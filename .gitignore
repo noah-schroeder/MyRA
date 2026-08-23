@@ -15,3 +15,5 @@ vm/searxng/data/
 
 # SearXNG install record
 vm/searxng/installed-image.txt
+out/
+vendor/
