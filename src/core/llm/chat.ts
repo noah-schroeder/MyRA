@@ -11,7 +11,7 @@
  * display, no keyring, and no `pi` binary on PATH.
  */
 
-import type { EndpointSettings } from "../config.ts";
+import { ConfigStore, type EndpointSettings } from "../config.ts";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -368,7 +368,6 @@ export class SubagentError extends Error {
 
 /** Resolves the endpoint a stage should use. Overridable so tests need no disk. */
 let endpointResolver: () => Promise<{ endpoint: EndpointSettings; apiKey?: string }> = async () => {
-  const { ConfigStore } = await import("../config.ts");
   const store = new ConfigStore();
   const settings = await store.load();
   return { endpoint: settings.llm };

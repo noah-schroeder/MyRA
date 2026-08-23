@@ -3,96 +3,93 @@
  *
  * Nothing here exposes Node, the filesystem, or the network. The renderer can
  * only ask the main process to do specific, named things -- which is what makes
- * `sandbox: true` and the egress filter meaningful rather than decorative.
+ * `sandbox: true` meaningful rather than decorative.
+ *
+ * Smaller than v1's, because v1 also had to carry the bridge: pairing codes,
+ * connection status, host-verb approvals and a network activity log all existed
+ * because the agent lived on another machine. None of that is here.
  */
 
 import { contextBridge, ipcRenderer } from "electron";
 
+/** Mirrors AgentEvent in core. Duplicated rather than imported: the preload is
+ *  bundled for the renderer and must not pull the main-process tree in. */
+export interface AgentEventPayload {
+  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "done" | "error";
+  text?: string;
+  toolCallId?: string;
+  tool?: string;
+  params?: Record<string, unknown>;
+  result?: string;
+}
+
+/** Subscribe to a main→renderer channel, returning an unsubscribe. */
+function on<T>(channel: string, cb: (payload: T) => void): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: T): void => cb(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 const api = {
-  getStatus: () => ipcRenderer.invoke("karen:get-status"),
+  /* ---- conversation ---- */
+  send: (text: string) => ipcRenderer.invoke("karen:send", text),
+  abort: () => ipcRenderer.invoke("karen:abort"),
+  onAgentEvent: (cb: (event: AgentEventPayload) => void) => on("karen:agent-event", cb),
 
-  /** Send a pi RPC command (prompt, abort, set_model, ...). */
-  rpc: (payload: unknown) => ipcRenderer.invoke("karen:rpc", payload),
-
-  pauseResearch: () => ipcRenderer.invoke("karen:pause-research"),
+  /* ---- sessions ---- */
+  newSession: () => ipcRenderer.invoke("karen:new-session"),
   listSessions: () => ipcRenderer.invoke("karen:list-sessions"),
+  openSession: (id: string) => ipcRenderer.invoke("karen:open-session", id),
   deleteSession: (id: string) => ipcRenderer.invoke("karen:delete-session", id),
   deleteAllSessions: () => ipcRenderer.invoke("karen:delete-all-sessions"),
-  setMode: (mode: string) => ipcRenderer.invoke("karen:set-mode", mode),
+
+  /* ---- settings ---- */
+  getSettings: () => ipcRenderer.invoke("karen:get-settings"),
   updateSettings: (patch: unknown) => ipcRenderer.invoke("karen:update-settings", patch),
   setSecret: (name: string, value: string) => ipcRenderer.invoke("karen:set-secret", name, value),
-
-  probeModels: () => ipcRenderer.invoke("karen:probe-models"),
-  getModelState: () => ipcRenderer.invoke("karen:get-model-state"),
-  getModels: () => ipcRenderer.invoke("karen:get-models"),
-  writeModels: (config: unknown) => ipcRenderer.invoke("karen:write-models", config),
-
-  respondToApproval: (id: string, allowed: boolean, opts?: { alwaysAllowVerb?: string }) =>
-    ipcRenderer.invoke("karen:approval-response", id, allowed, opts),
-
-  getPairing: () => ipcRenderer.invoke("karen:get-pairing"),
-
-  getSearchCategories: () => ipcRenderer.invoke("karen:get-search-categories"),
-  setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
-
-  networkActivity: () => ipcRenderer.invoke("karen:network-activity"),
-  clearNetworkActivity: () => ipcRenderer.invoke("karen:clear-network-activity"),
-  audit: () => ipcRenderer.invoke("karen:audit"),
-
+  secretsBackend: () => ipcRenderer.invoke("karen:secrets-backend"),
+  discoverModels: (which: "llm" | "transcription" | "embeddings") =>
+    ipcRenderer.invoke("karen:discover-models", which),
+  testEndpoint: (which: "llm" | "transcription" | "embeddings") =>
+    ipcRenderer.invoke("karen:test-endpoint", which),
   chooseDirectory: (opts: { title?: string; current?: string }) =>
     ipcRenderer.invoke("karen:choose-directory", opts),
-  testTranscription: () => ipcRenderer.invoke("karen:test-transcription"),
+  setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
+  getResearch: () => ipcRenderer.invoke("karen:get-research"),
+  engines: () => ipcRenderer.invoke("karen:engines"),
+
+  /* ---- meetings ----
+   * Capture happens in the renderer, because device access is a Web API. The
+   * renderer downsamples to mono 16 kHz s16le and pushes chunks here. */
   meetingState: () => ipcRenderer.invoke("karen:meeting-state"),
-  meetingStart: (title: string) => ipcRenderer.invoke("karen:meeting-start", title),
+  meetingStart: (title: string, tracks: { id: string; label: string; source?: string }[]) =>
+    ipcRenderer.invoke("karen:meeting-start", title, tracks),
+  meetingAudio: (trackId: string, pcm: ArrayBuffer) =>
+    ipcRenderer.invoke("karen:meeting-audio", trackId, pcm),
   meetingStop: () => ipcRenderer.invoke("karen:meeting-stop"),
   meetingDiscard: () => ipcRenderer.invoke("karen:meeting-discard"),
-  meetingDismiss: () => ipcRenderer.invoke("karen:meeting-dismiss"),
-  onMeeting: (cb: (s: unknown) => void) => {
-    const h = (_e: unknown, s: unknown) => cb(s);
-    ipcRenderer.on("karen:meeting", h);
-    return () => ipcRenderer.removeListener("karen:meeting", h);
-  },
-  dictationState: () => ipcRenderer.invoke("karen:dictation-state"),
-  dictationToggle: () => ipcRenderer.invoke("karen:dictation-toggle"),
-  dictationCancel: () => ipcRenderer.invoke("karen:dictation-cancel"),
-  audioSources: () => ipcRenderer.invoke("karen:audio-sources"),
-  hotkeyState: () => ipcRenderer.invoke("karen:hotkey-state"),
-  hotkeyInstall: (binding: string) => ipcRenderer.invoke("karen:hotkey-install", binding),
-  hotkeyRemove: () => ipcRenderer.invoke("karen:hotkey-remove"),
-  onDictation: (cb: (s: unknown) => void) => {
-    const h = (_e: unknown, s: unknown) => cb(s);
-    ipcRenderer.on("karen:dictation", h);
-    return () => ipcRenderer.removeListener("karen:dictation", h);
-  },
-  onDictationText: (cb: (t: string) => void) => {
-    const h = (_e: unknown, t: string) => cb(t);
-    ipcRenderer.on("karen:dictation-text", h);
-    return () => ipcRenderer.removeListener("karen:dictation-text", h);
-  },
-  commitTask: (id: string) => ipcRenderer.invoke("karen:commit-task", id),
-  dismissTask: (id: string) => ipcRenderer.invoke("karen:dismiss-task", id),
+  meetingLevels: () => ipcRenderer.invoke("karen:meeting-levels"),
+  onMeeting: (cb: (state: unknown) => void) => on("karen:meeting", cb),
 
-  /* --- push channels --- */
-  onRpcEvent: (cb: (frame: unknown) => void) => {
-    const h = (_e: unknown, frame: unknown) => cb(frame);
-    ipcRenderer.on("karen:rpc-event", h);
-    return () => ipcRenderer.off("karen:rpc-event", h);
-  },
-  onStatus: (cb: (status: unknown) => void) => {
-    const h = (_e: unknown, s: unknown) => cb(s);
-    ipcRenderer.on("karen:status", h);
-    return () => ipcRenderer.off("karen:status", h);
-  },
-  onModelsChanged: (cb: () => void) => {
-    const h = () => cb();
-    ipcRenderer.on("karen:models-changed", h);
-    return () => ipcRenderer.off("karen:models-changed", h);
-  },
-  onApprovalRequest: (cb: (req: unknown) => void) => {
-    const h = (_e: unknown, r: unknown) => cb(r);
-    ipcRenderer.on("karen:approval-request", h);
-    return () => ipcRenderer.off("karen:approval-request", h);
-  },
+  /* The renderer is the only thing that can enumerate capture devices, so it
+   * reports them up rather than main asking down. */
+  reportDevices: (devices: unknown[]) => ipcRenderer.invoke("karen:report-devices", devices),
+
+  /* ---- dictation ---- */
+  dictationStart: () => ipcRenderer.invoke("karen:dictation-start"),
+  dictationAudio: (pcm: ArrayBuffer) => ipcRenderer.invoke("karen:dictation-audio", pcm),
+  dictationStop: () => ipcRenderer.invoke("karen:dictation-stop"),
+  dictationCancel: () => ipcRenderer.invoke("karen:dictation-cancel"),
+  onDictationText: (cb: (text: string) => void) => on("karen:dictation-text", cb),
+
+  /* ---- research ---- */
+  researchRuns: () => ipcRenderer.invoke("karen:research-runs"),
+  onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
+  /** Answer a clarifying question the pipeline asked. */
+  answerPrompt: (id: string, answer: string | undefined) =>
+    ipcRenderer.invoke("karen:answer-prompt", id, answer),
+  onPrompt: (cb: (request: { id: string; title: string; method: "input" | "editor"; prefill?: string }) => void) =>
+    on("karen:prompt", cb),
 };
 
 contextBridge.exposeInMainWorld("karen", api);

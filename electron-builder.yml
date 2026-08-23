@@ -1,0 +1,40 @@
+appId: dev.karen.app
+productName: Karen
+# Pinned: electron-builder cannot infer the version when electron is a
+# devDependency of a package that does not list it as a direct dependency.
+electronVersion: 43.4.0
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asarUnpack:
+  - "**/*.node"
+linux:
+  target: [deb]
+  category: Office
+  executableName: karen
+  synopsis: A private, local-first assistant for academic work
+  desktop:
+    entry:
+      Name: Karen
+      Comment: Meeting notes, research synthesis and document drafting
+      Categories: Office;Education;Science;
+mac:
+  target: [dmg]
+  category: public.app-category.productivity
+win:
+  target: [nsis]
+deb:
+  packageName: karen
+  artifactName: karen_${version}_${arch}.deb
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libsecret-1-0
