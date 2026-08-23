@@ -13,11 +13,29 @@
 
 import type { EndpointSettings } from "../config.ts";
 
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
+
+/** One tool call the model asked for. `arguments` is a JSON string, per the wire format. */
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
 
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /** Present on assistant messages that asked for tools. */
+  tool_calls?: ToolCall[];
+  /** Present on tool messages: which call this is the result of. */
+  tool_call_id?: string;
+  /** Present on tool messages: the tool's name, which some servers require. */
+  name?: string;
+}
+
+export interface ToolSchema {
+  type: "function";
+  function: { name: string; description: string; parameters: unknown };
 }
 
 export class LlmError extends Error {
@@ -47,6 +65,8 @@ export interface ChatRequest {
   messages: ChatMessage[];
   temperature: number;
   stream: boolean;
+  tools?: ToolSchema[];
+  tool_choice?: "auto";
 }
 
 /**
@@ -63,6 +83,7 @@ export function buildRequest(opts: {
   messages: ChatMessage[];
   temperature?: number;
   stream?: boolean;
+  tools?: ToolSchema[];
 }): ChatRequest {
   return {
     ...(opts.model ? { model: opts.model } : {}),
@@ -71,6 +92,9 @@ export function buildRequest(opts: {
     // invents owners for action items nobody volunteered for.
     temperature: opts.temperature ?? 0.2,
     stream: opts.stream ?? false,
+    // Omitted entirely when there are none: some OpenAI-compatible servers
+    // reject an empty `tools` array rather than treating it as "no tools".
+    ...(opts.tools?.length ? { tools: opts.tools, tool_choice: "auto" as const } : {}),
   };
 }
 
@@ -82,6 +106,7 @@ export interface ChatOptions {
   signal?: AbortSignal;
   /** Receives text as it arrives. Providing it switches the request to SSE. */
   onDelta?: (delta: string) => void;
+  tools?: ToolSchema[];
 }
 
 export interface ChatUsage {
@@ -93,6 +118,10 @@ export interface ChatUsage {
 export interface ChatResult {
   text: string;
   usage: ChatUsage;
+  /** Tools the model asked for. Empty unless tools were offered. */
+  toolCalls: ToolCall[];
+  /** Why the model stopped, when the server says. */
+  finishReason?: string;
 }
 
 const EMPTY_USAGE: ChatUsage = { input: 0, output: 0, total: 0 };
@@ -132,6 +161,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
           messages: opts.messages,
           ...(opts.temperature === undefined ? {} : { temperature: opts.temperature }),
           stream: streaming,
+          ...(opts.tools?.length ? { tools: opts.tools } : {}),
         }),
       ),
       signal,
@@ -167,23 +197,33 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     ? await readStream(res, opts.onDelta!)
     : await readWhole(res);
 
-  if (!result.text.trim()) throw new LlmError("The LLM endpoint returned an empty reply.");
+  // A reply with no text but a tool call is not empty -- it is the normal shape
+  // of a turn that decided to use a tool before saying anything.
+  if (!result.text.trim() && result.toolCalls.length === 0) {
+    throw new LlmError("The LLM endpoint returned an empty reply.");
+  }
   return result;
 }
 
 async function readWhole(res: Response): Promise<ChatResult> {
   const body = (await res.json().catch(() => undefined)) as
     | {
-        choices?: { message?: { content?: unknown } }[];
+        choices?: {
+          message?: { content?: unknown; tool_calls?: ToolCall[] };
+          finish_reason?: string;
+        }[];
         usage?: unknown;
         error?: { message?: string };
       }
     | undefined;
   if (body?.error?.message) throw new LlmError(body.error.message);
-  const content = body?.choices?.[0]?.message?.content;
+  const choice = body?.choices?.[0];
+  const content = choice?.message?.content;
   return {
     text: typeof content === "string" ? content : "",
     usage: usageFrom(body?.usage),
+    toolCalls: choice?.message?.tool_calls ?? [],
+    ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}),
   };
 }
 
@@ -201,6 +241,11 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
   let buffer = "";
   let text = "";
   let usage = EMPTY_USAGE;
+  let finishReason: string | undefined;
+  /* Tool calls arrive spread across frames, keyed by an index rather than by id:
+   * the first frame carries the id and name, later ones append argument
+   * fragments. Accumulate by index or the arguments arrive as JSON confetti. */
+  const partial = new Map<number, { id: string; name: string; args: string }>();
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -216,7 +261,17 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
         const data = line.slice(5).trim();
         if (!data || data === "[DONE]") continue;
         let parsed: {
-          choices?: { delta?: { content?: unknown } }[];
+          choices?: {
+            delta?: {
+              content?: unknown;
+              tool_calls?: {
+                index?: number;
+                id?: string;
+                function?: { name?: string; arguments?: string };
+              }[];
+            };
+            finish_reason?: string;
+          }[];
           usage?: unknown;
           error?: { message?: string };
         };
@@ -229,15 +284,34 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
         }
         if (parsed.error?.message) throw new LlmError(parsed.error.message);
         if (parsed.usage) usage = usageFrom(parsed.usage);
-        const delta = parsed.choices?.[0]?.delta?.content;
+        const choice = parsed.choices?.[0];
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+        const delta = choice?.delta?.content;
         if (typeof delta === "string" && delta) {
           text += delta;
           onDelta(delta);
         }
+        for (const call of choice?.delta?.tool_calls ?? []) {
+          const index = call.index ?? 0;
+          const acc = partial.get(index) ?? { id: "", name: "", args: "" };
+          if (call.id) acc.id = call.id;
+          if (call.function?.name) acc.name = call.function.name;
+          if (call.function?.arguments) acc.args += call.function.arguments;
+          partial.set(index, acc);
+        }
       }
     }
   }
-  return { text, usage };
+  const toolCalls: ToolCall[] = [...partial.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, acc]) => ({
+      id: acc.id || `call_${index}`,
+      type: "function" as const,
+      function: { name: acc.name, arguments: acc.args },
+    }))
+    .filter((c) => c.function.name);
+
+  return { text, usage, toolCalls, ...(finishReason ? { finishReason } : {}) };
 }
 
 // ---------------------------------------------------------------------------
