@@ -1,0 +1,16 @@
+{
+  "name": "@karen/ctl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "karen-ctl — deliver a hotkey press to a running Karen",
+  "bin": { "karen-ctl": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

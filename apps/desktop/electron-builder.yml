@@ -1,0 +1,76 @@
+# Packaging Karen for the host.
+#
+# The .deb carries the desktop app only. The agent, its extensions and SearXNG
+# live in the VM and are installed there by scripts/install-vm.sh -- the two
+# halves are deliberately separate, and the app talks to the VM over a socket
+# the VM dials out on.
+
+appId: dev.karen.app
+# Pinned rather than left to the "^43.4.0" range in package.json: builder
+# downloads platform binaries for one exact release and cannot resolve a range.
+electronVersion: 43.4.0
+productName: Karen
+copyright: Copyright © 2026
+
+directories:
+  output: ../../dist
+  buildResources: build
+
+# The app is bundled by electron-vite; `out` is the whole of it. node_modules
+# is still needed because the main process externalises its dependencies --
+# bundling them into the main chunk wedges Electron's message loop, which is
+# why electron-vite ships externalizeDepsPlugin in the first place.
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+  - "!**/test/**"
+
+asar: true
+
+# karen-ctl ships beside the asar rather than inside it. It is executed as a
+# plain Node script by the wrapper below, and a plain file needs no asar
+# support in whatever ends up running it.
+extraResources:
+  - from: ../ctl/dist/index.js
+    to: karen-ctl.js
+
+linux:
+  target:
+    - deb
+  category: Office
+  executableName: karen
+  # Names the .desktop file for the appId and makes Electron report the same
+  # string as its app_id, which is how GNOME pairs the window to the entry.
+  syncDesktopName: true
+  synopsis: A private, local-first executive assistant
+  description: |
+    Karen is a desktop assistant that keeps your data on your own machines.
+    Chat, dictation, meeting notes and research, driven by an agent sandboxed
+    in a VM and by model endpoints you point at yourself.
+  icon: build/icons
+  # The .desktop file is named for the appId, and StartupWMClass must match the
+  # window class the app actually sets: GNOME pairs a running window to its
+  # desktop entry through it, and a mismatch shows a generic icon in the dash
+  # with no application name in the top bar.
+  desktop:
+    entry:
+      Keywords: assistant;dictation;meetings;notes;research;
+
+deb:
+  # Without these the artifact is named for the npm package, which is scoped --
+  # "@karen/desktop_0.1.0_amd64.deb" puts a slash in the filename and writes the
+  # package into a directory nobody asked for.
+  packageName: karen
+  artifactName: karen_${version}_${arch}.deb
+  # pw-record captures audio; pdftotext is not needed on the host (documents are
+  # converted inside the VM), and neither is anything else. Recommends rather
+  # than Depends for pipewire: the app runs fine without it, minus dictation.
+  recommends:
+    - pipewire-bin
+    - libsecret-1-0
+  afterInstall: build/after-install.sh
+  afterRemove: build/after-remove.sh
+  fpm:
+    - --deb-field
+    - "Vendor: Karen"
