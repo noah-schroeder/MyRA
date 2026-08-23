@@ -13,7 +13,10 @@ asarUnpack:
   - "**/*.node"
 linux:
   target: [deb]
-  category: Office
+  icon: build/icons
+  # Semicolon-separated: electron-builder writes this straight into
+  # Categories=, and the desktop.entry override does not reach that field.
+  category: Office;Education;Science
   executableName: karen
   synopsis: A private, local-first assistant for academic work
   desktop:
@@ -23,9 +26,11 @@ linux:
       Categories: Office;Education;Science;
 mac:
   target: [dmg]
+  icon: build/icon.png
   category: public.app-category.productivity
 win:
   target: [nsis]
+  icon: build/icon.png
 deb:
   packageName: karen
   artifactName: karen_${version}_${arch}.deb
