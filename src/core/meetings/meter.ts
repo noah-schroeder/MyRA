@@ -5,11 +5,14 @@
  * actually hearing anything? Without it a silent recording is only discovered
  * at the transcript, by which point what you said is gone.
  *
- * Levels come from tailing the WAV pw-record is already writing, not from
- * teeing the audio through this process. The capture path therefore stays
- * exactly as it was verified, and a meter that fails cannot spoil a recording.
- * Measured against a live PipeWire, that file grows every ~107 ms -- roughly
- * one quantum -- which is fine granularity for a meter and no lag worth seeing.
+ * The maths here is pure and takes a window of PCM. v1 obtained that window by
+ * tailing the WAV `pw-record` was already writing, so a failing meter could not
+ * spoil a recording; the capture path pushes audio through this process now, so
+ * the recorder keeps the most recent half-second and hands it over directly.
+ *
+ * The dB scale is the part that matters. Speech sits around -20 dBFS, which is
+ * 0.1 in linear amplitude, so a linear bar spends its life in the leftmost
+ * tenth and reads as broken.
  */
 
 /** Quietest level the meter draws at all. Below this the bar reads empty. */

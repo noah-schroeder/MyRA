@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,11 +21,6 @@ function tone(amplitude: number, samples: number, rate = 16_000, hz = 440): Buff
   return pcm;
 }
 
-function skipUnlessPipewire(): string | false {
-  return spawnSync("pw-record", ["--help"], { stdio: "ignore" }).status === 0
-    ? false
-    : "pw-record is not available here";
-}
 
 test("a meeting id sorts chronologically and is safe as a directory name", () => {
   // Built from local calendar fields, so this is stated in local time: a
