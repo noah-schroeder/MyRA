@@ -13,6 +13,8 @@
  */
 
 import { readResearchConfig } from "../../research/config.ts";
+import { ResearchRun } from "../../research/run.ts";
+import { runPipeline, type PipelineUi } from "../../research/pipeline.ts";
 import { fetchPage } from "../../research/fetch.ts";
 import { isScholarlyCategory, search, supportsTimeRange } from "../../research/providers.ts";
 import { formatHits } from "../../research/types.ts";
@@ -127,6 +129,69 @@ export const fetchPageTool: ToolDef = {
   },
 };
 
+/**
+ * What the pipeline needs from the app: the model to fall back to, and a way to
+ * ask the user a question mid-run.
+ *
+ * Left uninstalled the research tools REFUSE rather than degrade. A pipeline
+ * that cannot ask its clarifying questions, or that silently answers them
+ * itself, produces a confident report on the wrong question -- which is worse
+ * than no report, because it looks like work.
+ */
+export interface ResearchHost {
+  fallbackModel: string;
+  ui: PipelineUi;
+  knownModels?: string[];
+  onProgress?: (note: string) => void;
+}
+
+let host: ResearchHost | undefined;
+
+export function setResearchHost(installed: ResearchHost): void {
+  host = installed;
+}
+
+export function researchHostInstalled(): boolean {
+  return host !== undefined;
+}
+
+async function deepRun(
+  question: string,
+  category: string,
+  ctx: { signal?: AbortSignal; onUpdate?: (note: string) => void },
+): Promise<{ content: string; detail: unknown }> {
+  if (!host) {
+    throw new Error(
+      "Research is not available: the app has not attached a run store. " +
+        "This is a wiring fault, not something to work around.",
+    );
+  }
+  if (!question.trim()) throw new Error("deep_research was given no question");
+
+  const run = await ResearchRun.create(question);
+  {
+    const result = await runPipeline({
+      question,
+      run,
+      // Forced, so "academic_research" means what it says regardless of what
+      // the settings happened to hold when the user last touched them.
+      category,
+      fallbackModel: host.fallbackModel,
+      ui: host.ui,
+      ...(host.knownModels ? { knownModels: host.knownModels } : {}),
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      onProgress: (note: string) => {
+        ctx.onUpdate?.(note);
+        host?.onProgress?.(note);
+      },
+    });
+    return {
+      content: `${result.report}\n\n${result.bibliography}`,
+      detail: { runId: run.id, dir: run.dir, sources: result.sources, funnel: result.funnel },
+    };
+  }
+}
+
 export const deepResearchTool: ToolDef = {
   name: "deep_research",
   description:
@@ -143,12 +208,8 @@ export const deepResearchTool: ToolDef = {
     required: ["question"],
     additionalProperties: false,
   },
-  async handler() {
-    // Wired to runPipeline by the app, which owns the run store and the UI
-    // callbacks the pipeline needs. Kept unimplemented here rather than
-    // half-implemented: a stub that silently returns nothing is exactly the
-    // failure mode the stages were made strict to avoid.
-    throw new Error("deep_research must be installed by the app with a run store attached");
+  async handler(params, ctx) {
+    return await deepRun(String(params["question"] ?? ""), "general", ctx);
   },
 };
 
@@ -159,6 +220,9 @@ export const academicResearchTool: ToolDef = {
     "Deep research restricted to the scholarly literature: OpenAlex, arXiv, Crossref and " +
     "Semantic Scholar, with citation counts, venues and open-access PDFs resolved.",
   enabled: () => mode() !== "web",
+  async handler(params, ctx) {
+    return await deepRun(String(params["question"] ?? ""), "science", ctx);
+  },
 };
 
 export const checkCitationsTool: ToolDef = {

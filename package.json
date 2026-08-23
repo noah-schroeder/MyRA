@@ -15,7 +15,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "node --test --experimental-strip-types --no-warnings test/*.test.ts",
-    "dist": "electron-vite build && electron-builder"
+    "dist": "electron-vite build && electron-builder",
+    "deb": "electron-vite build && electron-builder --linux deb"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.33",

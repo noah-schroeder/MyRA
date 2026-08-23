@@ -2,137 +2,101 @@ import { useEffect, useState } from "react";
 import type { SessionSummary } from "../types.ts";
 
 /**
- * The conversation history rail.
+ * Past conversations.
  *
- * Collapsible because it is a navigation aid, not the interface: the chat is
- * the point, and a permanently docked list of old chats narrows it for no
- * reason on the days you never look at one.
- *
- * Deleting asks first, and says what else goes with it. A chat that started a
- * research run owns that run's retrieved sources and report, so "delete" has to
- * name the consequence rather than discover it afterwards.
+ * v1 listed pi's session JSONLs and, separately, research runs -- two stores,
+ * because pi owned one of them. There is one store now, so this is one list.
  */
 export function SessionList({
-  open,
-  onToggle,
-  activeId,
-  onOpenSession,
-  onDeleted,
+  currentId,
+  onOpen,
+  onNew,
   refreshKey,
-  connected,
 }: {
-  open: boolean;
-  onToggle: () => void;
-  activeId?: string;
-  onOpenSession: (session: SessionSummary) => void;
-  onDeleted: (id: string) => void;
+  currentId?: string;
+  onOpen: (id: string) => void;
+  onNew: () => void;
   refreshKey: number;
-  /** Sessions live in the VM, so there is nothing to list until it answers. */
-  connected: boolean;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [error, setError] = useState<string | undefined>();
-  const [confirming, setConfirming] = useState<string | undefined>();
-  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
-  const load = async () => {
-    try {
-      const res = await window.karen.listSessions();
-      setSessions(res?.sessions ?? []);
-      setError(undefined);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const load = (): void => {
+    void window.karen.listSessions().then(setSessions);
   };
 
-  // Gated on the bridge: asking before it connects raises "the VM bridge is not
-  // connected", which is a state to wait through, not an error to show.
-  useEffect(() => {
-    if (open && connected) void load();
-  }, [open, connected, refreshKey]);
+  useEffect(load, [refreshKey]);
 
-  const remove = async (s: SessionSummary) => {
-    setBusy(true);
-    try {
-      await window.karen.deleteSession(s.id);
-      setConfirming(undefined);
-      await load();
-      // Deleting the chat you are reading leaves the transcript on screen with
-      // no file behind it, so the parent has to clear it.
-      onDeleted(s.id);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  const remove = async (id: string): Promise<void> => {
+    await window.karen.deleteSession(id);
+    load();
   };
 
-  if (!open) {
-    return (
-      <button className="rail-toggle" onClick={onToggle} title="Show past chats" aria-label="Show past chats">
-        ☰
-      </button>
-    );
-  }
+  const removeAll = async (): Promise<void> => {
+    await window.karen.deleteAllSessions();
+    setConfirming(false);
+    load();
+    onNew();
+  };
 
   return (
-    <aside className="rail">
-      <div className="rail-head">
-        <span className="rail-title">Chats</span>
-        <button className="btn btn-ghost" onClick={() => void load()} title="Refresh">⟳</button>
-        <button className="btn btn-ghost" onClick={onToggle} title="Hide">←</button>
-      </div>
+    <nav className="sessions" aria-label="Conversations">
+      <button type="button" className="new-session" onClick={onNew}>
+        New conversation
+      </button>
 
-      {error ? <div className="warn rail-warn">{error}</div> : null}
-
-      <div className="rail-list">
-        {!connected ? (
-          <div className="rail-empty">Waiting for the VM…</div>
-        ) : sessions.length === 0 && !error ? (
-          <div className="rail-empty">No past chats yet.</div>
-        ) : null}
-
+      <ul className="session-items">
         {sessions.map((s) => (
-          <div key={s.id} className={`rail-item${s.id === activeId ? " active" : ""}`}>
-            <button className="rail-item-main" onClick={() => onOpenSession(s)} title={s.title}>
-              <span className="rail-item-title">{s.title}</span>
-              <span className="rail-item-meta">
-                {new Date(s.updatedAt || s.at).toLocaleString(undefined, {
-                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                })}
-                {s.messages ? ` · ${s.messages} msg` : ""}
-                {s.runs.length ? ` · ${s.runs.length} research run${s.runs.length > 1 ? "s" : ""}` : ""}
+          <li key={s.id} className={s.id === currentId ? "session current" : "session"}>
+            <button type="button" className="session-open" onClick={() => onOpen(s.id)}>
+              <span className="session-title">{s.title}</span>
+              <span className="session-meta">
+                {when(s.updatedAt)} · {s.messages} message{s.messages === 1 ? "" : "s"}
               </span>
             </button>
             <button
-              className="rail-item-del"
-              title="Delete this chat"
+              type="button"
+              className="session-delete"
               aria-label={`Delete ${s.title}`}
-              onClick={() => setConfirming(s.id)}
+              onClick={() => void remove(s.id)}
             >
-              ✕
+              ×
             </button>
-
-            {confirming === s.id ? (
-              <div className="rail-confirm">
-                <span>
-                  Delete this chat
-                  {s.runs.length
-                    ? ` and ${s.runs.length} research run${s.runs.length > 1 ? "s" : ""} it started`
-                    : ""}
-                  ? This cannot be undone.
-                </span>
-                <div className="rail-confirm-actions">
-                  <button className="btn btn-ghost" onClick={() => setConfirming(undefined)}>Cancel</button>
-                  <button className="btn btn-danger" disabled={busy} onClick={() => void remove(s)}>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
+          </li>
         ))}
-      </div>
-    </aside>
+        {sessions.length === 0 ? <li className="session-empty">Nothing saved yet.</li> : null}
+      </ul>
+
+      {sessions.length > 0 ? (
+        confirming ? (
+          <div className="session-confirm">
+            <span>Delete all {sessions.length}?</span>
+            <button type="button" onClick={() => void removeAll()}>
+              Delete
+            </button>
+            <button type="button" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="session-delete-all" onClick={() => setConfirming(true)}>
+            Delete all
+          </button>
+        )
+      ) : null}
+    </nav>
   );
+}
+
+/** Relative for the last week, then the date. Absolute dates age better. */
+function when(iso: string): string {
+  const then = new Date(iso).getTime();
+  const mins = Math.round((Date.now() - then) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
 }

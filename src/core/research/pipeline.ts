@@ -42,6 +42,14 @@ export interface PipelineUi {
 export interface PipelineOptions {
   question: string;
   run: ResearchRun;
+  /**
+   * Forces the category for this run, overriding the GUI setting.
+   *
+   * This is how `academic_research` means what its name says: the tool the
+   * model chose decides, not whatever the settings happened to hold when the
+   * user last touched them.
+   */
+  category?: string;
   /** The model the app's dropdown is on: the first-run fallback for every role. */
   fallbackModel: string;
   ui: PipelineUi;
@@ -157,7 +165,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
     const proposed: Plan = {
       scope,
-      category: effectiveCategory(undefined, "science"),
+      category: opts.category ?? effectiveCategory(undefined, "science"),
       queries,
       pages: 2,
       screenTop: 150,
@@ -257,7 +265,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const candidates = await run.readJsonl<StoredCandidate>("candidates.jsonl");
   if (candidates.length === 0) {
     throw new Error(
-      "no candidates found — check that SearXNG is running and the category has engines behind it",
+      "no candidates found — no provider returned results for this category",
     );
   }
 
