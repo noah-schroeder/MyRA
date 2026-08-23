@@ -1,23 +1,43 @@
 {
   "name": "karen",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Karen \u2014 a private, local-first executive assistant",
+  "type": "module",
+  "description": "Karen \u2014 a private, local-first assistant for academic work",
   "license": "MIT",
-  "workspaces": [
-    "packages/*",
-    "apps/*",
-    "vm/bridge"
-  ],
+  "main": "./out/main/index.js",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present && npm run test:extensions",
-    "test:extensions": "node --test --experimental-strip-types --no-warnings vm/extensions/test/*.test.ts",
-    "pretest:extensions": "./scripts/link-extension-deps.sh",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p vm/extensions/tsconfig.json",
-    "pretypecheck": "./scripts/link-extension-deps.sh"
-  }
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "node --test --experimental-strip-types --no-warnings test/*.test.ts",
+    "dist": "electron-vite build && electron-builder"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.33",
+    "marked": "^18.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0"
+  },
+  "author": {
+    "name": "Noah Schroeder",
+    "email": "4noah.schroeder@gmail.com"
+  },
+  "homepage": "https://karen.invalid/",
+  "desktopName": "dev.karen.app.desktop"
 }

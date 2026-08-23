@@ -1,6 +1,0 @@
-{
-  "name": "@karen/extensions",
-  "private": true,
-  "type": "module",
-  "description": "pi extensions for Karen. Not an npm workspace: node_modules is a link to the copies pi itself loads, so the extension is typechecked and tested against the exact versions it runs on."
-}
