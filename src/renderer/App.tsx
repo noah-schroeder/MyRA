@@ -9,11 +9,13 @@ import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
+import { useDictation } from "./useDictation.ts";
+import { DictationHud } from "./components/DictationHud.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 
 export function App() {
-  const { items, busy, usage, error, sources, send, abort, reset, setError } = useAgent();
+  const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   const [showMeeting, setShowMeeting] = useState(false);
@@ -33,7 +35,13 @@ export function App() {
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   useEffect(() => window.karen.onResearchProgress(setProgress), []);
-  useEffect(() => window.karen.onDictationText((text) => setDraft((d) => (d ? `${d} ${text}` : text))), []);
+
+  // Appended rather than replacing: dictation is for adding to what you were
+  // already writing, and overwriting a half-typed question would be a bad way
+  // to find that out.
+  const dictation = useDictation(
+    useCallback((text: string) => setDraft((d) => (d ? `${d} ${text}` : text)), []),
+  );
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -86,7 +94,7 @@ export function App() {
       <main className="main">
         <header className="topbar">
           <div className="topbar-left">
-            <ResearchBar onNotice={setError} />
+            <ResearchBar />
           </div>
           <div className="topbar-right">
             <button
@@ -160,6 +168,18 @@ export function App() {
               }
             }}
           />
+          <button
+            type="button"
+            className={dictation.state.phase === "recording" ? "mic active" : "mic"}
+            aria-pressed={dictation.state.phase === "recording"}
+            aria-label={dictation.state.phase === "recording" ? "Stop dictation" : "Dictate"}
+            title="Dictate"
+            onClick={() =>
+              void (dictation.state.phase === "recording" ? dictation.stop() : dictation.start())
+            }
+          >
+            ●
+          </button>
           {busy ? (
             <button type="button" className="stop" onClick={abort}>
               Stop
@@ -179,6 +199,12 @@ export function App() {
           </div>
         ) : null}
       </main>
+
+      <DictationHud
+        state={dictation.state}
+        onStop={() => void dictation.stop()}
+        onCancel={() => void dictation.cancel()}
+      />
 
       {showSettings ? <SettingsModal onClose={() => setShowSettings(false)} /> : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}

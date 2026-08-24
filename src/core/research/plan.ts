@@ -17,7 +17,7 @@ import type { Scope } from "./scope.ts";
 
 export interface Plan {
   scope: Scope;
-  /** SearXNG categories the sweep runs against, comma-separated. */
+  /** Where the sweep searches: "science" or "general", comma-separated. */
   category: string;
   /** Query variants, generated but yours to edit. */
   queries: string[];

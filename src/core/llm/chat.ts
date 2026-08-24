@@ -373,9 +373,6 @@ let endpointResolver: () => Promise<{ endpoint: EndpointSettings; apiKey?: strin
   return { endpoint: settings.llm };
 };
 
-export function setEndpointResolver(fn: typeof endpointResolver): void {
-  endpointResolver = fn;
-}
 
 function retryable(err: unknown): boolean {
   if (!(err instanceof LlmError)) return false;

@@ -1,7 +1,9 @@
 /**
  * OpenAlex: free, keyless, and the source of the metadata screening needs.
  *
- * Its role here is HYDRATION rather than discovery. SearXNG finds candidates
+ * Both DISCOVERY and hydration now: openAlexSearch backs the scholarly
+ * provider, and the same records identify candidates found elsewhere. In v1
+ * this file was hydration only -- SearXNG found the candidates
  * across the user's configured engines, but only ~65% arrive with a usable
  * abstract, and none arrive with citation counts or open-access links. OpenAlex
  * fills exactly that gap.
@@ -223,21 +225,3 @@ export function titlesMatch(a: string, b: string): boolean {
   return x.startsWith(y.slice(0, 60)) || y.startsWith(x.slice(0, 60));
 }
 
-export function formatWork(w: Work, n: number, includeAbstract: boolean): string {
-  const authors = authorsOf(w);
-  const shown = authors.slice(0, 4).join(", ") + (authors.length > 4 ? ", et al." : "");
-  const lines = [
-    `[${n}] ${w.title ?? "(untitled)"}`,
-    `    ${shown || "(authors unknown)"} — ${w.publication_year ?? "n.d."}`,
-    `    ${venueOf(w)}  ·  cited by ${w.cited_by_count ?? 0}` +
-      `  ·  ${w.referenced_works?.length ?? 0} references`,
-  ];
-  if (w.doi) lines.push(`    doi: ${w.doi}`);
-  const pdf = oaUrl(w);
-  lines.push(pdf ? `    open access pdf: ${pdf}` : `    open access: none found`);
-  if (includeAbstract) {
-    const abstract = abstractFromInverted(w.abstract_inverted_index);
-    if (abstract) lines.push(`    abstract: ${abstract}`);
-  }
-  return lines.join("\n");
-}

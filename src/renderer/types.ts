@@ -167,7 +167,7 @@ export interface DictationState {
 export interface PromptRequest {
   id: string;
   /** v1's `method`, kept under its old name so the dialog reads the same. */
-  method: "input" | "editor";
+  method: "input" | "editor" | "confirm";
   title: string;
   message?: string;
   prefill?: string;

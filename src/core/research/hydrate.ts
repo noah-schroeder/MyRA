@@ -68,8 +68,10 @@ export interface Hydrated {
   references?: number;
   /**
    * Reconstructed from OpenAlex's inverted index. Screening judges papers on
-   * their abstracts, and SearXNG's snippet is a truncated fragment of the page
-   * rather than the abstract, so this is what makes screening worth doing.
+   * their abstracts, and a search snippet is a fragment of the page rather than
+   * the abstract, so this is what makes screening worth doing. (For hits that
+   * arrive with their record attached the abstract is already present; this
+   * still matters for everything found another way.)
    */
   abstract?: string;
   /** Full text, when it is openly available. Preferred over the search hit URL. */

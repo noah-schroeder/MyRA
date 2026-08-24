@@ -118,26 +118,21 @@ export const arxivProvider: SearchProvider = {
   },
 };
 
+/*
+ * The providers this build ships.
+ *
+ * Scholarly only, and that is why scholarly search needs no setup: both of
+ * these are keyless public APIs. A general-web backend would be added here as
+ * a third entry with `scholarly: false`; there was briefly a registerProvider()
+ * for that, but an extension point with no extension is just unused API, and
+ * adding a line to this list is the same amount of work.
+ */
 const registry = new Map<string, SearchProvider>([
   [openAlexProvider.id, openAlexProvider],
   [arxivProvider.id, arxivProvider],
 ]);
 
-/**
- * Adds a provider, or replaces one by id.
- *
- * This is how a general-web backend arrives: the settings page constructs one
- * from whatever the user configured and registers it. Nothing is registered by
- * default, so an unconfigured install simply has no web search rather than a
- * broken one.
- */
-export function registerProvider(provider: SearchProvider): void {
-  registry.set(provider.id, provider);
-}
 
-export function unregisterProvider(id: string): void {
-  registry.delete(id);
-}
 
 export function providers(): SearchProvider[] {
   return [...registry.values()];

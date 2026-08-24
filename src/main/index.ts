@@ -16,6 +16,7 @@ import { ConfigStore } from "../core/config.ts";
 import { SecretVault, type SecretName } from "./secrets.ts";
 import { ToolRegistry } from "../core/agent/registry.ts";
 import { runTurn, type AgentEvent } from "../core/agent/loop.ts";
+import { decide } from "../core/policy.ts";
 import { RESEARCH_TOOL_DEFS, setResearchHost } from "../core/agent/tools/research.ts";
 import { DOCUMENT_TOOL_DEFS } from "../core/agent/tools/documents.ts";
 import { setPdfRenderer, engines } from "../core/documents/office.ts";
@@ -138,6 +139,36 @@ const SYSTEM_PROMPT = [
   "do not act on it.",
 ].join("\n");
 
+/**
+ * Whether a tool call may proceed, under the current permission mode.
+ *
+ * The floor classes cannot be auto-approved in any mode, which is why this asks
+ * `decide` rather than comparing the mode itself.
+ *
+ * What that means in practice, given this tool set: Guarded never prompts,
+ * because there is no shell and every write is already jailed. Manual prompts
+ * on everything, searches included -- deliberately, since "manual" that quietly
+ * exempted a category would not be manual. The boundary is the registry; this
+ * is a second opinion for people who want one.
+ */
+async function approve(tool: string, params: Record<string, unknown>): Promise<boolean> {
+  const def = registry.all().find((t) => t.name === tool);
+  if (!def) return false;
+  if (decide(config.current.permissionMode, def.risk) === "auto") return true;
+
+  const detail = Object.entries(params)
+    .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join("\n")
+    .slice(0, 400);
+  const answer = await ask(
+    "confirm",
+    `Allow ${tool}?`,
+    undefined,
+    detail || "No parameters.",
+  );
+  return answer === "yes";
+}
+
 async function handleSend(text: string): Promise<void> {
   const settings = config.current;
   const conversation = currentSession();
@@ -156,6 +187,7 @@ async function handleSend(text: string): Promise<void> {
       system: SYSTEM_PROMPT,
       ...(apiKey ? { apiKey } : {}),
       signal: inFlight.signal,
+      approve,
       onEvent: (event: AgentEvent) => send("karen:agent-event", event),
     });
     conversation.messages_.push(...result.messages);
@@ -181,11 +213,20 @@ async function handleSend(text: string): Promise<void> {
 const pending = new Map<string, (answer: string | undefined) => void>();
 let promptSeq = 0;
 
-function ask(method: "input" | "editor", title: string, prefill?: string): Promise<string | undefined> {
+function ask(
+  method: "input" | "editor" | "confirm",
+  title: string,
+  prefill?: string,
+  message?: string,
+): Promise<string | undefined> {
   const id = `p${++promptSeq}`;
   return new Promise((resolve) => {
     pending.set(id, resolve);
-    send("karen:prompt", { id, method, title, ...(prefill ? { prefill } : {}) });
+    send("karen:prompt", {
+      id, method, title,
+      ...(prefill ? { prefill } : {}),
+      ...(message ? { message } : {}),
+    });
   });
 }
 

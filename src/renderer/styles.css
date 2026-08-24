@@ -1430,4 +1430,23 @@ p.warning { margin: 0; font-size: 12.5px; }
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 .pane input[readonly] { color: var(--text-faint); }
-.pane input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+.pane input[type="checkbox"], .pane input[type="radio"] { width: auto; accent-color: var(--accent); }
+
+/* The dictation button. A dot, not a microphone glyph: every system font draws
+   a different microphone and several draw none at all. */
+.mic {
+  font: inherit; font-size: 11px; line-height: 1;
+  width: 38px; height: 38px; flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-float);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.mic:hover { color: var(--text); border-color: var(--border-hover); }
+.mic.active {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, var(--border));
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}

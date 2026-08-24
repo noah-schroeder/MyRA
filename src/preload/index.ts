@@ -88,7 +88,7 @@ const api = {
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>
     ipcRenderer.invoke("karen:answer-prompt", id, answer),
-  onPrompt: (cb: (request: { id: string; title: string; method: "input" | "editor"; prefill?: string }) => void) =>
+  onPrompt: (cb: (request: { id: string; title: string; method: "input" | "editor" | "confirm"; message?: string; prefill?: string }) => void) =>
     on("karen:prompt", cb),
 };
 

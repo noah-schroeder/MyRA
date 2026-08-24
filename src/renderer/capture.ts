@@ -49,6 +49,27 @@ export async function enumerate(): Promise<AudioSource[]> {
   return sources;
 }
 
+/**
+ * Peak and RMS of one chunk, 0..1.
+ *
+ * Duplicated from core's levelOf rather than shared, because that one reads a
+ * Buffer and the renderer has none -- Node's Buffer is not in a sandboxed
+ * window. The arithmetic is four lines; a shim to unify them would be longer
+ * than both.
+ */
+export function levelOfPcm(pcm: Int16Array): { peak: number; rms: number } {
+  if (pcm.length === 0) return { peak: 0, rms: 0 };
+  let peak = 0;
+  let sum = 0;
+  for (const sample of pcm) {
+    const value = sample / 32_768;
+    const magnitude = Math.abs(value);
+    if (magnitude > peak) peak = magnitude;
+    sum += value * value;
+  }
+  return { peak: Math.min(1, peak), rms: Math.min(1, Math.sqrt(sum / pcm.length)) };
+}
+
 interface Track {
   context: AudioContext;
   stream: MediaStream;
@@ -176,5 +197,44 @@ export class MeetingCapture {
       await context.close().catch(() => {});
     }
     this.#tracks.clear();
+  }
+}
+
+/**
+ * Dictation: one microphone, straight into the composer.
+ *
+ * A thin wrapper over the same capture path meetings use, because the only
+ * differences are that there is one track and the audio goes to a different
+ * IPC channel. The level is computed here rather than asked of the main
+ * process: the chunks pass through this code anyway, and a round trip per
+ * meter frame would be absurd.
+ */
+export class DictationCapture {
+  #capture: MeetingCapture | undefined;
+
+  async start(opts: {
+    micDeviceId?: string;
+    onChunk: (pcm: ArrayBuffer) => void;
+    onLevel?: (level: { peak: number; rms: number }) => void;
+  }): Promise<void> {
+    const capture = new MeetingCapture();
+    await capture.start({
+      ...(opts.micDeviceId ? { micDeviceId: opts.micDeviceId } : {}),
+      systemAudio: false,
+      onChunk: (_track, pcm) => {
+        opts.onLevel?.(levelOfPcm(new Int16Array(pcm)));
+        opts.onChunk(pcm);
+      },
+    });
+    this.#capture = capture;
+  }
+
+  async stop(): Promise<void> {
+    await this.#capture?.stop();
+    this.#capture = undefined;
+  }
+
+  get active(): boolean {
+    return this.#capture !== undefined;
   }
 }

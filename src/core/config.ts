@@ -24,7 +24,6 @@ export interface EndpointSettings {
 }
 
 export interface Settings {
-  bridgePort: number;
   permissionMode: PermissionMode;
   llm: EndpointSettings;
   transcription: EndpointSettings;
@@ -63,7 +62,6 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  bridgePort: 8765,
   permissionMode: "guarded",
   llm: { baseUrl: "", envVar: "KAREN_LLM_KEY", timeoutMs: 120_000 },
   transcription: { baseUrl: "", envVar: "KAREN_TRANSCRIPTION_KEY", model: "whisper-1", timeoutMs: 120_000 },
