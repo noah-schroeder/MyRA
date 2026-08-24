@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  convertArgs, extensionOf, FORMATS, isReadable, outputName, resolveFormat, safeRelativePath, slugName,
+  extensionOf, FORMATS, isReadable, outputName, pandocArgs, resolveFormat, safeRelativePath, slugName,
 } from "../src/core/documents/formats.ts";
 
 test("formats are named the several ways a model will name them", () => {
@@ -13,10 +13,20 @@ test("formats are named the several ways a model will name them", () => {
   assert.equal(resolveFormat("pages"), undefined);
 });
 
-test("docx is written through an explicit filter", () => {
-  // Without it LibreOffice reaches for the Word 97 binary writer, and the
-  // result is a .docx that some readers refuse to open.
-  assert.equal(FORMATS["docx"]!.convertTo, "docx:MS Word 2007 XML");
+test("every writable format names a pandoc writer, and PDF deliberately does not", () => {
+  for (const [name, format] of Object.entries(FORMATS)) {
+    if (name === "pdf") continue;
+    assert.ok(format.pandocTo, `${name} has no pandoc writer`);
+  }
+  // PDF has none on purpose: pandoc's PDF writers need a LaTeX toolchain, so
+  // PDF goes through HTML and the app's own browser engine instead. A writer
+  // here would send it down a path that fails on a machine without LaTeX.
+  assert.equal(FORMATS["pdf"]!.pandocTo, undefined);
+});
+
+test("plain text is written as plain text, not as different markup", () => {
+  // `markdown` here would answer a request for .txt with asterisks and hashes.
+  assert.equal(FORMATS["txt"]!.pandocTo, "plain");
 });
 
 test("a conversion keeps the stem and changes the extension", () => {
@@ -28,21 +38,18 @@ test("a conversion keeps the stem and changes the extension", () => {
 });
 
 test("conversions never run in place", () => {
-  // The finding this guards: LibreOffice writes beside its input under the same
-  // stem, so converting report.docx to Markdown destroys report.md next to it.
-  // Observed against a real install, not theorised.
-  const args = convertArgs({
+  // The finding this guards, inherited from v1: a converter left to choose its
+  // own output path writes beside the input under the same stem, so converting
+  // report.docx to Markdown destroys report.md next to it. Observed against a
+  // real install, not theorised. The output is always named explicitly.
+  const args = pandocArgs({
     source: "/w/report.docx",
-    format: FORMATS["md"]!,
-    outDir: "/w/out",
-    profileDir: "/tmp/profile",
+    from: "docx",
+    to: "markdown",
+    output: "/w/out/report.md",
   });
-  assert.ok(args.includes("--outdir"), "every conversion must be given an output directory");
-  assert.equal(args[args.indexOf("--outdir") + 1], "/w/out");
-  // And the profile lock: a conversion started while the user has LibreOffice
-  // open fails outright without its own profile.
-  assert.ok(args.some((a) => a.startsWith("-env:UserInstallation=file:///tmp/profile")));
-  assert.ok(args.includes("--headless"));
+  assert.ok(args.includes("--output"), "every conversion must name its output file");
+  assert.equal(args[args.indexOf("--output") + 1], "/w/out/report.md");
   assert.equal(args[args.length - 1], "/w/report.docx", "the source is the last argument");
 });
 
@@ -78,16 +85,18 @@ test("what can be read back as text", () => {
 });
 
 test("scratch space is inside the workspace, never /tmp", async () => {
-  // Not a style preference. LibreOffice here is a snap and snaps get a PRIVATE
-  // /tmp: a conversion given --outdir /tmp/... reports success and writes the
-  // file into a namespace this process cannot see, so the output looks like it
-  // vanished. Found by doing exactly that.
+  // Not a style preference, and it outlived the engine that caused it. v1 ran
+  // LibreOffice as a snap, and snaps get a PRIVATE /tmp: a conversion given an
+  // output path under /tmp reported success and wrote into a namespace this
+  // process could not see, so the file looked as though it had vanished. Any
+  // sandboxed packaging -- snap, flatpak, the Mac App Store -- can do the same,
+  // so the workspace stays the scratch root.
   const { scratchRoot, workspaceRoot, documentsDir } = await import("../src/core/documents/office.ts");
   assert.ok(scratchRoot().startsWith(workspaceRoot() + "/"), `scratch was ${scratchRoot()}`);
   assert.ok(!scratchRoot().startsWith("/tmp"));
   // And no hidden directories: snap confinement refuses those under $HOME too.
-  assert.ok(!scratchRoot().split("/").some((s) => s.startsWith(".")), scratchRoot());
-  assert.ok(!documentsDir().split("/").some((s) => s.startsWith(".")), documentsDir());
+  assert.ok(!scratchRoot().split("/").some((seg: string) => seg.startsWith(".")), scratchRoot());
+  assert.ok(!documentsDir().split("/").some((seg: string) => seg.startsWith(".")), documentsDir());
 });
 
 test("the documents folder is the only place these tools reach", async () => {

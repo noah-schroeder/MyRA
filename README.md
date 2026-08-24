@@ -41,9 +41,11 @@ All of it is in Settings; you should never need to open a JSON file. Point the
 endpoints at whatever speaks the OpenAI API — llama.cpp, Ollama, vLLM, or a
 hosted provider. API keys go to the OS keyring, never to disk in the clear.
 
-Document conversion uses **pandoc** where it is installed and falls back to
-LibreOffice. Neither is required to run: without them, documents are written as
-Markdown. PDF output is rendered by the app's own browser engine.
+Document conversion uses **pandoc**, bundled per platform — it is what gives you
+CSL citation styles, bibliographies and journal templates. It is not required to
+run: without it, documents are written as Markdown and everything else works
+normally. PDF output goes through HTML and the app's own browser engine, so
+there is no LaTeX toolchain to install.
 
 ## What leaves this machine
 
@@ -74,7 +76,7 @@ Electron main                       Renderer (sandboxed)
 │   ├─ research   OpenAlex · arXiv · S2 · hydrate · pdf
 │   ├─ documents  pandoc argv · path jail
 │   └─ llm        one HTTP client, OpenAI-shaped
-└─ vendor/     pdftotext, pandoc (optional)
+└─ vendor/     pandoc, pdftotext — bundled per platform
 ```
 
 **The tool registry is the security boundary.** There is no `bash`, so "run a

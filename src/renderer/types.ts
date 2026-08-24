@@ -194,7 +194,7 @@ export interface KarenApi {
   chooseDirectory(opts: { title?: string; current?: string }): Promise<string | undefined>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
-  engines(): Promise<{ pandoc: boolean; libreoffice: boolean }>;
+  engines(): Promise<{ pandoc: boolean; pandocPath?: string; pandocVersion?: string; pdftotext: boolean }>;
 
   meetingState(): Promise<MeetingState>;
   meetingStart(title: string, tracks: { id: string; label: string; source?: string }[]): Promise<string>;
