@@ -168,3 +168,58 @@ test("an empty selection does not claim time ranges are unsupported", () => {
   assert.equal(supportsTimeRange(" , "), true);
   assert.equal(supportsTimeRange(undefined), true);
 });
+
+/*
+ * Identification survives the flattening into a SearchHit.
+ *
+ * A SearchHit is flat, so its URL is the only handle downstream has on the
+ * work. These two tests guard the path that turned out to be broken in the v2
+ * port: the search already HAD the DOI, the hit threw it away in favour of the
+ * open-access PDF link, and hydration then could not identify the paper it had
+ * just found.
+ */
+test("a work keeps its DOI in the hit URL, even when an open PDF exists", async () => {
+  const { openAlexProvider } = await import("../src/core/research/providers.ts");
+  const work = {
+    id: "https://openalex.org/W1",
+    doi: "https://doi.org/10.1016/j.compedu.2019.103641",
+    title: "Pedagogical agents and learning outcomes",
+    publication_year: 2019,
+    // The valuable case, and the one that broke: OpenAlex knows an open copy,
+    // and its URL carries no DOI at all.
+    open_access: { is_oa: true, oa_url: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7096066" },
+  };
+
+  const real = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ results: [work] }), {
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+  let hits;
+  try {
+    hits = await openAlexProvider.search("pedagogical agents");
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  assert.equal(
+    doiFromUrl(hits[0]!.url),
+    "10.1016/j.compedu.2019.103641",
+    "the DOI must be recoverable from the hit, or the work cannot be identified",
+  );
+  // Nothing is lost by this: hydration reads oa_url off the work it identifies,
+  // and the pipeline fetches `pdfUrl ?? url`, so the open copy is still read.
+});
+
+test("a URL's file extension is not part of the DOI", () => {
+  // Springer serves open PDFs at this exact shape. The ".pdf" used to travel
+  // with the identifier, match nothing at OpenAlex, and drop the paper into a
+  // fuzzy title lookup.
+  assert.equal(
+    doiFromUrl("https://link.springer.com/content/pdf/10.1007/s11192-021-04026-6.pdf"),
+    "10.1007/s11192-021-04026-6",
+  );
+  assert.equal(doiFromUrl("https://x.test/10.1234/abcd.html"), "10.1234/abcd");
+  // A real DOI whose final segment merely looks like an extension is untouched.
+  assert.equal(doiFromUrl("https://doi.org/10.1234/journal.pone.0123456"), "10.1234/journal.pone.0123456");
+});

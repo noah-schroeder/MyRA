@@ -49,8 +49,27 @@ export function isScholarlyCategory(category: string | undefined): boolean {
     .some((c) => SCHOLARLY_CATEGORIES.has(c));
 }
 
+/**
+ * The DOI landing page is preferred over the open-access PDF, which looks
+ * backwards until you follow what happens next.
+ *
+ * A SearchHit is flat -- {url, title, content} -- so the URL is the only thing
+ * downstream can identify the work by. Putting the oa_url there reads as
+ * helpful (it is the full text, after all) and destroys the identity: an OA URL
+ * is usually a PMC, Europe PMC, repository or publisher-PII link with no DOI in
+ * it, so hydration cannot recover the DOI, falls back to a fuzzy title match,
+ * and on a miss files the paper as NOT_A_PAPER -- no citation count, no venue,
+ * no abstract, and no full text either.
+ *
+ * Nothing is lost by preferring the DOI: hydration reads oa_url off the work it
+ * identifies, and the pipeline fetches `pdfUrl ?? url`, so the open copy is
+ * still what gets read.
+ */
 function workToHit(w: Parameters<typeof venueOf>[0]): SearchHit | undefined {
-  const url = oaUrl(w) ?? (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi\.org\//, "")}` : w.id);
+  const url =
+    (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi\.org\//, "")}` : undefined) ??
+    oaUrl(w) ??
+    w.id;
   if (!url || !w.title) return undefined;
   const authors = authorsOf(w);
   const byline = authors.length ? `${authors.slice(0, 3).join(", ")}${authors.length > 3 ? " et al." : ""}. ` : "";

@@ -39,7 +39,16 @@ export function doiFromUrl(url: string): string | undefined {
   if (!m) return undefined;
   // URLs carry query strings, fragments and sentence punctuation that are not
   // part of the identifier.
-  const doi = m[1]!.split(/[?#]/)[0]!.replace(/[.,;)\]]+$/, "").replace(/\/(full|pdf|abstract)$/i, "");
+  const doi = m[1]!
+    .split(/[?#]/)[0]!
+    .replace(/[.,;)\]]+$/, "")
+    .replace(/\/(full|pdf|abstract)$/i, "")
+    // A file extension is part of the URL, not of the identifier. Springer
+    // serves open PDFs at .../content/pdf/10.1007/s11192-021-04026-6.pdf, and
+    // the segment rule above does not catch a suffix -- so the DOI went to
+    // OpenAlex with ".pdf" attached, matched nothing, and the paper silently
+    // fell through to a fuzzy title lookup.
+    .replace(/\.(pdf|html?|xml)$/i, "");
   return doi.length > 8 ? doi.toLowerCase() : undefined;
 }
 
