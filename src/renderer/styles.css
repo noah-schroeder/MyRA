@@ -971,3 +971,463 @@ kbd {
 /* A meeting recording with something already known to be wrong downstream. */
 .meet-warned { border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
 .meet-warned .meet-error { flex-basis: 100%; }
+
+/* ================================================================== *
+ *  v2 shell
+ *
+ *  The components below were rewritten when the VM and pi came out, and
+ *  their class names went with them. These rules come last deliberately:
+ *  several of them override v1 rules of the same specificity that are
+ *  still above -- `.app` in particular was a flex COLUMN, which stacked
+ *  the history rail on top of the conversation instead of beside it.
+ * ================================================================== */
+
+.app {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  height: 100%;
+}
+
+/*
+ * The control voice, applied by element rather than by class.
+ *
+ * v1 styled `.input`, `.select` and friends, so every field had to remember to
+ * ask. A bare <input> then rendered with the browser default -- white, on a
+ * near-black app -- and the meeting title box did exactly that.
+ */
+.app input:not([type="checkbox"]):not([type="radio"]),
+.app select,
+.app textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+}
+.app input::placeholder, .app textarea::placeholder { color: var(--text-faint); }
+.app input:focus-visible, .app select:focus-visible, .app textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.rail {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-inset);
+  overflow-y: auto;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* ---------- chips: the topbar's own small controls ---------- */
+
+.chip {
+  font: inherit; font-size: 12px; color: var(--text-dim);
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-float);
+  box-shadow: var(--lift);
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.chip:hover { color: var(--text); border-color: var(--border-hover); }
+.chip.active {
+  color: var(--accent-soft);
+  border-color: var(--accent-dim);
+  background: var(--accent-wash);
+}
+
+/* ---------- conversation ---------- */
+
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 26px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.empty {
+  margin: auto;
+  max-width: 42ch;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.turn { max-width: 74ch; }
+
+/* The user's own words are a quotation of the request, not a chat bubble:
+   a rule in the margin reads as "you said this" without the toy styling. */
+.turn.user {
+  border-left: 2px solid var(--accent-dim);
+  padding-left: 14px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+.turn.user p { margin: 0; }
+
+.turn.assistant { color: var(--text); }
+
+.error {
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  color: var(--red);
+  border-radius: var(--radius);
+  padding: 10px 13px;
+  font-size: 13px;
+}
+
+/* ---------- sources ---------- */
+
+.sources { border-top: 1px solid var(--border); padding-top: 14px; }
+.sources h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); margin: 0 0 10px;
+}
+.source-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 7px; }
+.source-list li { font-size: 13px; color: var(--text-dim); }
+.source-list a { color: var(--text); text-decoration: none; }
+.source-list a:hover { color: var(--accent-soft); text-decoration: underline; }
+.source-meta { color: var(--text-faint); margin-left: 8px; font-size: 12px; }
+
+/* ---------- composer ---------- */
+
+.composer {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 26px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.composer .input {
+  flex: 1;
+  resize: none;
+  min-height: 40px;
+  max-height: 40vh;
+  padding: 10px 12px;
+  line-height: 1.5;
+  font-family: var(--sans);
+}
+.composer .progress {
+  flex-basis: 100%;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin: 0 0 2px;
+}
+
+.primary, .ghost, .stop {
+  font: inherit; font-size: 13px;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.primary { background: var(--accent); color: var(--on-accent); font-weight: 560; }
+.primary:hover:not(:disabled) { background: var(--accent-soft); }
+.primary:disabled { opacity: 0.4; cursor: default; }
+.ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
+.ghost:hover { color: var(--text); border-color: var(--border-hover); }
+.stop { background: var(--bg-float); color: var(--red); border-color: var(--border-strong); }
+.stop:hover { border-color: var(--red); }
+
+/* ---------- history rail ---------- */
+
+.sessions { display: flex; flex-direction: column; gap: 4px; padding: 12px 10px; }
+
+.new-session {
+  font: inherit; font-size: 12.5px;
+  text-align: left;
+  padding: 8px 11px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.new-session:hover { color: var(--accent-soft); border-color: var(--accent-dim); }
+
+.session-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.session {
+  display: flex; align-items: center;
+  border-radius: var(--radius-sm);
+}
+.session:hover { background: var(--bg-raised); }
+/* The open conversation is marked by a warm wash rather than a hard rail. */
+.session.current { background: var(--accent-wash); }
+
+.session-open {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  background: none; border: 0; cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+}
+.session-title {
+  font-size: 12.5px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.session.current .session-title { color: var(--accent-soft); }
+.session-meta { font-size: 11px; color: var(--text-faint); }
+
+/* Hidden until hover or focus: a delete control on every row, always visible,
+   is an invitation to lose a conversation by mis-clicking. */
+.session-delete {
+  opacity: 0; flex: none;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-faint); font-size: 16px; line-height: 1;
+  padding: 4px 9px;
+}
+.session:hover .session-delete, .session-delete:focus-visible { opacity: 1; }
+.session-delete:hover { color: var(--red); }
+
+.session-empty { font-size: 12px; color: var(--text-faint); padding: 8px 10px; }
+
+.session-delete-all {
+  font: inherit; font-size: 11.5px;
+  margin-top: 8px; padding: 6px;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-faint);
+}
+.session-delete-all:hover { color: var(--red); }
+
+.session-confirm {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--text-dim);
+  padding: 8px 4px;
+}
+.session-confirm button {
+  font: inherit; font-size: 11.5px;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-dim); cursor: pointer; padding: 3px 8px;
+}
+.session-confirm button:first-of-type { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
+
+/* ---------- research bar ---------- */
+
+.research-modes { display: flex; gap: 2px; padding: 2px; background: var(--bg-inset); border-radius: 999px; border: 1px solid var(--border); }
+
+.mode {
+  font: inherit; font-size: 12px;
+  padding: 4px 12px;
+  border: 0; border-radius: 999px;
+  background: transparent; color: var(--text-faint);
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.mode:hover { color: var(--text-dim); }
+/* The active mode is load-bearing information: it changes which tools the
+   model can reach at all, so it is stated, not merely highlighted. */
+.mode.active { background: var(--accent); color: var(--on-accent); font-weight: 560; }
+
+.research-category {
+  font: inherit; font-size: 12px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-float);
+  color: var(--text-dim);
+}
+
+/* ---------- meeting ---------- */
+
+.meeting {
+  flex: none;
+  margin: 14px 26px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--lift);
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.meeting-start { display: flex; gap: 10px; }
+.meeting-title { flex: 1; }
+
+.meeting-live { display: flex; flex-direction: column; gap: 12px; }
+.meeting-live-head { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.meeting-elapsed { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+
+.recording-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--red);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .recording-dot { animation: none; } }
+
+.meter-row { display: flex; align-items: center; gap: 12px; }
+.meter-label { font-size: 11.5px; color: var(--text-faint); width: 88px; flex: none; }
+.meter { display: flex; gap: 2px; flex: 1; height: 12px; }
+
+.meeting-actions { display: flex; gap: 8px; }
+
+.meeting-progress { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.meeting-progress p { margin: 0; }
+.meeting-progress .detail { color: var(--text-faint); font-size: 12px; }
+.bar { height: 4px; border-radius: 2px; background: var(--bg-inset); overflow: hidden; }
+.fill { height: 100%; background: var(--accent); transition: width var(--t-med); }
+
+.meeting-done { margin: 0; font-size: 13px; color: var(--green); }
+.meeting-done code { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+.meeting-failed { margin: 0; font-size: 13px; color: var(--red); }
+.meeting-warning { margin: 0; font-size: 12.5px; color: var(--amber); }
+
+/* ---------- dialogs and settings ---------- */
+
+/*
+ * Flex, not `display: grid; place-items: center`.
+ *
+ * Grid was the obvious choice and it centred the modal 330px too low. An
+ * auto-sized grid row cannot resolve a percentage height in its item, so
+ * `.settings { height: min(660px, 100%) }` fell back to auto while the row was
+ * being sized -- the row grew to the settings body's full unclipped height
+ * (1447px in an 831px window) and then centred a 660px modal inside THAT.
+ *
+ * A flex container's height here is definite (it is `inset: 0`), so the
+ * percentage resolves and the item is centred against the real viewport.
+ */
+.dialog-backdrop, .settings-backdrop {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: rgba(5, 5, 7, 0.72);
+}
+
+.dialog, .settings {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+}
+
+.dialog { width: min(560px, 100%); max-height: 100%; padding: 20px; gap: 14px; overflow-y: auto; }
+/* The plan editor needs room: it is a document, not a prompt. */
+.dialog-wide { width: min(880px, 100%); }
+
+.dialog-title { margin: 0; font-size: 15px; font-weight: 600; }
+.dialog-message { margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+.dialog-input { width: 100%; }
+.dialog-editor {
+  width: 100%; min-height: 46vh; resize: vertical;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+  padding: 12px;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.settings { width: min(860px, 100%); height: 660px; max-height: 100%; }
+.settings-head {
+  display: flex; align-items: center;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.settings-tabs { display: flex; gap: 2px; }
+.tab {
+  font: inherit; font-size: 12.5px;
+  padding: 13px 12px 11px;
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--text-faint); cursor: pointer;
+}
+.tab:hover { color: var(--text-dim); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.settings-close {
+  margin-left: auto;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-faint); font-size: 20px; line-height: 1; padding: 6px 10px;
+}
+.settings-close:hover { color: var(--text); }
+
+.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px 24px; }
+
+.pane { display: flex; flex-direction: column; gap: 18px; max-width: 62ch; }
+.pane h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.pane-lead { margin: 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.6; }
+
+.pane label, .folder {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 12.5px; color: var(--text-dim);
+}
+.pane label.checkbox, .checkbox {
+  flex-direction: row; align-items: center; gap: 9px;
+}
+.hint { font-size: 11.5px; color: var(--text-faint); line-height: 1.5; }
+.unit { font-size: 11.5px; color: var(--text-faint); }
+
+.endpoint {
+  display: flex; flex-direction: column; gap: 11px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 15px; margin: 0;
+  background: var(--bg-inset);
+}
+.endpoint legend { padding: 0 6px; font-size: 12px; color: var(--text); font-weight: 560; }
+.endpoint-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.endpoint-actions button {
+  font: inherit; font-size: 12px;
+  padding: 6px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-float);
+  color: var(--text-dim); cursor: pointer;
+}
+.endpoint-actions button:hover { color: var(--text); border-color: var(--border-hover); }
+.status { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+
+.folder-row { flex-direction: row; gap: 8px; align-items: center; }
+.folder-row input { flex: 1; }
+.folder-row button {
+  font: inherit; font-size: 12px;
+  padding: 7px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-float);
+  color: var(--text-dim); cursor: pointer; flex: none;
+}
+.folder-row button:hover { color: var(--text); border-color: var(--border-hover); }
+
+.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; color: var(--text-dim); line-height: 1.55; }
+.plain li.warning, .warning {
+  color: var(--amber);
+  border-left: 2px solid var(--amber);
+  padding-left: 11px;
+  line-height: 1.6;
+}
+p.warning { margin: 0; font-size: 12.5px; }
+
+/* Settings inputs share the base control voice; only the sizing differs. */
+.pane input, .pane select, .dialog-input {
+  font: inherit; font-size: 12.5px;
+  padding: 7px 10px;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.pane input:focus-visible, .pane select:focus-visible, .dialog-input:focus-visible {
+  outline: none; border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.pane input[readonly] { color: var(--text-faint); }
+.pane input[type="checkbox"] { width: auto; accent-color: var(--accent); }
