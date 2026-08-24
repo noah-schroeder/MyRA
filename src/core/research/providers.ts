@@ -13,7 +13,9 @@
  */
 
 import { arxivSearch } from "./arxiv.ts";
-import { abstractFromInverted, authorsOf, oaUrl, openAlexSearch, venueOf } from "./openalex.ts";
+import {
+  abstractFromInverted, authorsOf, oaUrl, openAlexSearch, venueOf, type Work,
+} from "./openalex.ts";
 import {
   NoProviderError,
   dedupe,
@@ -65,7 +67,7 @@ export function isScholarlyCategory(category: string | undefined): boolean {
  * identifies, and the pipeline fetches `pdfUrl ?? url`, so the open copy is
  * still what gets read.
  */
-function workToHit(w: Parameters<typeof venueOf>[0]): SearchHit | undefined {
+function workToHit(w: Work): SearchHit | undefined {
   const url =
     (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi\.org\//, "")}` : undefined) ??
     oaUrl(w) ??
@@ -81,6 +83,9 @@ function workToHit(w: Parameters<typeof venueOf>[0]): SearchHit | undefined {
     content: `${byline}${venue ? `${venue}. ` : ""}${abstract}`.trim(),
     engine: "openalex",
     publishedDate: w.publication_year ? `${w.publication_year}-01-01` : null,
+    // Carried, not discarded: hydration would otherwise re-fetch this exact
+    // record by DOI, using the same select= clause that produced it.
+    work: w,
   };
 }
 
