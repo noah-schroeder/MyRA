@@ -44,6 +44,14 @@ export interface AgentTurnOptions {
   maxSteps?: number;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Asked before each call. Returning false refuses it.
+   *
+   * The loop deliberately knows nothing about permission modes or risk classes:
+   * it takes a yes-or-no. That keeps the policy in one place and means this
+   * file cannot drift out of step with it.
+   */
+  approve?: (tool: string, params: Record<string, unknown>) => Promise<boolean>;
 }
 
 export interface AgentTurnResult {
@@ -153,6 +161,16 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
       }
 
       opts.onEvent?.({ type: "tool_start", tool: name, toolCallId: call.id, params: parsed.value });
+
+      if (opts.approve && !(await opts.approve(name, parsed.value))) {
+        // Refusal is a result, not an error: the model is told plainly so it
+        // can propose something else rather than retrying the same call.
+        const refused = `The user declined to run ${name}.`;
+        opts.onEvent?.({ type: "tool_error", tool: name, toolCallId: call.id, text: refused });
+        produced.push(toolMessage(call, refused));
+        continue;
+      }
+
       try {
         const result = await opts.registry.dispatch(name, parsed.value, {
           ...(opts.signal ? { signal: opts.signal } : {}),

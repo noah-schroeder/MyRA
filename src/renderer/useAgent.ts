@@ -153,7 +153,7 @@ export function useAgent() {
     open.current = undefined;
   }, []);
 
-  return { items, busy, usage, error, sources, send, abort, reset, setError };
+  return { items, busy, usage, error, sources, send, abort, reset };
 }
 
 function appendText(blocks: AssistantItem["blocks"], text: string): AssistantItem["blocks"] {

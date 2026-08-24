@@ -23,6 +23,33 @@ export function UiDialog({
   const submit = (): void => onAnswer(request.id, value.trim() ? value : undefined);
   const skip = (): void => onAnswer(request.id, undefined);
 
+  /*
+   * A confirm is not an input with two buttons.
+   *
+   * "Skip" on a question means "no answer, carry on"; on a permission request
+   * it must mean "no". Same dialog, different verbs, and the refusing action is
+   * the plain one -- a request to write to your disk should not have its
+   * approval pre-emphasised.
+   */
+  if (request.method === "confirm") {
+    return (
+      <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label={request.title}>
+        <div className="dialog">
+          <h2 className="dialog-title">{request.title}</h2>
+          {request.message ? <p className="dialog-message">{request.message}</p> : null}
+          <div className="dialog-actions">
+            <button type="button" className="ghost" autoFocus onClick={() => onAnswer(request.id, undefined)}>
+              Don't allow
+            </button>
+            <button type="button" className="primary" onClick={() => onAnswer(request.id, "yes")}>
+              Allow
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label={request.title}>
       <div className={`dialog ${request.method === "editor" ? "dialog-wide" : ""}`}>

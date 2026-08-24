@@ -160,10 +160,6 @@ export async function engines(): Promise<Engines> {
   return probed;
 }
 
-/** Clears the probe. Tests only. */
-export function resetEngines(): void {
-  probed = undefined;
-}
 
 /**
  * Rendering HTML to PDF.
@@ -180,9 +176,6 @@ export function setPdfRenderer(fn: (html: string, outPath: string) => Promise<vo
   pdfRenderer = fn;
 }
 
-export function canRenderPdf(): boolean {
-  return pdfRenderer !== undefined;
-}
 
 const HTML_FORMAT: Format = {
   ext: "html", pandocTo: "html", pandocFrom: "html", label: "HTML", readable: true,

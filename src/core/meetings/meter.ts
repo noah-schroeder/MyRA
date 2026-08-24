@@ -26,9 +26,6 @@ const FLOOR_DB = -60;
  */
 export const SILENCE_AMPLITUDE = 0.004;
 
-/** How long the input must stay under that before the HUD says so. */
-export const SILENCE_MS = 2_500;
-
 /** Peaks this close to full scale are being clipped by the input gain. */
 export const CLIP_AMPLITUDE = 0.99;
 

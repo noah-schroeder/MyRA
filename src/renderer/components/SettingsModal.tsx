@@ -11,12 +11,13 @@ import { enumerate } from "../capture.ts";
  * configured.
  */
 
-type Tab = "endpoints" | "storage" | "audio" | "about";
+type Tab = "endpoints" | "storage" | "audio" | "permissions" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "endpoints", label: "Endpoints" },
   { id: "storage", label: "Folders" },
   { id: "audio", label: "Audio" },
+  { id: "permissions", label: "Permissions" },
   { id: "about", label: "About" },
 ];
 
@@ -62,6 +63,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           {tab === "endpoints" ? <Endpoints settings={settings} patch={patch} vault={vault} /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
+          {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
           {tab === "about" ? <About /> : null}
         </div>
       </div>
@@ -327,6 +329,54 @@ function Audio({
         />
         <span className="unit">two-letter code, e.g. en</span>
       </label>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- permissions */
+
+const MODES = [
+  { value: "guarded", label: "Guarded", hint: "Reading is silent; writing a document is silent too, and every write is jailed to your documents folder. The default." },
+  { value: "manual", label: "Ask every time", hint: "Confirm every tool call, searches included. Thorough, and noisy: a research run becomes a wall of prompts." },
+  { value: "yolo", label: "Never ask", hint: "Nothing prompts. With this tool set that is the same as Guarded, and it stays honest if a riskier tool is ever added." },
+] as const;
+
+function Permissions({
+  settings,
+  patch,
+}: {
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  return (
+    <div className="pane">
+      <p className="pane-lead">
+        Karen can only do what its tools allow — there is no shell, so &ldquo;run a command&rdquo; is
+        not something it can express. These modes decide how much of the rest you want to see
+        before it happens.
+      </p>
+
+      {MODES.map((m) => (
+        <label key={m.value} className="checkbox">
+          <input
+            type="radio"
+            name="permission-mode"
+            checked={settings.permissionMode === m.value}
+            onChange={() => void patch({ permissionMode: m.value })}
+          />
+          <span>
+            {m.label}
+            <span className="hint"> — {m.hint}</span>
+          </span>
+        </label>
+      ))}
+
+      <h3>What the tools can reach</h3>
+      <ul className="plain">
+        <li>Searching and reading sources: the open web, read-only.</li>
+        <li>Reading and writing documents: your documents folder only, checked on every call.</li>
+        <li>Nothing can send data anywhere. Every tool reads; none posts.</li>
+      </ul>
     </div>
   );
 }

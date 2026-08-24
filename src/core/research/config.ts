@@ -10,9 +10,6 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const SEARXNG_URL =
-  (process.env["KAREN_SEARXNG_URL"] ?? "http://127.0.0.1:8888").replace(/\/$/, "");
-
 /** OpenAlex's "polite pool" is faster and more generously rate limited. */
 export const OPENALEX_MAILTO = process.env["KAREN_OPENALEX_MAILTO"] ?? "";
 
@@ -59,7 +56,7 @@ export interface EmbeddingsConfig {
 
 export interface ResearchConfig {
   mode: "off" | "web" | "deep";
-  /** One or more SearXNG categories, comma-separated (SearXNG's own format). */
+  /** Where to search: "science" for the literature, "general" for the web. */
   category: string;
   timeRange?: string;
   embeddings?: EmbeddingsConfig;
@@ -114,9 +111,11 @@ export function effectiveCategory(modelChoice: string | undefined, fallback: str
  * Same rule as effectiveCategory, and for the same reason: the GUI has a time
  * range control, so the GUI decides. This is not symmetry for its own sake --
  * a model that volunteers `time_range: "year"` on a scholarly category gets
- * ZERO results back, because SearXNG drops every engine lacking time-range
- * support and no scholarly engine has it. That failure looked exactly like a
- * broken search: eight queries, eight empty answers, no error.
+ * ZERO results back: v1's SearXNG dropped every engine lacking time-range
+ * support, and no scholarly engine had it. That failure looked exactly like a
+ * broken search -- eight queries, eight empty answers, no error. providers.ts
+ * declares the capability per provider now, so an unsupported filter is
+ * reported and not sent.
  *
  * "any time" in the GUI is a real choice and returns "", clearing the model's.
  */

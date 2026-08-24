@@ -18,7 +18,7 @@ import {
   DocsError, convert, documentsDir, exists, readAsText, writeText,
 } from "../../documents/office.ts";
 import type { ToolDef } from "../registry.ts";
-import { untrusted } from "./research.ts";
+import { asUntrusted } from "../../research/html.ts";
 
 /**
  * Resolve a model-supplied name inside the jail.
@@ -133,7 +133,7 @@ export const readDocumentTool: ToolDef = {
     const text = await readAsText(abs);
     // A document can have arrived from the open web -- a downloaded preprint is
     // the normal case here -- so it is labelled as data, exactly like a page.
-    return { content: untrusted(name, text), detail: { path: abs, chars: text.length } };
+    return { content: asUntrusted(name, text), detail: { path: abs, chars: text.length } };
   },
 };
 

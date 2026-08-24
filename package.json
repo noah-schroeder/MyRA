@@ -19,7 +19,6 @@
     "deb": "electron-vite build && electron-builder --linux deb"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.33",
     "marked": "^18.0.10"
   },
   "devDependencies": {

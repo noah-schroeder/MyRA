@@ -17,14 +17,27 @@ const MODES: { value: ResearchMode; label: string; hint: string }[] = [
   { value: "deep", label: "Deep", hint: "Plan, read, verify, synthesise. Minutes." },
 ];
 
+/**
+ * Where to search.
+ *
+ * The general-web option is listed and disabled rather than hidden. It is a
+ * real capability the app supports and simply has no backend for yet, and a
+ * control that quietly does not exist teaches the user the feature does not
+ * exist either. Offering it as a live choice would be worse: it would fail at
+ * search time, several seconds into a run, with an error about providers.
+ */
 const CATEGORIES = [
   { value: "science", label: "Scholarly", hint: "OpenAlex, arXiv, Crossref, Semantic Scholar" },
-  { value: "general", label: "General web", hint: "Needs a backend configured in Settings" },
+  {
+    value: "general",
+    label: "General web (no backend yet)",
+    hint: "Scholarly search needs no setup; general web search needs a backend this build does not ship.",
+    disabled: true,
+  },
 ];
 
-export function ResearchBar({ onNotice }: { onNotice?: (text: string) => void }) {
+export function ResearchBar() {
   const [config, setConfig] = useState<ResearchConfig>({ mode: "off", category: "science" });
-  const [webAvailable, setWebAvailable] = useState(true);
 
   useEffect(() => {
     void window.karen.getResearch().then(setConfig);
@@ -34,18 +47,7 @@ export function ResearchBar({ onNotice }: { onNotice?: (text: string) => void })
     const next = { ...config, ...patch };
     setConfig(next);
     void window.karen.setResearch(next);
-    if (patch.category === "general" && !webAvailable) {
-      onNotice?.(
-        "General web search has no backend configured. Scholarly search works without one.",
-      );
-    }
   };
-
-  useEffect(() => {
-    // A general-web provider is optional and usually absent, so say so before
-    // the user picks it and gets an empty result they cannot explain.
-    void window.karen.getResearch().then(() => setWebAvailable(false));
-  }, []);
 
   return (
     <div className="research-bar">
@@ -72,7 +74,7 @@ export function ResearchBar({ onNotice }: { onNotice?: (text: string) => void })
           onChange={(e) => apply({ category: e.target.value })}
         >
           {CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value} title={c.hint}>
+            <option key={c.value} value={c.value} title={c.hint} disabled={c.disabled ?? false}>
               {c.label}
             </option>
           ))}

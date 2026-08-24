@@ -51,10 +51,6 @@ export function decide(mode: PermissionMode, risk: RiskClass): Decision {
   return MATRIX[risk][mode];
 }
 
-/** True when the prompt should be styled as a serious, deliberate confirmation. */
-export function requiresEmphasis(risk: RiskClass): boolean {
-  return risk === "dangerous" || risk === "catastrophic";
-}
 
 /** True when the user must type to confirm rather than just click. */
 export function requiresTypedConfirm(risk: RiskClass): boolean {
