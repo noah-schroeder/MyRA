@@ -334,7 +334,7 @@ function Audio({
 /* ------------------------------------------------------------------- about */
 
 function About() {
-  const [engines, setEngines] = useState<{ pandoc: boolean; libreoffice: boolean } | undefined>();
+  const [engines, setEngines] = useState<Awaited<ReturnType<typeof window.karen.engines>> | undefined>();
 
   useEffect(() => {
     void window.karen.engines().then(setEngines);
@@ -356,11 +356,21 @@ function About() {
       <h3>Document conversion</h3>
       {engines ? (
         <ul className="plain">
-          <li>pandoc: {engines.pandoc ? "available" : "not found"}</li>
-          <li>LibreOffice: {engines.libreoffice ? "available" : "not found"}</li>
-          {!engines.pandoc && !engines.libreoffice ? (
+          <li>
+            pandoc: {engines.pandoc ? engines.pandocVersion ?? "available" : "not found"}
+            {engines.pandocPath ? <span className="hint"> — {engines.pandocPath}</span> : null}
+          </li>
+          <li>PDF text extraction: {engines.pdftotext ? "available" : "not found"}</li>
+          {!engines.pandoc ? (
             <li className="warning">
-              Neither is installed, so documents can only be written as Markdown.
+              Without pandoc, documents can only be written as Markdown. Everything else —
+              meetings, research, chat — works as normal.
+            </li>
+          ) : null}
+          {!engines.pdftotext ? (
+            <li className="warning">
+              Without poppler, PDFs cannot be read as text. Papers found by research will still
+              be cited, but their full text will not be available.
             </li>
           ) : null}
         </ul>

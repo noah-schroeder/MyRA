@@ -9,21 +9,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEvent, AssistantItem, CitedSource, Item, ToolItem, Usage } from "./types.ts";
+import { harvestSources } from "./restore.ts";
 
 let seq = 0;
 const nextId = (): string => `i${++seq}`;
-
-/** Sources a tool reported, so [n] markers in the prose can resolve to a link. */
-function harvest(result: string | undefined): CitedSource[] {
-  if (!result) return [];
-  const found: CitedSource[] = [];
-  // The format formatHits writes: "[3] Title\n    https://…"
-  const pattern = /^\[(\d+)\]\s+(.*)\n\s+(https?:\/\/\S+)/gm;
-  for (const m of result.matchAll(pattern)) {
-    found.push({ n: Number(m[1]), title: m[2]!.trim(), url: m[3]! });
-  }
-  return found;
-}
 
 export function useAgent() {
   const [items, setItems] = useState<Item[]>([]);
@@ -89,7 +78,7 @@ export function useAgent() {
           break;
 
         case "tool_end": {
-          const harvested = harvest(event.result);
+          const harvested = harvestSources(event.result);
           if (harvested.length) {
             setSources((prev) => {
               const next = new Map(prev);
@@ -155,9 +144,9 @@ export function useAgent() {
     setBusy(false);
   }, []);
 
-  const reset = useCallback((restored: Item[] = []) => {
+  const reset = useCallback((restored: Item[] = [], restoredSources?: Map<number, CitedSource>) => {
     setItems(restored);
-    setSources(new Map());
+    setSources(restoredSources ?? new Map());
     setUsage(undefined);
     setError(undefined);
     setBusy(false);

@@ -9,6 +9,7 @@ import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
+import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 
 export function App() {
@@ -50,13 +51,15 @@ export function App() {
   }, [draft, busy, send]);
 
   const openSession = async (id: string): Promise<void> => {
-    await window.karen.openSession(id);
+    const messages = (await window.karen.openSession(id)) as StoredMessage[];
     setSessionId(id);
-    // The stored conversation is the model's message list, not this view's item
-    // list. Rebuilding one from the other faithfully is a job in itself, so for
-    // now reopening starts a clean view over the same history rather than
-    // pretending to reconstruct the tool cards.
-    reset();
+    // The stored form is the model's message list; this view wants cards in the
+    // order they happened, each knowing its own outcome. restoreThread does
+    // that conversion, including reuniting each tool call with the result that
+    // arrived as a separate message, and recovering the sources so the [n]
+    // markers in the restored prose still resolve.
+    const { items: restored, sources: restoredSources } = restoreThread(messages);
+    reset(restored, restoredSources);
   };
 
   const newSession = async (): Promise<void> => {

@@ -1,5 +1,5 @@
 /**
- * Driving pandoc, LibreOffice and pdftotext from the agent.
+ * Driving pandoc and pdftotext from the agent.
  *
  * Deliberately boring: spawn, wait, check the file appeared. The interesting
  * decisions are in formats.ts; what is here is the operational care that these
@@ -7,22 +7,41 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import {
-  convertArgs, extensionOf, outputName, pandocArgs, pandocReader, type Format,
-} from "./formats.ts";
+import { FORMATS, extensionOf, outputName, pandocArgs, pandocReader, type Format } from "./formats.ts";
 
 export class DocsError extends Error {
   override readonly name = "DocsError";
 }
 
+/** pandoc is fast, but a very long document on a slow disk is not instant. */
+const CONVERT_TIMEOUT_MS = 120_000;
+
 /**
- * A cold snap start is genuinely slow -- the first conversion after boot can
- * take the better part of a minute before it has even loaded the filter.
+ * Where the bundled binaries live, relative to the app.
+ *
+ * Overridable so a developer can point at a system install, and so the tests
+ * can run against whatever the machine happens to have.
  */
-const CONVERT_TIMEOUT_MS = 180_000;
+export function vendorDir(): string {
+  return process.env["KAREN_VENDOR_DIR"] ?? join(process.resourcesPath ?? ".", "vendor", platform());
+}
+
+/**
+ * The pandoc to run: the bundled one if it is there, otherwise the PATH.
+ *
+ * Bundled wins deliberately. A user's own pandoc may be years old -- the docx
+ * writer in particular has changed a lot -- and a document that comes out
+ * subtly different depending on the machine is worse than one that comes out
+ * the same everywhere.
+ */
+export function pandocPath(): string {
+  const bundled = join(vendorDir(), platform() === "win32" ? "pandoc.exe" : "pandoc");
+  return existsSync(bundled) ? bundled : "pandoc";
+}
 
 /** Where the agent may read and write. */
 export function workspaceRoot(): string {
@@ -30,10 +49,12 @@ export function workspaceRoot(): string {
 }
 
 /**
- * Documents live in one place so the host's "Save to host…" knows where to look.
+ * Documents live in one place, so there is one folder to jail and one to open.
  *
- * A plain path, not a dot-directory: LibreOffice here is a snap, and snap
- * confinement refuses hidden directories in $HOME.
+ * A plain path, never a dot-directory. The reason predates pandoc and outlives
+ * it: sandboxed packaging -- snap, flatpak, the Mac App Store -- routinely
+ * refuses hidden directories under $HOME, and a folder the user cannot find in
+ * their file manager is a folder they will assume is empty.
  */
 export function documentsDir(): string {
   return join(workspaceRoot(), "documents");
@@ -42,13 +63,15 @@ export function documentsDir(): string {
 /**
  * Scratch space for conversions, inside the workspace rather than in /tmp.
  *
- * This is not a preference. LibreOffice here is a snap, and **snaps get a
- * private /tmp**: a conversion given `--outdir /tmp/...` succeeds, reports
- * success, and writes the file into a namespace this process cannot see. The
- * output then appears to have vanished. Found by doing exactly that.
+ * This is not a preference, and it is the finding most likely to be undone by
+ * someone tidying up. v1 ran LibreOffice as a snap, and **snaps get a private
+ * /tmp**: a conversion given an output path under /tmp succeeded, reported
+ * success, and wrote the file into a namespace this process could not see, so
+ * the output appeared to have vanished. Found by doing exactly that.
  *
- * A plain directory name, too -- snap confinement also refuses hidden
- * directories under $HOME, so no dot-names here.
+ * The engine changed; the hazard did not. Any sandboxed packaging can remap
+ * /tmp the same way, so conversions stay inside the workspace where both sides
+ * agree the path means one thing.
  */
 export function scratchRoot(): string {
   return join(workspaceRoot(), "scratch");
@@ -102,23 +125,36 @@ async function run(
   });
 }
 
-/** Which binaries are actually present. Probed once; they do not appear mid-run. */
-let probed: { pandoc: boolean; libreoffice: boolean } | undefined;
+/** What is actually available. Probed once; binaries do not appear mid-run. */
+let probed: Engines | undefined;
 
-async function present(command: string): Promise<boolean> {
+export interface Engines {
+  /** pandoc is present, so anything but PDF can be produced. */
+  pandoc: boolean;
+  /** Where it was found, so the About pane can say whether it is the bundled one. */
+  pandocPath?: string;
+  pandocVersion?: string;
+  /** poppler is present, so PDFs can be read. */
+  pdftotext: boolean;
+}
+
+async function present(command: string): Promise<string | undefined> {
   try {
-    const { code } = await run(command, ["--version"], 20_000);
-    return code === 0;
+    const { code, stdout } = await run(command, ["--version"], 20_000);
+    return code === 0 ? stdout.split("\n")[0]?.trim() : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
-export async function engines(): Promise<{ pandoc: boolean; libreoffice: boolean }> {
+export async function engines(): Promise<Engines> {
   if (!probed) {
+    const path = pandocPath();
+    const version = await present(path);
     probed = {
-      pandoc: await present("pandoc"),
-      libreoffice: await present("libreoffice"),
+      pandoc: version !== undefined,
+      ...(version ? { pandocPath: path, pandocVersion: version } : {}),
+      pdftotext: (await present("pdftotext")) !== undefined,
     };
   }
   return probed;
@@ -148,76 +184,59 @@ export function canRenderPdf(): boolean {
   return pdfRenderer !== undefined;
 }
 
+const HTML_FORMAT: Format = {
+  ext: "html", pandocTo: "html", pandocFrom: "html", label: "HTML", readable: true,
+};
+
 /**
  * Convert one file into `outDir`, returning the path it produced.
  *
- * The exit code is not trusted on its own. LibreOffice exits 0 having converted
- * nothing when it does not recognise a filter, so the check is always that the
+ * The exit code is not trusted on its own -- the check is always that the
  * output file exists and is not empty.
  */
 export async function convert(source: string, format: Format, outDir: string): Promise<string> {
   await mkdir(outDir, { recursive: true });
   const produced = join(outDir, outputName(source, format));
-  const available = await engines();
 
+  // PDF has no pandoc writer here, so it goes through HTML and the app's own
+  // browser engine. Two steps, but no LaTeX toolchain to install.
   if (format.ext === "pdf") {
-    if (pdfRenderer) {
-      const html = await convert(source, FORMATS_HTML, outDir);
-      await pdfRenderer(await readFile(html, "utf8"), produced);
-      await rm(html, { force: true });
-      return await verify(produced, format, "");
-    }
-    if (!available.libreoffice) {
+    if (!pdfRenderer) {
       throw new DocsError(
-        "PDF output is unavailable: no renderer is installed and LibreOffice was not found.",
+        "PDF output is unavailable: this build has no renderer attached. " +
+          "Write the document as Markdown, Word or OpenDocument instead.",
       );
     }
-    return await viaLibreOffice(source, format, outDir, produced);
-  }
-
-  if (available.pandoc) {
-    const from = pandocReader(source);
-    const to = format.pandocTo;
-    if (from && to) {
-      const result = await run(
-        "pandoc",
-        pandocArgs({ source, from, to, output: produced }),
-        CONVERT_TIMEOUT_MS,
-      );
-      return await verify(produced, format, result.stderr);
+    const html = await convert(source, HTML_FORMAT, outDir);
+    try {
+      await pdfRenderer(await readFile(html, "utf8"), produced);
+    } finally {
+      // The intermediate is not the user's document and must not be left in
+      // their folder looking like one, even when the render failed.
+      await rm(html, { force: true });
     }
+    return await verify(produced, format, "");
   }
 
-  if (!available.libreoffice) {
+  const from = pandocReader(source);
+  const to = format.pandocTo;
+  if (!from) throw new DocsError(`${extensionOf(source) || "that file"} is not a format pandoc can read`);
+  if (!to) throw new DocsError(`${format.label} is not a format pandoc can write`);
+
+  const { pandoc } = await engines();
+  if (!pandoc) {
     throw new DocsError(
-      `Cannot convert to ${format.label}: neither pandoc nor LibreOffice is available.`,
+      `Cannot convert to ${format.label}: pandoc was not found. ` +
+        `Documents can still be written as Markdown.`,
     );
   }
-  return await viaLibreOffice(source, format, outDir, produced);
-}
 
-const FORMATS_HTML: Format = {
-  ext: "html", convertTo: "html", pandocTo: "html", pandocFrom: "html",
-  label: "HTML", readable: true,
-};
-
-async function viaLibreOffice(
-  source: string,
-  format: Format,
-  outDir: string,
-  produced: string,
-): Promise<string> {
-  const profile = await scratchDir("lo-");
-  try {
-    const result = await run(
-      "libreoffice",
-      convertArgs({ source, format, outDir, profileDir: profile }),
-      CONVERT_TIMEOUT_MS,
-    );
-    return await verify(produced, format, result.stderr);
-  } finally {
-    await rm(profile, { recursive: true, force: true });
-  }
+  const result = await run(
+    pandocPath(),
+    pandocArgs({ source, from, to, output: produced }),
+    CONVERT_TIMEOUT_MS,
+  );
+  return await verify(produced, format, result.stderr);
 }
 
 async function verify(produced: string, format: Format, stderr: string): Promise<string> {
@@ -252,9 +271,11 @@ export async function exists(abs: string): Promise<boolean> {
 /**
  * Read a document back as text.
  *
- * PDFs go through pdftotext rather than LibreOffice: LibreOffice opens a PDF in
- * Draw, where every line becomes its own text frame, and the "text" that comes
- * back out is shredded. `-layout` keeps tables roughly readable.
+ * PDFs go through poppler's pdftotext rather than pandoc, because pandoc has no
+ * PDF reader at all. poppler is also the right tool independently: it handles
+ * the two-column layouts academic papers arrive in, and is an order of
+ * magnitude faster than the JS libraries on a 40-page paper. `-layout` keeps
+ * tables roughly readable.
  */
 export async function readAsText(abs: string): Promise<string> {
   const ext = extensionOf(abs);
@@ -278,11 +299,7 @@ export async function readAsText(abs: string): Promise<string> {
   // and emphasis the model can act on rather than flattening to a wall of text.
   const out = await scratchDir("doc-");
   try {
-    const md = await convert(
-      abs,
-      { ext: "md", convertTo: "md", pandocTo: "markdown", pandocFrom: "markdown", label: "Markdown", readable: true },
-      out,
-    );
+    const md = await convert(abs, FORMATS["md"]!, out);
     return await readFile(md, "utf8");
   } finally {
     await rm(out, { recursive: true, force: true });
