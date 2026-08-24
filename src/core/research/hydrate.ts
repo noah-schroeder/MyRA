@@ -83,7 +83,14 @@ export interface Hydrated {
    * prevent.
    */
   note?: string;
-  matchedBy: "doi" | "arxiv" | "title" | "none";
+  /**
+   * How the work was identified.
+   *
+   * "provider" means the search returned the record itself, so no lookup was
+   * needed and no mismatch is possible -- the strongest of these, and the
+   * common case for scholarly search.
+   */
+  matchedBy: "provider" | "doi" | "arxiv" | "title" | "none";
 }
 
 const NOT_A_PAPER: Hydrated = { matchedBy: "none" };
@@ -109,14 +116,22 @@ function fromWork(work: Work, matchedBy: Hydrated["matchedBy"]): Hydrated {
 /**
  * Stage 0: identify one search hit as a known work.
  *
- * DOI first because it is exact; title only as a fallback, and openAlexByTitle
- * confirms the title really matches before returning -- attaching one paper's
- * citation count to another paper would be worse than no metadata at all.
+ * In descending order of certainty: the record the provider already gave us,
+ * then the DOI because it is exact, then the title as a last resort --
+ * openAlexByTitle confirms the title really matches before returning, because
+ * attaching one paper's citation count to another would be worse than no
+ * metadata at all.
  */
 export async function identifyHit(
   hit: SearchHit,
   signal?: AbortSignal,
 ): Promise<{ hydrated: Hydrated; work?: Work }> {
+  // The provider already handed us the record. Re-fetching it by DOI would ask
+  // OpenAlex for the same fields it just returned -- openAlexSearch and
+  // openAlexByDoi share one select= clause -- so this is not an optimisation
+  // so much as declining to undo work already done.
+  if (hit.work) return { hydrated: fromWork(hit.work, "provider"), work: hit.work };
+
   const doi = doiFromUrl(hit.url) ?? arxivDoiFromUrl(hit.url);
   if (doi) {
     const work = await openAlexByDoi(doi, signal).catch(() => undefined);

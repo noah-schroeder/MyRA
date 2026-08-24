@@ -223,3 +223,89 @@ test("a URL's file extension is not part of the DOI", () => {
   // A real DOI whose final segment merely looks like an extension is untouched.
   assert.equal(doiFromUrl("https://doi.org/10.1234/journal.pone.0123456"), "10.1234/journal.pone.0123456");
 });
+
+/*
+ * The record the search returned is used, not re-fetched.
+ *
+ * openAlexSearch and openAlexByDoi share one select= clause, so identifying an
+ * OpenAlex hit by DOI asks the API for the fields it has already sent. This
+ * counts requests rather than inspecting the result, because the result looked
+ * correct the whole time it was doing twice the work.
+ */
+test("an OpenAlex hit is not identified all over again", async () => {
+  const { openAlexProvider } = await import("../src/core/research/providers.ts");
+  const { hydrateHits } = await import("../src/core/research/hydrate.ts");
+
+  const work = {
+    id: "https://openalex.org/W1",
+    doi: "https://doi.org/10.1016/j.compedu.2019.103641",
+    title: "Pedagogical agents and learning outcomes",
+    publication_year: 2019,
+    cited_by_count: 412,
+    authorships: [{ author: { display_name: "A. Smith" } }],
+    primary_location: { source: { display_name: "Computers & Education" } },
+    open_access: { is_oa: true, oa_url: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7096066" },
+    abstract_inverted_index: { A: [0], "meta-analysis": [1] },
+    referenced_works: ["W2", "W3"],
+  };
+
+  const calls: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ results: [work] }), {
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  let hydrated;
+  try {
+    const hits = await openAlexProvider.search("pedagogical agents");
+    calls.length = 0; // Only what happens AFTER the search is at issue.
+    hydrated = await hydrateHits(hits);
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  assert.deepEqual(calls, [], `hydration made ${calls.length} redundant request(s): ${calls.join(", ")}`);
+
+  const [h] = hydrated;
+  assert.equal(h!.matchedBy, "provider");
+  // And it is genuinely populated, not merely cheap.
+  assert.equal(h!.citedBy, 412);
+  assert.equal(h!.venue, "Computers & Education");
+  assert.equal(h!.year, 2019);
+  assert.equal(h!.references, 2);
+  assert.equal(h!.doi, "https://doi.org/10.1016/j.compedu.2019.103641");
+  assert.equal(h!.abstract, "A meta-analysis");
+  // The open copy still reaches the reader, which is the whole point of having
+  // preferred the DOI for the hit URL.
+  assert.equal(h!.pdfUrl, "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7096066");
+  assert.equal(h!.fullTextFrom, "openalex");
+});
+
+test("a hit with no record attached still identifies the old way", async () => {
+  // arXiv results carry no OpenAlex metadata at all, and a general web hit
+  // carries none either, so the DOI lookup must remain intact for them.
+  const { hydrateHits } = await import("../src/core/research/hydrate.ts");
+
+  const calls: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ results: [] }), {
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await hydrateHits([
+      { url: "https://doi.org/10.1234/abcd", title: "Something", content: "" },
+    ]);
+  } finally {
+    globalThis.fetch = real;
+  }
+
+  assert.ok(calls.length > 0, "a hit without a record must still be looked up");
+  assert.ok(calls[0]!.includes("openalex.org"), calls[0]);
+});

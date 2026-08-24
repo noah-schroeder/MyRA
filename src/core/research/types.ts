@@ -9,6 +9,7 @@
  */
 
 import { canonicalUrl } from "./html.ts";
+import type { Work } from "./openalex.ts";
 
 export interface SearchHit {
   url: string;
@@ -18,6 +19,20 @@ export interface SearchHit {
   engine?: string;
   engines?: string[];
   publishedDate?: string | null;
+  /**
+   * The provider's own record, when it has one richer than this hit.
+   *
+   * A SearchHit is flat because that is all a general web backend can offer,
+   * and for a long time flat was all there was: v1 routed every query through
+   * SearXNG, which discards everything but url/title/snippet. So the pipeline
+   * identified each hit all over again by DOI, to recover metadata the search
+   * had already been given and thrown away.
+   *
+   * Calling the scholarly APIs directly, that loss is now self-inflicted, so
+   * the record rides along. Providers that genuinely have nothing more to give
+   * simply leave it undefined and hydration works exactly as before.
+   */
+  work?: Work;
 }
 
 export interface SearchOptions {
