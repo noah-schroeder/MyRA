@@ -7,6 +7,7 @@ import { SessionList } from "./components/SessionList.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
 import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
+import { RunPanel } from "./components/RunPanel.tsx";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
@@ -19,6 +20,7 @@ export function App() {
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   const [showMeeting, setShowMeeting] = useState(false);
+  const [showRuns, setShowRuns] = useState(false);
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
@@ -104,6 +106,13 @@ export function App() {
               onClick={() => setShowMeeting((v) => !v)}
             >
               Meeting
+            </button>
+            {/* The audit trail, one click from the conversation. Every run
+                already wrote its search log, screening reasons, source hashes
+                and verification table; until this button existed none of it
+                was reachable from anywhere in the app. */}
+            <button type="button" className="chip" onClick={() => setShowRuns(true)}>
+              Runs
             </button>
             <button type="button" className="chip" onClick={() => setShowSettings(true)}>
               Settings
@@ -207,6 +216,7 @@ export function App() {
       />
 
       {showSettings ? <SettingsModal onClose={() => setShowSettings(false)} /> : null}
+      {showRuns ? <RunPanel onClose={() => setShowRuns(false)} /> : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
     </div>
   );

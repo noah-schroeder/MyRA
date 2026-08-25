@@ -25,10 +25,11 @@ import { extractFromSource, type Claim } from "./extract.ts";
 import { synthesize } from "./synthesize.ts";
 import { verifyDraft, type Check } from "./verify.ts";
 import { reviewDraft, reviseDraft } from "./review.ts";
-import { makeSourceRecord, renderBibliography, type SourceRecord } from "./sources.ts";
+import { makeSourceRecord, renderBibliography, verifyQuotes, type SourceRecord } from "./sources.ts";
 import { generateQueries, parsePlan, renderPlan, type Plan } from "./plan.ts";
 import { applyAnswers, draftScope, type Scope, type ScopeQuestion } from "./scope.ts";
 import { rubricText } from "./rubrics.ts";
+import { toBibtex, toCslJson } from "./export.ts";
 import { readRoleConfig, resolveRoles } from "./roles.ts";
 import type { ResearchRun } from "./run.ts";
 
@@ -501,8 +502,41 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
 
   const report = (await run.readText("report.md"))!;
+
+  /* ------------- the finished report's quotes, checked mechanically -------- */
+
+  /*
+   * Extraction proved every quote was verbatim in its source. That was two
+   * model calls ago: synthesis wrote the sentences and revision rewrote them,
+   * and both are free to reshape a quotation while keeping the quote marks.
+   * verifyQuotes existed for this from the start and the pipeline never called
+   * it, so the guarantee stopped at the claims table and the REPORT -- the only
+   * artefact anyone reads -- was never checked at all.
+   *
+   * This is a mechanical check, not a judgement: a quote either appears in the
+   * stored source text or it does not.
+   */
+  const quoteChecks = verifyQuotes(report, sources, await run.sourceTexts());
+  const badQuotes = quoteChecks.filter((q) => !q.verbatim);
+  if (quoteChecks.length) {
+    await run.write("quote-checks.jsonl", quoteChecks.map((q) => JSON.stringify(q)).join("\n") + "\n");
+  }
+  if (badQuotes.length) {
+    say(`${badQuotes.length} quotation(s) in the report are not verbatim in the source they cite`);
+    ui.notify?.(
+      `${badQuotes.length} quotation(s) in the final report could not be found verbatim ` +
+        `in the source cited. See the run's quote-checks.jsonl.`,
+      "warning",
+    );
+  }
+
   const bibliography = renderBibliography(sources);
   await run.write("report-final.md", [report, "", "## Sources", "", bibliography, ""].join("\n"));
+  // Rendered from the source table like the bibliography, never from model
+  // output. A report you cannot get into Zotero is a report you retype, and
+  // retyping is where citations drift.
+  await run.write("sources.bib", toBibtex(sources));
+  await run.write("sources.json", toCslJson(sources));
 
   return {
     report,

@@ -164,3 +164,109 @@ test("the summary reports self-review rather than implying independence", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/*
+ * The run's provenance has to be readable, or it is not an audit trail.
+ *
+ * Everything asserted here was already written to disk on every run and was
+ * reachable from nowhere in the app. readRun is what makes the requirement
+ * ("auditable, accurate, correctly cited") true rather than merely intended.
+ */
+test("readRun assembles what the run actually wrote", async () => {
+  const { ResearchRun, readRun, readRunSource } = await import("../src/core/research/run.ts");
+  const { makeSourceRecord } = await import("../src/core/research/sources.ts");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "karen-readrun-"));
+  try {
+    const run = await ResearchRun.create("does working memory training transfer", root);
+    // A stage's OUTPUT file is its done marker, so the earlier ones have to
+    // exist or nextStage correctly reports the run as barely started.
+    await run.writeJson("scope.json", { question: "q", subQuestions: ["a"], include: [], exclude: [] });
+    await run.writeJson("plan.json", {
+      queries: ["n-back transfer", "working memory training"],
+      roles: { screener: "a", analyst: "a", synthesist: "b", reviewer: "c" },
+    });
+    await run.write("plan.md", "# Research plan\n");
+    await run.logSearch({ query: "n-back transfer", source: "search", page: 1, results: 12, newResults: 12 });
+    await run.logSearch({ query: "dead query", source: "search", page: 1, results: 0, error: "429" });
+
+    await run.append("candidates.jsonl", { id: 1, title: "Far transfer of n-back", url: "https://doi.org/10.1/a", year: 2019, foundBy: 0 });
+    await run.append("candidates.jsonl", { id: 2, title: "A rat study", url: "https://doi.org/10.1/b", foundBy: 1 });
+    await run.append("screened.jsonl", { id: 1, include: true, reason: "measures the outcome directly" });
+    await run.append("screened.jsonl", { id: 2, include: false, reason: "animal study, excluded by criteria" });
+
+    const text = "Training produced no far transfer to fluid intelligence in this sample.";
+    await run.saveSource(makeSourceRecord(1, text, {
+      url: "https://doi.org/10.1/a", title: "Far transfer of n-back", via: "pdf", year: 2019,
+    }), text);
+    await run.append("claims.jsonl", {
+      source: 1, question: "does it transfer", claim: "no far transfer",
+      quote: "no far transfer to fluid intelligence", start: 18, end: 55,
+    });
+    await run.append("dropped-claims.jsonl", { source: 1, quote: "invented", reason: "not found verbatim" });
+    await run.append("verification.jsonl", { sentenceIndex: 0, sentence: "Training does not transfer [1].", source: 1, verdict: "supports", note: "" });
+    await run.write("report.md", "Training does not transfer [1].\n");
+
+    const detail = await readRun(run.id, root);
+    assert.equal(detail.question, "does working memory training transfer");
+    assert.deepEqual(detail.queries, ["n-back transfer", "working memory training"]);
+
+    // A failed query is part of the record: it explains a thin funnel.
+    assert.equal(detail.searches.length, 2);
+    assert.equal(detail.searches[1]!.error, "429");
+
+    // A screening decision is useless without the paper it decided about.
+    const excluded = detail.screened.find((d) => !d.include)!;
+    assert.equal(excluded.title, "A rat study");
+    assert.match(excluded.reason, /animal study/);
+
+    assert.equal(detail.sources.length, 1);
+    assert.equal(detail.sources[0]!.via, "pdf");
+    assert.ok(detail.sources[0]!.sha256, "a source with no hash cannot be audited later");
+    assert.equal(detail.dropped.length, 1);
+    assert.equal(detail.verification[0]!.verdict, "supports");
+
+    // Stage state is what a resume would act on, so it must be reported.
+    assert.equal(detail.stages.length, 10);
+    assert.equal(detail.stages.find((s) => s.stage === "screen")!.done, true);
+    // claims.jsonl exists so extract is done; draft.md does not, so the run
+    // would resume at synthesize -- the FIRST incomplete stage, not the last
+    // one to have written anything.
+    assert.equal(detail.nextStage, "synthesize");
+
+    // The located passage resolves to the exact characters in the stored text.
+    const source = await readRunSource(run.id, 1, root);
+    assert.ok(source);
+    assert.equal(source.spans.length, 1);
+    assert.equal(
+      source.text.slice(source.spans[0]!.start, source.spans[0]!.end),
+      "no far transfer to fluid intelligence",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("listRuns survives a half-created run directory", async () => {
+  const { ResearchRun, listRuns } = await import("../src/core/research/run.ts");
+  const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "karen-listruns-"));
+  try {
+    await ResearchRun.create("a real run", root);
+    // A directory with nothing in it: interrupted before question.json landed.
+    await mkdir(join(root, "2026-01-01-broken-0000"), { recursive: true });
+    const runs = await listRuns(root);
+    assert.equal(runs.length, 2);
+    assert.ok(runs.some((r) => r.question === "a real run"));
+    // The broken one falls back to its id rather than hiding the other.
+    assert.ok(runs.some((r) => r.question === "2026-01-01-broken-0000"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
