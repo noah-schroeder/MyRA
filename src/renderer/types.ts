@@ -223,6 +223,33 @@ export interface KarenApi {
   onResearchProgress(cb: (note: string) => void): () => void;
   answerPrompt(id: string, answer: string | undefined): Promise<void>;
   onPrompt(cb: (request: PromptRequest) => void): () => void;
+
+  /* The bundled runtime. All user-driven: no tool reaches any of this. */
+  runtimeState(): Promise<RuntimeState>;
+  runtimeConfig(patch: Partial<RuntimeConfig>): Promise<RuntimeConfig>;
+  runtimeDetect(): Promise<{ gpu: unknown; suggestion: { backend: Backend; reason: string } }>;
+  runtimeSetUp(): Promise<{ ok: boolean; note?: string; error?: string; devices?: RuntimeDevice[]; build?: string }>;
+  runtimeCheckUpdates(): Promise<{ ok: boolean; current?: string; newest?: string; behind?: number; error?: string }>;
+  runtimeInstall(
+    tag: string,
+    backend: string,
+  ): Promise<{ ok: boolean; error?: string; devices?: RuntimeDevice[]; accelerated?: boolean; build?: string }>;
+  runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
+  runtimeCancel(): Promise<{ ok: boolean }>;
+  runtimeModels(): Promise<LocalModel[]>;
+  runtimeDeleteModel(path: string): Promise<{ ok: boolean; error?: string }>;
+  runtimeStart(modelPath?: string): Promise<{ ok: boolean; status?: ServerStatus; error?: string }>;
+  runtimeStop(): Promise<{ ok: boolean }>;
+  onRuntime(cb: (state: RuntimeState) => void): () => void;
+  onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
+
+  hfSearch(query: string, sort?: string): Promise<{ ok: boolean; models?: HfSearchResult[]; error?: string }>;
+  hfFiles(repo: string): Promise<{ ok: boolean; files?: HfFileChoice[]; error?: string; gated?: boolean }>;
+  hfInspect(repo: string, entry: string, size: number): Promise<{ shape?: unknown; fit: ModelFit; largestContext?: number }>;
+  hfDownload(
+    repo: string,
+    parts: { path: string; size: number; sha256?: string }[],
+  ): Promise<{ ok: boolean; path?: string; error?: string }>;
 }
 
 declare global {
@@ -313,4 +340,92 @@ export interface AcademicResult {
   /** A directly readable full text, when the record names one. */
   pdfUrl?: string;
   engine: string;
+}
+
+/* ------------------------------------------------------------------ runtime */
+
+export type Backend = "cpu" | "vulkan" | "cuda" | "rocm" | "metal";
+
+export interface RuntimeDevice {
+  id: string;
+  description: string;
+  totalBytes?: number;
+  freeBytes?: number;
+}
+
+export interface ModelFit {
+  verdict: "gpu" | "partial" | "cpu" | "too-large";
+  requiredBytes: number;
+  kvBytes?: number;
+  estimated: boolean;
+  label: string;
+}
+
+export interface RuntimeConfig {
+  activeBuild?: string;
+  backendOverride?: Backend;
+  modelsDir: string;
+  startOnLaunch: boolean;
+  activeModel?: string;
+  contextSize?: number;
+  useForChat: boolean;
+}
+
+export type RuntimePhase =
+  | { kind: "idle" }
+  | { kind: "downloading"; what: string; receivedBytes: number; totalBytes?: number; bytesPerSecond: number }
+  | { kind: "extracting"; what: string }
+  | { kind: "probing"; what: string };
+
+export interface ServerStatus {
+  state: "stopped" | "starting" | "ready" | "failed";
+  baseUrl?: string;
+  modelPath?: string;
+  error?: string;
+  log: string[];
+  pid?: number;
+}
+
+export interface RuntimeState {
+  config: RuntimeConfig;
+  phase: RuntimePhase;
+  server: ServerStatus;
+  suggestion: { backend: Backend; reason: string };
+  activeBuild?: { id: string; tag: string; backend: Backend };
+  builds: { id: string; tag: string; backend: Backend }[];
+  baseline: string;
+  devices?: RuntimeDevice[];
+}
+
+export interface LocalModel {
+  path: string;
+  name: string;
+  size: number;
+  source: string;
+  shape?: { layers?: number; contextLength?: number; hasChatTemplate?: boolean; architecture?: string };
+  fit?: ModelFit;
+}
+
+export interface HfSearchResult {
+  id: string;
+  downloads?: number;
+  likes?: number;
+  gated: false | "auto" | "manual";
+}
+
+export interface HfFileChoice {
+  label: string;
+  entry: string;
+  size: number;
+  /** Every file that must be fetched. More than one for a sharded model. */
+  parts: { path: string; size: number; sha256?: string }[];
+  quant?: string;
+  fit: ModelFit;
+}
+
+export interface DownloadProgress {
+  what: string;
+  receivedBytes: number;
+  totalBytes?: number;
+  bytesPerSecond: number;
 }

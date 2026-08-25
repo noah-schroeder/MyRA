@@ -136,6 +136,13 @@ export class RuntimeManager {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
     this.#server.onChange(() => this.#emit());
+    /*
+     * Detect now, not on first use. `suggestion()` is read the moment the
+     * Runtime pane opens, and without this it answers from an empty GpuInfo --
+     * so a machine with a card is told "no GPU was detected" until something
+     * else happens to call detect(). Cheap, and app is already ready here.
+     */
+    await this.detect();
     return this.#config;
   }
 

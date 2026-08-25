@@ -1768,3 +1768,79 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .search-pager button:hover:not(:disabled) { color: var(--text); border-color: var(--border-hover); }
 .search-pager button:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- the bundled runtime ---------- */
+
+/* The engine pane is a status display first and a settings form second, so
+   state has to read at a glance rather than needing to be parsed. */
+
+.pane .note { color: var(--text-dim); border-left: 2px solid var(--accent-dim); padding-left: 10px; }
+
+.runtime-current {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; font-size: 13px; color: var(--text);
+}
+
+.runtime-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.runtime-devices li { font-size: 12px; color: var(--text-dim); }
+.runtime-devices code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+
+.runtime-progress {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 0 2px;
+}
+.runtime-progress .bar { flex: 1 1 160px; min-width: 120px; }
+.runtime-progress .bar > span {
+  display: block; height: 100%;
+  background: var(--accent); transition: width var(--t-med);
+}
+.runtime-progress .dim { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+.runtime-log {
+  max-height: 220px; overflow: auto;
+  margin: 0; padding: 10px;
+  background: var(--bg-inset); border-radius: 4px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.5;
+  color: var(--text-dim); white-space: pre-wrap; word-break: break-word;
+}
+
+/* A coloured dot carries the server's state without a sentence, which matters
+   because this line is glanced at far more often than it is read. */
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-faint); }
+.dot-ready { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 60%, transparent); }
+.dot-starting { background: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
+.dot-failed { background: var(--red); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dot-starting { animation: none; } }
+
+.model-list, .quant-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.model-list > li, .quant-list > li {
+  padding: 10px; border: 1px solid var(--border); border-radius: 5px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.model-list > li.active { border-color: var(--accent-dim); background: var(--accent-wash); }
+
+.model-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.model-name { font-size: 12.5px; color: var(--text); word-break: break-all; }
+.model-row .dim { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* The verdict is the point of the row, so it is colour-coded: someone
+   scanning a list of quantisations is looking for exactly this. */
+.fit { margin: 0; font-size: 11.5px; line-height: 1.5; }
+.fit-gpu { color: var(--green); }
+.fit-partial { color: var(--amber); }
+.fit-cpu { color: var(--text-dim); }
+.fit-too-large { color: var(--red); }
+
+.quant-list { margin-top: 10px; }
+.quant-list button {
+  align-self: flex-start;
+  padding: 4px 12px; font-size: 11.5px;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-dim); cursor: pointer;
+}
+.quant-list button:hover:not(:disabled) { color: var(--text); border-color: var(--border-hover); }
+.quant-list button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.endpoint-actions button.danger { color: var(--red); }
+.endpoint-actions button.danger:hover { border-color: var(--red); }

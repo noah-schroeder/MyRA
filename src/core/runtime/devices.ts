@@ -106,17 +106,29 @@ const MIB = 1024 * 1024;
 /**
  * Parse `llama-server --list-devices`.
  *
- * Written to tolerate a format we do not control and have not been able to
- * exercise against a real GPU here -- this machine has a virtio adapter and no
- * Vulkan, so it reports no devices at all. Every field except the id is
- * therefore optional, and a line that does not parse is skipped rather than
- * throwing: a device list we cannot read must degrade to "no accelerator
- * found", which is safe, not to a crash on startup.
+ * The format is not guessed. It is one printf in upstream's
+ * `common_print_available_devices`, read at tag b10628:
  *
- * The shape being matched:
+ *     printf("  %s: %s (%zu MiB, %zu MiB free)\n", name, description, total/MiB, free/MiB);
+ *
+ * so a device line looks like:
  *
  *     Available devices:
  *       CUDA0: NVIDIA GeForce RTX 3090 (24576 MiB, 23000 MiB free)
+ *
+ * Two things follow from that source, and both matter here:
+ *
+ *   - **CPU devices are filtered out before printing**, so anything listed is
+ *     by definition an accelerator, and an empty list is upstream's own way of
+ *     saying there is none. It prints a literal `  (none)` in that case --
+ *     confirmed by running the CPU build on this machine.
+ *   - **Memory is always printed** for a real device, so a device with no
+ *     memory figure means the format moved.
+ *
+ * Kept tolerant regardless: every field except the id is optional and an
+ * unparsable line is skipped rather than thrown on, because a device list we
+ * cannot read must degrade to "no accelerator found" -- which is safe, since
+ * the CPU build always works -- and never to a crash on startup.
  */
 export function parseDevices(stdout: string): Device[] {
   const devices: Device[] = [];

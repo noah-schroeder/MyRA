@@ -82,6 +82,11 @@ test("an unreadable device list degrades to 'no accelerator', never to a crash",
   assert.equal(largestDeviceBytes(devices), undefined);
 });
 
-test("no devices at all is what this machine actually reports", () => {
-  assert.deepEqual(parseDevices("Available devices:\n"), []);
+test("upstream's literal 'no devices' output is understood", () => {
+  // Verbatim from running the b10628 CPU build on this machine. Upstream
+  // filters CPU devices out of the listing entirely, so this is what a machine
+  // with no accelerator genuinely prints.
+  const devices = parseDevices("Available devices:\n  (none)\n");
+  assert.deepEqual(devices, []);
+  assert.equal(hasAccelerator(devices), false);
 });
