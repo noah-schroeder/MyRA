@@ -41,9 +41,17 @@ export function buildExtractPrompt(opts: {
   title: string;
   questions: string[];
   text: string;
+  /** Set when the source was split, so the model knows it is seeing a part. */
+  part?: { n: number; of: number };
 }): string {
   return [
     `SOURCE [${opts.sourceNumber}]: ${opts.title}`,
+    ...(opts.part
+      ? [
+          `PART ${opts.part.n} OF ${opts.part.of} — this is a section of a longer document.`,
+          `Judge only what is in front of you. Do not comment on what other parts may contain.`,
+        ]
+      : []),
     "",
     `QUESTIONS`,
     ...opts.questions.map((q, i) => `  ${i + 1}. ${q}`),
@@ -117,9 +125,60 @@ export function locateClaims(
 
 export interface ExtractResult extends ExtractedPassages {
   usage: SubagentUsage;
+  /** How many chunks the source was split into. 1 for anything short. */
+  chunks: number;
 }
 
-/** Extract located passages from one stored source. */
+/**
+ * Characters of source text sent to the analyst in one call.
+ *
+ * Retrieval truncates a page at 60k characters and the whole thing used to go
+ * to the model in a single request. Two things went wrong with that, and both
+ * hurt exactly the papers worth reading: a 60k-character prompt is roughly
+ * 15k tokens, which overflows a 32k-context local model once the reply is
+ * accounted for; and on a long paper the truncation falls in the results and
+ * discussion, which is the half a research question is actually answered from.
+ *
+ * 24k characters is ~6k tokens, comfortable for any endpoint, and small enough
+ * that the model attends to the whole chunk rather than the ends of it.
+ */
+export const CHUNK_CHARS = 24_000;
+
+/**
+ * Split on paragraph boundaries, never mid-sentence.
+ *
+ * A quote must be found verbatim in the STORED text, so a chunk boundary that
+ * lands mid-sentence would make any passage spanning it unlocatable -- the
+ * model would quote across the join and the check would correctly reject it.
+ * Splitting on blank lines keeps that from happening at the only place it
+ * plausibly could.
+ */
+export function chunkText(text: string, size = CHUNK_CHARS): string[] {
+  if (text.length <= size) return [text];
+  const chunks: string[] = [];
+  let current = "";
+  for (const para of text.split(/\n\s*\n/)) {
+    // A single paragraph over the budget (a PDF with no blank lines) is passed
+    // through whole rather than cut: an oversized chunk is recoverable, an
+    // unlocatable quote is not.
+    if (current && current.length + para.length + 2 > size) {
+      chunks.push(current);
+      current = para;
+    } else {
+      current = current ? `${current}\n\n${para}` : para;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Extract located passages from one stored source, a chunk at a time.
+ *
+ * Every chunk is located against the WHOLE stored text, not against the chunk
+ * it came from, so the offsets point into the file a reader can open and the
+ * verbatim guarantee is exactly as strong as it was for a single call.
+ */
 export async function extractFromSource(opts: {
   sourceNumber: number;
   title: string;
@@ -127,22 +186,49 @@ export async function extractFromSource(opts: {
   questions: string[];
   model: string;
   rubric?: string;
+  chunkChars?: number;
   signal?: AbortSignal;
   cwd?: string;
+  onChunk?: (chunk: number, chunks: number) => void;
   onDelta?: (delta: string, kind: "text" | "thinking") => void;
 }): Promise<ExtractResult> {
-  const result = await runSubagent({
-    model: opts.model,
-    prompt: buildExtractPrompt({
-      sourceNumber: opts.sourceNumber,
-      title: opts.title,
-      questions: opts.questions,
-      text: opts.text,
-    }),
-    ...(opts.rubric ? { system: opts.rubric } : {}),
-    ...(opts.signal ? { signal: opts.signal } : {}),
-    ...(opts.cwd ? { cwd: opts.cwd } : {}),
-    ...(opts.onDelta ? { onDelta: opts.onDelta } : {}),
-  });
-  return { ...locateClaims(result.text, opts.sourceNumber, opts.text), usage: result.usage };
+  const chunks = chunkText(opts.text, opts.chunkChars ?? CHUNK_CHARS);
+  const claims: Claim[] = [];
+  const dropped: DroppedClaim[] = [];
+  const usage: SubagentUsage = { input: 0, output: 0, total: 0 };
+  const seen = new Set<string>();
+
+  for (const [i, chunk] of chunks.entries()) {
+    opts.onChunk?.(i + 1, chunks.length);
+    const result = await runSubagent({
+      model: opts.model,
+      prompt: buildExtractPrompt({
+        sourceNumber: opts.sourceNumber,
+        title: opts.title,
+        questions: opts.questions,
+        text: chunk,
+        ...(chunks.length > 1 ? { part: { n: i + 1, of: chunks.length } } : {}),
+      }),
+      ...(opts.rubric ? { system: opts.rubric } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      ...(opts.onDelta ? { onDelta: opts.onDelta } : {}),
+    });
+    // Located against the full text, so a chunk's offsets are file offsets.
+    const located = locateClaims(result.text, opts.sourceNumber, opts.text);
+    for (const c of located.claims) {
+      // A passage repeated across chunks (an abstract restating a finding)
+      // would otherwise be cited twice as if it were two pieces of evidence.
+      const key = `${c.start}:${c.end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      claims.push(c);
+    }
+    dropped.push(...located.dropped);
+    usage.input += result.usage.input;
+    usage.output += result.usage.output;
+    usage.total += result.usage.total;
+  }
+
+  return { claims, dropped, usage, chunks: chunks.length };
 }

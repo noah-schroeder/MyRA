@@ -194,6 +194,43 @@ export async function openAlexOpenSibling(
   return undefined;
 }
 
+/**
+ * Fetch many works by OpenAlex id, for citation-graph traversal.
+ *
+ * A filtered query costs 1 credit regardless of how many ids it names, against
+ * 10 for a `search=`, so batching is the difference between snowballing being
+ * affordable and being the most expensive thing a run does. OpenAlex caps an
+ * OR filter at 50 values, which sets the batch size.
+ *
+ * Verified against the live API: `filter=openalex:W1|W2` returns both works.
+ *
+ * Never throws. A traversal that fails should cost the run the extra papers it
+ * would have found, not the papers it already has.
+ */
+export async function openAlexByIds(ids: string[], signal?: AbortSignal): Promise<Work[]> {
+  const BATCH = 50;
+  // Accepts full URLs ("https://openalex.org/W123") or bare ids.
+  const clean = [...new Set(ids.map((i) => i.replace(/^https?:\/\/openalex\.org\//i, "").trim()))]
+    .filter((i) => /^W\d+$/i.test(i));
+
+  const out: Work[] = [];
+  for (let i = 0; i < clean.length; i += BATCH) {
+    const batch = clean.slice(i, i + BATCH);
+    try {
+      const res = await fetch(
+        url("works", { filter: `openalex:${batch.join("|")}`, per_page: String(BATCH) }),
+        { signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+      );
+      recordBudget(res);
+      if (!res.ok) continue;
+      out.push(...(((await res.json()) as { results?: Work[] }).results ?? []));
+    } catch {
+      // Rate limit, timeout, outage: keep whatever earlier batches produced.
+    }
+  }
+  return out;
+}
+
 export function normalizeDoi(doi: string): string {
   return doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim().toLowerCase();
 }
