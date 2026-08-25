@@ -12,7 +12,8 @@ both, merges them, and writes a report where **every claim is checked against th
 transcript**. Anything it cannot source is filed under `## Unverified` rather
 than stated.
 
-**Research.** Searches OpenAlex, arXiv, Crossref and Semantic Scholar directly,
+**Research.** Searches OpenAlex and arXiv directly, resolves open-access full
+text through Semantic Scholar,
 resolves open-access PDFs, and can run a full plan → search → read → verify →
 synthesise pipeline that produces a cited report.
 
@@ -54,7 +55,8 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
 - **Your prompts and audio go to the endpoints you configured.** Point them at
   localhost and nothing leaves. Point them at a hosted API and that traffic goes
   there. The app cannot change that.
-- **Scholarly searches** reach OpenAlex, arXiv, Crossref and Semantic Scholar.
+- **Scholarly searches** reach OpenAlex and arXiv. Semantic Scholar is asked only
+  whether a paper already found has an open-access PDF.
 - **Pages you ask it to read** see a request from this machine.
 - Everything else — files, transcripts, meeting audio, conversation history —
   never crosses the network at all.

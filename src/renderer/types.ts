@@ -211,6 +211,11 @@ export interface KarenApi {
   dictationCancel(): Promise<void>;
   onDictationText(cb: (text: string) => void): () => void;
 
+  academicSearch(
+    query: string,
+    opts: { page?: number; sort?: SortBy },
+  ): Promise<{ results: AcademicResult[]; failures: string[] }>;
+  openExternal(url: string): Promise<{ ok: boolean; error?: string }>;
   researchRuns(): Promise<RunSummary[]>;
   researchRun(id: string): Promise<RunDetail>;
   researchSource(id: string, n: number): Promise<RunSource | undefined>;
@@ -286,4 +291,26 @@ export interface RunSource {
   text: string;
   /** Where extraction located each cited passage in the text above. */
   spans: { start: number; end: number; quote: string; claim: string }[];
+}
+
+/* ------------------------------------------------------------------ *
+ * Academic search                                                     *
+ * ------------------------------------------------------------------ */
+
+export type SortBy = "relevance" | "citations" | "newest";
+
+export interface AcademicResult {
+  id: number;
+  title: string;
+  authors: string[];
+  year?: number;
+  venue?: string;
+  /** Times cited, per OpenAlex. Absent for arXiv-only records. */
+  citedBy?: number;
+  doi?: string;
+  abstract?: string;
+  url: string;
+  /** A directly readable full text, when the record names one. */
+  pdfUrl?: string;
+  engine: string;
 }

@@ -27,7 +27,7 @@ const MODES: { value: ResearchMode; label: string; hint: string }[] = [
  * search time, several seconds into a run, with an error about providers.
  */
 const CATEGORIES = [
-  { value: "science", label: "Scholarly", hint: "OpenAlex, arXiv, Crossref, Semantic Scholar" },
+  { value: "science", label: "Scholarly", hint: "Searches OpenAlex and arXiv; resolves open-access full text via Semantic Scholar" },
   {
     value: "general",
     label: "General web (no backend yet)",

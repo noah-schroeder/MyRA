@@ -395,7 +395,8 @@ function About() {
       <h3>What leaves this machine</h3>
       <ul className="plain">
         <li>Your prompts and audio go to the endpoints you configured, and nowhere else.</li>
-        <li>Searches reach OpenAlex, arXiv, Crossref and Semantic Scholar directly.</li>
+        <li>Searches reach OpenAlex and arXiv. Semantic Scholar is asked only whether a
+          paper already found has an open-access PDF.</li>
         <li>Pages you ask it to read see a request from this machine.</li>
         <li>
           Everything else — files, transcripts, meeting audio, conversation history — never
