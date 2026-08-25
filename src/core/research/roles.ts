@@ -47,7 +47,11 @@ export function readRoleConfig(path = rolesPath()): RoleConfig {
     const models: Partial<Record<Role, string>> = {};
     for (const role of ROLES) {
       const value = parsed.models?.[role];
-      if (typeof value === "string" && value.includes("/")) models[role] = value;
+      // Any non-empty string. This used to require "provider/id", because that
+      // is how pi's dropdown formatted models -- so a bare id from
+      // GET /v1/models was silently DISCARDED here, and every saved role
+      // assignment quietly reverted to the fallback on the next run.
+      if (typeof value === "string" && value.trim()) models[role] = value.trim();
     }
     return {
       models,

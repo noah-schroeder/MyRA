@@ -33,7 +33,7 @@ import { collapseDuplicates, identityKey, type Dedupable } from "./dedupe.ts";
 import { openAlexByDoi, openAlexByIds } from "./openalex.ts";
 import { coCitationThreshold, coCitedWorks } from "./snowball.ts";
 import { toBibtex, toCslJson } from "./export.ts";
-import { readRoleConfig, resolveRoles } from "./roles.ts";
+import { readRoleConfig, resolveRoles, writeRoleConfig } from "./roles.ts";
 import type { ResearchRun } from "./run.ts";
 
 /** Just the dialog surface the pipeline needs, so it can be run headless in tests. */
@@ -193,6 +193,18 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     if (edited === undefined) throw new CancelledError("plan not approved");
     // Parsed strictly: a typo'd model must fail here, not forty minutes in.
     plan = parsePlan(edited, proposed, opts.knownModels);
+    /*
+     * Remember the roles you chose, so the next run starts from them.
+     *
+     * Without this the plan editor was write-only: you could name a separate
+     * reviewer, the run would honour it, and the next run would silently reset
+     * every role to the app's current model -- which is self-review again. The
+     * warning about that is only actionable if acting on it sticks.
+     */
+    await writeRoleConfig({
+      models: { ...plan.roles },
+      ...(plan.embedModel ? { embedModel: plan.embedModel } : {}),
+    }).catch(() => undefined);
     await run.writeJson("plan.json", plan);
     await run.write("plan.md", renderPlan(plan));
   }
