@@ -83,6 +83,11 @@ const api = {
   onDictationText: (cb: (text: string) => void) => on("karen:dictation-text", cb),
 
   /* ---- research ---- */
+  /** Academic search the user runs directly. No model in the loop. */
+  academicSearch: (query: string, opts: { page?: number; sort?: string }) =>
+    ipcRenderer.invoke("karen:academic-search", query, opts),
+  /** Open a link in the user's own browser, never in a window of ours. */
+  openExternal: (url: string) => ipcRenderer.invoke("karen:open-external", url),
   researchRuns: () => ipcRenderer.invoke("karen:research-runs"),
   researchRun: (id: string) => ipcRenderer.invoke("karen:research-run", id),
   researchSource: (id: string, n: number) => ipcRenderer.invoke("karen:research-source", id, n),

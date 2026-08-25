@@ -8,6 +8,7 @@ import { ResearchBar } from "./components/ResearchBar.tsx";
 import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
+import { SearchPanel } from "./components/SearchPanel.tsx";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
@@ -21,6 +22,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMeeting, setShowMeeting] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
@@ -106,6 +108,12 @@ export function App() {
               onClick={() => setShowMeeting((v) => !v)}
             >
               Meeting
+            </button>
+            {/* Search the literature without a model in the loop. For a
+                straight lookup the model is pure overhead, and it can
+                paraphrase a title. */}
+            <button type="button" className="chip" onClick={() => setShowSearch(true)}>
+              Search
             </button>
             {/* The audit trail, one click from the conversation. Every run
                 already wrote its search log, screening reasons, source hashes
@@ -217,6 +225,7 @@ export function App() {
 
       {showSettings ? <SettingsModal onClose={() => setShowSettings(false)} /> : null}
       {showRuns ? <RunPanel onClose={() => setShowRuns(false)} /> : null}
+      {showSearch ? <SearchPanel onClose={() => setShowSearch(false)} /> : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
     </div>
   );

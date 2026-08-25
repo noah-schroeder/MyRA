@@ -30,6 +30,7 @@ import { installMeetingIpc } from "./meetings.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
+import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import { readResearchConfig, researchConfigPath } from "../core/research/config.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 
@@ -336,6 +337,47 @@ function installIpc(): void {
    * source hashes and verification table to disk and no screen ever showed
    * them. These three handlers are read-only by construction -- there is no
    * verb here that can change a completed run. */
+  /*
+   * Academic search, run by the user rather than by the model.
+   *
+   * No LLM is involved: this calls OpenAlex and arXiv and hands back what they
+   * said. Wanting to look something up is not the same as wanting to talk to a
+   * language model about it.
+   */
+  ipcMain.handle("karen:academic-search", (_e, query: string, opts: LookupOptions) =>
+    academicLookup(String(query ?? ""), {
+      page: Number(opts?.page) || 1,
+      sort: opts?.sort === "citations" || opts?.sort === "newest" ? opts.sort : "relevance",
+    }),
+  );
+
+  /**
+   * Open a link in the user's own browser.
+   *
+   * The user's browser, never a window of ours: rendering an arbitrary page
+   * inside the app would put untrusted web content in the same process tree as
+   * the vault and undo the CSP and sandbox the rest of the app is built on.
+   *
+   * Restricted to http(s) because shell.openExternal will happily hand a
+   * `file://` to the desktop, and on some platforms other schemes launch
+   * applications. This is reachable only from a click in the results list --
+   * no tool exposes it, so the model cannot ask for it.
+   */
+  ipcMain.handle("karen:open-external", async (_e, url: string) => {
+    const raw = String(url ?? "");
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      return { ok: false, error: "not a URL" };
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { ok: false, error: `${parsed.protocol.replace(":", "")} links are not opened` };
+    }
+    await shell.openExternal(parsed.href);
+    return { ok: true };
+  });
+
   ipcMain.handle("karen:research-runs", () => listRuns());
   ipcMain.handle("karen:research-run", (_e, id: string) => readRun(String(id)));
   ipcMain.handle("karen:research-source", (_e, id: string, n: number) =>

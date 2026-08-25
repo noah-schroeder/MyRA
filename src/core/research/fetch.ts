@@ -6,6 +6,7 @@
  * read abstracts.
  */
 
+import { assertFetchable, BlockedUrlError } from "./guard.ts";
 import { FETCH_TIMEOUT_MS, MAX_PAGE_BYTES } from "./config.ts";
 import { htmlToText } from "./html.ts";
 import { MAX_PDF_BYTES, MAX_PDF_MB, pdfToText } from "./pdf.ts";
@@ -20,26 +21,50 @@ export interface Page {
 }
 
 const UA = "Karen/0.1 (private research assistant)";
+/** Enough for the publisher → repository → CDN chains that papers really use. */
+const MAX_REDIRECTS = 5;
 
 export async function fetchPage(
   url: string,
   maxChars: number,
   signal?: AbortSignal,
 ): Promise<Page> {
+  // Closes over `url`, which is reassigned to the final hop below -- so an
+  // error after a redirect names the page actually read, not the one asked for.
   const fail = (error: string): Page => ({ url, title: "", text: "", via: "html", error });
 
   try {
-    const res = await fetch(url, {
-      signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: "follow",
-      headers: {
-        // Identify honestly. Pretending to be a browser is what gets an IP
-        // blocked, and this one is shared with every other tool in the VM.
-        "User-Agent": UA,
-        Accept: "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9",
-      },
-    });
+    /*
+     * Redirects are followed BY HAND so every hop can be checked.
+     *
+     * With redirect: "follow", a perfectly ordinary public URL that answers
+     * `302 http://169.254.169.254/` would be followed straight to the cloud
+     * metadata service, and a guard applied only to the URL the model supplied
+     * would have approved the request that got there. The check has to happen
+     * per hop or it does not really happen at all.
+     */
+    let current = await assertFetchable(url);
+    let res: Response;
+    for (let hop = 0; ; hop++) {
+      if (hop > MAX_REDIRECTS) return fail(`too many redirects (over ${MAX_REDIRECTS})`);
+      res = await fetch(current, {
+        signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        redirect: "manual",
+        headers: {
+          // Identify honestly. Pretending to be a browser is what gets an IP
+          // blocked, and this one is shared with every other tool in the app.
+          "User-Agent": UA,
+          Accept: "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9",
+        },
+      });
+      if (res.status < 300 || res.status > 399) break;
+      const location = res.headers.get("location");
+      if (!location) break; // a 3xx with nowhere to go is just a failed request
+      current = await assertFetchable(new URL(location, current).href);
+    }
     if (!res.ok) return fail(`HTTP ${res.status} ${res.statusText}`);
+    // Everything below reports the URL actually read, not the one requested.
+    url = current.href;
 
     const type = (res.headers.get("content-type") ?? "").toLowerCase();
     const looksPdf = /application\/pdf/.test(type) || /\.pdf($|\?)/i.test(url);
@@ -84,6 +109,7 @@ export async function fetchPage(
       text: clipped ? `${text.slice(0, maxChars)}\n\n[…truncated at ${maxChars} characters]` : text,
     };
   } catch (err) {
+    if (err instanceof BlockedUrlError) return fail(err.message);
     return fail((err as Error).message);
   }
 }

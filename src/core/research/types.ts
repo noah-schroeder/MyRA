@@ -4,7 +4,7 @@
  * v1 had exactly one backend -- a SearXNG container on loopback inside the VM --
  * so this shape was defined by SearXNG's JSON and the fetch lived beside it.
  * v2 has no container to require, so the shape stays and the fetch becomes an
- * interface: scholarly queries go straight to OpenAlex/arXiv/Crossref/S2, and
+ * interface: scholarly queries go straight to OpenAlex and arXiv, and
  * general web search is an optional provider that is absent until configured.
  */
 
