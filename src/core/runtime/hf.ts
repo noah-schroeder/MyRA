@@ -146,7 +146,7 @@ export function quantOf(path: string): string | undefined {
   // Q4_K_M, IQ4_XS, Q8_0, BF16 -- the suffix runs to the end of the name and may
   // carry several underscore-separated parts, which is why this is a repeated
   // group rather than one optional tail.
-  const m = /[.\-_]((?:IQ|Q)\d+(?:[.\-_][A-Z0-9]+)*|BF16|F16|F32)$/i.exec(base);
+  const m = /[.\-_]((?:IQ|TQ|Q)\d+(?:[.\-_][A-Z0-9]+)*|BF16|F16|F32)$/i.exec(base);
   return m?.[1]?.toUpperCase();
 }
 

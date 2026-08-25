@@ -65,6 +65,8 @@ export interface ChatRequest {
   messages: ChatMessage[];
   temperature: number;
   stream: boolean;
+  /** Asks a streaming server to send token counts in a final chunk. */
+  stream_options?: { include_usage: true };
   tools?: ToolSchema[];
   tool_choice?: "auto";
 }
@@ -92,6 +94,14 @@ export function buildRequest(opts: {
     // invents owners for action items nobody volunteered for.
     temperature: opts.temperature ?? 0.2,
     stream: opts.stream ?? false,
+    /*
+     * A streaming response carries no token counts unless they are asked for.
+     * That is the OpenAI convention and llama.cpp follows it, which is why the
+     * status bar read "0 tokens this conversation" against a working server --
+     * the usage block was never sent, not lost. Only meaningful while
+     * streaming, so it is only sent then.
+     */
+    ...(opts.stream ? { stream_options: { include_usage: true } } : {}),
     // Omitted entirely when there are none: some OpenAI-compatible servers
     // reject an empty `tools` array rather than treating it as "no tools".
     ...(opts.tools?.length ? { tools: opts.tools, tool_choice: "auto" as const } : {}),

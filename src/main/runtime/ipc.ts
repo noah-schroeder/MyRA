@@ -227,7 +227,14 @@ export function installRuntimeIpc(
           label: f.label,
           entry: f.entry,
           size: f.size,
-          parts: f.parts.length,
+          /* The parts themselves, with their hashes -- not a count. A sharded
+           * model is useless in part, and downloading only `entry` would fetch
+           * one fifth of a model and verify none of it. */
+          parts: f.parts.map((part) => ({
+            path: part.path,
+            size: part.size,
+            ...(part.sha256 ? { sha256: part.sha256 } : {}),
+          })),
           quant: quantOf(f.entry),
           fit: fitModel(f.size, machine, { context: runtime.config.contextSize ?? 8192 }),
         })),

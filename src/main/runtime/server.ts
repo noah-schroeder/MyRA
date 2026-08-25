@@ -117,7 +117,6 @@ export class LlamaServer {
       "-m", opts.modelPath,
       "--host", "127.0.0.1",
       "--port", String(port),
-      "--api-key", this.#apiKey,
       // Required for tool calling; upstream enables it by default but being
       // explicit means a future default change cannot quietly break tools.
       "--jinja",
@@ -136,6 +135,16 @@ export class LlamaServer {
       // Not detached: this process must remain our child so that closing the
       // app can find and kill it.
       windowsHide: true,
+      /*
+       * The key goes in the environment, not in argv.
+       *
+       * `--api-key` works, but a process's command line is world-readable on
+       * Linux -- `/proc/<pid>/cmdline` -- so every other user on the machine
+       * could read the key straight out of the process list. `/proc/<pid>/environ`
+       * is owner-only, which is the boundary we can actually enforce. Upstream
+       * documents LLAMA_API_KEY as the environment form of the same flag.
+       */
+      env: { ...process.env, LLAMA_API_KEY: this.#apiKey },
     });
     this.#child = child;
     this.#set({ pid: child.pid ?? undefined });

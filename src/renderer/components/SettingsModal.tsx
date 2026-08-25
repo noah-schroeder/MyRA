@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AudioSource, Settings, VaultStatus } from "../types.ts";
 import { enumerate } from "../capture.ts";
+import { RuntimePane } from "./RuntimePane.tsx";
 
 /**
  * Everything configurable, in one place.
@@ -11,10 +12,11 @@ import { enumerate } from "../capture.ts";
  * configured.
  */
 
-type Tab = "endpoints" | "storage" | "audio" | "permissions" | "about";
+type Tab = "endpoints" | "runtime" | "storage" | "audio" | "permissions" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "endpoints", label: "Endpoints" },
+  { id: "runtime", label: "Runtime" },
   { id: "storage", label: "Folders" },
   { id: "audio", label: "Audio" },
   { id: "permissions", label: "Permissions" },
@@ -61,6 +63,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="settings-body">
           {tab === "endpoints" ? <Endpoints settings={settings} patch={patch} vault={vault} /> : null}
+          {tab === "runtime" ? <RuntimePane /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
