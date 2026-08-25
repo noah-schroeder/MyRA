@@ -23,7 +23,10 @@ import { CONFIG_DIR } from "../core/paths.ts";
 const SECRETS_PATH = join(CONFIG_DIR, "secrets.enc.json");
 
 /** Logical secret names. `bridgeToken` authenticates the VM, not a provider. */
-export type SecretName = "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken";
+/* hfToken is here rather than in settings.json for the same reason as the
+ * others: a HuggingFace access token grants read access to a person's private
+ * repositories, so it belongs in the keyring, not in a JSON file. */
+export type SecretName = "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken" | "hfToken";
 
 export interface VaultStatus {
   usable: boolean;
@@ -182,6 +185,7 @@ export class SecretVault {
       transcriptionKey: has("transcriptionKey"),
       embedKey: has("embedKey"),
       bridgeToken: has("bridgeToken"),
+      hfToken: has("hfToken"),
     };
   }
 

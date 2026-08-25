@@ -29,6 +29,9 @@ import {
 import { installMeetingIpc } from "./meetings.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
+import { RuntimeManager } from "./runtime/manager.ts";
+import { installRuntimeIpc } from "./runtime/ipc.ts";
+import { setEndpointResolver } from "../core/llm/chat.ts";
 import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import { readResearchConfig, researchConfigPath } from "../core/research/config.ts";
@@ -54,6 +57,7 @@ app.commandLine.appendSwitch("password-store", "gnome-libsecret");
 const config = new ConfigStore();
 const vault = new SecretVault();
 const registry = new ToolRegistry();
+const runtime = new RuntimeManager();
 
 let window_: BrowserWindow | undefined;
 let session_: Session | undefined;
@@ -180,10 +184,17 @@ async function handleSend(text: string): Promise<void> {
   inFlight = new AbortController();
 
   try {
-    const apiKey = await vault.get("llmKey");
+    /*
+     * A model Karen is serving itself wins over the configured endpoint, but
+     * only while it is actually ready -- see RuntimeManager.chatEndpoint. The
+     * address and key change on every launch and exist only in this process,
+     * which is why this is resolved here rather than written into settings.
+     */
+    const managed = runtime.chatEndpoint();
+    const apiKey = managed ? managed.apiKey : await vault.get("llmKey");
     const result = await runTurn({
       registry,
-      endpoint: settings.llm,
+      endpoint: managed ? { ...settings.llm, baseUrl: managed.baseUrl } : settings.llm,
       messages: conversation.messages_,
       system: SYSTEM_PROMPT,
       ...(apiKey ? { apiKey } : {}),
@@ -432,8 +443,32 @@ async function main(): Promise<void> {
   installIpc();
   installMeetingIpc({ config, vault, send });
   installDictationIpc({ config, vault, send });
+
+  await runtime.load();
+  installRuntimeIpc(runtime, send, () => vault.get("hfToken"), () => window_);
+  /*
+   * Research stages follow chat to whichever model is actually answering. Left
+   * alone they would read settings.json and find either a stale port or the
+   * user's own endpoint, so a run would silently use a different model than the
+   * conversation that started it.
+   */
+  setEndpointResolver(async () => {
+    const managed = runtime.chatEndpoint();
+    if (managed) {
+      return { endpoint: { ...config.current.llm, baseUrl: managed.baseUrl }, apiKey: managed.apiKey };
+    }
+    const key = await vault.get("llmKey");
+    return { endpoint: config.current.llm, ...(key ? { apiKey: key } : {}) };
+  });
+
   createWindow();
   setPdfRenderer(installPdfRenderer());
+
+  if (runtime.config.startOnLaunch && runtime.config.activeModel) {
+    // Deliberately not awaited: a large model takes minutes to map and the
+    // window must not wait on it.
+    void runtime.startServer().catch(() => {});
+  }
 }
 
 app.whenReady().then(() => {
@@ -461,3 +496,14 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+/*
+ * Take the model server with us.
+ *
+ * `before-quit` cannot await, so this is the synchronous best effort; on
+ * Windows it is a taskkill /T because a terminated parent does not take its
+ * children with it there. Leaving an 8 GB process behind after the window
+ * closes is the single most annoying failure a local-model app can have.
+ */
+app.on("before-quit", () => runtime.killNow());
+process.on("exit", () => runtime.killNow());
