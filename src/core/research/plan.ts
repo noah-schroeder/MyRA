@@ -12,7 +12,7 @@
 
 import { parseCategories } from "./config.ts";
 import { parseJsonReply, runSubagent, type SubagentUsage } from "../llm/chat.ts";
-import type { ResolvedRoles } from "./roles.ts";
+import { reviewerIsSynthesist, type ResolvedRoles } from "./roles.ts";
 import type { Scope } from "./scope.ts";
 
 export interface Plan {
@@ -73,6 +73,23 @@ export function renderPlan(plan: Plan): string {
     `synthesist: ${plan.roles.synthesist}`,
     `reviewer: ${plan.roles.reviewer}`,
     `embedder: ${plan.embedModel ?? "(none — screening will use the model only)"}`,
+    ...(reviewerIsSynthesist(plan.roles)
+      ? [
+          ``,
+          `> The reviewer and the synthesist are the same model, so the review stage`,
+          `> is self-review. A model asked to critique its own draft mostly defends`,
+          `> the reasoning it already committed to. Name a different reviewer above`,
+          `> if you have one; the run will say it did not if you do not.`,
+        ]
+      : []),
+    ...(plan.embedModel
+      ? []
+      : [
+          ``,
+          `> With no embeddings model, candidates cannot be ranked by meaning. The`,
+          `> screener sees an even slice taken across all queries instead — set one`,
+          `> in Settings → Endpoints to rank ${plan.screenTop} by relevance.`,
+        ]),
     ``,
   ].join("\n");
 }
@@ -151,11 +168,22 @@ export function parsePlan(text: string, previous: Plan, knownModels?: string[]):
   const limits = keyValues(s.get("limits"));
   const models = keyValues(s.get("models"));
 
+  /**
+   * Validate a role's model against what the server actually serves.
+   *
+   * v1 required "provider/id" here, because that is how pi's dropdown formatted
+   * models. v2 discovers them from GET /v1/models, which returns the bare name
+   * the server knows -- "qwen3-30b-a3b" -- so that rule rejected every real
+   * model and failed the run at the plan step. There is nothing to infer from
+   * the shape of a model id; the only useful check is whether it is one of the
+   * ids we were told about.
+   */
   const roleOf = (role: keyof ResolvedRoles): string => {
-    const value = models.get(role) ?? previous.roles[role];
-    if (!value.includes("/")) {
+    const value = (models.get(role) ?? previous.roles[role]).trim();
+    if (!value || PLACEHOLDER.test(value)) {
       throw new PlanError(
-        `${role}: "${value}" is not a model — use provider/id, e.g. ${previous.roles[role]}`,
+        `${role}: no model chosen, and no default to fall back on. Set a model in ` +
+          `Settings → Endpoints, or name one in the Models section above.`,
       );
     }
     if (knownModels?.length && !knownModels.includes(value)) {

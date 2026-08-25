@@ -44,6 +44,55 @@ export interface ScreenScope {
 export const SCREEN_BATCH = 50;
 
 /**
+ * Cut a candidate list down to `limit` without losing whole queries.
+ *
+ * Used only when no embeddings model is configured, and it exists because the
+ * obvious `slice(0, limit)` is much worse than it looks. Candidates accumulate
+ * query by query, so a flat truncation keeps the first two or three queries
+ * entirely and discards the rest UNSCREENED -- they never reach the screener,
+ * never appear in the funnel, and nothing in the run says they were dropped.
+ * The plan asks for seven queries precisely because different fields name the
+ * same construct differently; throwing four of them away defeats the sweep.
+ *
+ * Round-robin instead: take the first from each query, then the second from
+ * each, and so on. Every query is represented, deeper results are dropped
+ * before shallower ones, and a query that returned little does not lose its
+ * hits to one that returned a lot. Input order is preserved in the output so
+ * the run's ids stay readable.
+ */
+export function fairShortlist<T extends { id: number; foundBy?: number }>(
+  candidates: T[],
+  limit: number,
+): T[] {
+  if (candidates.length <= limit) return candidates;
+
+  const byQuery = new Map<number, T[]>();
+  for (const c of candidates) {
+    // Anything with no recorded query shares one bucket rather than each
+    // getting a bucket of its own, which would starve the real queries.
+    const key = c.foundBy ?? -1;
+    const list = byQuery.get(key);
+    if (list) list.push(c);
+    else byQuery.set(key, [c]);
+  }
+
+  const queues = [...byQuery.entries()].sort((a, b) => a[0] - b[0]).map(([, list]) => list);
+  const kept = new Set<number>();
+  for (let depth = 0; kept.size < limit; depth++) {
+    let anyLeft = false;
+    for (const queue of queues) {
+      const item = queue[depth];
+      if (item === undefined) continue;
+      anyLeft = true;
+      kept.add(item.id);
+      if (kept.size >= limit) break;
+    }
+    if (!anyLeft) break;
+  }
+  return candidates.filter((c) => kept.has(c.id));
+}
+
+/**
  * The batches a screening pass will run, worked out up front.
  *
  * Separate from the loop so the boundaries can be announced before any work

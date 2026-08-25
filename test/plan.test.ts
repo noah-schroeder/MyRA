@@ -57,9 +57,32 @@ test("a typo'd model is caught at the plan, not forty minutes in", () => {
   );
 });
 
-test("a model without a provider is rejected rather than guessed at", () => {
-  const edited = renderPlan(plan).replace("reviewer: local/other", "reviewer: other");
-  assert.throws(() => parsePlan(edited, plan), (e: Error) => /use provider\/id/.test(e.message));
+/*
+ * The bare model id is the ONLY shape a v2 endpoint actually reports.
+ *
+ * v1 required "provider/id" because that is how pi's dropdown formatted models.
+ * GET /v1/models returns the name the server knows -- "qwen3-30b-a3b" -- so
+ * that rule rejected every real model and failed the run at the plan step,
+ * after the user had already answered the scoping questions.
+ */
+test("a bare model id from /v1/models is accepted", () => {
+  const bare = {
+    ...plan,
+    roles: { screener: "qwen3-30b", analyst: "qwen3-30b", synthesist: "gpt-oss-120b", reviewer: "gemma3-27b" },
+  };
+  const back = parsePlan(renderPlan(bare), bare);
+  assert.deepEqual(back.roles, bare.roles);
+});
+
+test("a role with no model at all names the setting that fixes it", () => {
+  const none = {
+    ...plan,
+    roles: { screener: "", analyst: "", synthesist: "", reviewer: "" },
+  };
+  assert.throws(
+    () => parsePlan(renderPlan(none), none),
+    (e: Error) => e instanceof PlanError && /Settings → Endpoints/.test(e.message),
+  );
 });
 
 test("emptying a section that the run needs fails loudly", () => {

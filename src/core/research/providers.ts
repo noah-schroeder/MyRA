@@ -24,7 +24,16 @@ import {
   type SearchProvider,
 } from "./types.ts";
 
-const PER_PROVIDER = 10;
+/*
+ * Results requested per provider, per page.
+ *
+ * Was 10, which put a ceiling of ~140 candidates on a seven-query run -- thin
+ * for anything review-grade. An OpenAlex request costs the same 10 credits at
+ * any page size up to 200, so a larger page is free recall; arXiv has no such
+ * meter. 50 keeps a single page's abstracts inside a sane response size while
+ * roughly quintupling what a sweep sees.
+ */
+const PER_PROVIDER = 50;
 
 /**
  * Which category names mean "scholarly literature".
@@ -95,7 +104,7 @@ export const openAlexProvider: SearchProvider = {
   scholarly: true,
   timeRange: true,
   async search(query, opts = {}) {
-    const works = await openAlexSearch(query, PER_PROVIDER, opts.signal);
+    const works = await openAlexSearch(query, PER_PROVIDER, opts.signal, opts.page ?? 1);
     return works.map(workToHit).filter((h): h is SearchHit => h !== undefined);
   },
 };
@@ -107,7 +116,7 @@ export const arxivProvider: SearchProvider = {
   // The Atom API sorts by date but does not filter by it.
   timeRange: false,
   async search(query, opts = {}) {
-    const papers = await arxivSearch(query, PER_PROVIDER, opts.signal);
+    const papers = await arxivSearch(query, PER_PROVIDER, opts.signal, opts.page ?? 1);
     return papers.map((p) => ({
       url: p.pdf || p.id,
       title: p.title,

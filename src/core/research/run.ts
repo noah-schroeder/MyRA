@@ -335,6 +335,23 @@ export class ResearchRun {
     if (dropped.length) {
       lines.push(`${dropped.length} extracted passage(s) discarded as not verbatim in the source`);
     }
+
+    /*
+     * Say plainly when the review was self-review.
+     *
+     * roles.ts has a reviewerIsSynthesist() for exactly this and nothing ever
+     * called it, while resolveRoles falls every role back to the one configured
+     * model -- so the DEFAULT configuration is the failure the review stage
+     * exists to prevent, and the report said nothing about it. A run that
+     * cannot claim independent review must not look as though it can.
+     */
+    const plan = await this.readJson<{ roles?: Record<string, string> }>("plan.json");
+    if (plan?.roles && plan.roles["reviewer"] === plan.roles["synthesist"]) {
+      lines.push(
+        `review was SELF-REVIEW: the reviewer and the synthesist are both ` +
+          `${plan.roles["reviewer"]}, so the critique is not independent`,
+      );
+    }
     return lines.join("\n");
   }
 }

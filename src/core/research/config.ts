@@ -46,20 +46,20 @@ export function researchConfigPath(): string {
   );
 }
 
-/** Where embeddings are served — usually a different process than chat. */
-export interface EmbeddingsConfig {
-  baseUrl: string;
-  /** Name of the env var holding the key. Never the key itself. */
-  envVar: string;
-  model: string;
-}
-
+/**
+ * What the research bar in the GUI controls, and nothing else.
+ *
+ * The embeddings endpoint used to live here too, which meant it had two homes:
+ * Settings wrote settings.json and the pipeline read research.json, so the
+ * endpoint the user configured was never the endpoint the pipeline looked for
+ * and the ranking stage silently never ran. Endpoints belong in Settings with
+ * every other endpoint; this file is only the search controls.
+ */
 export interface ResearchConfig {
   mode: "off" | "web" | "deep";
   /** Where to search: "science" for the literature, "general" for the web. */
   category: string;
   timeRange?: string;
-  embeddings?: EmbeddingsConfig;
 }
 
 export const DEFAULT_RESEARCH: ResearchConfig = { mode: "off", category: "general" };
@@ -67,23 +67,13 @@ export const DEFAULT_RESEARCH: ResearchConfig = { mode: "off", category: "genera
 export function readResearchConfig(path = researchConfigPath()): ResearchConfig {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ResearchConfig>;
-    const e = parsed.embeddings;
+    // Rebuilt field by field rather than spread, so a malformed file cannot
+    // inject anything -- which means every field must be listed HERE or it is
+    // silently dropped.
     return {
       mode: parsed.mode === "web" || parsed.mode === "deep" ? parsed.mode : "off",
       category: typeof parsed.category === "string" && parsed.category ? parsed.category : "general",
       ...(typeof parsed.timeRange === "string" ? { timeRange: parsed.timeRange } : {}),
-      // Rebuilt field by field rather than spread, so a malformed file cannot
-      // inject anything -- which means every field must be listed HERE or it is
-      // silently dropped.
-      ...(e && typeof e.baseUrl === "string" && e.baseUrl && typeof e.model === "string" && e.model
-        ? {
-            embeddings: {
-              baseUrl: e.baseUrl,
-              envVar: typeof e.envVar === "string" && e.envVar ? e.envVar : "KAREN_EMBED_KEY",
-              model: e.model,
-            },
-          }
-        : {}),
     };
   } catch {
     // No file yet, or corrupt: behave exactly as before the GUI existed rather

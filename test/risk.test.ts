@@ -197,7 +197,7 @@ test("every registered research tool carries its own risk class", async () => {
   // unrepresentable. What is still worth asserting is that the old list and the
   // real tools agree, since RESEARCH_TOOLS is still consulted elsewhere.
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
-  assert.ok(RESEARCH_TOOL_DEFS.length >= 5, `expected the research tools, got ${RESEARCH_TOOL_DEFS.length}`);
+  assert.ok(RESEARCH_TOOL_DEFS.length >= 4, `expected the research tools, got ${RESEARCH_TOOL_DEFS.length}`);
   for (const def of RESEARCH_TOOL_DEFS) {
     assert.ok(def.risk, `${def.name} has no risk class`);
     assert.ok(

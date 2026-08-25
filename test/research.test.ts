@@ -216,9 +216,12 @@ test("the mode button really removes the other research tool", async () => {
     handler: async () => ({ content: "" }),
   };
 
+  /* academic_research rather than deep_research: the deep general-web tool is
+   * gated off entirely while no general-web backend exists, so it can no longer
+   * stand in for "the deep tool" here. */
   for (const [mode, expected, gone] of [
-    ["web", "web_search", "deep_research"],
-    ["deep", "deep_research", "web_search"],
+    ["web", "web_search", "academic_research"],
+    ["deep", "academic_research", "web_search"],
   ] as const) {
     process.env["KAREN_RESEARCH_CONFIG"] = configFile({ mode, category: "science" });
     const registry = new ToolRegistry();
@@ -246,9 +249,12 @@ test("off leaves every research tool available", async () => {
   const registry = new ToolRegistry();
   for (const def of RESEARCH_TOOL_DEFS) registry.register(def);
   const active = registry.activeNames();
-  for (const t of ["web_search", "deep_research", "academic_research"]) {
+  for (const t of ["web_search", "academic_research"]) {
     assert.ok(active.includes(t), `${t} should be available in off mode`);
   }
+  // deep_research stays gated even in "off" mode: the gate is capability, not
+  // preference, and no general-web backend ships in this build.
+  assert.ok(!active.includes("deep_research"));
   delete process.env["KAREN_RESEARCH_CONFIG"];
 });
 
@@ -319,4 +325,88 @@ test("the GUI's time range wins over the model's, and 'any time' clears it", asy
     if (orig === undefined) delete process.env["KAREN_RESEARCH_CONFIG"];
     else process.env["KAREN_RESEARCH_CONFIG"] = orig;
   }
+});
+
+/*
+ * Paging has to actually reach the provider.
+ *
+ * The pipeline has always looped pages 1..plan.pages, but neither provider read
+ * the parameter: page 2 re-ran the identical query, returned the identical
+ * results, deduped them all away -- and still spent 10 OpenAlex credits. Two
+ * pages across seven queries is 140 of the 1000 free daily credits, for nothing.
+ */
+test("a page request reaches OpenAlex as a page parameter", async () => {
+  const { openAlexSearch } = await import("../src/core/research/openalex.ts");
+  const seen: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    seen.push(String(input));
+    return new Response(JSON.stringify({ results: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  try {
+    await openAlexSearch("working memory", 50, undefined, 3);
+    await openAlexSearch("working memory", 50, undefined, 1);
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.match(seen[0]!, /[?&]page=3(&|$)/);
+  assert.match(seen[0]!, /per_page=50/);
+  // Page 1 is the default, so it is left off rather than sent redundantly.
+  assert.ok(!/[?&]page=/.test(seen[1]!), `page= should be absent on page 1: ${seen[1]}`);
+});
+
+test("arXiv pages by result offset, not by page number", async () => {
+  const { arxivSearch } = await import("../src/core/research/arxiv.ts");
+  const seen: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    seen.push(String(input));
+    return new Response("<feed></feed>", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await arxivSearch("working memory", 50, undefined, 3);
+  } finally {
+    globalThis.fetch = real;
+  }
+  // start is an offset into the result list: page 3 of 50 begins at 100.
+  assert.match(seen[0]!, /start=100/);
+  assert.match(seen[0]!, /max_results=50/);
+});
+
+/*
+ * A tool the app cannot serve must not be offered.
+ *
+ * deep_research forces the general-web category, and this build ships only
+ * scholarly providers. Offering it meant the model chose it for any
+ * non-scholarly question and the user discovered the problem after answering
+ * four scoping dialogs and approving a plan -- discovery returned nothing and
+ * the run died with "no candidates found".
+ */
+test("deep_research is not offered while no general-web backend exists", async () => {
+  const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
+  const byName = new Map(RESEARCH_TOOL_DEFS.map((d) => [d.name, d]));
+
+  const deep = byName.get("deep_research");
+  assert.ok(deep, "deep_research should still be defined, just gated");
+  assert.equal(deep.enabled?.(), false);
+
+  // The scholarly one is the whole point of the app and must stay reachable.
+  const academic = byName.get("academic_research");
+  assert.ok(academic);
+  assert.notEqual(academic.enabled?.(), false);
+
+  // check_citations was registered with a handler that always threw. Gone.
+  assert.equal(byName.has("check_citations"), false);
+});
+
+test("the scholarly tool describes the providers it actually searches", async () => {
+  const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
+  const academic = RESEARCH_TOOL_DEFS.find((d) => d.name === "academic_research")!;
+  // It claimed Crossref and Semantic Scholar. Crossref is never called at all,
+  // and Semantic Scholar only resolves PDFs -- it is not a search backend.
+  assert.ok(!/Crossref/i.test(academic.description), academic.description);
+  assert.match(academic.description, /OpenAlex and arXiv/);
 });

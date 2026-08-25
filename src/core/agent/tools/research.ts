@@ -16,7 +16,7 @@ import { readResearchConfig } from "../../research/config.ts";
 import { ResearchRun } from "../../research/run.ts";
 import { runPipeline, type PipelineUi } from "../../research/pipeline.ts";
 import { fetchPage } from "../../research/fetch.ts";
-import { isScholarlyCategory, search, supportsTimeRange } from "../../research/providers.ts";
+import { isScholarlyCategory, providersFor, search, supportsTimeRange } from "../../research/providers.ts";
 import { formatHits } from "../../research/types.ts";
 import { asUntrusted } from "../../research/html.ts";
 import { DEFAULT_PAGE_CHARS } from "../../research/config.ts";
@@ -180,14 +180,28 @@ async function deepRun(
   }
 }
 
+/**
+ * Is there a backend that can serve a general-web sweep?
+ *
+ * This build ships OpenAlex and arXiv, both scholarly, so the answer is
+ * currently no -- and `deep_research` must therefore not be offered. It was:
+ * the model picked it for any non-scholarly question, and the user found out
+ * only after answering four scoping dialogs and approving a plan, when
+ * discovery returned nothing and the run failed with "no candidates found".
+ * A tool that cannot work must be absent, not merely doomed.
+ */
+function generalSweepPossible(): boolean {
+  return providersFor("general").length > 0;
+}
+
 export const deepResearchTool: ToolDef = {
   name: "deep_research",
   description:
-    "Plan, search, read, reflect and synthesise a cited report on a question. " +
-    "Takes minutes, not seconds. Use it when the user asked for a report or a review, " +
-    "not for a single lookup.",
+    "Plan, search, read, reflect and synthesise a cited report on a question, from " +
+    "general web sources. Takes minutes, not seconds. Use it when the user asked for a " +
+    "report or a review, not for a single lookup.",
   risk: "safe",
-  enabled: () => mode() !== "web",
+  enabled: () => mode() !== "web" && generalSweepPossible(),
   parameters: {
     type: "object",
     properties: {
@@ -205,30 +219,12 @@ export const academicResearchTool: ToolDef = {
   ...deepResearchTool,
   name: "academic_research",
   description:
-    "Deep research restricted to the scholarly literature: OpenAlex, arXiv, Crossref and " +
-    "Semantic Scholar, with citation counts, venues and open-access PDFs resolved.",
+    "Deep research over the scholarly literature: searches OpenAlex and arXiv, then " +
+    "resolves citation counts, venues and open-access full text for what it finds. " +
+    "Takes minutes, not seconds. This is the right tool for any academic question.",
   enabled: () => mode() !== "web",
   async handler(params, ctx) {
     return await deepRun(String(params["question"] ?? ""), "science", ctx);
-  },
-};
-
-export const checkCitationsTool: ToolDef = {
-  name: "check_citations",
-  description:
-    "Check a draft's [n] citations against the sources they point at, and report which " +
-    "sentences are supported, contradicted, or not addressed.",
-  risk: "safe",
-  parameters: {
-    type: "object",
-    properties: {
-      draft: { type: "string", description: "The text whose citations should be checked" },
-    },
-    required: ["draft"],
-    additionalProperties: false,
-  },
-  async handler() {
-    throw new Error("check_citations must be installed by the app with a source table attached");
   },
 };
 
@@ -237,7 +233,6 @@ export const RESEARCH_TOOL_DEFS: ToolDef[] = [
   fetchPageTool,
   deepResearchTool,
   academicResearchTool,
-  checkCitationsTool,
 ];
 
 /** True when the question should go to the scholarly providers. */
