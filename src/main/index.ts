@@ -29,7 +29,7 @@ import {
 import { installMeetingIpc } from "./meetings.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
-import { ResearchRun } from "../core/research/run.ts";
+import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
 import { readResearchConfig, researchConfigPath } from "../core/research/config.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 
@@ -331,7 +331,21 @@ function installIpc(): void {
     }
   });
 
-  ipcMain.handle("karen:research-runs", () => ResearchRun.list());
+  /* The run directory is the audit trail, and until now it was reachable from
+   * nowhere in the app: every run wrote its search log, screening reasons,
+   * source hashes and verification table to disk and no screen ever showed
+   * them. These three handlers are read-only by construction -- there is no
+   * verb here that can change a completed run. */
+  ipcMain.handle("karen:research-runs", () => listRuns());
+  ipcMain.handle("karen:research-run", (_e, id: string) => readRun(String(id)));
+  ipcMain.handle("karen:research-source", (_e, id: string, n: number) =>
+    readRunSource(String(id), Number(n)),
+  );
+  /** Reveal a run's directory, so the raw files are one click away. */
+  ipcMain.handle("karen:research-reveal", async (_e, id: string) => {
+    const run = await ResearchRun.open(String(id));
+    await shell.openPath(run.dir);
+  });
 
   ipcMain.handle("karen:get-research", () => readResearchConfig());
   ipcMain.handle("karen:set-research", async (_e, next: unknown) => {

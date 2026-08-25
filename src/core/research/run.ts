@@ -193,6 +193,29 @@ export class ResearchRun {
     return this.readText(join("sources", String(n), "text.txt"));
   }
 
+  /**
+   * Where each source's located passages sit in its stored text.
+   *
+   * Derived from claims.jsonl rather than stored a second time, so the offsets
+   * a reader is shown are necessarily the offsets extraction actually found --
+   * there is no second copy to drift. This is what lets a citation be opened at
+   * the exact characters it came from instead of at a whole document.
+   */
+  async spansBySource(): Promise<Map<number, { start: number; end: number; quote: string; claim: string }[]>> {
+    const claims = await this.readJsonl<{
+      source?: number; start?: number; end?: number; quote?: string; claim?: string;
+    }>("claims.jsonl");
+    const out = new Map<number, { start: number; end: number; quote: string; claim: string }[]>();
+    for (const c of claims) {
+      if (typeof c.source !== "number" || typeof c.start !== "number" || typeof c.end !== "number") continue;
+      const list = out.get(c.source) ?? [];
+      list.push({ start: c.start, end: c.end, quote: c.quote ?? "", claim: c.claim ?? "" });
+      out.set(c.source, list);
+    }
+    for (const list of out.values()) list.sort((a, b) => a.start - b.start);
+    return out;
+  }
+
   /** Every stored source's text, for quote verification. */
   async sourceTexts(): Promise<Map<number, string>> {
     const map = new Map<number, string>();
@@ -337,6 +360,23 @@ export class ResearchRun {
     }
 
     /*
+     * A quotation in the finished report that is not in the source it cites.
+     *
+     * Distinct from the citation verdicts above: those are a model's judgement
+     * about whether a passage supports a sentence, and this is a mechanical
+     * string check that cannot be wrong.
+     */
+    const quotes = await this.readJsonl<{ verbatim?: boolean }>("quote-checks.jsonl");
+    if (quotes.length) {
+      const bad = quotes.filter((q) => q.verbatim !== true).length;
+      lines.push(
+        bad === 0
+          ? `${quotes.length} quotation(s) in the report checked, all verbatim in the cited source`
+          : `${bad} of ${quotes.length} quotation(s) in the report are NOT verbatim in the source cited`,
+      );
+    }
+
+    /*
      * Say plainly when the review was self-review.
      *
      * roles.ts has a reviewerIsSynthesist() for exactly this and nothing ever
@@ -354,4 +394,166 @@ export class ResearchRun {
     }
     return lines.join("\n");
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading a finished run                                              *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Everything a run left behind, assembled for inspection.
+ *
+ * This is the auditability requirement made reachable. Every field below was
+ * already being written to disk on every run -- the search log, the screening
+ * reasons, the source hashes, the dropped passages, the verification table --
+ * and none of it was visible anywhere in the app. A pipeline whose provenance
+ * you cannot read is not auditable, however carefully it recorded things.
+ *
+ * Read-only and derived: nothing here is a second copy of state the run keeps
+ * elsewhere, so this cannot disagree with what actually happened.
+ */
+export interface RunSearch {
+  at: string;
+  query: string;
+  category?: string;
+  page?: number;
+  results: number;
+  newResults?: number;
+  error?: string;
+}
+
+export interface RunScreened {
+  id: number;
+  include: boolean;
+  reason: string;
+  defaulted?: boolean;
+  /** Joined from candidates.jsonl so a decision is readable on its own. */
+  title?: string;
+  url?: string;
+  year?: number;
+  venue?: string;
+  foundBy?: number;
+}
+
+export interface RunDetail {
+  id: string;
+  question: string;
+  startedAt?: string;
+  /** The first stage with no output: where a resumed run would pick up. */
+  nextStage?: Stage;
+  stages: { stage: Stage; done: boolean }[];
+  paused: boolean;
+  funnel: string;
+  summary: string;
+  counts: Awaited<ReturnType<ResearchRun["counts"]>>;
+  queries: string[];
+  searches: RunSearch[];
+  screened: RunScreened[];
+  sources: SourceRecord[];
+  dropped: { source: number; quote: string; reason: string }[];
+  verification: {
+    sentenceIndex: number; sentence: string; source: number; verdict: string; note: string;
+  }[];
+  quoteChecks: { quote: string; citation?: number; verbatim: boolean; reason?: string }[];
+  report?: string;
+  review?: string;
+  bibtex?: string;
+}
+
+export async function readRun(id: string, root = researchRoot()): Promise<RunDetail> {
+  const run = await ResearchRun.open(id, root);
+  const question = await run.readJson<{ question?: string; startedAt?: string }>("question.json");
+  const plan = await run.readJson<{ queries?: string[] }>("plan.json");
+
+  // Screening decisions are keyed by candidate id and carry only a reason, so
+  // join the candidate back on: "excluded — measures attitudes" is only useful
+  // next to the title it excluded.
+  const candidates = await run.readJsonl<{
+    id: number; title?: string; url?: string; year?: number; venue?: string; foundBy?: number;
+  }>("candidates.jsonl");
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+
+  const screened = (
+    await run.readJsonl<{ id: number; include: boolean; reason: string; defaulted?: boolean }>(
+      "screened.jsonl",
+    )
+  ).map((d) => {
+    const c = byId.get(d.id);
+    return {
+      ...d,
+      ...(c?.title ? { title: c.title } : {}),
+      ...(c?.url ? { url: c.url } : {}),
+      ...(c?.year ? { year: c.year } : {}),
+      ...(c?.venue ? { venue: c.venue } : {}),
+      ...(c?.foundBy !== undefined ? { foundBy: c.foundBy } : {}),
+    };
+  });
+
+  const next = run.nextStage();
+  return {
+    id,
+    question: question?.question ?? id,
+    ...(question?.startedAt ? { startedAt: question.startedAt } : {}),
+    ...(next ? { nextStage: next } : {}),
+    stages: STAGES.map((stage) => ({ stage, done: run.isDone(stage) })),
+    paused: run.isPaused(),
+    funnel: await run.funnel(),
+    summary: await run.summary(),
+    counts: await run.counts(),
+    queries: plan?.queries ?? [],
+    searches: await run.readJsonl<RunSearch>("search-log.jsonl"),
+    screened,
+    sources: await run.sources(),
+    dropped: await run.readJsonl("dropped-claims.jsonl"),
+    verification: await run.readJsonl("verification.jsonl"),
+    quoteChecks: await run.readJsonl("quote-checks.jsonl"),
+    ...((await run.readText("report.md")) ? { report: (await run.readText("report.md"))! } : {}),
+    ...((await run.readText("review.md")) ? { review: (await run.readText("review.md"))! } : {}),
+    ...((await run.readText("sources.bib")) ? { bibtex: (await run.readText("sources.bib"))! } : {}),
+  };
+}
+
+/** One source's stored text with the passages extraction located in it. */
+export async function readRunSource(
+  id: string,
+  n: number,
+  root = researchRoot(),
+): Promise<{ record?: SourceRecord; text: string; spans: { start: number; end: number; quote: string; claim: string }[] } | undefined> {
+  const run = await ResearchRun.open(id, root);
+  const text = await run.sourceText(n);
+  if (text === undefined) return undefined;
+  const record = (await run.sources()).find((s) => s.n === n);
+  return {
+    ...(record ? { record } : {}),
+    text,
+    spans: (await run.spansBySource()).get(n) ?? [],
+  };
+}
+
+/** Summary rows for the run list, cheap enough to build for every run. */
+export async function listRuns(root = researchRoot()): Promise<
+  { id: string; question: string; startedAt?: string; funnel: string; nextStage?: Stage; paused: boolean }[]
+> {
+  const ids = await ResearchRun.list(root);
+  const out: {
+    id: string; question: string; startedAt?: string; funnel: string; nextStage?: Stage; paused: boolean;
+  }[] = [];
+  for (const id of ids) {
+    try {
+      const run = await ResearchRun.open(id, root);
+      const q = await run.readJson<{ question?: string; startedAt?: string }>("question.json");
+      const next = run.nextStage();
+      out.push({
+        id,
+        question: q?.question ?? id,
+        ...(q?.startedAt ? { startedAt: q.startedAt } : {}),
+        funnel: await run.funnel(),
+        ...(next ? { nextStage: next } : {}),
+        paused: run.isPaused(),
+      });
+    } catch {
+      // A half-created directory should not hide every other run.
+    }
+  }
+  return out;
 }

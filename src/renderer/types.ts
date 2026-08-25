@@ -211,7 +211,10 @@ export interface KarenApi {
   dictationCancel(): Promise<void>;
   onDictationText(cb: (text: string) => void): () => void;
 
-  researchRuns(): Promise<string[]>;
+  researchRuns(): Promise<RunSummary[]>;
+  researchRun(id: string): Promise<RunDetail>;
+  researchSource(id: string, n: number): Promise<RunSource | undefined>;
+  researchReveal(id: string): Promise<void>;
   onResearchProgress(cb: (note: string) => void): () => void;
   answerPrompt(id: string, answer: string | undefined): Promise<void>;
   onPrompt(cb: (request: PromptRequest) => void): () => void;
@@ -219,4 +222,67 @@ export interface KarenApi {
 
 declare global {
   interface Window { karen: KarenApi }
+}
+
+/* ------------------------------------------------------------------ *
+ * Research runs                                                       *
+ * ------------------------------------------------------------------ */
+
+export interface RunSummary {
+  id: string;
+  question: string;
+  startedAt?: string;
+  /** "180 found → 174 deduped → 41 screened in → 28 read in full → 22 cited". */
+  funnel: string;
+  /** Present when the run did not finish: the stage it would resume at. */
+  nextStage?: string;
+  paused: boolean;
+}
+
+export interface RunSourceRecord {
+  n: number;
+  url: string;
+  title: string;
+  authors?: string[];
+  year?: number;
+  venue?: string;
+  doi?: string;
+  /** Exactly what was read, so a citation cannot drift from its source. */
+  sha256: string;
+  retrievedAt: string;
+  chars: number;
+  via: "html" | "pdf" | "abstract" | "text";
+  /** Set when the full text came from an open version rather than the record. */
+  note?: string;
+}
+
+export interface RunDetail extends RunSummary {
+  stages: { stage: string; done: boolean }[];
+  summary: string;
+  counts: { found: number; deduped: number; screened: number; read: number; cited: number };
+  queries: string[];
+  searches: {
+    at: string; query: string; category?: string; page?: number;
+    results: number; newResults?: number; error?: string;
+  }[];
+  screened: {
+    id: number; include: boolean; reason: string; defaulted?: boolean;
+    title?: string; url?: string; year?: number; venue?: string; foundBy?: number;
+  }[];
+  sources: RunSourceRecord[];
+  dropped: { source: number; quote: string; reason: string }[];
+  verification: {
+    sentenceIndex: number; sentence: string; source: number; verdict: string; note: string;
+  }[];
+  quoteChecks: { quote: string; citation?: number; verbatim: boolean; reason?: string }[];
+  report?: string;
+  review?: string;
+  bibtex?: string;
+}
+
+export interface RunSource {
+  record?: RunSourceRecord;
+  text: string;
+  /** Where extraction located each cited passage in the text above. */
+  spans: { start: number; end: number; quote: string; claim: string }[];
 }

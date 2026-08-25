@@ -84,6 +84,9 @@ const api = {
 
   /* ---- research ---- */
   researchRuns: () => ipcRenderer.invoke("karen:research-runs"),
+  researchRun: (id: string) => ipcRenderer.invoke("karen:research-run", id),
+  researchSource: (id: string, n: number) => ipcRenderer.invoke("karen:research-source", id, n),
+  researchReveal: (id: string) => ipcRenderer.invoke("karen:research-reveal", id),
   onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>
