@@ -146,55 +146,55 @@ test("a role config with a bare model id is ignored, not half-used", async () =>
   assert.equal(cfg.models.reviewer, "local/ok");
 });
 
-test("the embeddings endpoint survives the trip through research.json", async () => {
-  const { readResearchConfig } = await import("../src/core/research/config.ts");
-  const { writeFileSync, mkdtempSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const p = join(mkdtempSync(join(tmpdir(), "rcfg-")), "research.json");
-  // Exactly what the bridge writes when Settings changes.
-  writeFileSync(p, JSON.stringify({
-    mode: "deep", category: "science",
-    embeddings: { baseUrl: "http://10.0.2.2:8890/v1", envVar: "KAREN_EMBED_KEY", model: "nomic-embed" },
-  }));
-  const cfg = readResearchConfig(p);
-  // The parser rebuilds field by field, so an unlisted field is silently lost.
-  assert.equal(cfg.embeddings?.baseUrl, "http://10.0.2.2:8890/v1");
-  assert.equal(cfg.embeddings?.model, "nomic-embed");
-  assert.equal(cfg.embeddings?.envVar, "KAREN_EMBED_KEY");
+/*
+ * The embeddings endpoint lives in Settings, and only in Settings.
+ *
+ * It used to be duplicated into research.json, which is how the ranking stage
+ * came to be permanently skipped: the GUI wrote settings.json, the pipeline
+ * read research.json, and neither ever mentioned the other.
+ */
+test("the embeddings endpoint is read from Settings, not research.json", async () => {
+  const { configuredEmbeddingEndpoint } = await import("../src/core/research/embed.ts");
+  const endpoint = configuredEmbeddingEndpoint({
+    embeddings: { baseUrl: "http://127.0.0.1:8890/v1/", envVar: "", model: "nomic-embed", timeoutMs: 0 },
+  });
+  assert.equal(endpoint?.model, "nomic-embed");
+  // The trailing slash is stripped, or every request doubles it.
+  assert.equal(endpoint?.baseUrl, "http://127.0.0.1:8890/v1");
 });
 
 test("a half-configured embeddings endpoint is treated as absent", async () => {
-  const { readResearchConfig } = await import("../src/core/research/config.ts");
-  const { writeFileSync, mkdtempSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const dir = mkdtempSync(join(tmpdir(), "rcfg2-"));
-  const p = join(dir, "research.json");
+  const { configuredEmbeddingEndpoint } = await import("../src/core/research/embed.ts");
   // A base URL with no model cannot be called, so ranking must be skipped
   // rather than attempted and failed mid-run.
-  writeFileSync(p, JSON.stringify({ mode: "deep", category: "science", embeddings: { baseUrl: "http://x/v1" } }));
-  assert.equal(readResearchConfig(p).embeddings, undefined);
+  assert.equal(
+    configuredEmbeddingEndpoint({
+      embeddings: { baseUrl: "http://x/v1", envVar: "", model: "", timeoutMs: 0 },
+    }),
+    undefined,
+  );
+  assert.equal(
+    configuredEmbeddingEndpoint({
+      embeddings: { baseUrl: "", envVar: "", model: "nomic-embed", timeoutMs: 0 },
+    }),
+    undefined,
+  );
 });
 
 test("a missing embeddings key is reported as a key problem, not a network one", async () => {
   const { configuredEmbeddingEndpoint } = await import("../src/core/research/embed.ts");
-  const { writeFileSync, mkdtempSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const p = join(mkdtempSync(join(tmpdir(), "rcfg3-")), "research.json");
-  writeFileSync(p, JSON.stringify({
-    mode: "deep", category: "science",
-    embeddings: { baseUrl: "http://x/v1", envVar: "KAREN_TEST_EMBED_KEY_ABSENT", model: "m" },
-  }));
-  const prev = process.env["KAREN_RESEARCH_CONFIG"];
-  process.env["KAREN_RESEARCH_CONFIG"] = p;
-  try {
-    assert.throws(() => configuredEmbeddingEndpoint(), /has not reached the VM/);
-  } finally {
-    if (prev === undefined) delete process.env["KAREN_RESEARCH_CONFIG"];
-    else process.env["KAREN_RESEARCH_CONFIG"] = prev;
-  }
+  assert.throws(
+    () =>
+      configuredEmbeddingEndpoint({
+        embeddings: {
+          baseUrl: "http://x/v1",
+          envVar: "KAREN_TEST_EMBED_KEY_ABSENT",
+          model: "m",
+          timeoutMs: 0,
+        },
+      }),
+    /has not been unlocked/,
+  );
 });
 
 test("screening batches are worked out before any of them runs", async () => {
@@ -228,4 +228,69 @@ test("a stage that cannot reach its endpoint fails loudly", async () => {
       }),
     (err: Error) => err.name === "SubagentError" && !/0 minutes/.test(err.message),
   );
+});
+
+/*
+ * Truncating the candidate list must not throw away whole queries.
+ *
+ * Without an embeddings model the shortlist was `slice(0, screenTop)`, and
+ * candidates accumulate query by query -- so the plan's later queries were
+ * never screened, never counted in the funnel, and left no record of having
+ * been dropped. The plan asks for seven queries because different fields name
+ * the same construct differently; keeping only the first two defeats that.
+ */
+test("without embeddings, the shortlist still represents every query", async () => {
+  const { fairShortlist } = await import("../src/core/research/screen.ts");
+  // Seven queries, twenty hits each, in the order discovery produced them.
+  const candidates = Array.from({ length: 7 }, (_, q) =>
+    Array.from({ length: 20 }, (_, i) => ({ id: q * 20 + i + 1, foundBy: q })),
+  ).flat();
+
+  const kept = fairShortlist(candidates, 70);
+  assert.equal(kept.length, 70);
+
+  const perQuery = new Map<number, number>();
+  for (const c of kept) perQuery.set(c.foundBy, (perQuery.get(c.foundBy) ?? 0) + 1);
+  assert.equal(perQuery.size, 7, "a query was dropped entirely");
+  for (const [q, n] of perQuery) assert.equal(n, 10, `query ${q} got ${n}`);
+
+  // The old behaviour, for contrast: the last four queries never got screened.
+  const naive = candidates.slice(0, 70);
+  assert.equal(new Set(naive.map((c) => c.foundBy)).size, 4);
+});
+
+test("a query that found little does not lose its hits to one that found a lot", async () => {
+  const { fairShortlist } = await import("../src/core/research/screen.ts");
+  const candidates = [
+    ...Array.from({ length: 40 }, (_, i) => ({ id: i + 1, foundBy: 0 })),
+    { id: 41, foundBy: 1 },
+    { id: 42, foundBy: 2 },
+  ];
+  const kept = fairShortlist(candidates, 10);
+  assert.ok(kept.some((c) => c.id === 41), "the single hit from query 1 was dropped");
+  assert.ok(kept.some((c) => c.id === 42), "the single hit from query 2 was dropped");
+  assert.equal(kept.length, 10);
+});
+
+test("a shortlist longer than the list is the list, in its original order", async () => {
+  const { fairShortlist } = await import("../src/core/research/screen.ts");
+  const candidates = [
+    { id: 1, foundBy: 0 },
+    { id: 2, foundBy: 1 },
+    { id: 3, foundBy: 0 },
+  ];
+  assert.deepEqual(fairShortlist(candidates, 50), candidates);
+  // Output order always follows input order, so run ids stay readable.
+  assert.deepEqual(fairShortlist(candidates, 2).map((c) => c.id), [1, 2]);
+});
+
+test("candidates with no recorded query share one bucket rather than starving the rest", async () => {
+  const { fairShortlist } = await import("../src/core/research/screen.ts");
+  const candidates: { id: number; foundBy?: number }[] = [
+    ...Array.from({ length: 10 }, (_, i) => ({ id: i + 1 })),
+    ...Array.from({ length: 10 }, (_, i) => ({ id: i + 11, foundBy: 0 })),
+  ];
+  const kept = fairShortlist(candidates, 10);
+  assert.equal(kept.filter((c) => c.foundBy === undefined).length, 5);
+  assert.equal(kept.filter((c) => c.foundBy === 0).length, 5);
 });

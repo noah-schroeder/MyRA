@@ -91,6 +91,8 @@ export function oaUrl(w: Work): string | undefined {
 
 /** Cost of one `search=` request, and so the minimum worth having in hand. */
 const SEARCH_COST = 10;
+/** OpenAlex's documented ceiling for per_page. A request costs the same at any size. */
+export const MAX_PER_PAGE = 200;
 let creditsLeft: number | undefined;
 
 /** Credits remaining today, as last reported. Undefined until a call is made. */
@@ -122,14 +124,30 @@ function url(path: string, params: Record<string, string>): string {
   return `https://api.openalex.org/${path}?${q}`;
 }
 
+/**
+ * Search, one page at a time.
+ *
+ * `page` is 1-based, matching OpenAlex. It is not optional in practice: the
+ * pipeline has always looped over pages, but this function ignored the
+ * parameter, so every page after the first re-ran the identical query, got the
+ * identical results, deduped them all away -- and still spent 10 credits. Two
+ * pages per query across seven queries burned 140 of the 1000 free daily
+ * credits for nothing.
+ */
 export async function openAlexSearch(
   query: string,
   perPage: number,
   signal?: AbortSignal,
+  page = 1,
 ): Promise<Work[]> {
-  const res = await fetch(url("works", { search: query, per_page: String(perPage) }), {
-    signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
+  const res = await fetch(
+    url("works", {
+      search: query,
+      per_page: String(Math.min(perPage, MAX_PER_PAGE)),
+      ...(page > 1 ? { page: String(page) } : {}),
+    }),
+    { signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+  );
   recordBudget(res);
   if (res.status === 429) {
     throw new Error(

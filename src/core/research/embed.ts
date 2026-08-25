@@ -1,106 +1,57 @@
 /**
- * Embeddings, called directly rather than through pi.
+ * Embeddings: ranking candidate abstracts against the scope, cheaply.
  *
- * pi is a chat agent; it has no embeddings verb. But the endpoint pi is already
- * pointed at serves /v1/embeddings, so this reads the SAME provider block out
- * of models.json -- base URL and the name of the env var holding the key -- and
- * calls it. No second place to configure an endpoint, and no key on disk: the
- * file stores "$KAREN_LLM_KEY", and the value only ever exists in the process
- * environment the bridge injected.
+ * Ranking ~500 abstracts by cosine similarity takes about two minutes, costs
+ * nothing, and is deterministic. Sending all 500 to a model for judgement
+ * would be slower, dearer, and would still need a cheap pre-sort to be
+ * affordable at all.
  *
- * Why embeddings at all: ranking ~500 candidate abstracts against the scope by
- * cosine similarity takes about two minutes and costs nothing, and it is
- * deterministic. Sending all 500 to a model for judgement would be slower,
- * dearer, and would still need a cheap pre-sort to be affordable.
+ * The endpoint comes from Settings, like every other endpoint in the app. It
+ * used to be read out of `~/.pi/agent/models.json`, which pi maintained; when
+ * pi was removed that file stopped existing and nothing noticed, because the
+ * failure was silent in the worst way -- no embeddings model meant the ranking
+ * stage was skipped and the shortlist became "the first N in search order".
  */
 
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-import { FETCH_TIMEOUT_MS, readResearchConfig } from "./config.ts";
+import { ConfigStore, type Settings } from "../config.ts";
+import { FETCH_TIMEOUT_MS } from "./config.ts";
 
 /** Requests are sized to keep one batch comfortably inside any server's limits. */
 const BATCH = 64;
 const MAX_ATTEMPTS = 3;
-
-export function piModelsPath(): string {
-  return (
-    process.env["KAREN_PI_MODELS"] ??
-    join(process.env["HOME"] ?? homedir(), ".pi", "agent", "models.json")
-  );
-}
 
 export interface Endpoint {
   baseUrl: string;
   apiKey: string;
 }
 
-interface ModelsFile {
-  providers?: Record<string, { baseUrl?: string; apiKey?: string }>;
-}
-
 /**
- * Resolve the endpoint from the pi config the app already maintains.
+ * The embeddings endpoint the user configured, if any.
  *
- * `apiKey` in that file is an env reference like "$KAREN_LLM_KEY" -- never a
- * literal. Anything else is treated as absent rather than used, because a
- * literal key in that file would mean the app's secret handling had broken.
+ * Returns undefined rather than throwing when none is set: no embeddings model
+ * is a legitimate configuration, and the pipeline has a documented fallback for
+ * it. A configured endpoint whose KEY has not arrived is a different thing --
+ * that is a broken setup, and it says so.
  */
-/**
- * The embeddings endpoint the user configured in Settings, if any.
- *
- * Preferred over the chat provider because they are usually not the same
- * server: llama.cpp serves one model per process, so the embedding model
- * typically listens on its own port with its own key.
- */
-export function configuredEmbeddingEndpoint(): (Endpoint & { model: string }) | undefined {
-  const cfg = readResearchConfig().embeddings;
+export function configuredEmbeddingEndpoint(
+  settings: Pick<Settings, "embeddings">,
+): (Endpoint & { model: string }) | undefined {
+  const cfg = settings.embeddings;
   if (!cfg?.baseUrl || !cfg.model) return undefined;
   const apiKey = cfg.envVar ? (process.env[cfg.envVar] ?? "") : "";
   if (cfg.envVar && !apiKey) {
     throw new Error(
-      `${cfg.envVar} is not set in this process — the embeddings key has not reached the VM. ` +
-        `Re-enter it in Settings.`,
+      `${cfg.envVar} is not set in this process — the embeddings key has not been ` +
+        `unlocked. Re-enter it in Settings → Endpoints.`,
     );
   }
   return { baseUrl: cfg.baseUrl.replace(/\/$/, ""), apiKey, model: cfg.model };
 }
 
-/**
- * Fall back to the chat provider's endpoint.
- *
- * Only correct when one server happens to serve both, so it is the fallback
- * rather than the default.
- */
-export function resolveEndpoint(provider?: string, path = piModelsPath()): Endpoint {
-  let file: ModelsFile;
-  try {
-    file = JSON.parse(readFileSync(path, "utf8")) as ModelsFile;
-  } catch {
-    throw new Error(`no model configuration at ${path} — configure an endpoint in Settings first`);
-  }
-  const providers = Object.entries(file.providers ?? {});
-  if (providers.length === 0) throw new Error("no providers configured — open Settings");
-
-  const chosen = provider
-    ? providers.find(([name]) => name === provider)
-    : providers[0];
-  if (!chosen) throw new Error(`provider "${provider}" is not configured`);
-
-  const [name, spec] = chosen;
-  if (!spec.baseUrl) throw new Error(`provider "${name}" has no baseUrl`);
-
-  const ref = spec.apiKey ?? "";
-  const envName = ref.startsWith("$") ? ref.slice(1) : "";
-  const apiKey = envName ? (process.env[envName] ?? "") : "";
-  if (envName && !apiKey) {
-    throw new Error(
-      `${envName} is not set in this process — the endpoint key has not reached the VM. ` +
-        `Re-enter it in Settings.`,
-    );
-  }
-  return { baseUrl: spec.baseUrl.replace(/\/$/, ""), apiKey };
+/** Loads settings from disk to answer the same question. Used by the pipeline. */
+export async function embeddingEndpoint(): Promise<(Endpoint & { model: string }) | undefined> {
+  const store = new ConfigStore();
+  return configuredEmbeddingEndpoint(await store.load());
 }
 
 interface EmbeddingResponse {

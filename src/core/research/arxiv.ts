@@ -47,13 +47,19 @@ export function parseArxivEntries(xml: string): Preprint[] {
   });
 }
 
-export async function arxivSearch(query: string, max: number, signal?: AbortSignal): Promise<Preprint[]> {
+/** `page` is 1-based; arXiv pages by result offset rather than page number. */
+export async function arxivSearch(
+  query: string,
+  max: number,
+  signal?: AbortSignal,
+  page = 1,
+): Promise<Preprint[]> {
   await throttle();
   const url =
     "http://export.arxiv.org/api/query?" +
     new URLSearchParams({
       search_query: `all:"${query.replace(/"/g, "")}"`,
-      start: "0",
+      start: String(Math.max(0, page - 1) * max),
       max_results: String(max),
       sortBy: "relevance",
     });

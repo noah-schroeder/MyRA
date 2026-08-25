@@ -131,3 +131,36 @@ test("runs are listed newest first", async () => {
   assert.equal(list.length, 2);
   assert.deepEqual([...list].sort().reverse(), list, "newest first");
 });
+
+/*
+ * A run that could not be independently reviewed must say so.
+ *
+ * resolveRoles falls every unassigned role back to the single configured model,
+ * so the default configuration makes the reviewer and the synthesist the same
+ * model -- self-review, which is the failure the stage exists to prevent. The
+ * summary is where that has to surface: it is what the report carries.
+ */
+test("the summary reports self-review rather than implying independence", async () => {
+  const { ResearchRun } = await import("../src/core/research/run.ts");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "karen-selfreview-"));
+  try {
+    const run = await ResearchRun.create("does review matter", root);
+    await run.writeJson("plan.json", {
+      roles: { screener: "a", analyst: "a", synthesist: "big", reviewer: "big" },
+    });
+    assert.match(await run.summary(), /SELF-REVIEW/);
+    assert.match(await run.summary(), /both big/);
+
+    const other = await ResearchRun.create("two models", root);
+    await other.writeJson("plan.json", {
+      roles: { screener: "a", analyst: "a", synthesist: "big", reviewer: "other" },
+    });
+    assert.ok(!/SELF-REVIEW/.test(await other.summary()));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

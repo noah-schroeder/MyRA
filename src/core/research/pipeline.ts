@@ -19,8 +19,8 @@ import { canonicalUrl } from "./html.ts";
 import { hydrateHits, type Hydrated } from "./hydrate.ts";
 import { fetchPage, pooled } from "./fetch.ts";
 import { FETCH_CONCURRENCY } from "./config.ts";
-import { configuredEmbeddingEndpoint, embedTexts, rankBySimilarity, resolveEndpoint } from "./embed.ts";
-import { screenCandidates, type Candidate, type Decision } from "./screen.ts";
+import { embedTexts, embeddingEndpoint, rankBySimilarity } from "./embed.ts";
+import { fairShortlist, screenCandidates, type Candidate, type Decision } from "./screen.ts";
 import { extractFromSource, type Claim } from "./extract.ts";
 import { synthesize } from "./synthesize.ts";
 import { verifyDraft, type Check } from "./verify.ts";
@@ -28,7 +28,7 @@ import { reviewDraft, reviseDraft } from "./review.ts";
 import { makeSourceRecord, renderBibliography, type SourceRecord } from "./sources.ts";
 import { generateQueries, parsePlan, renderPlan, type Plan } from "./plan.ts";
 import { applyAnswers, draftScope, type Scope, type ScopeQuestion } from "./scope.ts";
-import { rubricPath } from "./rubrics.ts";
+import { rubricText } from "./rubrics.ts";
 import { readRoleConfig, resolveRoles } from "./roles.ts";
 import type { ResearchRun } from "./run.ts";
 
@@ -154,6 +154,9 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   } else {
     const roles = resolveRoles(readRoleConfig(), opts.fallbackModel);
     const config = readRoleConfig();
+    // Read once, here, so a missing embeddings endpoint is visible in the plan
+    // the user approves rather than discovered as a silently skipped stage.
+    const embeddings = await embeddingEndpoint().catch(() => undefined);
     say("drafting the plan…");
     const { queries } = await generateQueries({
       scope,
@@ -173,8 +176,8 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       roles,
       // Settings owns the embeddings endpoint, so its model is the default;
       // the saved role assignment only fills in when Settings has none.
-      ...(readResearchConfig().embeddings?.model ?? config.embedModel
-        ? { embedModel: readResearchConfig().embeddings?.model ?? config.embedModel! }
+      ...(embeddings?.model ?? config.embedModel
+        ? { embedModel: embeddings?.model ?? config.embedModel! }
         : {}),
     };
 
@@ -191,7 +194,15 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   checkpoint("discover");
   if (!run.isDone("discover")) {
     const seen = new Set<string>();
-    const hits: SearchHit[] = [];
+    /*
+     * Which query found each hit, carried alongside it.
+     *
+     * Needed by screening: without an embeddings model the shortlist is a
+     * truncation, and a truncation of a list built query-by-query throws away
+     * whole queries -- the last two or three in the plan are never screened at
+     * all. Recording the query is what lets that truncation be fair instead.
+     */
+    const hits: { hit: SearchHit; query: number }[] = [];
     for (const [i, query] of plan.queries.entries()) {
       for (let page = 1; page <= plan.pages; page++) {
         checkpoint("discover");
@@ -209,7 +220,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
             const key = canonicalUrl(hit.url ?? "");
             if (!key || seen.has(key)) continue;
             seen.add(key);
-            hits.push(hit);
+            hits.push({ hit, query: i });
             fresh++;
           }
           await run.logSearch({
@@ -230,12 +241,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     let hydrated: Hydrated[] = [];
     if (isScholarlyCategory(plan.category)) {
       say(`identifying ${hits.length} results in OpenAlex…`);
-      hydrated = await hydrateHits(hits, opts.signal, (n, total) =>
+      hydrated = await hydrateHits(hits.map((h) => h.hit), opts.signal, (n, total) =>
         say(`identified ${n}/${total}`),
       );
     }
 
-    for (const [i, hit] of hits.entries()) {
+    for (const [i, { hit, query }] of hits.entries()) {
       const h = hydrated[i];
       await run.appendPartial("candidates.jsonl", {
         id: i + 1,
@@ -243,6 +254,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         title: hit.title,
         dedupeKey: canonicalUrl(hit.url ?? ""),
         engine: hit.engine,
+        foundBy: query,
         abstract: h?.abstract ?? hit.content,
         ...(h?.year ? { year: h.year } : {}),
         ...(h?.venue ? { venue: h.venue } : {}),
@@ -261,6 +273,8 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     pdfUrl?: string;
     authors?: string[];
     note?: string;
+    /** Index of the plan query that surfaced this candidate. */
+    foundBy?: number;
   }
   const candidates = await run.readJsonl<StoredCandidate>("candidates.jsonl");
   if (candidates.length === 0) {
@@ -275,12 +289,9 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   if (!run.isDone("screen")) {
     let shortlist = candidates;
 
-    if (plan.embedModel) {
+    const endpoint = plan.embedModel ? await embeddingEndpoint() : undefined;
+    if (plan.embedModel && endpoint) {
       say(`ranking ${candidates.length} candidates by similarity…`);
-      // The dedicated embeddings endpoint when one is configured; the chat
-      // provider only when the same server happens to serve both.
-      const configured = configuredEmbeddingEndpoint();
-      const endpoint = configured ?? resolveEndpoint();
       const texts = candidates.map((c) => `${c.title}\n${c.abstract ?? ""}`.slice(0, 4_000));
       const vectors = await embedTexts(texts, plan.embedModel, endpoint, opts.signal, (d, t) =>
         say(`embedded ${d}/${t}`),
@@ -296,7 +307,21 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         .map((r) => r.item);
       await run.append("ranking.jsonl", { ranked: candidates.length, kept: shortlist.length });
     } else {
-      shortlist = candidates.slice(0, plan.screenTop);
+      // No embeddings model, so there is no ranking to apply -- but a flat
+      // truncation would drop the plan's later queries entirely. Take from
+      // every query in turn instead. See fairShortlist.
+      shortlist = fairShortlist(candidates, plan.screenTop);
+      if (shortlist.length < candidates.length) {
+        say(
+          `no embeddings model configured — screening ${shortlist.length} of ` +
+            `${candidates.length}, taken evenly across all ${plan.queries.length} queries`,
+        );
+        await run.append("ranking.jsonl", {
+          ranked: candidates.length,
+          kept: shortlist.length,
+          method: "round-robin across queries (no embeddings model configured)",
+        });
+      }
     }
 
     say(`screening ${shortlist.length} candidates…`);
@@ -304,7 +329,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       scope: { question: scope.question, include: scope.include, exclude: scope.exclude },
       candidates: shortlist,
       model: plan.roles.screener,
-      rubric: await rubricPath("screening"),
+      rubric: await rubricText("screening"),
       ...(opts.signal ? { signal: opts.signal } : {}),
       cwd,
       onBatch: (n, of, from, to) =>
@@ -381,7 +406,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         text,
         questions: scope.subQuestions,
         model: plan.roles.analyst,
-        rubric: await rubricPath("extraction"),
+        rubric: await rubricText("extraction"),
         ...(opts.signal ? { signal: opts.signal } : {}),
         cwd,
         onDelta: stream(`extracting [${source.n}]`),
@@ -447,7 +472,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       checks,
       flagged,
       model: plan.roles.reviewer,
-      rubric: await rubricPath("review"),
+      rubric: await rubricText("review"),
       ...(opts.signal ? { signal: opts.signal } : {}),
       cwd,
       onDelta: stream("reviewing"),

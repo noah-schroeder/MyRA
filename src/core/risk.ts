@@ -267,7 +267,6 @@ export const RESEARCH_TOOLS = new Set([
   "fetch_page",
   "deep_research",
   "academic_research",
-  "check_citations",
 ]);
 
 export function classifyToolCall(
