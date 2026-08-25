@@ -98,7 +98,7 @@ export interface Hydrated {
 const NOT_A_PAPER: Hydrated = { matchedBy: "none" };
 const VERSION_CAVEAT = "full text read from an open version of this work, not the version of record";
 
-function fromWork(work: Work, matchedBy: Hydrated["matchedBy"]): Hydrated {
+export function fromWork(work: Work, matchedBy: Hydrated["matchedBy"]): Hydrated {
   const authors = authorsOf(work);
   const pdf = oaUrl(work);
   const abstract = abstractFromInverted(work.abstract_inverted_index);

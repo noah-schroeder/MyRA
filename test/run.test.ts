@@ -207,8 +207,11 @@ test("readRun assembles what the run actually wrote", async () => {
       quote: "no far transfer to fluid intelligence", start: 18, end: 55,
     });
     await run.append("dropped-claims.jsonl", { source: 1, quote: "invented", reason: "not found verbatim" });
+    await run.finalize("snowball.jsonl"); // traversal off: the stage still completes
     await run.append("verification.jsonl", { sentenceIndex: 0, sentence: "Training does not transfer [1].", source: 1, verdict: "supports", note: "" });
-    await run.write("report.md", "Training does not transfer [1].\n");
+    await run.write("draft.md", "Training does not transfer [1].\n");
+    // Deliberately no review.md or report.md: this run stopped after
+    // verification, which is what the nextStage assertion below checks.
 
     const detail = await readRun(run.id, root);
     assert.equal(detail.question, "does working memory training transfer");
@@ -230,12 +233,11 @@ test("readRun assembles what the run actually wrote", async () => {
     assert.equal(detail.verification[0]!.verdict, "supports");
 
     // Stage state is what a resume would act on, so it must be reported.
-    assert.equal(detail.stages.length, 10);
+    assert.equal(detail.stages.length, 11);
     assert.equal(detail.stages.find((s) => s.stage === "screen")!.done, true);
-    // claims.jsonl exists so extract is done; draft.md does not, so the run
-    // would resume at synthesize -- the FIRST incomplete stage, not the last
-    // one to have written anything.
-    assert.equal(detail.nextStage, "synthesize");
+    // verification.jsonl exists so verify is done; review.md does not, so the
+    // run resumes there.
+    assert.equal(detail.nextStage, "review");
 
     // The located passage resolves to the exact characters in the stored text.
     const source = await readRunSource(run.id, 1, root);
@@ -266,6 +268,48 @@ test("listRuns survives a half-created run directory", async () => {
     assert.ok(runs.some((r) => r.question === "a real run"));
     // The broken one falls back to its id rather than hiding the other.
     assert.ok(runs.some((r) => r.question === "2026-01-01-broken-0000"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/*
+ * Adding a stage must not rewrite the history of finished runs.
+ *
+ * `snowball` was inserted between screen and retrieve. Without this, every run
+ * completed before it existed would report itself as "unfinished at snowball"
+ * in the run list -- describing a gap in the middle of a finished run as a
+ * stopping point.
+ */
+test("a run from before a stage existed is not reported as unfinished", async () => {
+  const { ResearchRun, STAGES } = await import("../src/core/research/run.ts");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = await mkdtemp(join(tmpdir(), "karen-oldrun-"));
+  try {
+    const run = await ResearchRun.create("an older run", root);
+    // Everything except the stage that did not exist when this run happened.
+    await run.writeJson("scope.json", {});
+    await run.write("plan.md", "x");
+    await run.write("candidates.jsonl", "");
+    await run.write("screened.jsonl", "");
+    await run.write("sources/index.jsonl", "");
+    await run.write("claims.jsonl", "");
+    await run.write("draft.md", "x");
+    await run.write("verification.jsonl", "");
+    await run.write("review.md", "x");
+    await run.write("report.md", "x");
+    assert.equal(run.isDone("snowball"), false);
+    assert.equal(run.nextStage(), undefined, "a finished run has no next stage");
+
+    // A genuinely interrupted run still reports where it stopped.
+    const stopped = await ResearchRun.create("an interrupted run", root);
+    await stopped.writeJson("scope.json", {});
+    await stopped.write("plan.md", "x");
+    assert.equal(stopped.nextStage(), "discover");
+    assert.equal(STAGES.includes("snowball"), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

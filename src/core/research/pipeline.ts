@@ -13,10 +13,10 @@
  */
 
 import { effectiveCategory, readResearchConfig } from "./config.ts";
-import { isScholarlyCategory, search } from "./providers.ts";
+import { isScholarlyCategory, search, workToHit } from "./providers.ts";
 import { dedupe, type SearchHit } from "./types.ts";
 import { canonicalUrl } from "./html.ts";
-import { hydrateHits, type Hydrated } from "./hydrate.ts";
+import { fromWork, hydrateHits, type Hydrated } from "./hydrate.ts";
 import { fetchPage, pooled } from "./fetch.ts";
 import { FETCH_CONCURRENCY } from "./config.ts";
 import { embedTexts, embeddingEndpoint, rankBySimilarity } from "./embed.ts";
@@ -29,6 +29,9 @@ import { makeSourceRecord, renderBibliography, verifyQuotes, type SourceRecord }
 import { generateQueries, parsePlan, renderPlan, type Plan } from "./plan.ts";
 import { applyAnswers, draftScope, type Scope, type ScopeQuestion } from "./scope.ts";
 import { rubricText } from "./rubrics.ts";
+import { collapseDuplicates, identityKey, type Dedupable } from "./dedupe.ts";
+import { openAlexByDoi, openAlexByIds } from "./openalex.ts";
+import { coCitationThreshold, coCitedWorks } from "./snowball.ts";
 import { toBibtex, toCslJson } from "./export.ts";
 import { readRoleConfig, resolveRoles } from "./roles.ts";
 import type { ResearchRun } from "./run.ts";
@@ -174,6 +177,10 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       pages: 2,
       screenTop: 150,
       fullTexts: 30,
+      // Off by default: a round of traversal roughly doubles a run's length,
+      // and it should be a decision you make in the plan rather than one the
+      // app makes for you.
+      snowball: 0,
       roles,
       // Settings owns the embeddings endpoint, so its model is the default;
       // the saved role assignment only fills in when Settings has none.
@@ -247,16 +254,26 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       );
     }
 
-    for (const [i, { hit, query }] of hits.entries()) {
+    /*
+     * Collapse the same paper found twice, now that hydration has supplied the
+     * DOIs. Discovery could only dedupe by URL, which misses both of the cases
+     * these providers produce constantly: the arXiv PDF and the OpenAlex record
+     * of one preprint, and a preprint alongside its published version.
+     */
+    interface Row extends Dedupable {
+      engine?: string;
+      foundBy: number;
+      authors?: string[];
+    }
+    const rows: Row[] = hits.map(({ hit, query }, i) => {
       const h = hydrated[i];
-      await run.appendPartial("candidates.jsonl", {
+      return {
         id: i + 1,
         url: hit.url,
         title: hit.title,
-        dedupeKey: canonicalUrl(hit.url ?? ""),
-        engine: hit.engine,
         foundBy: query,
         abstract: h?.abstract ?? hit.content,
+        ...(hit.engine ? { engine: hit.engine } : {}),
         ...(h?.year ? { year: h.year } : {}),
         ...(h?.venue ? { venue: h.venue } : {}),
         ...(h?.doi ? { doi: h.doi } : {}),
@@ -264,10 +281,27 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         ...(h?.citedBy !== undefined ? { citedBy: h.citedBy } : {}),
         ...(h?.pdfUrl ? { pdfUrl: h.pdfUrl } : {}),
         ...(h?.note ? { note: h.note } : {}),
+      };
+    });
+
+    const { rows: unique, merged } = collapseDuplicates(rows);
+    for (const m of merged) await run.append("merged.jsonl", m);
+    if (merged.length) {
+      say(`${merged.length} duplicate record(s) collapsed into the paper they duplicate`);
+    }
+
+    // Ids are assigned AFTER collapsing, so a citation number always refers to
+    // one paper and the numbers have no gaps.
+    for (const [i, row] of unique.entries()) {
+      const { id: _discard, ...rest } = row as Row & { id: number };
+      await run.appendPartial("candidates.jsonl", {
+        ...rest,
+        id: i + 1,
+        dedupeKey: identityKey(row),
       });
     }
     await run.finalize("candidates.jsonl");
-    say(`${hits.length} candidates found`);
+    say(`${unique.length} candidates found`);
   }
 
   interface StoredCandidate extends Candidate {
@@ -348,12 +382,128 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     throw new Error("screening excluded every candidate — the criteria in the plan may be too narrow");
   }
 
-  /* ---------------- 5. retrieve ---------------- */
+  /* ---------------- 5. snowball ---------------- */
+
+  /*
+   * Backward citation-graph traversal.
+   *
+   * Keyword search finds papers whose TITLE uses the vocabulary you searched
+   * for. The foundational paper a literature is built on usually does not: it
+   * was written before the field settled on those words, and it surfaces only
+   * because everyone cites it. `referenced_works` was already being fetched on
+   * every hit and only its LENGTH was ever used.
+   *
+   * The co-citation threshold is what keeps this affordable and what makes it
+   * good. Forty included papers cite perhaps two thousand works between them;
+   * taking all of them would swamp screening with one-off references. Taking
+   * only what SEVERAL included papers cite surfaces the shared ancestry of the
+   * literature, which is exactly what a review wants.
+   */
+  checkpoint("snowball");
+  if (!run.isDone("snowball")) {
+    if (plan.snowball < 1) {
+      await run.finalize("snowball.jsonl"); // writes empty: the stage is done
+    } else {
+      const byId = new Map(candidates.map((c) => [c.id, c]));
+      const seen = new Set(candidates.map((c) => identityKey(c as Dedupable)));
+      let seeds = included.map((d) => byId.get(d.id)).filter((c): c is StoredCandidate => !!c);
+      let nextId = candidates.length;
+
+      for (let round = 1; round <= plan.snowball; round++) {
+        checkpoint("snowball");
+        const withDoi = seeds.filter((c) => c.doi);
+        say(`snowball round ${round}: reading references of ${withDoi.length} paper(s)…`);
+
+        /* The single-entity DOI lookup is unmetered, so collecting references
+         * for every seed costs nothing against the daily credit budget. */
+        let read = 0;
+        const works = await pooled(withDoi, FETCH_CONCURRENCY, async (c) => {
+          const work = await openAlexByDoi(c.doi!, opts.signal).catch(() => undefined);
+          say(`snowball round ${round}: ${++read}/${withDoi.length}`);
+          return work;
+        });
+
+        const threshold = coCitationThreshold(withDoi.length);
+        const wanted = coCitedWorks(
+          works.map((w) => w?.referenced_works),
+          { threshold, limit: plan.screenTop },
+        ).map((c) => c.id);
+
+        if (wanted.length === 0) {
+          say(`snowball round ${round}: nothing was cited by ${threshold} or more papers`);
+          break;
+        }
+
+        say(`snowball round ${round}: fetching ${wanted.length} co-cited work(s)…`);
+        const found = await openAlexByIds(wanted, opts.signal);
+        const fresh: StoredCandidate[] = [];
+        for (const work of found) {
+          const hit = workToHit(work);
+          if (!hit) continue;
+          const row: Dedupable = {
+            id: 0, url: hit.url, title: hit.title,
+            ...(work.doi ? { doi: work.doi } : {}),
+          };
+          const key = identityKey(row);
+          if (seen.has(key)) continue; // already a candidate from the sweep
+          seen.add(key);
+          const h = fromWork(work, "provider");
+          fresh.push({
+            id: ++nextId,
+            url: hit.url,
+            title: hit.title,
+            abstract: h.abstract ?? hit.content,
+            ...(h.year ? { year: h.year } : {}),
+            ...(h.venue ? { venue: h.venue } : {}),
+            ...(h.doi ? { doi: h.doi } : {}),
+            ...(h.authors ? { authors: h.authors } : {}),
+            ...(h.citedBy !== undefined ? { citedBy: h.citedBy } : {}),
+            ...(h.pdfUrl ? { pdfUrl: h.pdfUrl } : {}),
+            ...(h.note ? { note: h.note } : {}),
+          });
+        }
+
+        if (fresh.length === 0) {
+          say(`snowball round ${round}: every co-cited work was already a candidate`);
+          break;
+        }
+
+        say(`snowball round ${round}: screening ${fresh.length} new candidate(s)…`);
+        const { decisions: more } = await screenCandidates({
+          scope: { question: scope.question, include: scope.include, exclude: scope.exclude },
+          candidates: fresh,
+          model: plan.roles.screener,
+          rubric: await rubricText("screening"),
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          cwd,
+          onProgress: (d, t) => say(`snowball round ${round}: screened ${d}/${t}`),
+          onDelta: stream("screening (snowball)"),
+        });
+
+        for (const c of fresh) await run.appendPartial("snowball.jsonl", { ...c, round });
+        for (const d of more) await run.append("screened-snowball.jsonl", { ...d, round });
+
+        seeds = fresh.filter((c) => more.find((d) => d.id === c.id)?.include);
+        say(`snowball round ${round}: ${seeds.length} of ${fresh.length} kept`);
+        if (seeds.length === 0) break;
+      }
+      await run.finalize("snowball.jsonl");
+    }
+  }
+
+  /* Snowballed papers are candidates and decisions like any others from here
+   * on -- the only difference is how they were found. */
+  const snowballed = await run.readJsonl<StoredCandidate>("snowball.jsonl");
+  const snowballDecisions = await run.readJsonl<Decision>("screened-snowball.jsonl");
+  const allCandidates = [...candidates, ...snowballed];
+  const allIncluded = [...included, ...snowballDecisions.filter((d) => d.include)];
+
+  /* ---------------- 6. retrieve ---------------- */
 
   checkpoint("retrieve");
   if (!run.isDone("retrieve")) {
-    const byId = new Map(candidates.map((c) => [c.id, c]));
-    const wanted = included
+    const byId = new Map(allCandidates.map((c) => [c.id, c]));
+    const wanted = allIncluded
       .map((d) => byId.get(d.id))
       .filter((c): c is StoredCandidate => !!c)
       .slice(0, plan.fullTexts);
@@ -410,6 +560,10 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         rubric: await rubricText("extraction"),
         ...(opts.signal ? { signal: opts.signal } : {}),
         cwd,
+        // A long paper is read in parts now, so say which part: a source that
+        // takes four calls otherwise looks like a stalled one.
+        onChunk: (n, of) =>
+          of > 1 ? say(`extracting [${source.n}] part ${n}/${of}: ${source.title.slice(0, 40)}`) : undefined,
         onDelta: stream(`extracting [${source.n}]`),
       });
       for (const c of claims) await run.appendPartial("claims.jsonl", c);

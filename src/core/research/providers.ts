@@ -76,7 +76,7 @@ export function isScholarlyCategory(category: string | undefined): boolean {
  * identifies, and the pipeline fetches `pdfUrl ?? url`, so the open copy is
  * still what gets read.
  */
-function workToHit(w: Work): SearchHit | undefined {
+export function workToHit(w: Work): SearchHit | undefined {
   const url =
     (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi\.org\//, "")}` : undefined) ??
     oaUrl(w) ??

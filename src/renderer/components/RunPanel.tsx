@@ -272,6 +272,11 @@ function Screening({ detail }: { detail: RunDetail }) {
               {/* A candidate the model never mentioned was KEPT rather than
                   dropped, and the run has to say which those were. */}
               {d.defaulted ? <span className="pill warn">no decision returned — kept</span> : null}
+              {/* Found by following citations rather than by any query, which
+                  is exactly the provenance a reader wants to know. */}
+              {d.snowballRound !== undefined ? (
+                <span className="pill">cited by included papers</span>
+              ) : null}
             </p>
           </li>
         ))}

@@ -29,6 +29,7 @@ const plan: Plan = {
   pages: 2,
   screenTop: 150,
   fullTexts: 30,
+  snowball: 0,
   roles: { screener: "local/small", analyst: "local/mid", synthesist: "local/big", reviewer: "local/other" },
   embedModel: "nomic-embed",
 };
@@ -188,4 +189,24 @@ test("the run resumes at the first stage with no output", async () => {
   await run.writeJson("scope.json", { question: "q" });
   await run.write("plan.md", "# plan");
   assert.equal(run.nextStage(), "discover");
+});
+
+/*
+ * Snowballing is off unless you ask for it, and 0 is a real answer.
+ *
+ * Every other limit rejects anything below 1, which would make "do not
+ * traverse" unexpressible -- so this one is parsed separately.
+ */
+test("snowball rounds accept zero and are clamped at two", () => {
+  assert.equal(parsePlan(renderPlan(plan), plan).snowball, 0);
+
+  const one = renderPlan(plan).replace("snowball: 0", "snowball: 1");
+  assert.equal(parsePlan(one, plan).snowball, 1);
+
+  // Each round screens a fresh batch, so the cost compounds.
+  const many = renderPlan(plan).replace("snowball: 0", "snowball: 9");
+  assert.equal(parsePlan(many, plan).snowball, 2);
+
+  const bad = renderPlan(plan).replace("snowball: 0", "snowball: -1");
+  assert.throws(() => parsePlan(bad, plan), (e: Error) => /0 or more/.test(e.message));
 });

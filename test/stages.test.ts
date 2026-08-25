@@ -294,3 +294,61 @@ test("candidates with no recorded query share one bucket rather than starving th
   assert.equal(kept.filter((c) => c.foundBy === undefined).length, 5);
   assert.equal(kept.filter((c) => c.foundBy === 0).length, 5);
 });
+
+/*
+ * A long paper is extracted in parts.
+ *
+ * Retrieval truncates at 60k characters and the whole thing went to the model
+ * in one call: ~15k tokens, which overflows a 32k-context local model once the
+ * reply is accounted for, and on a long paper the truncation lands in the
+ * results and discussion -- the half the question is answered from.
+ */
+test("chunking splits on paragraph boundaries, never mid-sentence", async () => {
+  const { chunkText } = await import("../src/core/research/extract.ts");
+  const para = (n: number) => `Paragraph ${n}. ${"word ".repeat(40)}`.trim();
+  const text = Array.from({ length: 30 }, (_, i) => para(i)).join("\n\n");
+
+  const chunks = chunkText(text, 1_000);
+  assert.ok(chunks.length > 1, "a long document should be split");
+  for (const c of chunks) {
+    // A boundary landing mid-sentence would make any passage spanning it
+    // unlocatable: the model quotes across the join and the verbatim check
+    // correctly rejects it.
+    assert.match(c.trimStart(), /^Paragraph \d+\./);
+    assert.ok(c.trimEnd().endsWith("word"));
+  }
+  // Nothing is lost or duplicated in the split.
+  assert.equal(chunks.join("\n\n"), text);
+});
+
+test("a short source is one chunk, unchanged", async () => {
+  const { chunkText } = await import("../src/core/research/extract.ts");
+  assert.deepEqual(chunkText("short text", 1_000), ["short text"]);
+});
+
+test("a single oversized paragraph is passed through whole rather than cut", async () => {
+  const { chunkText } = await import("../src/core/research/extract.ts");
+  // A PDF extracted with no blank lines. An oversized chunk is recoverable;
+  // an unlocatable quote is not.
+  const huge = "x".repeat(5_000);
+  assert.deepEqual(chunkText(huge, 1_000), [huge]);
+});
+
+test("passages are located against the whole file, not against their chunk", async () => {
+  const { locateClaims } = await import("../src/core/research/extract.ts");
+  const head = "Introduction. ".repeat(200);
+  const finding = "The effect was absent in the replication sample.";
+  const full = `${head}\n\n${finding}`;
+
+  // A claim extracted from the SECOND chunk, located against the full text.
+  const located = locateClaims(
+    JSON.stringify([{ question: "q", claim: "no effect", quote: finding }]),
+    1,
+    full,
+  );
+  assert.equal(located.claims.length, 1);
+  assert.equal(full.slice(located.claims[0]!.start, located.claims[0]!.end), finding);
+  // Offsets must point past the first chunk, or "open this citation" opens the
+  // wrong part of the document.
+  assert.ok(located.claims[0]!.start > head.length - 1);
+});

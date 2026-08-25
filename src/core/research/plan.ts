@@ -27,6 +27,16 @@ export interface Plan {
   screenTop: number;
   /** How many screened-in papers are read in full. */
   fullTexts: number;
+  /**
+   * Rounds of backward citation-graph traversal ("snowballing"). 0 is off.
+   *
+   * Each round takes the papers screening kept, collects what they cite, and
+   * puts the works cited by SEVERAL of them through screening as well. That
+   * co-citation filter is the point: it surfaces the paper everyone in a
+   * literature builds on, which keyword search reliably misses because its
+   * title uses the vocabulary of thirty years ago.
+   */
+  snowball: number;
   roles: ResolvedRoles;
   embedModel?: string;
 }
@@ -66,6 +76,7 @@ export function renderPlan(plan: Plan): string {
     `pages: ${plan.pages}`,
     `screen_top: ${plan.screenTop}`,
     `full_texts: ${plan.fullTexts}`,
+    `snowball: ${plan.snowball ?? 0}`,
     ``,
     `## Models`,
     `screener: ${plan.roles.screener}`,
@@ -147,6 +158,19 @@ function number(values: Map<string, string>, key: string, fallback: number, max:
   return Math.min(Math.floor(n), max);
 }
 
+/** Snowball rounds, where 0 means "do not traverse" rather than "invalid". */
+function rounds(values: Map<string, string>, fallback: number): number {
+  const raw = values.get("snowball");
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new PlanError(`snowball must be 0 or more, got "${raw}"`);
+  }
+  // Each round screens a fresh batch of papers, so the cost compounds; two is
+  // already a long run.
+  return Math.min(Math.floor(n), 2);
+}
+
 /**
  * Parse an edited plan, and reject what cannot work.
  *
@@ -212,6 +236,9 @@ export function parsePlan(text: string, previous: Plan, knownModels?: string[]):
     pages: number(limits, "pages", previous.pages, 10),
     screenTop: number(limits, "screen_top", previous.screenTop, 1000),
     fullTexts: number(limits, "full_texts", previous.fullTexts, 100),
+    // Zero is meaningful here, unlike every other limit, so it cannot go
+    // through number() -- which rejects anything below 1.
+    snowball: rounds(limits, previous.snowball ?? 0),
     roles: {
       screener: roleOf("screener"),
       analyst: roleOf("analyst"),

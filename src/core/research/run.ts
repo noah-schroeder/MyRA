@@ -20,7 +20,7 @@ import type { SourceRecord } from "./sources.ts";
 
 /** Stages in execution order. A run resumes at the first one with no output. */
 export const STAGES = [
-  "scope", "plan", "discover", "screen", "retrieve",
+  "scope", "plan", "discover", "screen", "snowball", "retrieve",
   "extract", "synthesize", "verify", "review", "revise",
 ] as const;
 export type Stage = (typeof STAGES)[number];
@@ -31,6 +31,9 @@ const STAGE_OUTPUT: Record<Stage, string> = {
   plan: "plan.md",
   discover: "candidates.jsonl",
   screen: "screened.jsonl",
+  // Written even when snowballing is off, so the stage is skipped on resume
+  // rather than re-run for a traversal that was never wanted.
+  snowball: "snowball.jsonl",
   retrieve: "sources/index.jsonl",
   extract: "claims.jsonl",
   synthesize: "draft.md",
@@ -99,9 +102,22 @@ export class ResearchRun {
     return existsSync(this.path(STAGE_OUTPUT[stage]));
   }
 
-  /** The first stage with no output: where a resumed run picks up. */
+  /**
+   * Where a resumed run picks up: the first stage with no output.
+   *
+   * A gap with a completed stage AFTER it is not an unfinished run, it is a
+   * run from before that stage existed. Adding `snowball` between screen and
+   * retrieve would otherwise have made every previously completed run report
+   * itself as "unfinished at snowball" -- rewriting history in the run list
+   * rather than describing it.
+   */
   nextStage(): Stage | undefined {
-    return STAGES.find((s) => !this.isDone(s));
+    const done = STAGES.map((s) => this.isDone(s));
+    const lastDone = done.lastIndexOf(true);
+    for (const [i, stage] of STAGES.entries()) {
+      if (!done[i] && i > lastDone) return stage;
+    }
+    return undefined;
   }
 
   /* ---------------- io ---------------- */
@@ -302,10 +318,19 @@ export class ResearchRun {
   async counts(): Promise<{
     found: number; deduped: number; screened: number; read: number; cited: number;
   }> {
-    const candidates = await this.readJsonl<{ dedupeKey?: string }>("candidates.jsonl");
+    // Snowballed papers are candidates like any other -- they were simply found
+    // by traversal rather than by a query -- so they belong in the funnel. A
+    // run that reads 40 papers must not report having found 28.
+    const candidates = [
+      ...(await this.readJsonl<{ dedupeKey?: string }>("candidates.jsonl")),
+      ...(await this.readJsonl<{ dedupeKey?: string }>("snowball.jsonl")),
+    ];
     // The screening stage writes `include`; accept `keep` too so an older run
     // directory still reports a funnel rather than a silent zero.
-    const screened = await this.readJsonl<{ include?: boolean; keep?: boolean }>("screened.jsonl");
+    const screened = [
+      ...(await this.readJsonl<{ include?: boolean; keep?: boolean }>("screened.jsonl")),
+      ...(await this.readJsonl<{ include?: boolean; keep?: boolean }>("screened-snowball.jsonl")),
+    ];
     const sources = await this.sources();
     const draft = (await this.readText("report.md")) ?? (await this.readText("draft.md")) ?? "";
     const cited = new Set(
@@ -427,6 +452,8 @@ export interface RunScreened {
   include: boolean;
   reason: string;
   defaulted?: boolean;
+  /** Set when the paper was reached by citation traversal, not by a query. */
+  snowballRound?: number;
   /** Joined from candidates.jsonl so a decision is readable on its own. */
   title?: string;
   url?: string;
@@ -468,16 +495,24 @@ export async function readRun(id: string, root = researchRoot()): Promise<RunDet
   // Screening decisions are keyed by candidate id and carry only a reason, so
   // join the candidate back on: "excluded — measures attitudes" is only useful
   // next to the title it excluded.
-  const candidates = await run.readJsonl<{
-    id: number; title?: string; url?: string; year?: number; venue?: string; foundBy?: number;
-  }>("candidates.jsonl");
+  type Row = {
+    id: number; title?: string; url?: string; year?: number; venue?: string;
+    foundBy?: number; round?: number;
+  };
+  const candidates = [
+    ...(await run.readJsonl<Row>("candidates.jsonl")),
+    ...(await run.readJsonl<Row>("snowball.jsonl")),
+  ];
   const byId = new Map(candidates.map((c) => [c.id, c]));
 
-  const screened = (
-    await run.readJsonl<{ id: number; include: boolean; reason: string; defaulted?: boolean }>(
+  const screened = [
+    ...(await run.readJsonl<{ id: number; include: boolean; reason: string; defaulted?: boolean }>(
       "screened.jsonl",
-    )
-  ).map((d) => {
+    )),
+    ...(await run.readJsonl<{ id: number; include: boolean; reason: string; defaulted?: boolean }>(
+      "screened-snowball.jsonl",
+    )),
+  ].map((d) => {
     const c = byId.get(d.id);
     return {
       ...d,
@@ -486,6 +521,9 @@ export async function readRun(id: string, root = researchRoot()): Promise<RunDet
       ...(c?.year ? { year: c.year } : {}),
       ...(c?.venue ? { venue: c.venue } : {}),
       ...(c?.foundBy !== undefined ? { foundBy: c.foundBy } : {}),
+      // How this paper was found, which is part of the audit trail: a work
+      // reached by citation traversal was never returned by any query.
+      ...(c?.round !== undefined ? { snowballRound: c.round } : {}),
     };
   });
 

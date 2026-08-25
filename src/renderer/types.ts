@@ -268,6 +268,7 @@ export interface RunDetail extends RunSummary {
   screened: {
     id: number; include: boolean; reason: string; defaulted?: boolean;
     title?: string; url?: string; year?: number; venue?: string; foundBy?: number;
+    snowballRound?: number;
   }[];
   sources: RunSourceRecord[];
   dropped: { source: number; quote: string; reason: string }[];
