@@ -132,18 +132,30 @@ test("unassigned roles fall back to the model the user is already using", async 
   assert.equal(reviewerIsSynthesist(resolveRoles({ models: {} }, "local/one")), true);
 });
 
-test("a role config with a bare model id is ignored, not half-used", async () => {
+/*
+ * A bare model id is what a v2 endpoint actually reports.
+ *
+ * This used to require "provider/id" -- pi's dropdown format -- and silently
+ * DROPPED anything else, so a role saved from the plan editor reverted to the
+ * fallback on the next run and the user could never escape self-review.
+ */
+test("a role config keeps bare model ids, and drops only empty ones", async () => {
   const { readRoleConfig } = await import("../src/core/research/roles.ts");
   const { writeFileSync, mkdtempSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
   const p = join(mkdtempSync(join(tmpdir(), "roles-")), "roles.json");
-  // "big-model" has no provider, so pi could not resolve it; a stage silently
-  // running on the wrong model is worse than a stage falling back visibly.
-  writeFileSync(p, JSON.stringify({ models: { synthesist: "big-model", reviewer: "local/ok" } }));
+  writeFileSync(
+    p,
+    JSON.stringify({ models: { synthesist: "gpt-oss-120b", reviewer: "  ", analyst: "local/ok" } }),
+  );
   const cfg = readRoleConfig(p);
-  assert.equal(cfg.models.synthesist, undefined);
-  assert.equal(cfg.models.reviewer, "local/ok");
+  assert.equal(cfg.models.synthesist, "gpt-oss-120b");
+  // Blank is not a model, and a stage silently running on "" is worse than one
+  // falling back visibly to the app's current model.
+  assert.equal(cfg.models.reviewer, undefined);
+  // A slashed id is still a legitimate model name on many servers.
+  assert.equal(cfg.models.analyst, "local/ok");
 });
 
 /*
@@ -351,4 +363,44 @@ test("passages are located against the whole file, not against their chunk", asy
   // Offsets must point past the first chunk, or "open this citation" opens the
   // wrong part of the document.
   assert.ok(located.claims[0]!.start > head.length - 1);
+});
+
+/*
+ * The plan editor must not be write-only.
+ *
+ * You can name a separate reviewer in the plan and the run honours it -- but
+ * the choice was never saved, so the next run reset every role to the app's
+ * current model and was self-review again. A warning you cannot act on
+ * permanently is not much of a warning.
+ */
+test("role choices survive to the next run", async () => {
+  const { readRoleConfig, writeRoleConfig, resolveRoles } = await import(
+    "../src/core/research/roles.ts"
+  );
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dir = await mkdtemp(join(tmpdir(), "karen-roles-"));
+  const path = join(dir, "research-roles.json");
+  try {
+    await writeRoleConfig(
+      {
+        models: { screener: "small", analyst: "mid", synthesist: "big", reviewer: "other" },
+        embedModel: "nomic-embed",
+      },
+      path,
+    );
+    const back = readRoleConfig(path);
+    assert.equal(back.models.reviewer, "other");
+    assert.equal(back.embedModel, "nomic-embed");
+
+    // And the fallback no longer overrides what was saved, so the next run
+    // does not quietly become self-review.
+    const resolved = resolveRoles(back, "whatever-the-dropdown-says");
+    assert.equal(resolved.reviewer, "other");
+    assert.equal(resolved.synthesist, "big");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
