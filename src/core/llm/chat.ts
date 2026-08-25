@@ -373,6 +373,25 @@ let endpointResolver: () => Promise<{ endpoint: EndpointSettings; apiKey?: strin
   return { endpoint: settings.llm };
 };
 
+/**
+ * Point every stage somewhere else.
+ *
+ * Used by the bundled runtime: when Karen is serving a model itself, the
+ * address and key are known only to the main process and change on every
+ * launch, so reading them from settings on disk would find a stale port. The
+ * research stages have to follow chat to the same server, or a run would talk
+ * to a different model than the conversation that started it.
+ */
+export function setEndpointResolver(
+  fn: (() => Promise<{ endpoint: EndpointSettings; apiKey?: string }>) | undefined,
+): void {
+  endpointResolver = fn ?? (async () => {
+    const store = new ConfigStore();
+    const settings = await store.load();
+    return { endpoint: settings.llm };
+  });
+}
+
 
 function retryable(err: unknown): boolean {
   if (!(err instanceof LlmError)) return false;

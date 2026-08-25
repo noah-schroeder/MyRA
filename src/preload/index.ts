@@ -82,6 +82,32 @@ const api = {
   dictationCancel: () => ipcRenderer.invoke("karen:dictation-cancel"),
   onDictationText: (cb: (text: string) => void) => on("karen:dictation-text", cb),
 
+  /* ---- runtime ----
+   * The bundled llama.cpp: opt-in, driven entirely by buttons in Settings.
+   * Nothing here is reachable by the model -- no tool installs a runtime,
+   * downloads a model, or starts a process. */
+  runtimeState: () => ipcRenderer.invoke("karen:runtime-state"),
+  runtimeConfig: (patch: unknown) => ipcRenderer.invoke("karen:runtime-config", patch),
+  runtimeDetect: () => ipcRenderer.invoke("karen:runtime-detect"),
+  runtimeSetUp: () => ipcRenderer.invoke("karen:runtime-setup"),
+  runtimeCheckUpdates: () => ipcRenderer.invoke("karen:runtime-check-updates"),
+  runtimeInstall: (tag: string, backend: string) => ipcRenderer.invoke("karen:runtime-install", tag, backend),
+  runtimeProbe: () => ipcRenderer.invoke("karen:runtime-probe"),
+  runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
+  runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),
+  runtimeDeleteModel: (path: string) => ipcRenderer.invoke("karen:runtime-delete-model", path),
+  runtimeStart: (modelPath?: string) => ipcRenderer.invoke("karen:runtime-start", modelPath),
+  runtimeStop: () => ipcRenderer.invoke("karen:runtime-stop"),
+  onRuntime: (cb: (state: unknown) => void) => on("karen:runtime", cb),
+  onRuntimeDownload: (cb: (p: unknown) => void) => on("karen:runtime-download", cb),
+
+  /* ---- model search ---- */
+  hfSearch: (query: string, sort?: string) => ipcRenderer.invoke("karen:hf-search", query, sort),
+  hfFiles: (repo: string) => ipcRenderer.invoke("karen:hf-files", repo),
+  hfInspect: (repo: string, entry: string, size: number) =>
+    ipcRenderer.invoke("karen:hf-inspect", repo, entry, size),
+  hfDownload: (repo: string, parts: unknown[]) => ipcRenderer.invoke("karen:hf-download", repo, parts),
+
   /* ---- research ---- */
   /** Academic search the user runs directly. No model in the loop. */
   academicSearch: (query: string, opts: { page?: number; sort?: string }) =>
