@@ -52,6 +52,8 @@ export interface CitedSource {
 
 export interface Usage { input: number; output: number; total: number }
 
+export type Theme = "dark" | "light";
+
 export interface EndpointSettings {
   baseUrl: string;
   envVar: string;
@@ -61,6 +63,7 @@ export interface EndpointSettings {
 
 export interface Settings {
   permissionMode: "manual" | "guarded" | "yolo";
+  theme: Theme;
   llm: EndpointSettings;
   transcription: EndpointSettings;
   embeddings: EndpointSettings;

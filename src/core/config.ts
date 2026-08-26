@@ -23,8 +23,12 @@ export interface EndpointSettings {
   timeoutMs: number;
 }
 
+export type Theme = "dark" | "light";
+
 export interface Settings {
   permissionMode: PermissionMode;
+  /** Dark is the default; the whole palette is defined for both. */
+  theme: Theme;
   llm: EndpointSettings;
   transcription: EndpointSettings;
   /**
@@ -63,6 +67,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   permissionMode: "guarded",
+  theme: "dark",
   llm: { baseUrl: "", envVar: "KAREN_LLM_KEY", timeoutMs: 120_000 },
   transcription: { baseUrl: "", envVar: "KAREN_TRANSCRIPTION_KEY", model: "whisper-1", timeoutMs: 120_000 },
   embeddings: { baseUrl: "", envVar: "KAREN_EMBED_KEY", model: "", timeoutMs: 120_000 },
