@@ -91,16 +91,17 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
     setBusy(true);
     setError(undefined);
     const tag = activeBuild?.tag ?? state.baseline;
-    const result = (await window.karen.runtimeInstall(tag, backend)) as
-      { ok: boolean; error?: string; devices?: RuntimeDevice[]; accelerated?: boolean };
+    const result = await window.karen.runtimeInstall(tag, backend);
     setBusy(false);
     if (result.ok) {
       setDevices(result.devices ?? []);
-      setNote(
-        result.accelerated
-          ? undefined
-          : "That build started, but found no GPU on this machine — it will run on the processor.",
-      );
+      const gpu = result.accelerated
+        ? ""
+        : "That build started, but found no GPU on this machine — it will run on the processor. ";
+      const model = result.unloaded
+        ? `${result.unloaded} was unloaded — press Start to load it again.`
+        : "";
+      setNote(gpu + model || undefined);
       await refresh();
     } else {
       setError(result.error);
@@ -152,7 +153,11 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
     setUpdateNote(
       result.unchanged
         ? "You already had that build."
-        : `Now running ${result.build}. ${result.from} is still installed below.`,
+        : `Now running ${result.build}. ${result.from} is still installed below.` +
+          (result.unloaded
+            ? ` ${result.unloaded} was unloaded so it does not keep running on the old engine — ` +
+              `press Start to load it again.`
+            : ""),
     );
     if (result.devices) setDevices(result.devices);
     await refresh();
@@ -163,7 +168,12 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
     const result = await window.karen.runtimeActivate(id);
     if (!result.ok) setError(result.error);
     else if (result.devices) setDevices(result.devices);
-    setUpdateNote(result.ok ? `Now running ${id}.` : undefined);
+    setUpdateNote(
+      result.ok
+        ? `Now running ${id}.` +
+          (result.unloaded ? ` ${result.unloaded} was unloaded — press Start to load it again.` : "")
+        : undefined,
+    );
     await refresh();
   };
 
@@ -373,15 +383,6 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
                   : "Not running"}
           </p>
           {server.error ? <p className="warning">{server.error}</p> : null}
-          {/* An update moves the pointer; it does not restart a loaded model.
-              Saying so is cheaper than someone wondering why the new build
-              changed nothing. */}
-          {state.serverBuild && activeBuild && state.serverBuild !== activeBuild.id ? (
-            <p className="hint note">
-              This process started from <strong>{state.serverBuild}</strong>. Stop and start it to
-              run on {activeBuild.id}.
-            </p>
-          ) : null}
 
           <label className="checkbox">
             <input

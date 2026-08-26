@@ -237,7 +237,14 @@ export interface KarenApi {
   runtimeInstall(
     tag: string,
     backend: string,
-  ): Promise<{ ok: boolean; error?: string; devices?: RuntimeDevice[]; accelerated?: boolean; build?: string }>;
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    devices?: RuntimeDevice[];
+    accelerated?: boolean;
+    build?: string;
+    unloaded?: string;
+  }>;
   runtimeUpdate(tag?: string): Promise<{
     ok: boolean;
     error?: string;
@@ -246,8 +253,16 @@ export interface KarenApi {
     unchanged?: boolean;
     devices?: RuntimeDevice[];
     accelerated?: boolean;
+    /** The model file that was unloaded to make the switch, if one was. */
+    unloaded?: string;
   }>;
-  runtimeActivate(id: string): Promise<{ ok: boolean; error?: string; build?: string; devices?: RuntimeDevice[] }>;
+  runtimeActivate(id: string): Promise<{
+    ok: boolean;
+    error?: string;
+    build?: string;
+    devices?: RuntimeDevice[];
+    unloaded?: string;
+  }>;
   runtimeRemoveBuild(id: string): Promise<{ ok: boolean; error?: string }>;
   runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
   runtimeCancel(): Promise<{ ok: boolean }>;
@@ -418,9 +433,6 @@ export interface RuntimeState {
   config: RuntimeConfig;
   phase: RuntimePhase;
   server: ServerStatus;
-  /** The build the running process came from; differs from the active one
-   *  between an update and the next restart. */
-  serverBuild?: string;
   suggestion: { backend: Backend; reason: string };
   activeBuild?: { id: string; tag: string; backend: Backend };
   builds: { id: string; tag: string; backend: Backend }[];
