@@ -27,6 +27,27 @@ export interface SessionMeta {
 
 export interface Session extends SessionMeta {
   messages_: ChatMessage[];
+  /**
+   * How much of the model's window this conversation occupies, in tokens.
+   *
+   * Carried across turns so the meter has a figure before the next reply comes
+   * back, and so compaction can decide *before* sending rather than after being
+   * refused. Reopening a session starts it at zero: the number belongs to a
+   * particular model's window, and the next reply corrects it anyway.
+   */
+  contextTokens?: number;
+  /**
+   * The summary standing in for the earliest messages, and how many it covers.
+   *
+   * Stored so it is made once and reused, rather than redone on every turn past
+   * the threshold -- which would cost a full model call per message. The
+   * messages it replaces stay in `messages_` untouched: this records what is
+   * *sent*, not what happened, which is why `saveSession` does not write it.
+   * Reopening a conversation starts from the full history again, correctly: the
+   * summary was made to fit one particular model's window, and the model may
+   * not be the same one.
+   */
+  compaction?: { upTo: number; summary: string };
 }
 
 export function sessionsDir(): string {

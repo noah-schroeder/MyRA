@@ -70,6 +70,8 @@ export interface LaunchSettings {
 export const DEFAULT_SLOTS = 2;
 
 export interface Budget {
+  /** True when the context was left to llama.cpp rather than pinned. */
+  autofit: boolean;
   weightsBytes: number;
   /** The KV cache at this context, exact when the header was readable. */
   cacheBytes: number;
@@ -119,6 +121,7 @@ export function budgetFor(
   const budgetBytes = machine.vramBytes ?? machine.ramBytes;
 
   return {
+    autofit: settings.context === undefined,
     weightsBytes: fileBytes,
     cacheBytes: fit.cacheBytes,
     estimated: fit.estimated,
@@ -214,13 +217,20 @@ export function parseExtraArgs(text: string | undefined): string[] {
 /**
  * The tuning half of llama-server's command line.
  *
+ * `context` is deliberately allowed to be undefined, and that is the default.
+ * llama.cpp's `--fit` is on unless told otherwise, and it adjusts **unset**
+ * arguments to fit in device memory -- so passing `-c` at all is what stops it
+ * working. Leaving it out hands the decision to the thing that can measure free
+ * memory directly, rather than to an estimate built from a file size and a
+ * deliberately generous overhead margin.
+ *
  * Transport -- the model path, the address, the port -- stays in server.ts,
  * because those are not the user's to set and this function's output is shown
  * to them.
  */
 export function launchArgs(
   settings: LaunchSettings,
-  context: number,
+  context?: number,
 ): string[] {
   const args = [
     // Required for tool calling. Upstream enables it by default; being explicit
@@ -233,8 +243,9 @@ export function launchArgs(
      */
     "--kv-unified",
     "-np", String(Math.max(1, settings.slots)),
-    "-c", String(context),
   ];
+  // Only when pinned. Unset is the instruction that lets --fit do its job.
+  if (context !== undefined) args.push("-c", String(context));
 
   if (settings.cacheType !== "f16") {
     // Both halves, deliberately. Quantising K alone saves half of what people

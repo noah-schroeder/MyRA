@@ -197,6 +197,24 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
         res.status,
       );
     }
+    /*
+     * Too long for the window, stated in words rather than in JSON.
+     *
+     * llama.cpp answers 400 with `exceed_context_size_error` and, helpfully,
+     * both numbers. Summarising older messages cannot rescue this when the new
+     * message alone is over the limit, so the only useful thing to do is say
+     * what happened and what would fix it -- the raw body reads as a crash.
+     */
+    const oversize = parseOversize(body);
+    if (oversize) {
+      throw new LlmError(
+        `That message is too long for this model. It needs about ` +
+          `${oversize.needed.toLocaleString()} tokens and the model can hold ` +
+          `${oversize.limit.toLocaleString()}. Send less at once, or give the model a larger ` +
+          `context in Models → Configure.`,
+        res.status,
+      );
+    }
     throw new LlmError(
       `The LLM endpoint failed: ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`,
       res.status,
@@ -402,6 +420,30 @@ export function setEndpointResolver(
   });
 }
 
+
+/**
+ * Pull the two numbers out of llama.cpp's context-overflow error.
+ *
+ * Matched on the machine-readable `type` rather than on the prose, which is
+ * upstream's to reword. Returns undefined for every other 400 so that a real
+ * bad request is still reported as itself.
+ */
+export function parseOversize(body: string): { needed: number; limit: number } | undefined {
+  if (!body.includes("exceed_context_size_error")) return undefined;
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { n_prompt_tokens?: number; n_ctx?: number };
+    };
+    const needed = parsed.error?.n_prompt_tokens;
+    const limit = parsed.error?.n_ctx;
+    if (typeof needed === "number" && typeof limit === "number") return { needed, limit };
+  } catch {
+    // Truncated at 400 characters, so the JSON may not close. The prose form
+    // below still carries both numbers.
+  }
+  const m = /request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)/.exec(body);
+  return m ? { needed: Number(m[1]), limit: Number(m[2]) } : undefined;
+}
 
 function retryable(err: unknown): boolean {
   if (!(err instanceof LlmError)) return false;

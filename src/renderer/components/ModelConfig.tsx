@@ -127,13 +127,16 @@ export function ModelConfig({
               })
             }
           >
-            <option value="auto">As much as fits ({tokens(budget.context)})</option>
+            <option value="auto">Automatic — about {tokens(budget.context)}</option>
             {choices.map((c) => (
               <option key={c} value={c}>{tokens(c)} tokens</option>
             ))}
           </select>
           <span className="cfg-hint">
-            How much of a conversation the model can see at once. The cache above is what it costs.
+            {budget.autofit
+              ? "llama.cpp measures free memory when the model loads and takes as much as it " +
+                "safely can, so the figure above is an estimate until it starts."
+              : "How much of a conversation the model can see at once. The cache above is what it costs."}
           </span>
         </label>
 

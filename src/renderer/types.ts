@@ -32,7 +32,20 @@ export interface ToolItem {
   status: "running" | "ok" | "error";
 }
 
-export type Item = UserItem | AssistantItem | ToolItem;
+/**
+ * Something the app did to the conversation, said out loud.
+ *
+ * Compaction rewrites what the model is sent, so it has to be visible: an
+ * assistant that quietly forgets the first half of a conversation is
+ * indistinguishable from one that is broken.
+ */
+export interface NoticeItem {
+  id: string;
+  kind: "notice";
+  text: string;
+}
+
+export type Item = UserItem | AssistantItem | ToolItem | NoticeItem;
 
 /** A source a tool retrieved, so [n] markers in the prose can resolve. */
 export interface CitedSource {
@@ -50,7 +63,15 @@ export interface CitedSource {
   via?: string;
 }
 
-export interface Usage { input: number; output: number; total: number }
+export interface Usage {
+  input: number;
+  output: number;
+  total: number;
+  /** What the conversation currently occupies in the model's window. */
+  contextTokens?: number;
+  /** The window itself. Only known for a model Karen started. */
+  contextLimit?: number;
+}
 
 export type Theme = "dark" | "light";
 
@@ -139,7 +160,9 @@ export interface MeetingState {
 }
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "done" | "error";
+  type:
+    | "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error"
+    | "compacted" | "done" | "error";
   text?: string;
   toolCallId?: string;
   tool?: string;
@@ -432,6 +455,9 @@ export interface ServerStatus {
   error?: string;
   log: string[];
   pid?: number;
+  /** Tokens one conversation gets, read from the running server's /props. */
+  contextSize?: number;
+  slots?: number;
 }
 
 export interface RuntimeState {
@@ -460,6 +486,8 @@ export interface LaunchSettings {
 }
 
 export interface LaunchBudget {
+  /** True when the context was left for llama.cpp's --fit to size. */
+  autofit: boolean;
   weightsBytes: number;
   cacheBytes: number;
   estimated: boolean;

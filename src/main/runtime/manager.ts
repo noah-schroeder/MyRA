@@ -584,7 +584,13 @@ export class RuntimeManager {
     const machine = this.machine(devices);
     const budget = budgetFor(size, machine, settings, shape);
     try {
-      return { settings, budget, args: launchArgs(settings, budget.context) };
+      /*
+       * `settings.context`, not `budget.context`. The budget resolves auto to an
+       * estimate so the panel has a number to draw; the command line must leave
+       * it unset, which is what lets llama.cpp's --fit size it against real free
+       * memory instead.
+       */
+      return { settings, budget, args: launchArgs(settings, settings.context) };
     } catch (err) {
       // A rejected extra argument must not stop the budget rendering: the
       // person is mid-sentence in a text field, and blanking the panel they

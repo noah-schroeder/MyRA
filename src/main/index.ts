@@ -32,7 +32,8 @@ import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
-import { setEndpointResolver } from "../core/llm/chat.ts";
+import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
+import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import { readResearchConfig, researchConfigPath } from "../core/research/config.ts";
@@ -218,18 +219,59 @@ async function handleSend(text: string): Promise<void> {
      */
     const managed = runtime.chatEndpoint();
     const apiKey = managed ? managed.apiKey : await vault.get("llmKey");
+    const endpoint = managed ? { ...settings.llm, baseUrl: managed.baseUrl } : settings.llm;
+    /*
+     * Only a model Karen started can say how big its window is -- it is read
+     * from that server's own /props. For an endpoint someone else runs there is
+     * no honest number, so the meter and the compaction both stand down rather
+     * than act on a guess.
+     */
+    const limit = managed ? runtime.server.status.contextSize : undefined;
+
     const result = await runTurn({
       registry,
-      endpoint: managed ? { ...settings.llm, baseUrl: managed.baseUrl } : settings.llm,
+      endpoint,
       messages: conversation.messages_,
       system: SYSTEM_PROMPT,
       ...(apiKey ? { apiKey } : {}),
       signal: inFlight.signal,
       approve,
       onEvent: (event: AgentEvent) => send("karen:agent-event", event),
+      ...(limit ? { contextLimit: limit } : {}),
+      contextUsed: conversation.contextTokens ?? 0,
+      ...(conversation.compaction ? { compaction: conversation.compaction } : {}),
+      /*
+       * Summarised by the same model that is holding the conversation, on
+       * purpose: it already has the vocabulary of this particular exchange, and
+       * introducing a second model here would mean a second endpoint to
+       * configure for a step the user never asked to think about.
+       */
+      summarise: async (messages) => {
+        const { text } = await runSubagent({
+          endpoint,
+          ...(apiKey ? { apiKey } : {}),
+          // Whatever the endpoint is already serving. The bundled runtime
+          // serves exactly one model and ignores this; a remote endpoint that
+          // needs a name has it in settings.
+          model: settings.llm.model ?? "",
+          system: SUMMARY_SYSTEM,
+          prompt: summaryPrompt(messages),
+          signal: inFlight!.signal,
+        });
+        return text;
+      },
     });
     conversation.messages_.push(...result.messages);
-    send("karen:agent-event", { type: "done", result: JSON.stringify(result.usage) });
+    conversation.contextTokens = result.contextTokens;
+    if (result.compaction) conversation.compaction = result.compaction;
+    send("karen:agent-event", {
+      type: "done",
+      result: JSON.stringify({
+        ...result.usage,
+        contextTokens: result.contextTokens,
+        ...(limit ? { contextLimit: limit } : {}),
+      }),
+    });
   } catch (err) {
     send("karen:agent-event", { type: "error", text: (err as Error).message });
   } finally {

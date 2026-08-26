@@ -551,6 +551,9 @@ kbd {
   font-family: var(--mono); font-variant-numeric: tabular-nums;
   box-shadow: var(--lift);
 }
+/* The meter decides whether it has anything to say; when it does not, the bar
+   should not sit there as an empty 28px strip with a rule above it. */
+.statusbar:empty { display: none; }
 
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -2535,3 +2538,33 @@ p.warning { margin: 0; font-size: 12.5px; }
   background: var(--bg-float); border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
 }
 .cfg-actions button:not(.primary-sm):hover { color: var(--text); border-color: var(--border-hover); }
+
+/* ==========================================================================
+   Context meter — how much of the window is in use
+   ==========================================================================
+   Running out of context is the most confusing failure an assistant has: it
+   starts forgetting the start of the conversation with nothing on screen
+   having changed. The bar turns this into a gauge, and changes colour at the
+   point where Karen summarises rather than at some other number.
+   ========================================================================== */
+
+.meter { display: inline-flex; align-items: center; gap: 8px; }
+.meter-bar {
+  display: block; width: 72px; height: 4px; border-radius: 2px;
+  background: var(--bg-float); overflow: hidden;
+}
+.meter-bar > span {
+  display: block; height: 100%; background: var(--accent-dim);
+  transition: width var(--t-med), background var(--t-med);
+}
+.meter-bar.half > span { background: var(--accent); }
+.meter-bar.full > span { background: var(--amber); }
+.meter-text, .meter-plain { font-variant-numeric: tabular-nums; }
+
+/* Something the app did to the conversation, set apart from what was said. */
+.notice {
+  align-self: center; max-width: 74ch; margin: 0;
+  padding: 5px 12px; border-radius: 999px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--text-faint);
+}
