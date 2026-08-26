@@ -57,6 +57,8 @@ const api = {
   setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
   getResearch: () => ipcRenderer.invoke("karen:get-research"),
   engines: () => ipcRenderer.invoke("karen:engines"),
+  mediaAccess: () => ipcRenderer.invoke("karen:media-access"),
+  requestMicrophone: () => ipcRenderer.invoke("karen:request-microphone"),
   installPandoc: () => ipcRenderer.invoke("karen:install-pandoc"),
   onSetupProgress: (cb: (p: unknown) => void) => on("karen:setup-progress", cb),
   privacy: () => ipcRenderer.invoke("karen:privacy"),

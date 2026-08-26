@@ -97,9 +97,21 @@ function pattern(t: Target): RegExp | undefined {
         return new RegExp(`-bin-ubuntu-vulkan-${a}\\.tar\\.gz$`);
       case "rocm":
         return new RegExp(`-bin-ubuntu-rocm-[^-]*-${a}\\.tar\\.gz$`);
-      // Deliberately absent: upstream publishes no Linux CUDA asset. Checked
-      // across b10598..b10629. See RUNTIME-PLAN.md R7 -- an NVIDIA card on
-      // Linux takes the Vulkan build until we build CUDA ourselves.
+      /*
+       * Linux CUDA: written for an asset that does not exist yet.
+       *
+       * Upstream publishes Windows CUDA and Linux ROCm but no Linux CUDA build
+       * -- rechecked at b10642, which still lists ubuntu builds for cpu, vulkan,
+       * rocm, sycl and openvino and nothing else. This pattern follows their own
+       * naming exactly (`-bin-ubuntu-rocm-7.14-x64.tar.gz` becomes
+       * `-bin-ubuntu-cuda-12.4-x64.tar.gz`), so if they start publishing one it
+       * is picked up with no code change; until then `pickAsset` finds nothing
+       * and the caller falls back, which is the behaviour this replaces.
+       *
+       * This has never matched a real asset. See RUNTIME-PLAN.md R7.
+       */
+      case "cuda":
+        return new RegExp(`-bin-ubuntu-cuda-[^-]*-${a}\\.tar\\.gz$`);
       default:
         return undefined;
     }

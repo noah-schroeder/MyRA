@@ -82,6 +82,35 @@ export function suggestBackend(platform: NodeJS.Platform, arch: string, gpu: Gpu
     return { backend: "cuda", reason: "NVIDIA card detected, and this system reports no Vulkan support." };
   }
 
+  /*
+   * A real card that Chromium says has no Vulkan is still worth one attempt.
+   *
+   * `hardwareSupportsVulkan` is Chromium's answer about Chromium's own
+   * rendering path, and it reports false in situations where llama.cpp's Vulkan
+   * backend works perfectly well -- a headless or EGL session, a machine where
+   * the browser fell back to SwiftShader, the NVIDIA proprietary driver under
+   * some X11 configurations. Believing it cost the user CPU-only inference on a
+   * workstation with a 4090 in it, silently.
+   *
+   * The download is 33 MB and `setUp` already probes the installed build with
+   * `--list-devices` and reinstalls the CPU build when nothing accelerated
+   * turns up. So the wrong guess costs one small download; the right guess is
+   * the difference between a usable machine and an unusable one.
+   *
+   * Not extended to virtual GPUs: those are handled above, and a virtio device
+   * genuinely has nothing to offer.
+   */
+  if (has(VENDOR.nvidia) || has(VENDOR.amd) || has(VENDOR.intel)) {
+    const who = has(VENDOR.nvidia) ? "NVIDIA" : has(VENDOR.amd) ? "AMD" : "Intel";
+    return {
+      backend: "vulkan",
+      reason:
+        `${who} card detected. This system reports no Vulkan support, which is often wrong ` +
+        `about what llama.cpp can use, so Karen will try the Vulkan build and fall back to the ` +
+        `processor build if it finds no GPU.`,
+    };
+  }
+
   return {
     backend: "cpu",
     reason:

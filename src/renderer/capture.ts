@@ -138,9 +138,23 @@ export class MeetingCapture {
       } catch (err) {
         // A meeting missed cannot be recovered; a meeting recorded from one
         // side usually can be worked with. So warn and carry on.
+        /* The advice differs by platform because the cause does. On macOS and
+           Windows the main process grants loopback capture and what is left to
+           go wrong is a permission; on Linux there is no loopback capture to
+           grant, and the way to record the far side is to point the microphone
+           at a monitor source. Saying "this needs a virtual audio device"
+           everywhere, as this used to, was wrong on two platforms out of
+           three. */
+        const advice =
+          navigator.userAgent.includes("Mac OS X")
+            ? "On macOS, check System Settings → Privacy & Security → Screen Recording."
+            : navigator.userAgent.includes("Windows")
+              ? "Windows records whatever is playing; check that something is."
+              : "On Linux, choose a monitor source as the microphone in Settings to record " +
+                "the other side of a call.";
         opts.onWarning?.(
           `Recording your side only — system audio was not captured (${(err as Error).message}). ` +
-            `On macOS this needs a virtual audio device.`,
+            advice,
         );
       }
     }

@@ -90,3 +90,40 @@ test("upstream's literal 'no devices' output is understood", () => {
   assert.deepEqual(devices, []);
   assert.equal(hasAccelerator(devices), false);
 });
+
+/*
+ * Written blind, for hardware this was never run on.
+ *
+ * Chromium's `hardwareSupportsVulkan` answers a question about Chromium's own
+ * rendering path, not about what llama.cpp can use. It reports false on
+ * headless and EGL sessions, when the browser has fallen back to SwiftShader,
+ * and under some X11 configurations of the NVIDIA proprietary driver -- all of
+ * which are ordinary states for a Linux workstation with a real card in it.
+ * Believing it meant that machine got CPU-only inference and no explanation.
+ */
+test("a real card with no reported Vulkan still gets one attempt", () => {
+  for (const [vendor, name] of [
+    [VENDOR.nvidia, "NVIDIA"],
+    [VENDOR.amd, "AMD"],
+    [VENDOR.intel, "Intel"],
+  ] as const) {
+    const s = suggestBackend("linux", "x64", { vendorIds: [vendor], supportsVulkan: false });
+    assert.equal(s.backend, "vulkan", `${name} should still try Vulkan`);
+    assert.match(s.reason, /fall back/, "and the reason has to say it might not work");
+  }
+});
+
+test("a virtual GPU is still not given that benefit of the doubt", () => {
+  // The check above must not undo the virtio case: a paravirtual display
+  // adapter has nothing to accelerate with, and a 33 MB download would be spent
+  // to learn what the vendor id already said.
+  const s = suggestBackend("linux", "x64", { vendorIds: [VENDOR.virtio], supportsVulkan: false });
+  assert.equal(s.backend, "cpu");
+});
+
+test("Windows NVIDIA still prefers CUDA over a hopeful Vulkan", () => {
+  // The new fallback sits below the CUDA branch deliberately: on Windows there
+  // is a real CUDA build to download, so a card with no Vulkan takes it.
+  const s = suggestBackend("win32", "x64", { vendorIds: [VENDOR.nvidia], supportsVulkan: false });
+  assert.equal(s.backend, "cuda");
+});

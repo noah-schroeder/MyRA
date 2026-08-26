@@ -28,6 +28,32 @@ mac:
   target: [dmg]
   icon: build/icon.png
   category: public.app-category.productivity
+  # Unsigned, deliberately, and not ad-hoc signed.
+  #
+  # electron-builder from v26.0.13 (this repo is on ^26.15.3) has a regression
+  # where an ad-hoc signed app passes signature verification, opens an audio
+  # stream successfully, and then receives nothing: the microphone produces
+  # silence and the camera LED never lights. It does not error. For an app whose
+  # two headline features are dictation and meeting capture, that is the worst
+  # available failure, so `null` skips signing rather than signing ad-hoc.
+  #
+  # The cost is the first-launch "Apple could not verify" dialog, which is one
+  # trip through System Settings → Privacy & Security → Open Anyway. A paid
+  # Developer ID removes the dialog and fixes none of the audio problems.
+  identity: null
+  # macOS refuses microphone access outright unless the app says why it wants
+  # it, and shows this string in the prompt. Written for the person reading it
+  # at the moment they press Record, not for a plist.
+  extendInfo:
+    NSMicrophoneUsageDescription: >-
+      Karen records meetings and takes dictation on this machine. Audio is
+      transcribed locally and never leaves your computer.
+    # Screen Recording has no Info.plist key of its own -- macOS prompts for it
+    # when the capture is attempted -- but system audio is taken through the
+    # same API, and this is the only place to explain that beforehand.
+    NSAudioCaptureUsageDescription: >-
+      Karen records the other side of a call so meeting notes include everyone,
+      not only you. Audio is transcribed locally and never leaves your computer.
 win:
   target: [nsis]
   icon: build/icon.png
