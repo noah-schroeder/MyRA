@@ -12,7 +12,8 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ConfigStore } from "../core/config.ts";
+import { ConfigStore, configuredEndpoints } from "../core/config.ts";
+import { DESTINATIONS } from "../core/destinations.ts";
 import { SecretVault, type SecretName } from "./secrets.ts";
 import { ToolRegistry } from "../core/agent/registry.ts";
 import { runTurn, type AgentEvent } from "../core/agent/loop.ts";
@@ -78,6 +79,15 @@ const runtime = new RuntimeManager();
 let window_: BrowserWindow | undefined;
 let session_: Session | undefined;
 let inFlight: AbortController | undefined;
+
+/**
+ * Requests the window tried to make and was not allowed to make.
+ *
+ * Kept so Settings can show them. An empty list is the expected state and the
+ * one worth being able to see: it is the difference between "we do not phone
+ * home" as a promise and as an observation.
+ */
+const blocked: { url: string; at: string }[] = [];
 
 function send(channel: string, payload?: unknown): void {
   if (window_ && !window_.isDestroyed()) window_.webContents.send(channel, payload);
@@ -347,6 +357,19 @@ function installIpc(): void {
 
   ipcMain.handle("karen:engines", () => engines());
 
+  /*
+   * What Settings shows under "what leaves this machine".
+   *
+   * Rendered from the table rather than written out in the UI, so the claim
+   * cannot drift from the code -- test/destinations.test.ts fails if a host
+   * appears in a fetch and not in the table.
+   */
+  ipcMain.handle("karen:privacy", () => ({
+    destinations: DESTINATIONS,
+    blocked,
+    endpoints: configuredEndpoints(config.current),
+  }));
+
   ipcMain.handle("karen:report-devices", (_e, devices: AudioSource[]) => {
     setDeviceResolver(async () => devices);
   });
@@ -519,6 +542,28 @@ app.whenReady().then(() => {
       responseHeaders: { ...details.responseHeaders, "Content-Security-Policy": [policy] },
     });
   });
+
+  /*
+   * Default-deny egress for the renderer, which is the belt to the CSP's braces.
+   *
+   * The UI makes no network requests at all -- every fetch in this app runs in
+   * the main process, behind IPC -- so the honest policy for the window is
+   * "nothing", and anything that does try is either a dependency phoning home
+   * or a bug. The one exception is the dev server, which serves the modules and
+   * the HMR socket.
+   *
+   * Blocked attempts are counted and shown in Settings rather than dropped in
+   * silence, because a privacy claim you cannot check is a claim you have to
+   * take on faith.
+   */
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ["*://*/*"] }, (details, done) => {
+    if (devServer && details.url.startsWith(devServer.replace(/^http/, "ws"))) return done({});
+    if (devServer && details.url.startsWith(devServer)) return done({});
+    blocked.push({ url: details.url.slice(0, 200), at: new Date().toISOString() });
+    if (blocked.length > 50) blocked.shift();
+    return done({ cancel: true });
+  });
+
   void main();
 
   app.on("activate", () => {

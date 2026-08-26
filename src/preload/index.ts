@@ -57,6 +57,7 @@ const api = {
   setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
   getResearch: () => ipcRenderer.invoke("karen:get-research"),
   engines: () => ipcRenderer.invoke("karen:engines"),
+  privacy: () => ipcRenderer.invoke("karen:privacy"),
 
   /* ---- meetings ----
    * Capture happens in the renderer, because device access is a Web API. The
@@ -92,6 +93,9 @@ const api = {
   runtimeSetUp: () => ipcRenderer.invoke("karen:runtime-setup"),
   runtimeCheckUpdates: () => ipcRenderer.invoke("karen:runtime-check-updates"),
   runtimeInstall: (tag: string, backend: string) => ipcRenderer.invoke("karen:runtime-install", tag, backend),
+  runtimeUpdate: (tag?: string) => ipcRenderer.invoke("karen:runtime-update", tag),
+  runtimeActivate: (id: string) => ipcRenderer.invoke("karen:runtime-activate", id),
+  runtimeRemoveBuild: (id: string) => ipcRenderer.invoke("karen:runtime-remove-build", id),
   runtimeProbe: () => ipcRenderer.invoke("karen:runtime-probe"),
   runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
   runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),

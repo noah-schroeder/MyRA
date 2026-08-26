@@ -37,6 +37,15 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4 6h16M4 12h16M4 18h10" />
     </>
   ),
+  /* A stack of layers: what a quantised model is, and distinct at 16px from
+     the list icon above it. */
+  models: (
+    <>
+      <path d="m12 3 8 4.5-8 4.5-8-4.5Z" />
+      <path d="m4 12 8 4.5 8-4.5" />
+      <path d="m4 16.5 8 4.5 8-4.5" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />

@@ -67,11 +67,23 @@ interface RawTreeEntry {
   lfs?: { oid?: string; size?: number };
 }
 
+/**
+ * Files that end in `.gguf` and are not models.
+ *
+ * An importance matrix -- `imatrix_unsloth.gguf`, `imatrix.dat.gguf` -- is
+ * calibration data used when *producing* a quantisation, and several popular
+ * repositories ship one next to the weights. It is a few megabytes, so it sorts
+ * to the top of a size-ordered list and reads as the cheapest option on offer;
+ * downloading it gets you a file llama-server cannot load.
+ */
+const NOT_A_MODEL = /(^|[/_.-])imatrix([_.-]|$)/i;
+
 export function parseTree(entries: unknown): HfFile[] {
   if (!Array.isArray(entries)) return [];
   const out: HfFile[] = [];
   for (const raw of entries as RawTreeEntry[]) {
     if (!raw?.path || !raw.path.toLowerCase().endsWith(".gguf")) continue;
+    if (NOT_A_MODEL.test(raw.path.slice(raw.path.lastIndexOf("/") + 1))) continue;
     const size = raw.lfs?.size ?? raw.size ?? 0;
     const oid = raw.lfs?.oid;
     out.push({

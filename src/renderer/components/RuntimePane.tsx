@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LocalModel, RuntimeDevice, RuntimeState } from "../types.ts";
-import { ModelBrowser } from "./ModelBrowser.tsx";
 
 /**
  * Running a model on this machine, without a terminal.
@@ -33,7 +32,7 @@ function rate(bytesPerSecond: number): string {
   return `${gb(bytesPerSecond)}/s`;
 }
 
-export function RuntimePane() {
+export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
   const [state, setState] = useState<RuntimeState | undefined>();
   const [devices, setDevices] = useState<RuntimeDevice[]>([]);
   const [models, setModels] = useState<LocalModel[]>([]);
@@ -41,8 +40,9 @@ export function RuntimePane() {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
   const [updateNote, setUpdateNote] = useState<string | undefined>();
+  /** Set once a check has found a build newer than the running one. */
+  const [available, setAvailable] = useState<string | undefined>();
 
   const refresh = useCallback(async () => {
     const next = (await window.karen.runtimeState()) as RuntimeState & { devices?: RuntimeDevice[] };
@@ -109,8 +109,8 @@ export function RuntimePane() {
 
   const checkUpdates = async (): Promise<void> => {
     setUpdateNote("checking…");
-    const result = (await window.karen.runtimeCheckUpdates()) as
-      { ok: boolean; current?: string; newest?: string; behind?: number; error?: string };
+    setAvailable(undefined);
+    const result = await window.karen.runtimeCheckUpdates();
     if (!result.ok) {
       setUpdateNote(result.error);
       return;
@@ -120,12 +120,57 @@ export function RuntimePane() {
       return;
     }
     // Upstream ships several builds a day, so "newer exists" is not the same
-    // recommendation it would be for a normal release feed. Say so.
+    // recommendation it would be for a normal release feed. Say so, and leave
+    // the decision to install with the person reading it.
+    setAvailable(result.newest);
     setUpdateNote(
-      `${result.newest} is available (you have ${result.current}). llama.cpp publishes several ` +
-        `builds most days, so a newer one is not necessarily a better one — these are upstream ` +
-        `nightlies, not tested releases.`,
+      `${result.newest} is available. llama.cpp publishes several builds most days, so a newer ` +
+        `one is not necessarily a better one — these are upstream nightlies, not tested releases. ` +
+        `The build you have now stays installed, so you can go back.`,
     );
+  };
+
+  /**
+   * Install what the check found.
+   *
+   * The old build is left on disk and the active pointer only moves once the
+   * new one has downloaded, verified, unpacked and answered --list-devices --
+   * so the worst case of pressing this is that you press "Use" on the previous
+   * build in the list below.
+   */
+  const installUpdate = async (tag: string): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    setUpdateNote(undefined);
+    const result = await window.karen.runtimeUpdate(tag);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setAvailable(undefined);
+    setUpdateNote(
+      result.unchanged
+        ? "You already had that build."
+        : `Now running ${result.build}. ${result.from} is still installed below.`,
+    );
+    if (result.devices) setDevices(result.devices);
+    await refresh();
+  };
+
+  const useBuild = async (id: string): Promise<void> => {
+    setError(undefined);
+    const result = await window.karen.runtimeActivate(id);
+    if (!result.ok) setError(result.error);
+    else if (result.devices) setDevices(result.devices);
+    setUpdateNote(result.ok ? `Now running ${id}.` : undefined);
+    await refresh();
+  };
+
+  const removeBuild = async (id: string): Promise<void> => {
+    const result = await window.karen.runtimeRemoveBuild(id);
+    if (!result.ok) setError(result.error);
+    await refresh();
   };
 
   const start = async (path?: string): Promise<void> => {
@@ -203,11 +248,55 @@ export function RuntimePane() {
               <button type="button" onClick={() => void checkUpdates()} disabled={busy}>
                 Check for updates
               </button>
+              {available ? (
+                <button
+                  type="button"
+                  className="primary-sm"
+                  onClick={() => void installUpdate(available)}
+                  disabled={busy}
+                >
+                  {busy ? "Installing…" : `Install ${available}`}
+                </button>
+              ) : null}
               <button type="button" onClick={() => void window.karen.runtimeProbe().then(refresh)}>
                 Re-check hardware
               </button>
-              {updateNote ? <span className="status">{updateNote}</span> : null}
             </div>
+            {updateNote ? <p className="hint note">{updateNote}</p> : null}
+
+            {/*
+              * Every build ever installed, and a way back to it.
+              *
+              * This is what makes the update button safe to press: builds go
+              * into their own directories and never overwrite each other, so
+              * "that nightly is worse" costs a click rather than a download.
+              */}
+            {state.builds.length > 1 ? (
+              <>
+                <h4 className="pane-sub">Installed builds</h4>
+                <ul className="build-list">
+                  {state.builds.map((b) => (
+                    <li key={b.id} className={b.id === activeBuild!.id ? "active" : ""}>
+                      <span className="build-tag">{b.tag}</span>
+                      <span className="pill">{b.backend}</span>
+                      <span className="build-spacer" />
+                      {b.id === activeBuild!.id ? (
+                        <span className="dim">in use</span>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => void useBuild(b.id)} disabled={busy}>
+                            Use
+                          </button>
+                          <button type="button" className="danger" onClick={() => void removeBuild(b.id)}>
+                            Remove
+                          </button>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </>
         )}
 
@@ -245,58 +334,24 @@ export function RuntimePane() {
       {installed ? (
         <fieldset className="endpoint">
           <legend>Models</legend>
-
-          {models.length === 0 ? (
-            <p className="hint">
-              No models yet. Karen also looks in LM Studio's and llama.cpp's folders, so if you
-              have models there they will appear here without being downloaded again.
-            </p>
-          ) : (
-            <ul className="model-list">
-              {models.map((m) => (
-                <li key={m.path} className={config.activeModel === m.path ? "active" : ""}>
-                  <div className="model-row">
-                    <span className="model-name">{m.name}</span>
-                    <span className="pill">{m.source}</span>
-                    <span className="dim">{gb(m.size)}</span>
-                  </div>
-                  {m.fit ? <p className={`fit fit-${m.fit.verdict}`}>{m.fit.label}</p> : null}
-                  {m.shape?.hasChatTemplate === false ? (
-                    <p className="fit fit-too-large">
-                      This file has no chat template, so it cannot hold a conversation.
-                    </p>
-                  ) : null}
-                  <div className="endpoint-actions">
-                    <button
-                      type="button"
-                      onClick={() => void start(m.path)}
-                      disabled={server.state === "starting"}
-                    >
-                      {config.activeModel === m.path && server.state === "ready" ? "Restart" : "Use this model"}
-                    </button>
-                    {m.source === "Karen" ? (
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={() =>
-                          void window.karen.runtimeDeleteModel(m.path).then(() => void refreshModels())
-                        }
-                      >
-                        Delete
-                      </button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
+          <p className="hint">
+            {models.length === 0
+              ? "No models yet. Karen also looks in LM Studio's and llama.cpp's folders, so if you " +
+                "have models there they will appear without being downloaded again."
+              : `${models.length} model${models.length === 1 ? "" : "s"} on this machine.`}
+          </p>
+          {/*
+            * Choosing a model is its own screen now, not a list in a dialog.
+            * Comparing quantisations against what this machine can hold is a
+            * task with real content in it -- sizes, fit, what is already
+            * downloaded -- and a fieldset in Settings was the wrong shape.
+            */}
           <div className="endpoint-actions">
-            <button type="button" onClick={() => setBrowsing(true)}>
-              Find models
+            <button type="button" className="primary-sm" onClick={onOpenHub}>
+              Open the model hub
             </button>
             <button type="button" onClick={() => void refreshModels()}>
-              Rescan
+              Rescan folders
             </button>
           </div>
         </fieldset>
@@ -318,6 +373,15 @@ export function RuntimePane() {
                   : "Not running"}
           </p>
           {server.error ? <p className="warning">{server.error}</p> : null}
+          {/* An update moves the pointer; it does not restart a loaded model.
+              Saying so is cheaper than someone wondering why the new build
+              changed nothing. */}
+          {state.serverBuild && activeBuild && state.serverBuild !== activeBuild.id ? (
+            <p className="hint note">
+              This process started from <strong>{state.serverBuild}</strong>. Stop and start it to
+              run on {activeBuild.id}.
+            </p>
+          ) : null}
 
           <label className="checkbox">
             <input
@@ -365,14 +429,6 @@ export function RuntimePane() {
         </fieldset>
       ) : null}
 
-      {browsing ? (
-        <ModelBrowser
-          onClose={() => {
-            setBrowsing(false);
-            void refreshModels();
-          }}
-        />
-      ) : null}
     </div>
   );
 }

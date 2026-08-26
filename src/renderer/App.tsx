@@ -10,6 +10,7 @@ import { ResearchBar } from "./components/ResearchBar.tsx";
 import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
+import { ModelHub } from "./components/ModelHub.tsx";
 import { SearchPanel } from "./components/SearchPanel.tsx";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
@@ -24,6 +25,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMeeting, setShowMeeting] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
+  const [showHub, setShowHub] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
@@ -120,7 +122,22 @@ export function App() {
             icon="runs"
             label="Research runs"
             active={showRuns}
-            onClick={() => setShowRuns((v) => !v)}
+            onClick={() => {
+              setShowRuns((v) => !v);
+              setShowHub(false);
+            }}
+          />
+          {/* Models are a place you go, not a dialog you open on top of a
+              conversation: choosing one means comparing sizes against what this
+              machine can hold, which wants the whole width. */}
+          <RailButton
+            icon="models"
+            label="Models"
+            active={showHub}
+            onClick={() => {
+              setShowHub((v) => !v);
+              setShowRuns(false);
+            }}
           />
         </nav>
 
@@ -140,7 +157,14 @@ export function App() {
         <header className="topbar">
           {/* The one thing that belongs at the top: which model is answering.
               Everything else moved to the rail or into the composer. */}
-          <ModelBar settings={settings} onOpen={() => setShowSettings(true)} />
+          <ModelBar
+            settings={settings}
+            onOpenSettings={() => setShowSettings(true)}
+            onOpenHub={() => {
+              setShowHub(true);
+              setShowRuns(false);
+            }}
+          />
         </header>
 
         {showMeeting && settings ? <MeetingPanel settings={settings} /> : null}
@@ -154,8 +178,9 @@ export function App() {
           * while reading it.
           */}
         {showRuns ? <RunPanel onClose={() => setShowRuns(false)} /> : null}
+        {showHub ? <ModelHub onClose={() => setShowHub(false)} /> : null}
 
-        <div className="thread" hidden={showRuns}>
+        <div className="thread" hidden={showRuns || showHub}>
           {items.length === 0 ? (
             <div className="welcome">
               <h1>What are you working on?</h1>
@@ -211,7 +236,7 @@ export function App() {
           * nor navigation: picking Deep gates the tool set for the very next
           * turn, so it belongs where that turn is written.
           */}
-        <footer className="composer" hidden={showRuns}>
+        <footer className="composer" hidden={showRuns || showHub}>
           <div className="composer-card">
             {progress && busy ? <p className="progress">{progress}</p> : null}
             <textarea
@@ -304,7 +329,15 @@ export function App() {
       />
 
       {showSettings ? (
-        <SettingsModal onClose={() => setShowSettings(false)} onChange={setSettings} />
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onChange={setSettings}
+          onOpenHub={() => {
+            setShowSettings(false);
+            setShowHub(true);
+            setShowRuns(false);
+          }}
+        />
       ) : null}
       {showSearch ? <SearchPanel onClose={() => setShowSearch(false)} /> : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}

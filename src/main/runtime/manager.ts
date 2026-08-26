@@ -103,6 +103,9 @@ export class RuntimeManager {
   #server = new LlamaServer();
   #phase: Phase = { kind: "idle" };
   #gpu: GpuInfo = { vendorIds: [], supportsVulkan: false };
+  /** The binary the running server was launched from, which is not necessarily
+   *  the active build's: an update switches the pointer, not the process. */
+  #serverBinary: string | undefined;
   #listeners = new Set<() => void>();
 
   get server(): LlamaServer {
@@ -113,6 +116,17 @@ export class RuntimeManager {
   }
   get phase(): Phase {
     return this.#phase;
+  }
+  /**
+   * The build the running process came from, which after an update is not the
+   * active one: switching builds moves a pointer, and a loaded model carries on
+   * executing the binary it was started with until it is restarted.
+   */
+  get serverBuild(): string | undefined {
+    if (!this.#serverBinary) return undefined;
+    const root = join(buildDir("x", "y"), "..");
+    const rest = this.#serverBinary.slice(root.length + 1);
+    return rest.split(/[/\\]/)[0];
   }
 
   onChange(fn: () => void): () => void {
@@ -240,6 +254,48 @@ export class RuntimeManager {
   async activeBuild(): Promise<InstalledBuild | undefined> {
     const builds = await this.installedBuilds();
     return builds.find((b) => b.id === this.#config.activeBuild) ?? builds[0];
+  }
+
+  /**
+   * Switch to a build that is already on disk.
+   *
+   * Builds install side by side and never overwrite each other, so a bad
+   * update is recoverable without another download -- but only if something
+   * can select the older one, which until now nothing could. The server is
+   * stopped first: it is a running process holding the old binary open, and
+   * "the active build changed" is not a thing a loaded model notices.
+   */
+  async activate(id: string): Promise<InstalledBuild> {
+    const build = (await this.installedBuilds()).find((b) => b.id === id);
+    if (!build) throw new Error(`${id} is not installed.`);
+    await this.stopServer();
+    await this.update({ activeBuild: build.id, backendOverride: build.backend });
+    return build;
+  }
+
+  /**
+   * Remove a build's files. Refuses the active one.
+   *
+   * Each build is 30-500 MB and they accumulate one per update, so something
+   * has to be able to remove them; refusing the active one means the only way
+   * to end up with none is to ask for that explicitly.
+   */
+  async removeBuild(id: string): Promise<void> {
+    if (id === (await this.activeBuild())?.id) {
+      throw new Error("That is the build in use. Switch to another one first.");
+    }
+    const build = (await this.installedBuilds()).find((b) => b.id === id);
+    if (!build) return;
+    /*
+     * A server started before an update is still executing the OLD build's
+     * binary -- switching the active build does not restart a loaded model --
+     * so the build being removed can be the one currently running. Unlinking an
+     * open file is harmless on Unix and fails outright on Windows, so stop it
+     * rather than rely on which of those two this is.
+     */
+    if (this.#serverBinary?.startsWith(build.dir)) await this.stopServer();
+    await rm(build.dir, { recursive: true, force: true });
+    this.#emit();
   }
 
   /**
@@ -456,6 +512,7 @@ export class RuntimeManager {
     await stat(model).catch(() => {
       throw new Error(`That model file is no longer at ${model}. It may have been moved or deleted.`);
     });
+    this.#serverBinary = build.binary;
     return this.#server.start({
       binary: build.binary,
       modelPath: model,
@@ -478,6 +535,7 @@ export class RuntimeManager {
 
   async stopServer(): Promise<void> {
     await this.#server.stop();
+    this.#serverBinary = undefined;
   }
 
   killNow(): void {

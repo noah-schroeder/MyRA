@@ -73,3 +73,21 @@ test("search asks for GGUF only, since nothing else can be run", () => {
   assert.equal(url.searchParams.get("filter"), "gguf");
   assert.equal(url.searchParams.get("search"), "qwen3");
 });
+
+test("an importance matrix is not offered as a model", () => {
+  // Real shape, from unsloth/Qwen3.8-27B-GGUF: 13 MB of calibration data sitting
+  // beside the weights. Size-ordered, it lands at the top of the list and reads
+  // as the cheapest model on offer -- and llama-server cannot load it.
+  const files = parseTree([
+    { type: "file", path: "imatrix_unsloth.gguf", size: 13_000_000 },
+    { type: "file", path: "Qwen3.8-27B-Q4_K_M.gguf", size: 17_000_000_000 },
+    { type: "file", path: "imatrix.gguf", size: 9_000_000 },
+    // Not an imatrix: the word has to stand alone, not appear inside another.
+    { type: "file", path: "myimatrixmodel-Q4_0.gguf", size: 1_000 },
+  ]);
+
+  assert.deepEqual(
+    files.map((f) => f.path),
+    ["Qwen3.8-27B-Q4_K_M.gguf", "myimatrixmodel-Q4_0.gguf"],
+  );
+});
