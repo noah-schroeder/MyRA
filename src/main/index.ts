@@ -472,18 +472,35 @@ async function main(): Promise<void> {
 }
 
 app.whenReady().then(() => {
-  // No remote assets, ever: the CSP is set here rather than in the HTML so a
-  // page that forgot its meta tag still cannot reach out.
+  /*
+   * No remote assets, ever. Set here rather than in the HTML so a page that
+   * forgot its meta tag still cannot reach out.
+   *
+   * The shipped policy forbids inline script. In development that is fatal but
+   * not for a security reason: @vitejs/plugin-react injects an inline preamble
+   * to install React Refresh, the strict policy blocks it, and the app fails
+   * with "can't detect preamble" and an empty <div id="root"> -- a blank
+   * window with nothing in the terminal to explain it.
+   *
+   * So the relaxation is scoped to the dev server and nothing else.
+   * ELECTRON_RENDERER_URL is set only by electron-vite; a packaged build loads
+   * from file:// and keeps the strict policy, which is the one that matters
+   * because it is the one users run.
+   */
+  const devServer = process.env["ELECTRON_RENDERER_URL"];
+  const policy = devServer
+    ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data: blob:; media-src 'self' blob:; " +
+      // Vite's HMR socket and module graph, both on the dev server's origin.
+      `connect-src 'self' ${devServer} ${devServer.replace(/^http/, "ws")}; ` +
+      "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; " +
+      "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'";
+
   session.defaultSession.webRequest.onHeadersReceived((details, done) => {
     done({
-      responseHeaders: {
-        ...details.responseHeaders,
-        "Content-Security-Policy": [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-            "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; " +
-            "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
-        ],
-      },
+      responseHeaders: { ...details.responseHeaders, "Content-Security-Policy": [policy] },
     });
   });
   void main();
