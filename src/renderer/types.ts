@@ -267,6 +267,11 @@ export interface KarenApi {
   runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
   runtimeCancel(): Promise<{ ok: boolean }>;
   runtimeModels(): Promise<LocalModel[]>;
+  runtimePlan(path: string, override?: Partial<LaunchSettings>): Promise<LaunchPlan>;
+  runtimeSetLaunch(
+    path: string,
+    patch: Partial<LaunchSettings>,
+  ): Promise<{ ok: boolean; settings?: LaunchSettings; error?: string }>;
   runtimeDeleteModel(path: string): Promise<{ ok: boolean; error?: string }>;
   runtimeStart(modelPath?: string): Promise<{ ok: boolean; status?: ServerStatus; error?: string }>;
   runtimeStop(): Promise<{ ok: boolean }>;
@@ -442,10 +447,45 @@ export interface RuntimeState {
   machine?: { vramBytes?: number; ramBytes: number };
 }
 
+export type CacheType = "f16" | "q8_0" | "q4_0";
+
+export interface LaunchSettings {
+  /** `?: T | undefined`, not `?: T`: undefined is the value that means "auto",
+   *  and a patch has to be able to send it. */
+  context?: number | undefined;
+  slots: number;
+  cacheType: CacheType;
+  gpuLayers?: number | undefined;
+  extraArgs?: string | undefined;
+}
+
+export interface LaunchBudget {
+  weightsBytes: number;
+  cacheBytes: number;
+  estimated: boolean;
+  overheadBytes: number;
+  totalBytes: number;
+  budgetBytes: number;
+  headroomBytes: number;
+  verdict: ModelFit["verdict"];
+  context: number;
+}
+
+export interface LaunchPlan {
+  settings: LaunchSettings;
+  budget: LaunchBudget;
+  /** The tuning half of the command line, shown verbatim. */
+  args: string[];
+  /** Set when an extra argument was rejected; the budget is still valid. */
+  error?: string;
+}
+
 export interface LocalModel {
   path: string;
   name: string;
   size: number;
+  /** The context it will start with, resolved from its settings. */
+  context?: number;
   source: string;
   shape?: { layers?: number; contextLength?: number; hasChatTemplate?: boolean; architecture?: string };
   fit?: ModelFit;

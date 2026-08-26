@@ -2335,10 +2335,11 @@ p.warning { margin: 0; font-size: 12.5px; }
   overflow-y: auto; flex: 1; min-height: 0;
 }
 .local-list > li {
-  display: flex; align-items: flex-start; gap: 16px;
+  display: flex; flex-direction: column;
   padding: 13px 15px; border-radius: var(--radius);
   background: var(--bg-raised); border: 1px solid var(--border);
 }
+.local-head { display: flex; align-items: flex-start; gap: 16px; }
 .local-list > li.active { border-color: var(--accent-dim); background: var(--accent-wash); }
 .local-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
 .local-name { font-size: 13.5px; font-weight: 560; color: var(--text); word-break: break-word; }
@@ -2460,3 +2461,77 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .privacy-table td:first-child { white-space: nowrap; }
 .privacy-table code { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+
+/* ==========================================================================
+   Launch settings — what a model will be given, and what it costs
+   ==========================================================================
+   The bar is the point, not the controls. Karen used to show a fit sized at
+   8192 tokens and then launch with `-c 0`, which llama.cpp reads as the model's
+   trained context per slot — so the panel and the process disagreed by a factor
+   of thirty-two on a 128k model. Every control here states its cost in the same
+   bar, computed by the same function that builds the command line.
+   ========================================================================== */
+
+.cfg {
+  display: flex; flex-direction: column; gap: 16px;
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.cfg-budget { display: flex; flex-direction: column; gap: 9px; }
+
+/* Segments are a percentage of the machine's memory, not of the total, so a
+   configuration that does not fit runs visibly past the end instead of
+   rescaling to look exactly like one that does. */
+.cfg-bar {
+  display: flex; height: 12px; border-radius: 3px; overflow: hidden;
+  background: var(--bg-inset); border: 1px solid var(--border);
+}
+.cfg-bar > span { display: block; height: 100%; }
+.seg-weights { background: var(--accent); }
+.seg-cache { background: var(--accent-dim); }
+.seg-over { background: color-mix(in srgb, var(--text-faint) 60%, transparent); }
+.cfg-bar.over { border-color: color-mix(in srgb, var(--red) 60%, transparent); }
+.cfg-bar.over .seg-weights { background: var(--red); }
+.cfg-bar.over .seg-cache { background: color-mix(in srgb, var(--red) 55%, transparent); }
+
+.cfg-key {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 4px 16px;
+  font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+.cfg-key li { display: flex; align-items: center; gap: 6px; }
+.cfg-key i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.k-weights { background: var(--accent); }
+.k-cache { background: var(--accent-dim); }
+.k-over { background: color-mix(in srgb, var(--text-faint) 60%, transparent); }
+.cfg-headroom { margin-left: auto; color: var(--green); }
+.cfg-headroom.over { color: var(--red); }
+
+.cfg-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px;
+}
+.cfg-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.cfg-label { font-size: 11.5px; font-weight: 600; color: var(--text-dim); }
+.cfg-hint { font-size: 11px; color: var(--text-faint); line-height: 1.45; text-wrap: pretty; }
+.cfg-error { margin: 0; font-size: 12px; color: var(--red); line-height: 1.5; }
+
+.cfg-reveal {
+  align-self: flex-start;
+  font: inherit; font-size: 11.5px; background: none; border: 0; padding: 0;
+  color: var(--text-faint); cursor: pointer; text-decoration: underline;
+}
+.cfg-reveal:hover { color: var(--text-dim); }
+.cfg-args {
+  margin: 0; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-inset); border: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--text-dim);
+  white-space: pre-wrap; word-break: break-all;
+}
+
+.cfg-actions { display: flex; gap: 8px; }
+.cfg-actions button:not(.primary-sm) {
+  font: inherit; font-size: 12px; padding: 6px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
+}
+.cfg-actions button:not(.primary-sm):hover { color: var(--text); border-color: var(--border-hover); }

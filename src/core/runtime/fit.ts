@@ -38,7 +38,11 @@ const OVERHEAD_FRACTION = 0.06;
  * not: a model with 32 attention heads and 4 KV heads caches four heads' worth,
  * not thirty-two. Getting this backwards overestimates by 8x.
  */
-export function kvCacheBytes(shape: ModelShape, context: number, bytesPerElement = 2): number | undefined {
+export function kvCacheBytes(
+  shape: ModelShape,
+  context: number,
+  bytesPerElement: number | undefined = 2,
+): number | undefined {
   const layers = shape.layers;
   if (!layers || !context) return undefined;
 
@@ -65,6 +69,10 @@ export interface Fit {
   requiredBytes: number;
   /** Present when the model's shape was known, so the estimate is exact. */
   kvBytes?: number;
+  /** The cache figure actually used: `kvBytes`, or the rule of thumb. */
+  cacheBytes: number;
+  /** Compute buffers, context tensors and fragmentation. */
+  overheadBytes: number;
   /** True when `requiredBytes` came from a rule of thumb rather than the header. */
   estimated: boolean;
   /** One line, written for someone who does not know what a quant is. */
@@ -87,13 +95,18 @@ const ESTIMATED_CACHE_FRACTION = 0.2;
 export function fitModel(
   fileBytes: number,
   machine: Machine,
-  opts: { shape?: ModelShape; context?: number } = {},
+  opts: { shape?: ModelShape; context?: number; bytesPerElement?: number } = {},
 ): Fit {
   const context = opts.context ?? 8192;
-  const kv = opts.shape ? kvCacheBytes(opts.shape, context) : undefined;
+  const kv = opts.shape ? kvCacheBytes(opts.shape, context, opts.bytesPerElement) : undefined;
   const estimated = kv === undefined;
   const cache = kv ?? fileBytes * ESTIMATED_CACHE_FRACTION;
-  const required = fileBytes + cache + OVERHEAD_BYTES + fileBytes * OVERHEAD_FRACTION;
+  const overhead = OVERHEAD_BYTES + fileBytes * OVERHEAD_FRACTION;
+  const required = fileBytes + cache + overhead;
+  /* Spread into all four returns below rather than repeated: the breakdown and
+     the total have to come from the same arithmetic, or a budget bar can add up
+     to something other than the number printed beside it. */
+  const parts = { cacheBytes: cache, overheadBytes: overhead };
 
   const gib = (n: number): string => `${(n / GIB).toFixed(1)} GB`;
   const detail = `Needs about ${gib(required)}${estimated ? " (estimated)" : ""}`;
@@ -103,6 +116,7 @@ export function fitModel(
       verdict: "gpu",
       requiredBytes: required,
       ...(kv !== undefined ? { kvBytes: kv } : {}),
+      ...parts,
       estimated,
       label: `Fits on your GPU — fast. ${detail}.`,
     };
@@ -115,6 +129,7 @@ export function fitModel(
       verdict: "partial",
       requiredBytes: required,
       ...(kv !== undefined ? { kvBytes: kv } : {}),
+      ...parts,
       estimated,
       label: `Fits with some layers on the processor — slower. ${detail}.`,
     };
@@ -125,6 +140,7 @@ export function fitModel(
       verdict: "cpu",
       requiredBytes: required,
       ...(kv !== undefined ? { kvBytes: kv } : {}),
+      ...parts,
       estimated,
       label: `Runs on the processor — much slower. ${detail}.`,
     };
@@ -134,6 +150,7 @@ export function fitModel(
     verdict: "too-large",
     requiredBytes: required,
     ...(kv !== undefined ? { kvBytes: kv } : {}),
+    ...parts,
     estimated,
     label: `Too large for this machine — needs about ${gib(required)}${estimated ? " (estimated)" : ""}, and there is ${gib(machine.ramBytes)} of memory.`,
   };

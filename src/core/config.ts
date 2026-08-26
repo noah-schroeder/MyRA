@@ -84,6 +84,32 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingCaptureSystemAudio: true,
 };
 
+/**
+ * The shortest timeout the app will honour, whatever the file says.
+ *
+ * The Settings field is in seconds and clamps at 5, so anything below this
+ * cannot have been produced by the UI -- but a file written by an older build
+ * can hold it, and this one did: a stored `timeoutMs: 1000` gave every request
+ * a one-second deadline, which a real model cannot meet and which presents as
+ * "the endpoint did not answer" rather than as a setting.
+ */
+const MIN_TIMEOUT_MS = 5_000;
+
+/**
+ * Merge one stored endpoint over its defaults, refusing values the UI could
+ * not have written. The same shape of coercion the research category already
+ * does: a stored value that is out of range is a bug to absorb on read, not
+ * something to hand to the rest of the app.
+ */
+function endpoint(base: EndpointSettings, stored?: Partial<EndpointSettings>): EndpointSettings {
+  const merged = { ...base, ...stored };
+  const timeout = Number(merged.timeoutMs);
+  return {
+    ...merged,
+    timeoutMs: Number.isFinite(timeout) && timeout >= MIN_TIMEOUT_MS ? timeout : base.timeoutMs,
+  };
+}
+
 export class ConfigStore {
   #settings: Settings = { ...DEFAULT_SETTINGS };
   #listeners = new Set<(s: Settings) => void>();
@@ -104,12 +130,12 @@ export class ConfigStore {
       this.#settings = {
         ...DEFAULT_SETTINGS,
         ...parsed,
-        llm: { ...DEFAULT_SETTINGS.llm, ...parsed.llm },
-        transcription: { ...DEFAULT_SETTINGS.transcription, ...parsed.transcription },
+        llm: endpoint(DEFAULT_SETTINGS.llm, parsed.llm),
+        transcription: endpoint(DEFAULT_SETTINGS.transcription, parsed.transcription),
         // Merged per key like the others: a settings file written before this
         // endpoint existed, or holding only a baseUrl, would otherwise drop
         // envVar and leave the key with nowhere to arrive.
-        embeddings: { ...DEFAULT_SETTINGS.embeddings, ...parsed.embeddings },
+        embeddings: endpoint(DEFAULT_SETTINGS.embeddings, parsed.embeddings),
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;

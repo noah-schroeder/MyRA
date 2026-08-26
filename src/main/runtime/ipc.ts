@@ -14,13 +14,13 @@ import { ipcMain, type BrowserWindow } from "electron";
 import { join } from "node:path";
 
 import { newestBuild, type Backend, type Release } from "../../core/runtime/assets.ts";
-import type { Device } from "../../core/runtime/devices.ts";
 import {
   downloadUrl, groupFiles, infoUrl, parseTree, quantOf, searchUrl, treeUrl,
   GatedError, type HfModel, type ModelFile,
 } from "../../core/runtime/hf.ts";
 import { fitModel } from "../../core/runtime/fit.ts";
 import { downloadFile } from "./download.ts";
+import type { LaunchSettings } from "../../core/runtime/launch.ts";
 import { BASELINE_BUILD, RuntimeManager, type LocalModel } from "./manager.ts";
 
 /** One place that decides what the renderer knows. */
@@ -44,8 +44,6 @@ export function installRuntimeIpc(
   hfToken: () => Promise<string | undefined>,
   _window: () => BrowserWindow | undefined,
 ): void {
-  /** Devices from the most recent probe, so model sizing has a VRAM figure. */
-  let devices: Device[] = [];
   /** Cancels whatever long download is in flight. */
   let inFlight: AbortController | undefined;
 
@@ -54,15 +52,15 @@ export function installRuntimeIpc(
     // this state wants them: the hub sizes models against VRAM, and a pushed
     // update that dropped them would blank the numbers on every re-render.
     void snapshot(runtime).then((state) =>
-      send("karen:runtime", { ...state, devices, machine: runtime.machine(devices) }),
+      send("karen:runtime", { ...state, devices: runtime.devices, machine: runtime.machine(runtime.devices) }),
     );
   };
   runtime.onChange(push);
 
   ipcMain.handle("karen:runtime-state", async () => ({
     ...(await snapshot(runtime)),
-    devices,
-    machine: runtime.machine(devices),
+    devices: runtime.devices,
+    machine: runtime.machine(runtime.devices),
   }));
 
   ipcMain.handle("karen:runtime-config", async (_e, patch: Record<string, unknown>) =>
@@ -83,8 +81,8 @@ export function installRuntimeIpc(
     inFlight = new AbortController();
     try {
       const result = await runtime.setUp(inFlight.signal);
-      devices = result.devices;
-      return { ok: true, note: result.note, devices, build: result.build.id };
+      runtime.setDevices(result.devices);
+      return { ok: true, note: result.note, devices: runtime.devices, build: result.build.id };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     } finally {
@@ -149,12 +147,12 @@ export function installRuntimeIpc(
       // new one has proved it starts, and the running model is unloaded so the
       // engine the app reports is the engine it is running.
       const { unloaded } = await runtime.useBuild(result.build.id);
-      devices = result.devices;
+      runtime.setDevices(result.devices);
       return {
         ok: true,
         build: result.build.id,
         from: current.id,
-        devices,
+        devices: runtime.devices,
         accelerated: result.accelerated,
         ...(unloaded ? { unloaded } : {}),
       };
@@ -172,8 +170,8 @@ export function installRuntimeIpc(
       const { build, unloaded } = await runtime.useBuild(id, true);
       const { listDevices } = await import("./server.ts");
       const { parseDevices } = await import("../../core/runtime/devices.ts");
-      devices = parseDevices(await listDevices(build.binary));
-      return { ok: true, build: build.id, devices, ...(unloaded ? { unloaded } : {}) };
+      runtime.setDevices(parseDevices(await listDevices(build.binary)));
+      return { ok: true, build: build.id, devices: runtime.devices, ...(unloaded ? { unloaded } : {}) };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     } finally {
@@ -199,13 +197,13 @@ export function installRuntimeIpc(
       if (!release) return { ok: false, error: "That build no longer exists upstream." };
 
       const result = await runtime.installBuild(release, backend, inFlight.signal);
-      devices = result.devices;
+      runtime.setDevices(result.devices);
       // Only now does it become the active one: a build that failed to install
       // or probe must never displace one that works.
       const { unloaded } = await runtime.useBuild(result.build.id, true);
       return {
         ok: true,
-        devices,
+        devices: runtime.devices,
         accelerated: result.accelerated,
         build: result.build.id,
         ...(unloaded ? { unloaded } : {}),
@@ -223,8 +221,8 @@ export function installRuntimeIpc(
     if (!build) return { ok: false, error: "No runtime is installed." };
     const { listDevices } = await import("./server.ts");
     const { parseDevices } = await import("../../core/runtime/devices.ts");
-    devices = parseDevices(await listDevices(build.binary));
-    return { ok: true, devices };
+    runtime.setDevices(parseDevices(await listDevices(build.binary)));
+    return { ok: true, devices: runtime.devices };
   });
 
   ipcMain.handle("karen:runtime-cancel", async () => {
@@ -235,7 +233,29 @@ export function installRuntimeIpc(
 
   /* ------------------------------------------------------------- models --- */
 
-  ipcMain.handle("karen:runtime-models", async (): Promise<LocalModel[]> => runtime.listModels(devices));
+  ipcMain.handle("karen:runtime-models", async (): Promise<LocalModel[]> => runtime.listModels(runtime.devices));
+
+  /**
+   * What a configuration costs, without committing to it.
+   *
+   * The renderer sends the controls' current position and gets back the memory
+   * figure and the exact command line. Nothing is stored, so dragging a slider
+   * does not write to disk on every frame -- and the number on screen comes
+   * from the same function that builds the flags, which is the property that
+   * was missing before.
+   */
+  ipcMain.handle("karen:runtime-plan", async (_e, path: string, override?: Record<string, unknown>) =>
+    runtime.plan(path, runtime.devices, override as Partial<LaunchSettings> | undefined),
+  );
+
+  ipcMain.handle("karen:runtime-set-launch", async (_e, path: string, patch: Record<string, unknown>) => {
+    try {
+      const settings = await runtime.setLaunchSettings(path, patch as Partial<LaunchSettings>);
+      return { ok: true, settings };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 
   ipcMain.handle("karen:runtime-delete-model", async (_e, path: string) => {
     try {
@@ -313,7 +333,7 @@ export function installRuntimeIpc(
       }
 
       const files = groupFiles(parseTree(await res.json()));
-      const machine = runtime.machine(devices);
+      const machine = runtime.machine(runtime.devices);
       return {
         ok: true,
         files: files.map((f) => ({
@@ -329,7 +349,7 @@ export function installRuntimeIpc(
             ...(part.sha256 ? { sha256: part.sha256 } : {}),
           })),
           quant: quantOf(f.entry),
-          fit: fitModel(f.size, machine, { context: runtime.config.contextSize ?? 8192 }),
+          fit: fitModel(f.size, machine, { context: 8192 }),
         })),
       };
     } catch (err) {
@@ -346,14 +366,14 @@ export function installRuntimeIpc(
   ipcMain.handle("karen:hf-inspect", async (_e, repo: string, entry: string, size: number) => {
     const token = await hfToken();
     const shape = await runtime.readRemoteShape(downloadUrl(repo, entry), token);
-    const machine = runtime.machine(devices);
+    const machine = runtime.machine(runtime.devices);
     return {
       shape,
       fit: fitModel(size, machine, {
         ...(shape ? { shape } : {}),
-        context: runtime.config.contextSize ?? 8192,
+        context: 8192,
       }),
-      largestContext: runtime.largestContextFor(size, devices, shape),
+      largestContext: runtime.largestContextFor(size, runtime.devices, shape),
     };
   });
 
