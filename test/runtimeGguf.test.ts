@@ -118,3 +118,65 @@ test("head_count_kv given per layer is taken at its maximum", () => {
   const header = parseGguf(fixture([kvStr("general.architecture", "test"), arr]));
   assert.equal(modelShape(header).headCountKv, 8);
 });
+
+/* type 5 = INT32, type 6 = FLOAT32 */
+function kvI32(key: string, value: number): Uint8Array {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setInt32(0, value, true);
+  return concat([str(key), u32(5), b]);
+}
+function kvF32(key: string, value: number): Uint8Array {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setFloat32(0, value, true);
+  return concat([str(key), u32(6), b]);
+}
+
+/**
+ * The bug this guards against read every signed and floating value from byte
+ * zero of the file rather than from the cursor, because `Buffer.prototype.slice`
+ * aliases `subarray` and does not copy. It only bit when the input was a Node
+ * Buffer -- which is what both callers pass, since one reads from disk and the
+ * other from a fetch -- so a suite built entirely on Uint8Array never saw it.
+ * Every model then reported a KV head count of 1179993927: the letters `GGUF`.
+ */
+test("a header read from a Node Buffer parses the same as from a Uint8Array", () => {
+  const pairs = [
+    kvStr("general.architecture", "test"),
+    kvU32("test.block_count", 32),
+    kvI32("test.attention.head_count_kv", 8),
+    kvF32("test.attention.layer_norm_rms_epsilon", 1e-5),
+    kvI32("general.sampling.top_k", -1),
+  ];
+  const bytes = fixture(pairs);
+  const asBuffer = Buffer.from(bytes.buffer.slice(0), bytes.byteOffset, bytes.byteLength);
+
+  for (const input of [bytes, asBuffer]) {
+    const m = parseGguf(input).metadata;
+    assert.equal(m.get("test.attention.head_count_kv"), 8);
+    assert.equal(m.get("general.sampling.top_k"), -1);
+    assert.ok(Math.abs(Number(m.get("test.attention.layer_norm_rms_epsilon")) - 1e-5) < 1e-9);
+  }
+});
+
+test("a hybrid model keeps its per-layer KV widths, not just the peak", () => {
+  // LFM2 writes a zero for every convolution layer. Sizing 30 layers at the
+  // widest one claimed three times the cache the model actually allocates.
+  const counts = [0, 0, 8, 0, 0, 8];
+  const arr = concat([
+    str("test.attention.head_count_kv"),
+    u32(9),
+    u32(4),
+    u64(counts.length),
+    ...counts.map(u32),
+  ]);
+  const shape = modelShape(parseGguf(fixture([kvStr("general.architecture", "test"), arr])));
+  assert.equal(shape.headCountKv, 8);
+  assert.deepEqual(shape.headCountKvPerLayer, counts);
+});
+
+test("a uniform per-layer list is not treated as hybrid", () => {
+  const arr = concat([str("test.attention.head_count_kv"), u32(9), u32(4), u64(3), u32(4), u32(4), u32(4)]);
+  const shape = modelShape(parseGguf(fixture([kvStr("general.architecture", "test"), arr])));
+  assert.equal(shape.headCountKv, 4);
+  assert.equal(shape.headCountKvPerLayer, undefined);
+});

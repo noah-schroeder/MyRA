@@ -74,6 +74,26 @@ class Reader {
     this.#offset += n;
     return out;
   }
+  /*
+   * Every scalar reads through the one DataView, positioned by the cursor.
+   *
+   * The previous version copied the bytes out and built a fresh DataView over
+   * them -- `new DataView(this.bytes(4).slice().buffer)`. That is correct for a
+   * plain Uint8Array and silently wrong for a Node Buffer, because
+   * `Buffer.prototype.slice` is an alias for `subarray` and does not copy: the
+   * `.buffer` it hands back is the whole file, so every signed and floating
+   * value in the header was decoded from byte 0 -- the letters `GGUF`. It read
+   * as 1179993927 as an int and 13649.82 as a float, and those two numbers
+   * appeared wherever a model stated a head count, an epsilon or a rope base.
+   * Unsigned reads were unaffected, which is why layer counts looked right and
+   * only the fit arithmetic came out absurd.
+   */
+  #scalar<T>(size: number, read: (view: DataView, at: number) => T): T {
+    this.#need(size);
+    const v = read(this.#view, this.#offset);
+    this.#offset += size;
+    return v;
+  }
   string(): string {
     const len = Number(this.u64());
     // A corrupt length would otherwise try to allocate the whole address space.
@@ -82,18 +102,18 @@ class Reader {
   }
   value(type: number): GgufValue {
     switch (type) {
-      case T.UINT8: return this.bytes(1)[0]!;
-      case T.INT8: return new Int8Array(this.bytes(1).slice())[0]!;
-      case T.UINT16: { const b = this.bytes(2); return b[0]! | (b[1]! << 8); }
-      case T.INT16: { const b = this.bytes(2).slice(); return new DataView(b.buffer).getInt16(0, true); }
+      case T.UINT8: return this.#scalar(1, (v, at) => v.getUint8(at));
+      case T.INT8: return this.#scalar(1, (v, at) => v.getInt8(at));
+      case T.UINT16: return this.#scalar(2, (v, at) => v.getUint16(at, true));
+      case T.INT16: return this.#scalar(2, (v, at) => v.getInt16(at, true));
       case T.UINT32: return this.u32();
-      case T.INT32: { const b = this.bytes(4).slice(); return new DataView(b.buffer).getInt32(0, true); }
-      case T.FLOAT32: { const b = this.bytes(4).slice(); return new DataView(b.buffer).getFloat32(0, true); }
-      case T.BOOL: return this.bytes(1)[0] !== 0;
+      case T.INT32: return this.#scalar(4, (v, at) => v.getInt32(at, true));
+      case T.FLOAT32: return this.#scalar(4, (v, at) => v.getFloat32(at, true));
+      case T.BOOL: return this.#scalar(1, (v, at) => v.getUint8(at) !== 0);
       case T.STRING: return this.string();
       case T.UINT64: return this.u64();
-      case T.INT64: { const b = this.bytes(8).slice(); return new DataView(b.buffer).getBigInt64(0, true); }
-      case T.FLOAT64: { const b = this.bytes(8).slice(); return new DataView(b.buffer).getFloat64(0, true); }
+      case T.INT64: return this.#scalar(8, (v, at) => v.getBigInt64(at, true));
+      case T.FLOAT64: return this.#scalar(8, (v, at) => v.getFloat64(at, true));
       case T.ARRAY: {
         const elem = this.u32();
         const len = Number(this.u64());
@@ -164,6 +184,17 @@ export interface ModelShape {
   headCount?: number;
   /** Grouped-query models have fewer KV heads than attention heads. */
   headCountKv?: number;
+  /**
+   * Per-layer KV head counts, when the model states them that way.
+   *
+   * Hybrid architectures (LFM2, Jamba, and the Mamba-attention mixes) put an
+   * attention block only every few layers and a convolution or state-space
+   * block in between, and write a zero for each layer that keeps no KV cache.
+   * Sizing those at `layers x max` overstates the cache by three or four times,
+   * which is the difference between telling someone a model runs and telling
+   * them it does not.
+   */
+  headCountKvPerLayer?: number[];
   /** Head dimension, when stated directly rather than implied. */
   keyLength?: number;
   valueLength?: number;
@@ -178,15 +209,22 @@ export interface ModelShape {
   name?: string;
 }
 
+function numbers(v: GgufValue | undefined): number[] | undefined {
+  if (!Array.isArray(v) || !v.length) return undefined;
+  const out = v
+    .map((x) => (typeof x === "bigint" ? Number(x) : x))
+    .filter((x): x is number => typeof x === "number");
+  return out.length === v.length ? out : undefined;
+}
+
 function num(v: GgufValue | undefined): number | undefined {
   if (typeof v === "number") return v;
   if (typeof v === "bigint") return Number(v);
-  // head_count_kv is an array on models with per-layer variation; the largest
-  // is what the cache has to be sized for.
-  if (Array.isArray(v) && v.length) {
-    const nums = v.map((x) => (typeof x === "bigint" ? Number(x) : x)).filter((x): x is number => typeof x === "number");
-    if (nums.length) return Math.max(...nums);
-  }
+  // head_count_kv is an array on models with per-layer variation. The largest
+  // is the widest any single layer gets; the per-layer list is kept separately
+  // for anything that needs the total rather than the peak.
+  const nums = numbers(v);
+  if (nums?.length) return Math.max(...nums);
   return undefined;
 }
 
@@ -213,5 +251,8 @@ export function modelShape(header: GgufHeader): ModelShape {
   for (const [key, value] of fields) {
     if (value !== undefined) (shape as unknown as Record<string, number>)[key] = value;
   }
+
+  const perLayer = arch ? numbers(m.get(`${arch}.attention.head_count_kv`)) : undefined;
+  if (perLayer && perLayer.some((n) => n !== perLayer[0])) shape.headCountKvPerLayer = perLayer;
   return shape;
 }

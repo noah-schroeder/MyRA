@@ -38,6 +38,8 @@ export interface Lookup {
   run: (query: string) => Promise<void>;
   setSort: (sort: SortBy) => void;
   goToPage: (page: number) => Promise<void>;
+  /** Back to an empty search, and any request in flight stops counting. */
+  clear: () => void;
 }
 
 export function useLookup(): Lookup {
@@ -84,5 +86,13 @@ export function useLookup(): Lookup {
     [fetchPage, state.query, state.sort],
   );
 
-  return useMemo(() => ({ state, run, setSort, goToPage }), [state, run, setSort, goToPage]);
+  const clear = useCallback(() => {
+    seq.current++;
+    setState(EMPTY);
+  }, []);
+
+  return useMemo(
+    () => ({ state, run, setSort, goToPage, clear }),
+    [state, run, setSort, goToPage, clear],
+  );
 }

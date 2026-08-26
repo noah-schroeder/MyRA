@@ -13,6 +13,7 @@
  */
 
 import { chat, type ChatMessage, type ChatUsage, type ToolCall } from "../llm/chat.ts";
+import type { DeltaKind } from "../llm/thinking.ts";
 import type { EndpointSettings } from "../config.ts";
 import { UnknownToolError, type ToolRegistry } from "./registry.ts";
 import {
@@ -32,6 +33,14 @@ export interface AgentEvent {
   type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "compacted";
   /** For text: the delta. For tool events: a human-readable note. */
   text?: string;
+  /**
+   * For text: whether this delta is the answer or the model's reasoning.
+   *
+   * Absent means answer, so a consumer that does not care about reasoning is
+   * unaffected. The reasoning is shown as it arrives and then kept out of the
+   * message history -- see ChatResult.reasoning.
+   */
+  kind?: DeltaKind;
   toolCallId?: string;
   tool?: string;
   params?: Record<string, unknown>;
@@ -231,7 +240,7 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
       ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onEvent
-        ? { onDelta: (d: string) => opts.onEvent!({ type: "text", text: d }) }
+        ? { onDelta: (d: string, kind: DeltaKind) => opts.onEvent!({ type: "text", text: d, kind }) }
         : {}),
     });
 

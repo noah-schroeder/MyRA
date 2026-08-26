@@ -164,6 +164,8 @@ export interface AgentEvent {
     | "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error"
     | "compacted" | "done" | "error";
   text?: string;
+  /** For text: "thinking" is the model's reasoning, anything else is the answer. */
+  kind?: "text" | "thinking";
   toolCallId?: string;
   tool?: string;
   params?: Record<string, unknown>;

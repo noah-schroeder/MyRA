@@ -29,6 +29,7 @@ export function useAgent() {
         case "text": {
           if (!event.text) break;
           const text = event.text;
+          const kind = event.kind === "thinking" ? "thinking" : "text";
           /*
            * The id is decided here, not inside the updater.
            *
@@ -46,14 +47,14 @@ export function useAgent() {
               ? prev.map((i) =>
                   i.id !== id || i.kind !== "assistant"
                     ? i
-                    : { ...i, blocks: appendText(i.blocks, text) },
+                    : { ...i, blocks: append(i.blocks, text, kind) },
                 )
               : [
                   ...prev,
                   {
                     id,
                     kind: "assistant",
-                    blocks: [{ kind: "text", text }],
+                    blocks: [{ kind, text }],
                     streaming: true,
                   } satisfies AssistantItem,
                 ],
@@ -177,10 +178,20 @@ export function useAgent() {
   return { items, busy, usage, error, sources, send, abort, reset };
 }
 
-function appendText(blocks: AssistantItem["blocks"], text: string): AssistantItem["blocks"] {
+/*
+ * Deltas of the same kind join the block they belong to; a change of kind
+ * starts a new one. That is what makes a model that thinks, answers, thinks
+ * again and answers again render as four blocks in the order it produced them,
+ * rather than as one heap with the reasoning folded into the prose.
+ */
+function append(
+  blocks: AssistantItem["blocks"],
+  text: string,
+  kind: "text" | "thinking",
+): AssistantItem["blocks"] {
   const last = blocks.at(-1);
-  if (last?.kind === "text") {
-    return [...blocks.slice(0, -1), { kind: "text", text: last.text + text }];
+  if (last?.kind === kind) {
+    return [...blocks.slice(0, -1), { kind, text: last.text + text }];
   }
-  return [...blocks, { kind: "text", text }];
+  return [...blocks, { kind, text }];
 }

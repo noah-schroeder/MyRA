@@ -127,7 +127,7 @@ export function App() {
   const openSession = async (id: string): Promise<void> => {
     const messages = (await window.karen.openSession(id)) as StoredMessage[];
     setSessionId(id);
-    toChat();
+    startFresh();
     // The stored form is the model's message list; this view wants cards in the
     // order they happened, each knowing its own outcome. restoreThread does
     // that conversion, including reuniting each tool call with the result that
@@ -140,13 +140,27 @@ export function App() {
   const newSession = async (): Promise<void> => {
     setSessionId(await window.karen.newSession());
     reset();
-    toChat();
+    startFresh();
   };
 
   /** Whatever page you were on, a conversation is what you asked for. */
   const toChat = (): void => {
     setPage("chat");
     setLookup(false);
+  };
+
+  /*
+   * A different conversation is a fresh start, search included.
+   *
+   * Results outlive the mode switch on purpose -- you look something up, read
+   * an answer, come back to the list -- but they must not outlive the
+   * conversation, or opening the app to a new chat and clicking Look up shows
+   * you a search you have no memory of running.
+   */
+  const startFresh = (): void => {
+    toChat();
+    search.clear();
+    setQueryDraft("");
   };
 
   const answer = (id: string, value: string | undefined): void => {

@@ -55,9 +55,18 @@ export function kvCacheBytes(
   }
   if (!kvHeads || !headDim) return undefined;
 
-  const kBytes = layers * kvHeads * headDim * context * bytesPerElement;
+  /* Hybrid models cache nothing on their convolution layers, so the total is
+     the sum of the per-layer widths rather than the layer count times the
+     widest one. Falls back to the flat product when the header states a single
+     number, which is every conventional transformer. */
+  const heads = shape.headCountKvPerLayer?.length
+    ? shape.headCountKvPerLayer.reduce((a, b) => a + b, 0)
+    : layers * kvHeads;
+  if (!heads) return undefined;
+
+  const kBytes = heads * headDim * context * bytesPerElement;
   const vDim = shape.valueLength ?? headDim;
-  const vBytes = layers * kvHeads * vDim * context * bytesPerElement;
+  const vBytes = heads * vDim * context * bytesPerElement;
   return kBytes + vBytes;
 }
 
