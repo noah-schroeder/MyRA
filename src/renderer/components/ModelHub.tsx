@@ -87,6 +87,7 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
   const [models, setModels] = useState<LocalModel[]>([]);
   const [state, setState] = useState<RuntimeState | undefined>();
   const box = useRef<HTMLInputElement>(null);
+  const seq = useRef(0);
 
   const refreshModels = useCallback(async () => {
     setModels(await window.karen.runtimeModels());
@@ -104,16 +105,43 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
     };
   }, [refreshModels]);
 
+  /*
+   * Search as you type.
+   *
+   * Two things make that safe to do against someone else's API. The debounce
+   * below means a typed word costs one request rather than one per letter; and
+   * every request takes a ticket, so a slow early reply cannot overwrite the
+   * results of a later, more specific query -- the failure that makes live
+   * search feel haunted.
+   */
   const search = useCallback(async (q: string, s: string) => {
-    if (!q.trim()) return;
-    setBusy(true);
+    const ticket = ++seq.current;
     setError(undefined);
     setSelected(undefined);
     const result = await window.karen.hfSearch(q.trim(), s);
+    if (ticket !== seq.current) return;
     setBusy(false);
     if (result.ok) setResults(result.models ?? []);
     else setError(result.error);
   }, []);
+
+  useEffect(() => {
+    if (tab !== "discover") return;
+    const q = query.trim();
+    // Below two characters there is nothing to match on, so the shortlist is
+    // more use than ten thousand repositories -- and clearing the box puts it
+    // back rather than leaving stale results behind.
+    if (q.length < 2) {
+      seq.current++;
+      setBusy(false);
+      setResults(undefined);
+      setError(undefined);
+      return;
+    }
+    setBusy(true);
+    const timer = setTimeout(() => void search(q, sort), 250);
+    return () => clearTimeout(timer);
+  }, [query, sort, tab, search]);
 
   const select = async (repo: string): Promise<void> => {
     setSelected(repo);
@@ -242,28 +270,20 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
                 placeholder="Search every GGUF model on HuggingFace…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void search(query, sort);
-                }}
                 aria-label="Search HuggingFace"
               />
+              {busy ? <span className="hub-spin" aria-label="Searching" /> : null}
             </div>
             <select
               className="hub-sort"
               value={sort}
               aria-label="Sort by"
-              onChange={(e) => {
-                setSort(e.target.value);
-                if (results) void search(query, e.target.value);
-              }}
+              onChange={(e) => setSort(e.target.value)}
             >
               {SORTS.map((s) => (
                 <option key={s.id} value={s.id}>{s.label}</option>
               ))}
             </select>
-            <button type="button" className="primary-sm" onClick={() => void search(query, sort)} disabled={busy}>
-              {busy ? "Searching…" : "Search"}
-            </button>
           </>
         ) : (
           <>

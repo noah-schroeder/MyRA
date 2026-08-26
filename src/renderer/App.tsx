@@ -12,7 +12,8 @@ import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
 import { ModelHub } from "./components/ModelHub.tsx";
 import { ContextMeter } from "./components/ContextMeter.tsx";
-import { SearchPanel } from "./components/SearchPanel.tsx";
+import { LookupResults } from "./components/LookupResults.tsx";
+import { useLookup } from "./useLookup.ts";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
@@ -20,18 +21,43 @@ import { DictationHud } from "./components/DictationHud.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 
+/** Runs and Models are places you go; the conversation is where you come back to. */
+type Page = "chat" | "runs" | "models";
+
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   const [showMeeting, setShowMeeting] = useState(false);
-  const [showRuns, setShowRuns] = useState(false);
-  const [showHub, setShowHub] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
+  /*
+   * One page at a time, held in one variable.
+   *
+   * These were three independent booleans, which meant every place that opened
+   * a page also had to remember to close the other two -- and the places that
+   * did not open a page, chiefly starting or reopening a conversation, closed
+   * nothing at all. Clicking a past conversation while the model hub was up
+   * loaded it behind the hub, so the app looked broken and the only way back
+   * was a "Back to chat" button on the far side of the screen.
+   */
+  const [page, setPage] = useState<Page>("chat");
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
+  /*
+   * Two drafts, one box.
+   *
+   * A half-written question and a search query are not the same text, and
+   * carrying one into the other mode is how you end up sending "spaced
+   * retrieval practice" to a model, or searching OpenAlex for a paragraph you
+   * were writing. Each mode keeps what you left in it.
+   */
   const [draft, setDraft] = useState("");
+  const [queryDraft, setQueryDraft] = useState("");
   const [sessionId, setSessionId] = useState<string | undefined>();
+  // Searching the literature yourself is a mode of the composer, not a window
+  // over it: the box you type in is the same box either way, and what changes
+  // is who reads what you typed.
+  const [lookup, setLookup] = useState(false);
+  const search = useLookup();
   const [sessionsKey, setSessionsKey] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -56,11 +82,21 @@ export function App() {
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   useEffect(() => window.karen.onResearchProgress(setProgress), []);
 
+  // Read through a ref because transcription lands long after the callback was
+  // made, and it has to reach whichever box is in front of you then.
+  const lookupRef = useRef(lookup);
+  useEffect(() => {
+    lookupRef.current = lookup;
+  }, [lookup]);
+
   // Appended rather than replacing: dictation is for adding to what you were
   // already writing, and overwriting a half-typed question would be a bad way
   // to find that out.
   const dictation = useDictation(
-    useCallback((text: string) => setDraft((d) => (d ? `${d} ${text}` : text)), []),
+    useCallback((text: string) => {
+      const set = lookupRef.current ? setQueryDraft : setDraft;
+      set((d) => (d ? `${d} ${text}` : text));
+    }, []),
   );
 
   useEffect(() => {
@@ -71,16 +107,27 @@ export function App() {
     if (!busy) setSessionsKey((k) => k + 1);
   }, [busy]);
 
+  const typed = lookup ? queryDraft : draft;
+  const setTyped = lookup ? setQueryDraft : setDraft;
+
   const submit = useCallback(() => {
-    const text = draft.trim();
-    if (!text || busy) return;
+    const text = typed.trim();
+    if (!text) return;
+    // A query stays in the box: you refine a search by editing it, and clearing
+    // it after every Enter would mean retyping the whole thing to change a word.
+    if (lookup) {
+      void search.run(text);
+      return;
+    }
+    if (busy) return;
     setDraft("");
     void send(text);
-  }, [draft, busy, send]);
+  }, [typed, busy, send, lookup, search]);
 
   const openSession = async (id: string): Promise<void> => {
     const messages = (await window.karen.openSession(id)) as StoredMessage[];
     setSessionId(id);
+    toChat();
     // The stored form is the model's message list; this view wants cards in the
     // order they happened, each knowing its own outcome. restoreThread does
     // that conversion, including reuniting each tool call with the result that
@@ -93,6 +140,13 @@ export function App() {
   const newSession = async (): Promise<void> => {
     setSessionId(await window.karen.newSession());
     reset();
+    toChat();
+  };
+
+  /** Whatever page you were on, a conversation is what you asked for. */
+  const toChat = (): void => {
+    setPage("chat");
+    setLookup(false);
   };
 
   const answer = (id: string, value: string | undefined): void => {
@@ -114,7 +168,12 @@ export function App() {
             icon="meeting"
             label="Meeting"
             active={showMeeting}
-            onClick={() => setShowMeeting((v) => !v)}
+            onClick={() => {
+              // The meeting panel sits over the conversation, so asking for it
+              // from another page means asking to go back to the conversation.
+              setShowMeeting((v) => !v);
+              setPage("chat");
+            }}
           />
           {/* The audit trail. Every run already wrote its search log, screening
               reasons, source hashes and verification table; until this existed
@@ -122,11 +181,8 @@ export function App() {
           <RailButton
             icon="runs"
             label="Research runs"
-            active={showRuns}
-            onClick={() => {
-              setShowRuns((v) => !v);
-              setShowHub(false);
-            }}
+            active={page === "runs"}
+            onClick={() => setPage((p) => (p === "runs" ? "chat" : "runs"))}
           />
           {/* Models are a place you go, not a dialog you open on top of a
               conversation: choosing one means comparing sizes against what this
@@ -134,11 +190,8 @@ export function App() {
           <RailButton
             icon="models"
             label="Models"
-            active={showHub}
-            onClick={() => {
-              setShowHub((v) => !v);
-              setShowRuns(false);
-            }}
+            active={page === "models"}
+            onClick={() => setPage((p) => (p === "models" ? "chat" : "models"))}
           />
         </nav>
 
@@ -161,14 +214,11 @@ export function App() {
           <ModelBar
             settings={settings}
             onOpenSettings={() => setShowSettings(true)}
-            onOpenHub={() => {
-              setShowHub(true);
-              setShowRuns(false);
-            }}
+            onOpenHub={() => setPage("models")}
           />
         </header>
 
-        {showMeeting && settings ? <MeetingPanel settings={settings} /> : null}
+        {page === "chat" && showMeeting && settings ? <MeetingPanel settings={settings} /> : null}
 
         {/*
           * Runs replace the conversation rather than covering it.
@@ -178,10 +228,18 @@ export function App() {
           * interruption to be dismissed, over a thread you could not consult
           * while reading it.
           */}
-        {showRuns ? <RunPanel onClose={() => setShowRuns(false)} /> : null}
-        {showHub ? <ModelHub onClose={() => setShowHub(false)} /> : null}
+        {page === "runs" ? <RunPanel onClose={toChat} /> : null}
+        {page === "models" ? <ModelHub onClose={toChat} /> : null}
 
-        <div className="thread" hidden={showRuns || showHub}>
+        {page === "chat" && lookup ? (
+          <LookupResults
+            state={search.state}
+            onSort={search.setSort}
+            onPage={(n) => void search.goToPage(n)}
+          />
+        ) : null}
+
+        <div className="thread" hidden={page !== "chat" || lookup}>
           {items.length === 0 ? (
             <div className="welcome">
               <h1>What are you working on?</h1>
@@ -244,15 +302,19 @@ export function App() {
           * nor navigation: picking Deep gates the tool set for the very next
           * turn, so it belongs where that turn is written.
           */}
-        <footer className="composer" hidden={showRuns || showHub}>
+        <footer className="composer" hidden={page !== "chat"}>
           <div className="composer-card">
             {progress && busy ? <p className="progress">{progress}</p> : null}
             <textarea
               className="input"
-              placeholder="Ask a question, or describe what you need"
-              value={draft}
+              placeholder={
+                lookup
+                  ? "Search the literature — no model in the loop"
+                  : "Ask a question, or describe what you need"
+              }
+              value={typed}
               rows={1}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -262,26 +324,11 @@ export function App() {
             />
 
             <div className="composer-tools">
-              <ResearchBar />
-              {/*
-                * Searching the literature yourself, next to the control that
-                * decides whether the model searches for you -- the two are the
-                * same decision seen from either side. For a straight lookup the
-                * model is pure overhead: slower, and able to paraphrase a title.
-                */}
-              <button
-                type="button"
-                className="composer-chip"
-                onClick={() => setShowSearch(true)}
-                title="Search OpenAlex and arXiv yourself, with no model involved"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m20 20-3.5-3.5" />
-                </svg>
-                Look up papers
-              </button>
+              <ResearchBar
+                lookup={lookup}
+                onLookup={() => setLookup(true)}
+                onLeaveLookup={() => setLookup(false)}
+              />
               <span className="composer-spacer" />
               <button
                 type="button"
@@ -299,7 +346,21 @@ export function App() {
                   <path d="M19 11a7 7 0 0 1-14 0M12 18v3" />
                 </svg>
               </button>
-              {busy ? (
+              {lookup ? (
+                <button
+                  type="button"
+                  className="send"
+                  onClick={submit}
+                  disabled={!typed.trim() || search.state.busy}
+                  aria-label="Search"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="m20 20-3.5-3.5" />
+                  </svg>
+                </button>
+              ) : busy ? (
                 <button type="button" className="send stop" onClick={abort} aria-label="Stop">
                   <span className="stop-square" />
                 </button>
@@ -321,7 +382,7 @@ export function App() {
           </div>
         </footer>
 
-        <div className="statusbar" hidden={showRuns || showHub}>
+        <div className="statusbar" hidden={page !== "chat" || lookup}>
           <ContextMeter usage={usage} />
         </div>
       </main>
@@ -338,12 +399,10 @@ export function App() {
           onChange={setSettings}
           onOpenHub={() => {
             setShowSettings(false);
-            setShowHub(true);
-            setShowRuns(false);
+            setPage("models");
           }}
         />
       ) : null}
-      {showSearch ? <SearchPanel onClose={() => setShowSearch(false)} /> : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
     </div>
   );
