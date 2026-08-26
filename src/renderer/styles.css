@@ -53,8 +53,60 @@
   --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Cantarell, "Noto Sans", sans-serif;
 
+  --scrim: rgba(5, 5, 7, 0.72);
+
   --t-fast: 110ms cubic-bezier(0.4, 0, 0.2, 1);
   --t-med:  200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/*
+ * Light mode, stamped on <html> by the theme setting.
+ *
+ * Only the tokens are redefined -- not one component rule appears below --
+ * which is the whole return on having tokenised the palette in the first
+ * place: there is no hardcoded colour anywhere else in this file to miss.
+ *
+ * Not an inversion. The dark ground is warm-neutral because the accent is
+ * amber, and the same reasoning gives a warm paper white rather than a blue-
+ * white. The accent itself has to change: #e0a458 is legible as a fill on
+ * near-black and fails as text on paper, so light mode uses a darker amber and
+ * keeps the bright one for the fills where it still works.
+ */
+:root[data-theme="light"] {
+  --bg:        #faf8f4;
+  --bg-raised: #ffffff;
+  --bg-inset:  #f1ede5;
+  --bg-float:  #ffffff;
+
+  /* On paper, elevation is a shadow rather than a top highlight -- the inset
+     white line that lifts a surface off black is invisible here. */
+  --lift:      0 1px 2px rgba(60, 48, 30, 0.05);
+  --shadow-md: 0 4px 14px -6px rgba(60, 48, 30, 0.18);
+  --shadow-lg: 0 24px 56px -18px rgba(60, 48, 30, 0.28);
+
+  --border:        #e5dfd4;
+  --border-strong: #d5cdbe;
+  --border-hover:  #b5aa95;
+
+  --text:      #22201c;
+  --text-dim:  #5d5850;
+  --text-faint:#8b8478;
+
+  /* Dark enough to read as text; the fills that use it get --on-accent white. */
+  --accent:      #a4670f;
+  --accent-soft: #8a5509;
+  --accent-dim:  #cfa971;
+  --accent-glow: rgba(164, 103, 15, 0.16);
+  --accent-wash: rgba(164, 103, 15, 0.08);
+  --on-accent:   #fffdf8;
+
+  /* Semantic colours darkened to hold contrast on a light ground. */
+  --blue:   #2b6ca3;
+  --green:  #3f7d43;
+  --amber:  #91650a;
+  --red:    #b0453a;
+
+  --scrim: rgba(46, 38, 26, 0.34);
 }
 
 /* Motion here is feedback, never decoration, so it is safe to drop entirely. */
@@ -67,6 +119,16 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+/*
+ * `hidden` has to win.
+ *
+ * The attribute is display:none in the user-agent stylesheet, which any author
+ * `display` beats -- so `.thread { display: flex }` kept the conversation on
+ * screen underneath the runs panel while its own layout collapsed. This is the
+ * one place !important is the correct tool: the attribute means hidden.
+ */
+[hidden] { display: none !important; }
 
 html, body, #root { height: 100%; }
 
@@ -410,7 +472,7 @@ kbd {
 /* ---------- modal ---------- */
 
 .overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.66);
+  position: fixed; inset: 0; background: var(--scrim);
   display: grid; place-items: center; z-index: 50; padding: 22px;
   backdrop-filter: blur(3px);
   animation: overlay-in var(--t-med) ease-out;
@@ -1452,7 +1514,7 @@ kbd {
   position: fixed; inset: 0; z-index: 40;
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
-  background: rgba(5, 5, 7, 0.72);
+  background: var(--scrim);
 }
 
 .dialog, .settings {
@@ -1604,17 +1666,22 @@ p.warning { margin: 0; font-size: 12.5px; }
   position: fixed; inset: 0; z-index: 40;
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
-  background: rgba(5, 5, 7, 0.72);
+  background: var(--scrim);
 }
 
+/*
+ * The runs panel fills the conversation area rather than floating over it.
+ *
+ * It was a 1180x760 card in a modal, which is why the sizing here reads as an
+ * absence: no fixed dimensions, no border, no shadow, no rounding. Reading a
+ * run is a task with six tabs, source texts and a verification table -- framing
+ * that as a dialog to be dismissed was the wrong shape for it.
+ */
 .runs {
-  width: min(1180px, 100%); height: 760px; max-height: 100%;
-  display: flex;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 232px minmax(0, 1fr);
   overflow: hidden;
+  background: transparent;
 }
 
 /* ---- run list ---- */
@@ -1983,3 +2050,62 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .endpoint-actions button.danger { color: var(--red); }
 .endpoint-actions button.danger:hover { border-color: var(--red); }
+
+/* ---------- theme picker ---------- */
+
+.theme-choices { display: flex; gap: 12px; flex-wrap: wrap; }
+
+.theme-choice {
+  flex: 1 1 180px;
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 11px; text-align: left;
+  font: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-float); color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.theme-choice:hover { border-color: var(--border-hover); }
+.theme-choice.active { border-color: var(--accent-dim); background: var(--accent-wash); }
+.theme-name { font-size: 12.5px; font-weight: 560; color: var(--text); }
+.theme-choice .hint { margin: 0; }
+
+/* The preview paints its own colours deliberately: it has to show the theme
+   you are NOT currently in, so it cannot use the live tokens. */
+.theme-preview {
+  display: flex; height: 54px; overflow: hidden;
+  border-radius: 5px; border: 1px solid var(--border);
+}
+.tp-rail { width: 26%; }
+.tp-body { flex: 1; padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; }
+.tp-line { height: 4px; border-radius: 2px; width: 82%; }
+.tp-line.short { width: 54%; }
+.tp-card { margin-top: auto; height: 13px; border-radius: 4px; }
+
+.theme-preview-dark { background: #09090b; border-color: #26262e; }
+.theme-preview-dark .tp-rail { background: #050507; }
+.theme-preview-dark .tp-line { background: #3a3740; }
+.theme-preview-dark .tp-card { background: #17171d; border: 1px solid #34343e; }
+
+.theme-preview-light { background: #faf8f4; border-color: #e5dfd4; }
+.theme-preview-light .tp-rail { background: #f1ede5; }
+.theme-preview-light .tp-line { background: #cfc7b8; }
+.theme-preview-light .tp-card { background: #ffffff; border: 1px solid #d5cdbe; }
+
+/* Prose, not a source listing. The report is the one thing in this panel a
+   reader actually wants to read, and it was the least readable. */
+.run-doc-prose { max-width: 68ch; font-size: 13.5px; line-height: 1.7; }
+.run-doc-prose > * + * { margin-top: 0.85em; }
+
+/* ---------- composer chips ---------- */
+
+.composer-chip {
+  display: flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 11.5px; color: var(--text-dim);
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent;
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+.composer-chip:hover { color: var(--text); border-color: var(--border-hover); }
+.composer-chip svg { opacity: 0.7; flex: none; }

@@ -12,18 +12,27 @@ import { RuntimePane } from "./RuntimePane.tsx";
  * configured.
  */
 
-type Tab = "endpoints" | "runtime" | "storage" | "audio" | "permissions" | "about";
+type Tab = "endpoints" | "runtime" | "storage" | "audio" | "appearance" | "permissions" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "endpoints", label: "Endpoints" },
   { id: "runtime", label: "Runtime" },
   { id: "storage", label: "Folders" },
   { id: "audio", label: "Audio" },
+  { id: "appearance", label: "Appearance" },
   { id: "permissions", label: "Permissions" },
   { id: "about", label: "About" },
 ];
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({
+  onClose,
+  onChange,
+}: {
+  onClose: () => void;
+  /* Settings changed here have to reach the app, not just this dialog. The
+   * theme made that obvious: the picker updated, and the window stayed dark. */
+  onChange?: (s: Settings) => void;
+}) {
   const [tab, setTab] = useState<Tab>("endpoints");
   const [settings, setSettings] = useState<Settings | undefined>();
   const [vault, setVault] = useState<VaultStatus | undefined>();
@@ -34,7 +43,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const patch = async (changes: Partial<Settings>): Promise<void> => {
-    setSettings(await window.karen.updateSettings(changes));
+    const next = await window.karen.updateSettings(changes);
+    setSettings(next);
+    onChange?.(next);
   };
 
   if (!settings) return null;
@@ -66,6 +77,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           {tab === "runtime" ? <RuntimePane /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
+          {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}
           {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
           {tab === "about" ? <About /> : null}
         </div>
@@ -337,6 +349,66 @@ function Audio({
 }
 
 /* ------------------------------------------------------------- permissions */
+
+/* --------------------------------------------------------------- appearance */
+
+const THEMES = [
+  { value: "dark", label: "Dark", hint: "Warm near-black. The default." },
+  { value: "light", label: "Light", hint: "Warm paper white, with a darker amber so text stays readable." },
+] as const;
+
+/**
+ * Which palette to paint with.
+ *
+ * Both themes are defined as the same set of tokens, so this changes forty
+ * variables and no component rules. It is a real second design rather than an
+ * inversion: the accent that reads as a fill on near-black fails as text on
+ * paper, so light mode darkens it.
+ */
+function Appearance({
+  settings,
+  patch,
+}: {
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  return (
+    <div className="pane">
+      <p className="pane-lead">
+        Karen follows the theme you pick here rather than the system one, so a desktop that
+        switches at sunset will not change the app underneath you mid-sentence.
+      </p>
+
+      <fieldset className="endpoint">
+        <legend>Theme</legend>
+        <div className="theme-choices">
+          {THEMES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              className={settings.theme === t.value ? "theme-choice active" : "theme-choice"}
+              aria-pressed={settings.theme === t.value}
+              onClick={() => void patch({ theme: t.value })}
+            >
+              {/* A miniature of the app rather than a colour swatch: the point
+                  is what the window will look like, not what colour it is. */}
+              <span className={`theme-preview theme-preview-${t.value}`} aria-hidden="true">
+                <span className="tp-rail" />
+                <span className="tp-body">
+                  <span className="tp-line" />
+                  <span className="tp-line short" />
+                  <span className="tp-card" />
+                </span>
+              </span>
+              <span className="theme-name">{t.label}</span>
+              <span className="hint">{t.hint}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+    </div>
+  );
+}
 
 const MODES = [
   { value: "guarded", label: "Guarded", hint: "Reading is silent; writing a document is silent too, and every write is jailed to your documents folder. The default." },

@@ -32,6 +32,17 @@ export function App() {
   const [sessionsKey, setSessionsKey] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
 
+  /*
+   * The theme is stamped on <html>, not on a wrapper element.
+   *
+   * `body` and the scrollbars take their colour from the document, so a class
+   * on a div inside the app leaves the page behind it painted in the other
+   * theme -- visible as a dark gutter down the side of a light window.
+   */
+  useEffect(() => {
+    document.documentElement.dataset["theme"] = settings?.theme ?? "dark";
+  }, [settings?.theme]);
+
   useEffect(() => {
     void window.karen.getSettings().then(setSettings);
     // Enumerating once at startup is what gives the main process a device list
@@ -102,13 +113,15 @@ export function App() {
             active={showMeeting}
             onClick={() => setShowMeeting((v) => !v)}
           />
-          {/* Search the literature without a model in the loop. For a straight
-              lookup the model is pure overhead, and it can paraphrase a title. */}
-          <RailButton icon="search" label="Search" onClick={() => setShowSearch(true)} />
-          {/* The audit trail, one click from the conversation. Every run already
-              wrote its search log, screening reasons, source hashes and
-              verification table; until this existed none of it was reachable. */}
-          <RailButton icon="runs" label="Research runs" onClick={() => setShowRuns(true)} />
+          {/* The audit trail. Every run already wrote its search log, screening
+              reasons, source hashes and verification table; until this existed
+              none of it was reachable from anywhere in the app. */}
+          <RailButton
+            icon="runs"
+            label="Research runs"
+            active={showRuns}
+            onClick={() => setShowRuns((v) => !v)}
+          />
         </nav>
 
         <SessionList
@@ -132,7 +145,17 @@ export function App() {
 
         {showMeeting && settings ? <MeetingPanel settings={settings} /> : null}
 
-        <div className="thread">
+        {/*
+          * Runs replace the conversation rather than covering it.
+          *
+          * Reading a run is a task in its own right -- six tabs, source texts,
+          * a verification table -- and a modal framed all of that as an
+          * interruption to be dismissed, over a thread you could not consult
+          * while reading it.
+          */}
+        {showRuns ? <RunPanel onClose={() => setShowRuns(false)} /> : null}
+
+        <div className="thread" hidden={showRuns}>
           {items.length === 0 ? (
             <div className="welcome">
               <h1>What are you working on?</h1>
@@ -188,7 +211,7 @@ export function App() {
           * nor navigation: picking Deep gates the tool set for the very next
           * turn, so it belongs where that turn is written.
           */}
-        <footer className="composer">
+        <footer className="composer" hidden={showRuns}>
           <div className="composer-card">
             {progress && busy ? <p className="progress">{progress}</p> : null}
             <textarea
@@ -207,6 +230,25 @@ export function App() {
 
             <div className="composer-tools">
               <ResearchBar />
+              {/*
+                * Searching the literature yourself, next to the control that
+                * decides whether the model searches for you -- the two are the
+                * same decision seen from either side. For a straight lookup the
+                * model is pure overhead: slower, and able to paraphrase a title.
+                */}
+              <button
+                type="button"
+                className="composer-chip"
+                onClick={() => setShowSearch(true)}
+                title="Search OpenAlex and arXiv yourself, with no model involved"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
+                Look up papers
+              </button>
               <span className="composer-spacer" />
               <button
                 type="button"
@@ -261,8 +303,9 @@ export function App() {
         onCancel={() => void dictation.cancel()}
       />
 
-      {showSettings ? <SettingsModal onClose={() => setShowSettings(false)} /> : null}
-      {showRuns ? <RunPanel onClose={() => setShowRuns(false)} /> : null}
+      {showSettings ? (
+        <SettingsModal onClose={() => setShowSettings(false)} onChange={setSettings} />
+      ) : null}
       {showSearch ? <SearchPanel onClose={() => setShowSearch(false)} /> : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
     </div>

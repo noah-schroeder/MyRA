@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RunDetail, RunSource, RunSummary } from "../types.ts";
+import { Markdown } from "./Markdown.tsx";
 
 /**
  * The run panel: what a research run actually did, and why you should believe it.
@@ -62,8 +63,7 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
   }, [selected]);
 
   return (
-    <div className="runs-backdrop" onClick={onClose}>
-      <div className="runs" onClick={(e) => e.stopPropagation()}>
+    <div className="runs">
         <div className="runs-rail">
           <p className="runs-rail-title">Research runs</p>
           {runs.length === 0 ? (
@@ -109,8 +109,10 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
                   Open folder
                 </button>
               ) : null}
-              <button type="button" className="close" onClick={onClose} aria-label="Close">
-                ×
+              {/* "Back to the conversation" rather than a dismissive ×: this is
+                  a place you navigated to, not a dialog you interrupted. */}
+              <button type="button" onClick={onClose}>
+                Back to chat
               </button>
             </div>
           </div>
@@ -124,7 +126,6 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </div>
-      </div>
     </div>
   );
 }
@@ -478,7 +479,15 @@ function Report({ detail }: { detail: RunDetail }) {
         </button>
       </div>
       {text ? (
-        <pre className="run-doc">{text}</pre>
+        view === "bibtex" ? (
+          // BibTeX is not prose -- it is a file you copy, so it stays verbatim
+          // and monospaced.
+          <pre className="run-doc">{text}</pre>
+        ) : (
+          <div className="run-doc-prose">
+            <Markdown text={text} sources={new Map()} />
+          </div>
+        )
       ) : (
         <p className="runs-empty">
           {view === "bibtex"
