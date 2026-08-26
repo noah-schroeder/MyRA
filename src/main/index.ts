@@ -9,7 +9,7 @@
  * loop running in this same process.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ConfigStore, configuredEndpoints } from "../core/config.ts";
@@ -94,6 +94,15 @@ function send(channel: string, payload?: unknown): void {
   if (window_ && !window_.isDestroyed()) window_.webContents.send(channel, payload);
 }
 
+/**
+ * Where `audio: "loopback"` is a thing that exists.
+ *
+ * Electron documents loopback capture for Windows and macOS. Linux is absent,
+ * and offering it there produced a request that never answered rather than a
+ * capture -- see the handler in `createWindow`.
+ */
+const LOOPBACK_PLATFORMS = new Set<NodeJS.Platform>(["darwin", "win32"]);
+
 /* ---------------------------------------------------------------- window -- */
 
 function createWindow(): void {
@@ -124,6 +133,85 @@ function createWindow(): void {
   });
 
   window_.once("ready-to-show", () => window_?.show());
+
+  /*
+   * System audio on macOS, and the reason it is silent without this.
+   *
+   * The meeting recorder captures two tracks -- the microphone, and the
+   * system's output, which is the only way to get the far side of a call. The
+   * renderer asks for the second with `getDisplayMedia({ video: true, audio:
+   * true })`. On Windows and Linux that is enough. On macOS Chromium hands back
+   * an audio track containing nothing but silence unless the main process
+   * explicitly grants loopback capture, which is what this handler does.
+   *
+   * The failure it prevents is the quiet kind: a meeting transcript with only
+   * the user's own half of the conversation, which is precisely what the
+   * two-track design exists to avoid, and which looks like a working recording
+   * until someone reads it.
+   *
+   * Two things were found while writing this that the note in DISTRIBUTION.md
+   * had wrong, and both are worth stating.
+   *
+   * **It was never a macOS problem.** Without a handler installed, Electron
+   * refuses `getDisplayMedia` outright -- measured here, on Linux, as an
+   * immediate `NotSupportedError`. So the meeting's second track has never
+   * worked on any platform; it failed fast on Linux and Windows and silently on
+   * macOS, and the recorder's "recording your side only" warning has been the
+   * normal outcome everywhere rather than a rare one.
+   *
+   * **Installing it on Linux made things worse, not better.**
+   * `desktopCapturer.getSources` never resolved on the virtio-GPU VM this was
+   * written on, so `getDisplayMedia` never settled at all and a hang replaced
+   * an error. `audio: "loopback"` is documented for Windows and macOS in any
+   * case; Linux system audio wants a PipeWire monitor source, which is a
+   * different piece of work. So Linux keeps the honest refusal and gets a
+   * warning that says what it means.
+   *
+   * WRITTEN BLIND. Verified on no Mac and no Windows machine. The pieces are
+   * right in principle -- Electron 43 is well past the version where Chromium
+   * adopted Apple's CoreAudio tap API -- but the interaction with Screen
+   * Recording permission is exactly the kind of thing that has to be tried.
+   */
+  if (LOOPBACK_PLATFORMS.has(process.platform)) {
+    window_.webContents.session.setDisplayMediaRequestHandler(
+      (_request, callback) => {
+        /* A deadline, because this is the only thing standing between the user
+           and a request that never answers. `getSources` hung indefinitely when
+           this was tried on a Linux VM with a virtio GPU -- which is what
+           scoped the whole handler to macOS -- and a Mac with Screen Recording
+           denied is a plausible place for the same shape of failure. Refusing
+           is recoverable: the recorder treats it as "record my side only" and
+           says so. */
+        let answered = false;
+        const answer = (result: Parameters<typeof callback>[0]): void => {
+          if (answered) return;
+          answered = true;
+          callback(result);
+        };
+        const timer = setTimeout(() => answer({}), 10_000);
+
+        void desktopCapturer
+          .getSources({ types: ["screen"] })
+          .then((sources) => {
+            clearTimeout(timer);
+            const screen = sources[0];
+            /*
+             * `loopback` rather than `loopbackWithMute`: the user is on a call
+             * and needs to keep hearing it. Muting their own speakers to record
+             * the other side would be an odd definition of success.
+             */
+            answer(screen ? { video: screen, audio: "loopback" } : {});
+          })
+          .catch(() => {
+            clearTimeout(timer);
+            answer({});
+          });
+      },
+      // The renderer is our own page; there is no third party to ask about
+      // here, and macOS still gates the capture behind its own permission.
+      { useSystemPicker: false },
+    );
+  }
 
   // Links open in the user's browser, never in a window of ours: a page loaded
   // in-app would run with the app's origin and the app's permissions.
@@ -424,6 +512,45 @@ function installIpc(): void {
       properties: ["openDirectory", "createDirectory"],
     });
     return result.canceled ? undefined : result.filePaths[0];
+  });
+
+  /*
+   * What macOS has actually granted, so a refusal can be explained.
+   *
+   * On macOS the microphone and screen recording are gated by TCC, and a denial
+   * does not raise an error: `getUserMedia` resolves, the track exists, and it
+   * carries silence. That is the worst possible failure for a meeting recorder,
+   * because it looks exactly like a recording until someone reads the
+   * transcript. Asking first turns it into a sentence the user can act on.
+   *
+   * Every other platform answers "granted" because there is nothing of the kind
+   * to check: Linux and Windows gate this at the device, and a refusal there
+   * does raise an error.
+   *
+   * WRITTEN BLIND -- see DISTRIBUTION.md. The API is documented as
+   * macOS-and-Windows only, and "not-determined" is the state before the first
+   * prompt, which is why it is reported rather than treated as a refusal.
+   */
+  ipcMain.handle("karen:media-access", () => {
+    if (process.platform !== "darwin") return { microphone: "granted", screen: "granted" };
+    return {
+      microphone: systemPreferences.getMediaAccessStatus("microphone"),
+      screen: systemPreferences.getMediaAccessStatus("screen"),
+    };
+  });
+
+  /**
+   * Ask for the microphone, once.
+   *
+   * Only macOS has anything to ask; elsewhere this is a no-op that answers yes,
+   * so the caller does not have to know which platform it is on. A second call
+   * after a refusal returns false without prompting -- macOS shows the prompt
+   * once and then requires System Settings -- which is why the UI says where to
+   * go rather than offering the button again.
+   */
+  ipcMain.handle("karen:request-microphone", async () => {
+    if (process.platform !== "darwin") return true;
+    return await systemPreferences.askForMediaAccess("microphone");
   });
 
   ipcMain.handle("karen:engines", () => engines());

@@ -31,16 +31,18 @@ const NAMES = [
   "llama-b10628-bin-win-vulkan-x64.zip",
 ];
 
+const asset = (name: string) => ({
+  name,
+  size: 1,
+  digest: "sha256:" + "a".repeat(64),
+  browser_download_url: `https://example.invalid/${name}`,
+});
+
 const build: Release = {
   tag_name: "b10628",
   prerelease: true,
   published_at: "2026-08-25T18:06:50Z",
-  assets: NAMES.map((name) => ({
-    name,
-    size: 1,
-    digest: "sha256:" + "a".repeat(64),
-    browser_download_url: `https://example.invalid/${name}`,
-  })),
+  assets: NAMES.map(asset),
 };
 
 test("the newest build is found by build number, and v-tags are ignored", () => {
@@ -79,10 +81,31 @@ test("the ROCm version number is absorbed rather than pinned", () => {
 });
 
 test("Linux CUDA does not exist, and asking for it says so rather than guessing", () => {
-  // Upstream ships no such asset -- verified across b10598..b10629. Returning
-  // undefined is what makes the caller fall back to Vulkan instead of
-  // downloading something that is not a CUDA build.
+  // Upstream ships no such asset -- rechecked at b10642, whose ubuntu builds are
+  // cpu, vulkan, rocm, sycl and openvino and nothing else. Returning undefined
+  // is what makes the caller fall back instead of downloading something that is
+  // not a CUDA build.
   assert.equal(pickAsset(build, { platform: "linux", arch: "x64", backend: "cuda" }), undefined);
+});
+
+test("a Linux CUDA asset would be recognised on the day upstream ships one", () => {
+  /*
+   * The pattern is written ahead of the asset, following upstream's own naming
+   * for the build they *do* publish for Linux -- rocm-7.14 -- so the day a
+   * cuda-12.4 appears beside it, or we build one ourselves under the same name,
+   * it is picked up with no code change. This is the only test that has ever
+   * exercised that branch, because no real release has matched it.
+   */
+  const future: Release = {
+    ...build,
+    assets: [
+      ...build.assets,
+      asset("llama-b10628-bin-ubuntu-cuda-12.4-x64.tar.gz"),
+      asset("llama-b10628-bin-ubuntu-cuda-13.3-x64.tar.gz"),
+    ],
+  };
+  const chosen = pickAsset(future, { platform: "linux", arch: "x64", backend: "cuda" });
+  assert.equal(chosen?.name, "llama-b10628-bin-ubuntu-cuda-13.3-x64.tar.gz", "newest toolchain wins");
 });
 
 test("the newest CUDA toolchain wins when a release carries several", () => {

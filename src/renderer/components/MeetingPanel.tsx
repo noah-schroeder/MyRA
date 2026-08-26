@@ -35,6 +35,40 @@ export function MeetingPanel({ settings }: { settings: Settings }) {
 
   const start = async (): Promise<void> => {
     setWarning(undefined);
+
+    /*
+     * Ask macOS before asking for a microphone.
+     *
+     * On macOS a denied microphone does not raise: getUserMedia resolves, the
+     * track exists, and it carries silence for the whole meeting. That is
+     * indistinguishable from a working recording until someone reads the
+     * transcript and finds nothing in it, so the permission is checked first
+     * and a refusal is a sentence rather than an hour of quiet.
+     *
+     * Every other platform answers "granted" and this costs one IPC round trip.
+     */
+    const access = await window.karen.mediaAccess();
+    if (access.microphone === "not-determined") {
+      // Before the first prompt. Asking here puts the system dialog in front of
+      // a person who just pressed Record, which is when it makes sense.
+      await window.karen.requestMicrophone();
+    } else if (access.microphone === "denied" || access.microphone === "restricted") {
+      // macOS shows its prompt once; after a refusal only System Settings can
+      // change the answer, so say that rather than offering the button again.
+      setWarning(
+        "Karen does not have permission to use the microphone. Open System Settings → " +
+          "Privacy & Security → Microphone, switch Karen on, and try again.",
+      );
+      return;
+    }
+    if (settings.meetingCaptureSystemAudio && access.screen === "denied") {
+      // Not fatal: the mic track still records this side of the call.
+      setWarning(
+        "Screen Recording permission is off, so only your own side will be recorded. " +
+          "System Settings → Privacy & Security → Screen Recording.",
+      );
+    }
+
     const session = new MeetingCapture();
     try {
       const tracks = await session.start({

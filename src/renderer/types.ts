@@ -224,6 +224,9 @@ export interface KarenApi {
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
   engines(): Promise<{ pandoc: boolean; pandocPath?: string; pandocVersion?: string; pdftotext: boolean }>;
+  /** macOS TCC status. Every other platform answers "granted". */
+  mediaAccess(): Promise<{ microphone: MediaAccess; screen: MediaAccess }>;
+  requestMicrophone(): Promise<boolean>;
   installPandoc(): Promise<{ ok: boolean; error?: string; path?: string; version?: string }>;
   onSetupProgress(cb: (p: DownloadProgress | undefined) => void): () => void;
   privacy(): Promise<PrivacyReport>;
@@ -543,6 +546,9 @@ export interface HfFileChoice {
   quant?: string;
   fit: ModelFit;
 }
+
+/** Electron's `systemPreferences.getMediaAccessStatus` states. */
+export type MediaAccess = "not-determined" | "granted" | "denied" | "restricted" | "unknown";
 
 export interface DownloadProgress {
   what: string;
