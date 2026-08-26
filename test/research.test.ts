@@ -252,7 +252,8 @@ test("the mode button really removes the other research tool", async () => {
     const active = registry.activeNames();
     assert.ok(active.includes(expected), `${mode}: ${expected} should be active`);
     assert.ok(!active.includes(gone), `${mode}: ${gone} must NOT be reachable`);
-    // Gating research must never strip the unrelated tools.
+    // Gating research must never strip the unrelated tools. fetch_page stays
+    // in both searching modes: it is how a result gets read.
     assert.ok(active.includes("read_document") && active.includes("fetch_page"),
       `${mode}: non-research tools must survive`);
 
@@ -263,19 +264,36 @@ test("the mode button really removes the other research tool", async () => {
   restoreResearchConfig();
 });
 
-test("off leaves every research tool available", async () => {
+/*
+ * Off is not "the model decides".
+ *
+ * It used to be, and the model decided: asked why the sky is blue with search
+ * off, it ran two failed web searches and then started a literature review. A
+ * setting called off that leaves the capability in place is not a setting, it
+ * is a hint -- so the tools leave the schema entirely and the reply is the
+ * model's own.
+ */
+test("off removes every way onto the network", async () => {
   const { ToolRegistry } = await import("../src/core/agent/registry.ts");
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
   process.env["KAREN_RESEARCH_CONFIG"] = configFile({ mode: "off", category: "general" });
   const registry = new ToolRegistry();
   for (const def of RESEARCH_TOOL_DEFS) registry.register(def);
+
+  const readDocument = {
+    name: "read_document", description: "", risk: "safe" as const,
+    parameters: { type: "object" as const, properties: {} },
+    handler: async () => ({ content: "" }),
+  };
+  registry.register(readDocument);
+
   const active = registry.activeNames();
-  for (const t of ["web_search", "academic_research"]) {
-    assert.ok(active.includes(t), `${t} should be available in off mode`);
+  for (const t of ["web_search", "academic_research", "deep_research", "fetch_page"]) {
+    assert.ok(!active.includes(t), `${t} must NOT be reachable with search off`);
+    await assert.rejects(() => registry.dispatch(t, {}), /not enabled/);
   }
-  // deep_research stays gated even in "off" mode: the gate is capability, not
-  // preference, and no general-web backend ships in this build.
-  assert.ok(!active.includes("deep_research"));
+  // Off gates the network, not the app: local work is untouched.
+  assert.ok(active.includes("read_document"));
   restoreResearchConfig();
 });
 
@@ -413,6 +431,9 @@ test("deep_research is not offered while no general-web backend exists", async (
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
   const byName = new Map(RESEARCH_TOOL_DEFS.map((d) => [d.name, d]));
 
+  // In Deep, where it would otherwise be the tool of choice.
+  process.env["KAREN_RESEARCH_CONFIG"] = configFile({ mode: "deep", category: "general" });
+
   const deep = byName.get("deep_research");
   assert.ok(deep, "deep_research should still be defined, just gated");
   assert.equal(deep.enabled?.(), false);
@@ -421,6 +442,7 @@ test("deep_research is not offered while no general-web backend exists", async (
   const academic = byName.get("academic_research");
   assert.ok(academic);
   assert.notEqual(academic.enabled?.(), false);
+  restoreResearchConfig();
 
   // check_citations was registered with a handler that always threw. Gone.
   assert.equal(byName.has("check_citations"), false);

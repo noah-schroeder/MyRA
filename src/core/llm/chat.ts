@@ -12,6 +12,7 @@
  */
 
 import { ConfigStore, type EndpointSettings } from "../config.ts";
+import { splitThinking, type DeltaKind } from "./thinking.ts";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -114,8 +115,13 @@ export interface ChatOptions {
   apiKey?: string;
   temperature?: number;
   signal?: AbortSignal;
-  /** Receives text as it arrives. Providing it switches the request to SSE. */
-  onDelta?: (delta: string) => void;
+  /**
+   * Receives text as it arrives. Providing it switches the request to SSE.
+   *
+   * `kind` separates the model's reasoning from its answer, so the UI can show
+   * the thinking while it happens without mixing it into the reply.
+   */
+  onDelta?: (delta: string, kind: DeltaKind) => void;
   tools?: ToolSchema[];
 }
 
@@ -127,6 +133,13 @@ export interface ChatUsage {
 
 export interface ChatResult {
   text: string;
+  /**
+   * The model's reasoning, if it produced any.
+   *
+   * Kept out of `text` and out of the message history: it is workings on a
+   * question already answered, and replaying it costs context for nothing.
+   */
+  reasoning?: string;
   usage: ChatUsage;
   /** Tools the model asked for. Empty unless tools were offered. */
   toolCalls: ToolCall[];
@@ -237,7 +250,12 @@ async function readWhole(res: Response): Promise<ChatResult> {
   const body = (await res.json().catch(() => undefined)) as
     | {
         choices?: {
-          message?: { content?: unknown; tool_calls?: ToolCall[] };
+          message?: {
+            content?: unknown;
+            reasoning_content?: unknown;
+            reasoning?: unknown;
+            tool_calls?: ToolCall[];
+          };
           finish_reason?: string;
         }[];
         usage?: unknown;
@@ -247,12 +265,34 @@ async function readWhole(res: Response): Promise<ChatResult> {
   if (body?.error?.message) throw new LlmError(body.error.message);
   const choice = body?.choices?.[0];
   const content = choice?.message?.content;
+  const raw = typeof content === "string" ? content : "";
+
+  /* Either convention: a field beside the content, or tags inside it. Run the
+     splitter over the whole string so the two paths agree on what counts as
+     reasoning -- the streaming path uses the same code, frame by frame. */
+  let text = "";
+  let inline = "";
+  const split = splitThinking((s, kind) => {
+    if (kind === "thinking") inline += s;
+    else text += s;
+  });
+  split.push(raw);
+  split.flush();
+
+  const stated = str(choice?.message?.reasoning_content) || str(choice?.message?.reasoning);
+  const reasoning = stated || inline;
   return {
-    text: typeof content === "string" ? content : "",
+    text,
+    ...(reasoning ? { reasoning } : {}),
     usage: usageFrom(body?.usage),
     toolCalls: choice?.message?.tool_calls ?? [],
     ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}),
   };
+}
+
+/** A field that should be a string, from a server that may send anything. */
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
 }
 
 /**
@@ -262,13 +302,25 @@ async function readWhole(res: Response): Promise<ChatResult> {
  * boundary lands mid-event often enough that parsing per-read desynchronises
  * on the first long reply. Buffer until a real separator appears.
  */
-async function readStream(res: Response, onDelta: (d: string) => void): Promise<ChatResult> {
+async function readStream(
+  res: Response,
+  onDelta: (d: string, kind: DeltaKind) => void,
+): Promise<ChatResult> {
   if (!res.body) throw new LlmError("The LLM endpoint returned no response body.");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let reasoning = "";
   let usage = EMPTY_USAGE;
+  /* Deltas go through the splitter rather than straight out, so a model that
+     writes its thinking inline is treated the same as one that puts it in its
+     own field -- and the tag never reaches the transcript. */
+  const split = splitThinking((piece, kind) => {
+    if (kind === "thinking") reasoning += piece;
+    else text += piece;
+    onDelta(piece, kind);
+  });
   let finishReason: string | undefined;
   /* Tool calls arrive spread across frames, keyed by an index rather than by id:
    * the first frame carries the id and name, later ones append argument
@@ -292,6 +344,8 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
           choices?: {
             delta?: {
               content?: unknown;
+              reasoning_content?: unknown;
+              reasoning?: unknown;
               tool_calls?: {
                 index?: number;
                 id?: string;
@@ -314,11 +368,15 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
         if (parsed.usage) usage = usageFrom(parsed.usage);
         const choice = parsed.choices?.[0];
         if (choice?.finish_reason) finishReason = choice.finish_reason;
-        const delta = choice?.delta?.content;
-        if (typeof delta === "string" && delta) {
-          text += delta;
-          onDelta(delta);
+        // A server that states the reasoning separately needs no splitting:
+        // it is already labelled, and it never appears in `content`.
+        const thought = str(choice?.delta?.reasoning_content) || str(choice?.delta?.reasoning);
+        if (thought) {
+          reasoning += thought;
+          onDelta(thought, "thinking");
         }
+        const delta = choice?.delta?.content;
+        if (typeof delta === "string" && delta) split.push(delta);
         for (const call of choice?.delta?.tool_calls ?? []) {
           const index = call.index ?? 0;
           const acc = partial.get(index) ?? { id: "", name: "", args: "" };
@@ -330,6 +388,7 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
       }
     }
   }
+  split.flush();
   const toolCalls: ToolCall[] = [...partial.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([index, acc]) => ({
@@ -339,7 +398,13 @@ async function readStream(res: Response, onDelta: (d: string) => void): Promise<
     }))
     .filter((c) => c.function.name);
 
-  return { text, usage, toolCalls, ...(finishReason ? { finishReason } : {}) };
+  return {
+    text,
+    ...(reasoning ? { reasoning } : {}),
+    usage,
+    toolCalls,
+    ...(finishReason ? { finishReason } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
