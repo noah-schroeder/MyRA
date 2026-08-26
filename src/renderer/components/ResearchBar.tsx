@@ -2,20 +2,27 @@ import { useEffect, useState } from "react";
 import type { ResearchConfig, ResearchMode } from "../types.ts";
 
 /**
- * The research control.
+ * One control for the whole question of how a search happens.
  *
- * v1 offered SearXNG's live category list, fetched from the container's
- * /config. There is no container, so the choice is the honest one: which body
- * of literature to search, and how hard to look.
+ * Three of these four choices decide how hard the *model* looks; the fourth
+ * takes the model out of the loop and hands the query to OpenAlex and arXiv
+ * directly. They were two separate controls -- a mode switch here and a "Look
+ * up papers" button beside it -- which read as unrelated features when they are
+ * really one decision with four answers, and hid the fastest of them behind a
+ * modal.
  *
- * The mode does more than filter: picking one gates the tool set, so the model
- * cannot quietly do a shallow lookup when the user asked for a report.
+ * "Look up" is deliberately not a persisted research mode. It changes nothing
+ * about what the agent may do on your next turn; it changes where the composer
+ * sends what you type. Leaving it restores the mode you had, rather than
+ * silently having turned research off while you were reading.
  */
 const MODES: { value: ResearchMode; label: string; hint: string }[] = [
-  { value: "off", label: "Off", hint: "The model decides whether to search." },
-  { value: "web", label: "Quick", hint: "Search and cite. Seconds." },
+  { value: "off", label: "Off", hint: "The model answers from what it knows." },
+  { value: "web", label: "Quick", hint: "The model searches and cites. Seconds." },
   { value: "deep", label: "Deep", hint: "Plan, read, verify, synthesise. Minutes." },
 ];
+
+const LOOKUP_HINT = "Search OpenAlex and arXiv yourself. No model, no waiting, nothing logged.";
 
 /**
  * Where to search.
@@ -36,7 +43,15 @@ const CATEGORIES = [
   },
 ];
 
-export function ResearchBar() {
+export function ResearchBar({
+  lookup,
+  onLookup,
+  onLeaveLookup,
+}: {
+  lookup: boolean;
+  onLookup: () => void;
+  onLeaveLookup: () => void;
+}) {
   const [config, setConfig] = useState<ResearchConfig>({ mode: "off", category: "science" });
 
   useEffect(() => {
@@ -51,22 +66,39 @@ export function ResearchBar() {
 
   return (
     <div className="research-bar">
-      <div className="research-modes" role="group" aria-label="Research depth">
-        {MODES.map((m) => (
-          <button
-            key={m.value}
-            type="button"
-            title={m.hint}
-            aria-pressed={config.mode === m.value}
-            className={config.mode === m.value ? "mode active" : "mode"}
-            onClick={() => apply({ mode: m.value })}
-          >
-            {m.label}
-          </button>
-        ))}
+      <div className="research-modes" role="group" aria-label="How to search">
+        {MODES.map((m) => {
+          const on = !lookup && config.mode === m.value;
+          return (
+            <button
+              key={m.value}
+              type="button"
+              title={m.hint}
+              aria-pressed={on}
+              className={on ? "mode active" : "mode"}
+              onClick={() => {
+                onLeaveLookup();
+                apply({ mode: m.value });
+              }}
+            >
+              {m.label}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          title={LOOKUP_HINT}
+          aria-pressed={lookup}
+          className={lookup ? "mode lookup active" : "mode lookup"}
+          onClick={onLookup}
+        >
+          Look up
+        </button>
       </div>
 
-      {config.mode !== "off" ? (
+      {/* Lookup is scholarly by construction -- it queries OpenAlex and arXiv
+          and nothing else -- so the choice does not apply while it is on. */}
+      {config.mode !== "off" && !lookup ? (
         <select
           className="research-category"
           aria-label="Where to search"
