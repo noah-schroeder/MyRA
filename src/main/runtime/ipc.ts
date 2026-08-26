@@ -31,7 +31,6 @@ async function snapshot(runtime: RuntimeManager): Promise<Record<string, unknown
     config: runtime.config,
     phase: runtime.phase,
     server: runtime.server.status,
-    serverBuild: runtime.serverBuild,
     suggestion: runtime.suggestion(),
     activeBuild: build ? { id: build.id, tag: build.tag, backend: build.backend } : undefined,
     builds: builds.map((b) => ({ id: b.id, tag: b.tag, backend: b.backend })),
@@ -146,9 +145,10 @@ export function installRuntimeIpc(
 
       const backend = runtime.config.backendOverride ?? current.backend;
       const result = await runtime.installBuild(release, backend, inFlight.signal);
-      // The old build is untouched on disk; only the pointer moves, and only
-      // after the new one has proved it starts.
-      await runtime.update({ activeBuild: result.build.id });
+      // The old build is untouched on disk; the pointer moves only after the
+      // new one has proved it starts, and the running model is unloaded so the
+      // engine the app reports is the engine it is running.
+      const { unloaded } = await runtime.useBuild(result.build.id);
       devices = result.devices;
       return {
         ok: true,
@@ -156,6 +156,7 @@ export function installRuntimeIpc(
         from: current.id,
         devices,
         accelerated: result.accelerated,
+        ...(unloaded ? { unloaded } : {}),
       };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
@@ -168,11 +169,11 @@ export function installRuntimeIpc(
   /** Roll back, or move between backends already downloaded. No network. */
   ipcMain.handle("karen:runtime-activate", async (_e, id: string) => {
     try {
-      const build = await runtime.activate(id);
+      const { build, unloaded } = await runtime.useBuild(id, true);
       const { listDevices } = await import("./server.ts");
       const { parseDevices } = await import("../../core/runtime/devices.ts");
       devices = parseDevices(await listDevices(build.binary));
-      return { ok: true, build: build.id, devices };
+      return { ok: true, build: build.id, devices, ...(unloaded ? { unloaded } : {}) };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     } finally {
@@ -201,8 +202,14 @@ export function installRuntimeIpc(
       devices = result.devices;
       // Only now does it become the active one: a build that failed to install
       // or probe must never displace one that works.
-      await runtime.update({ activeBuild: result.build.id, backendOverride: backend });
-      return { ok: true, devices, accelerated: result.accelerated, build: result.build.id };
+      const { unloaded } = await runtime.useBuild(result.build.id, true);
+      return {
+        ok: true,
+        devices,
+        accelerated: result.accelerated,
+        build: result.build.id,
+        ...(unloaded ? { unloaded } : {}),
+      };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     } finally {

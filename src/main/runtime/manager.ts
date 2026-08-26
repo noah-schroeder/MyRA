@@ -103,8 +103,7 @@ export class RuntimeManager {
   #server = new LlamaServer();
   #phase: Phase = { kind: "idle" };
   #gpu: GpuInfo = { vendorIds: [], supportsVulkan: false };
-  /** The binary the running server was launched from, which is not necessarily
-   *  the active build's: an update switches the pointer, not the process. */
+  /** The binary the running server was launched from. */
   #serverBinary: string | undefined;
   #listeners = new Set<() => void>();
 
@@ -116,17 +115,6 @@ export class RuntimeManager {
   }
   get phase(): Phase {
     return this.#phase;
-  }
-  /**
-   * The build the running process came from, which after an update is not the
-   * active one: switching builds moves a pointer, and a loaded model carries on
-   * executing the binary it was started with until it is restarted.
-   */
-  get serverBuild(): string | undefined {
-    if (!this.#serverBinary) return undefined;
-    const root = join(buildDir("x", "y"), "..");
-    const rest = this.#serverBinary.slice(root.length + 1);
-    return rest.split(/[/\\]/)[0];
   }
 
   onChange(fn: () => void): () => void {
@@ -257,20 +245,35 @@ export class RuntimeManager {
   }
 
   /**
-   * Switch to a build that is already on disk.
+   * Make an installed build the active one, unloading whatever is running.
    *
-   * Builds install side by side and never overwrite each other, so a bad
-   * update is recoverable without another download -- but only if something
-   * can select the older one, which until now nothing could. The server is
-   * stopped first: it is a running process holding the old binary open, and
-   * "the active build changed" is not a thing a loaded model notices.
+   * The single door: updating, rolling back and switching backend all come
+   * through here, so the running process and the active build can never
+   * disagree. Builds install side by side and never overwrite each other, so a
+   * bad update is recoverable without another download -- which is only useful
+   * if something can select the older one.
+   *
+   * The unload is the point rather than a side effect. A loaded model does not
+   * notice that a pointer moved: it goes on executing the binary it was started
+   * with, so leaving it running means the app reports one engine and runs
+   * another, and the update you just installed appears to have done nothing.
+   * Stopping is also what makes the old build's files safe to delete.
+   *
+   * `activeModel` is left set, so Start reloads the same model on the new
+   * engine -- unloading is not the same as forgetting.
    */
-  async activate(id: string): Promise<InstalledBuild> {
+  async useBuild(id: string, pinBackend = false): Promise<{ build: InstalledBuild; unloaded?: string }> {
     const build = (await this.installedBuilds()).find((b) => b.id === id);
     if (!build) throw new Error(`${id} is not installed.`);
+
+    const running = this.#server.status.state === "ready" || this.#server.status.state === "starting";
+    const model = running ? this.#server.status.modelPath : undefined;
     await this.stopServer();
-    await this.update({ activeBuild: build.id, backendOverride: build.backend });
-    return build;
+    await this.update({
+      activeBuild: build.id,
+      ...(pinBackend ? { backendOverride: build.backend } : {}),
+    });
+    return { build, ...(model ? { unloaded: model.slice(model.lastIndexOf("/") + 1) } : {}) };
   }
 
   /**
@@ -287,11 +290,11 @@ export class RuntimeManager {
     const build = (await this.installedBuilds()).find((b) => b.id === id);
     if (!build) return;
     /*
-     * A server started before an update is still executing the OLD build's
-     * binary -- switching the active build does not restart a loaded model --
-     * so the build being removed can be the one currently running. Unlinking an
-     * open file is harmless on Unix and fails outright on Windows, so stop it
-     * rather than rely on which of those two this is.
+     * Unreachable while every build switch goes through useBuild(), which
+     * unloads first -- kept because this function should not depend on that to
+     * be safe. Unlinking a running binary is harmless on Unix and fails
+     * outright on Windows, so it is a bug that would only appear on one
+     * platform, found by whoever ships there rather than by whoever wrote it.
      */
     if (this.#serverBinary?.startsWith(build.dir)) await this.stopServer();
     await rm(build.dir, { recursive: true, force: true });
