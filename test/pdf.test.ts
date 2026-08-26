@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pdfToText, pdfToolAvailable } from "../src/core/research/pdf.ts";
+import { dehyphenate, pdfToText, pdfToolAvailable } from "../src/core/research/pdf.ts";
 
 test("pdftotext is installed", async () => {
   assert.equal(await pdfToolAvailable(), true, "install poppler-utils");
@@ -47,4 +47,45 @@ test("a scanned PDF reports that it needs OCR", async (t) => {
   } catch (err) {
     assert.match((err as Error).message, /scanned images|OCR|no extractable text|PDF/i);
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * De-hyphenation                                                      *
+ * ------------------------------------------------------------------ */
+
+test("a word broken across a line is rejoined without its hyphen", () => {
+  const text = "Direct instruc-\ntion improved recall.";
+  assert.equal(dehyphenate(text), "Direct instruction improved recall.");
+});
+
+test("a real compound keeps its hyphen when the paper writes it that way", () => {
+  // The document is its own dictionary: "self-report" appears intact further
+  // down, so the break at the top is a compound, not a typesetter's hyphen.
+  const text = "Students gave a self-\nreport of effort. Each self-report was scored.";
+  assert.equal(
+    dehyphenate(text),
+    "Students gave a self-report of effort. Each self-report was scored.",
+  );
+});
+
+test("with no evidence either way the hyphen is dropped", () => {
+  // Line-break hyphenation is far and away the common case, so it is the
+  // default when the document says nothing.
+  assert.equal(dehyphenate("meta-\ncognitive"), "metacognitive");
+});
+
+test("a hyphen that does not end a line is left alone", () => {
+  const text = "A well-known effect\nacross studies.";
+  assert.equal(dehyphenate(text), text);
+});
+
+test("a break before a capitalised word is not a broken word", () => {
+  // "the 2019-\nSmith dataset": a range or a name, not a split word.
+  const text = "the 2019-\nSmith dataset";
+  assert.equal(dehyphenate(text), text);
+});
+
+test("text with no line-break hyphens is returned untouched", () => {
+  const text = "Nothing here is hyphenated at a line end.\nSecond line.";
+  assert.equal(dehyphenate(text), text);
 });

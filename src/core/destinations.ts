@@ -51,12 +51,17 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     host: "api.github.com",
-    when: "You press Check for updates, or set up a local runtime",
+    when: "Karen sets up its local runtime or document tools, or you check for an update",
+    sends: "Nothing but the request",
+  },
+  {
+    host: "github.com",
+    when: "A llama.cpp build or pandoc is downloaded",
     sends: "Nothing but the request",
   },
   {
     host: ".githubusercontent.com",
-    when: "A llama.cpp build is downloaded",
+    when: "GitHub redirects one of those downloads to its own file host",
     sends: "Nothing but the request",
   },
   {

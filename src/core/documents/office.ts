@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { toolsDir } from "../paths.ts";
 import { FORMATS, extensionOf, outputName, pandocArgs, pandocReader, type Format } from "./formats.ts";
 
 export class DocsError extends Error {
@@ -38,9 +39,23 @@ export function vendorDir(): string {
  * subtly different depending on the machine is worse than one that comes out
  * the same everywhere.
  */
+export function pandocBinaryName(): string {
+  return platform() === "win32" ? "pandoc.exe" : "pandoc";
+}
+
+/** Where a pandoc fetched on first run is kept. */
+export function installedPandocPath(): string {
+  return join(toolsDir(), pandocBinaryName());
+}
+
 export function pandocPath(): string {
-  const bundled = join(vendorDir(), platform() === "win32" ? "pandoc.exe" : "pandoc");
-  return existsSync(bundled) ? bundled : "pandoc";
+  const name = pandocBinaryName();
+  // Bundled first, then the copy fetched on first run, then whatever the user
+  // has. Each step is a weaker guarantee about which version answers.
+  for (const candidate of [join(vendorDir(), name), installedPandocPath()]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return "pandoc";
 }
 
 /** Where the agent may read and write. */
@@ -109,7 +124,12 @@ async function run(
       clearTimeout(timer);
       fail(
         err.code === "ENOENT"
-          ? new DocsError(`${command} is not installed in the VM`)
+          ? new DocsError(
+              command.endsWith("pandoc") || command.endsWith("pandoc.exe")
+                ? "pandoc is not installed, so this format cannot be written. " +
+                  "Install it from Settings → Document tools."
+                : `${command} is not installed on this machine`,
+            )
           : new DocsError(err.message),
       );
     });
@@ -138,13 +158,36 @@ export interface Engines {
   pdftotext: boolean;
 }
 
-async function present(command: string): Promise<string | undefined> {
+/*
+ * Ask a binary its version, in the dialect that binary speaks.
+ *
+ * `--version` is not universal. poppler's pdftotext has no such flag and reads
+ * it as a filename, so it answered "Couldn't open file '--version'" and exited
+ * 1 -- which this read as absent. Karen then reported pdftotext missing on
+ * every machine that had it, poppler's own convention being `-v`, and printed
+ * it to stderr at that.
+ */
+async function present(command: string, flag = "--version"): Promise<string | undefined> {
   try {
-    const { code, stdout } = await run(command, ["--version"], 20_000);
-    return code === 0 ? stdout.split("\n")[0]?.trim() : undefined;
+    const { code, stdout, stderr } = await run(command, [flag], 20_000);
+    if (code !== 0) return undefined;
+    const line = (stdout.trim() || stderr.trim()).split("\n")[0]?.trim();
+    return line || undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Forget what was probed.
+ *
+ * The cache above is right for a normal run -- binaries do not appear
+ * mid-session -- and wrong for exactly one moment: the first run, where the app
+ * installs pandoc itself and would otherwise go on reporting the absence it
+ * measured at startup until restarted.
+ */
+export function forgetEngines(): void {
+  probed = undefined;
 }
 
 export async function engines(): Promise<Engines> {
@@ -154,7 +197,7 @@ export async function engines(): Promise<Engines> {
     probed = {
       pandoc: version !== undefined,
       ...(version ? { pandocPath: path, pandocVersion: version } : {}),
-      pdftotext: (await present("pdftotext")) !== undefined,
+      pdftotext: (await present("pdftotext", "-v")) !== undefined,
     };
   }
   return probed;

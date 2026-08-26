@@ -98,6 +98,7 @@ export interface Settings {
   meetingsRoot: string;
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
+  setupCompleted: boolean;
 }
 
 export interface SessionSummary {
@@ -223,6 +224,8 @@ export interface KarenApi {
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
   engines(): Promise<{ pandoc: boolean; pandocPath?: string; pandocVersion?: string; pdftotext: boolean }>;
+  installPandoc(): Promise<{ ok: boolean; error?: string; path?: string; version?: string }>;
+  onSetupProgress(cb: (p: DownloadProgress | undefined) => void): () => void;
   privacy(): Promise<PrivacyReport>;
 
   meetingState(): Promise<MeetingState>;
