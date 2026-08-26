@@ -166,6 +166,18 @@ import { join } from "node:path";
 import { readResearchConfig } from "../src/core/research/config.ts";
 
 
+/**
+ * Put KAREN_RESEARCH_CONFIG back where test/setup.ts left it.
+ *
+ * Deleting it instead -- which two tests here used to do -- does not restore
+ * the default, it removes the isolation: the path then falls back to the real
+ * ~/.config/karen/research.json, and every later test in the file starts
+ * reading whatever the developer last clicked in the running app.
+ */
+function restoreResearchConfig(): void {
+  process.env["KAREN_RESEARCH_CONFIG"] = join(process.env["KAREN_CONFIG_DIR"] ?? tmpdir(), "research.json");
+}
+
 function configFile(contents: unknown): string {
   const dir = mkdtempSync(join(tmpdir(), "karen-research-"));
   const path = join(dir, "research.json");
@@ -176,8 +188,17 @@ function configFile(contents: unknown): string {
 test("readResearchConfig defaults to off when there is no file", () => {
   assert.deepEqual(readResearchConfig(join(tmpdir(), "definitely-not-here.json")), {
     mode: "off",
-    category: "general",
+    // Not "general": that category has no provider in this build, and storing
+    // it means a run asks for a backend nobody serves.
+    category: "science",
   });
+});
+
+test("a stored category with no backend is corrected on read", () => {
+  // "general" was the default for a while, so it is written to disk on existing
+  // installs and would otherwise survive there forever.
+  const cfg = readResearchConfig(configFile({ mode: "web", category: "general" }));
+  assert.equal(cfg.category, "science");
 });
 
 test("readResearchConfig reads a GUI selection", () => {
@@ -239,7 +260,7 @@ test("the mode button really removes the other research tool", async () => {
     // model that the call succeeded.
     await assert.rejects(() => registry.dispatch(gone, {}), /not enabled/);
   }
-  delete process.env["KAREN_RESEARCH_CONFIG"];
+  restoreResearchConfig();
 });
 
 test("off leaves every research tool available", async () => {
@@ -255,7 +276,7 @@ test("off leaves every research tool available", async () => {
   // deep_research stays gated even in "off" mode: the gate is capability, not
   // preference, and no general-web backend ships in this build.
   assert.ok(!active.includes("deep_research"));
-  delete process.env["KAREN_RESEARCH_CONFIG"];
+  restoreResearchConfig();
 });
 
 test("a tool name the model invented is refused, not ignored", async () => {
@@ -386,6 +407,9 @@ test("arXiv pages by result offset, not by page number", async () => {
  * the run died with "no candidates found".
  */
 test("deep_research is not offered while no general-web backend exists", async () => {
+  // Config is isolated for the whole run by test/setup.ts; without it this
+  // read the developer's real research.json and failed whenever they had last
+  // left the app in Quick mode.
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
   const byName = new Map(RESEARCH_TOOL_DEFS.map((d) => [d.name, d]));
 
