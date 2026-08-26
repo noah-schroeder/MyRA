@@ -15,7 +15,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "test": "node --test --experimental-strip-types --no-warnings test/*.test.ts",
+    "test": "node --test --experimental-strip-types --no-warnings --import ./test/setup.ts test/*.test.ts",
     "dist": "electron-vite build && electron-builder",
     "deb": "electron-vite build && electron-builder --linux deb"
   },

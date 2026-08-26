@@ -62,7 +62,19 @@ export interface ResearchConfig {
   timeRange?: string;
 }
 
-export const DEFAULT_RESEARCH: ResearchConfig = { mode: "off", category: "general" };
+/**
+ * Categories this build can actually search.
+ *
+ * "general" is a real capability with no provider in this build -- the GUI
+ * offers it disabled, and `deep_research` is gated on whether a general sweep
+ * is possible at all. It must therefore never be the *stored* value: a run
+ * would ask for a category no provider serves and fail several seconds in,
+ * with an error about providers rather than about a setting.
+ */
+const SUPPORTED_CATEGORIES = new Set(["science"]);
+const FALLBACK_CATEGORY = "science";
+
+export const DEFAULT_RESEARCH: ResearchConfig = { mode: "off", category: FALLBACK_CATEGORY };
 
 export function readResearchConfig(path = researchConfigPath()): ResearchConfig {
   try {
@@ -72,7 +84,12 @@ export function readResearchConfig(path = researchConfigPath()): ResearchConfig 
     // silently dropped.
     return {
       mode: parsed.mode === "web" || parsed.mode === "deep" ? parsed.mode : "off",
-      category: typeof parsed.category === "string" && parsed.category ? parsed.category : "general",
+      // Coerced, not just defaulted: "general" was the default for a while, so
+      // existing installs have it written to disk and would keep it forever.
+      category:
+        typeof parsed.category === "string" && SUPPORTED_CATEGORIES.has(parsed.category)
+          ? parsed.category
+          : FALLBACK_CATEGORY,
       ...(typeof parsed.timeRange === "string" ? { timeRange: parsed.timeRange } : {}),
     };
   } catch {

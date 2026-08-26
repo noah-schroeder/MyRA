@@ -54,6 +54,22 @@ app.commandLine.appendSwitch("disable-features", "MediaRouter,OptimizationHints"
 // Real keyring-backed storage rather than the hardcoded-password fallback.
 app.commandLine.appendSwitch("password-store", "gnome-libsecret");
 
+/*
+ * Pin the application name before anything asks Electron where to put things.
+ *
+ * `app.getPath("userData")` derives from it, and the name differs between how
+ * the app is launched: electron-vite dev takes package.json's "karen", a
+ * packaged build takes electron-builder's productName "Karen", and running the
+ * built main directly gets the default "Electron". Three different data
+ * directories for one app, which strands a downloaded model in whichever one
+ * happened to be current -- a 30 GB file the app then reports as missing.
+ *
+ * Setting it explicitly also stops Chromium's caches being written into
+ * ~/.config/karen, where Karen keeps settings, sessions and the encrypted
+ * secrets file. Those had been sharing a directory with Cookies and GPUCache.
+ */
+app.setName("Karen");
+
 const config = new ConfigStore();
 const vault = new SecretVault();
 const registry = new ToolRegistry();
