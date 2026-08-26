@@ -100,9 +100,10 @@ body {
 .topbar {
   display: flex; align-items: center; gap: 12px;
   padding: 0 14px; height: 46px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised);
-  box-shadow: var(--lift);
+  /* No rule and no raised fill: with a single control up here, a full-width
+     border drew a line under nothing and cut the conversation off from the
+     top of the window. */
+  background: transparent;
   -webkit-app-region: drag;
 }
 .topbar > * { -webkit-app-region: no-drag; }
@@ -1015,10 +1016,55 @@ kbd {
 
 .rail {
   min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-inset);
-  overflow-y: auto;
+  /* A column, so the session list is the only part that scrolls and Settings
+     stays reachable at the bottom however long the history gets. */
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px 8px;
+  gap: 2px;
 }
+
+.rail-brand {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 9px 12px;
+  font-size: 14px; font-weight: 620; letter-spacing: -0.015em;
+  color: var(--text);
+  -webkit-app-region: drag;
+}
+/* A mark rather than a logo file: no remote asset, and nothing to redraw. */
+.rail-mark {
+  width: 15px; height: 15px; border-radius: 5px; flex: none;
+  background: linear-gradient(145deg, var(--accent-soft), var(--accent-dim));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.rail-nav { display: flex; flex-direction: column; gap: 1px; }
+
+.rail-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  font: inherit; font-size: 13px; color: var(--text-dim);
+  padding: 7px 9px; border-radius: var(--radius-sm);
+  border: 1px solid transparent; background: none; cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.rail-nav-item svg { flex: none; opacity: 0.75; }
+.rail-nav-item:hover { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.rail-nav-item:hover svg { opacity: 1; }
+.rail-nav-item.active { color: var(--accent-soft); background: var(--accent-wash); }
+.rail-nav-item.active svg { opacity: 1; }
+
+.rail-heading {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-faint);
+  padding: 14px 10px 6px; margin: 0;
+}
+
+/* Pushed to the bottom, outside the scrolling list above it. */
+.rail-foot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
 
 .main {
   display: flex;
@@ -1107,30 +1153,123 @@ kbd {
 
 /* ---------- composer ---------- */
 
+/*
+ * The composer is one card, not a strip of separate controls.
+ *
+ * Everything that changes what pressing send will do lives inside its border:
+ * the field, the research depth, dictation, and send itself. That containment
+ * is the point -- research depth used to sit in the top bar and read as an
+ * app-wide preference rather than a decision about this message.
+ */
 .composer {
   flex: none;
+  padding: 6px 26px 20px;
+  /* Explicit, and not inherited: these three were set by a v1 rule of the same
+     name further up the file, which is how the bar kept a raised fill and a top
+     border the current design never asked for. */
+  border-top: none;
+  background: transparent;
+  box-shadow: none;
+}
+.composer-card {
+  max-width: 780px;
+  margin: 0 auto;
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 12px 26px 16px;
-  border-top: 1px solid var(--border);
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
   background: var(--bg-raised);
+  box-shadow: var(--lift), var(--shadow-md);
+  transition: border-color var(--t-med);
 }
+.composer-card:focus-within { border-color: var(--border-hover); }
+
 .composer .input {
-  flex: 1;
+  width: 100%;
   resize: none;
-  min-height: 40px;
+  min-height: 26px;
   max-height: 40vh;
-  padding: 10px 12px;
-  line-height: 1.5;
+  padding: 2px 4px;
+  line-height: 1.55;
   font-family: var(--sans);
+  font-size: 13.5px;
+  /* Transparent, because the card is the field: a second inset panel inside
+     the card would draw a box inside a box. */
+  background: transparent;
+  border: none;
 }
+.composer .input:focus-visible { outline: none; }
+
+.composer-tools { display: flex; align-items: center; gap: 8px; }
+.composer-spacer { flex: 1 1 0; min-width: 0; }
+
 .composer .progress {
-  flex-basis: 100%;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--text-faint);
-  margin: 0 0 2px;
+  margin: 0;
+}
+
+/* One round button, so send keeps its shape whether it sends or stops and the
+   control does not resize under the cursor mid-turn. */
+.send {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: var(--accent); color: var(--on-accent);
+  cursor: pointer;
+  transition: background var(--t-fast), opacity var(--t-fast);
+}
+.send:hover:not(:disabled) { background: var(--accent-soft); }
+.send:disabled { opacity: 0.32; cursor: default; }
+.send.stop { background: var(--bg-float); color: var(--red); border-color: var(--border-strong); padding: 0; }
+.send.stop:hover { border-color: var(--red); }
+.stop-square { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+
+/* ---------- which model is answering ---------- */
+
+.modelbar {
+  display: flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 12.5px; color: var(--text-dim);
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  max-width: 460px;
+  transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+}
+.modelbar:hover { color: var(--text); background: var(--bg-raised); border-color: var(--border); }
+.modelbar svg { opacity: 0.5; flex: none; }
+.modelbar-name {
+  color: var(--text); font-weight: 520;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.modelbar-where { color: var(--text-faint); font-size: 11.5px; flex: none; }
+.modelbar.tone-none .modelbar-name { color: var(--accent-soft); }
+.dot-idle { background: var(--text-faint); }
+
+/* ---------- the empty thread ---------- */
+
+.welcome {
+  margin: auto 0;
+  padding: 6vh 0 3vh;
+  display: flex; flex-direction: column; gap: 12px;
+  text-align: center;
+}
+.welcome h1 {
+  margin: 0;
+  font-size: 25px; font-weight: 600; letter-spacing: -0.02em;
+  color: var(--text); text-wrap: balance;
+}
+.welcome p {
+  margin: 0 auto; max-width: 46ch;
+  font-size: 13px; line-height: 1.65; color: var(--text-faint);
+  text-wrap: pretty;
 }
 
 .primary, .ghost, .stop {

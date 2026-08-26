@@ -41,9 +41,9 @@ export function SessionList({
 
   return (
     <nav className="sessions" aria-label="Conversations">
-      <button type="button" className="new-session" onClick={onNew}>
-        New conversation
-      </button>
+      {/* "New conversation" lives in the rail's nav block now, beside the other
+          destinations, rather than being repeated here. */}
+      <h2 className="rail-heading">Recent</h2>
 
       <ul className="session-items">
         {sessions.map((s) => (

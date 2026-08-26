@@ -4,6 +4,8 @@ import { Markdown } from "./components/Markdown.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
 import { Reasoning } from "./components/Reasoning.tsx";
 import { SessionList } from "./components/SessionList.tsx";
+import { RailButton } from "./components/Rail.tsx";
+import { ModelBar } from "./components/ModelBar.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
 import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
@@ -87,54 +89,61 @@ export function App() {
   return (
     <div className="app">
       <aside className="rail">
+        <div className="rail-brand">
+          <span className="rail-mark" aria-hidden="true" />
+          Karen
+        </div>
+
+        <nav className="rail-nav" aria-label="Sections">
+          <RailButton icon="new" label="New conversation" onClick={() => void newSession()} />
+          <RailButton
+            icon="meeting"
+            label="Meeting"
+            active={showMeeting}
+            onClick={() => setShowMeeting((v) => !v)}
+          />
+          {/* Search the literature without a model in the loop. For a straight
+              lookup the model is pure overhead, and it can paraphrase a title. */}
+          <RailButton icon="search" label="Search" onClick={() => setShowSearch(true)} />
+          {/* The audit trail, one click from the conversation. Every run already
+              wrote its search log, screening reasons, source hashes and
+              verification table; until this existed none of it was reachable. */}
+          <RailButton icon="runs" label="Research runs" onClick={() => setShowRuns(true)} />
+        </nav>
+
         <SessionList
           {...(sessionId ? { currentId: sessionId } : {})}
           onOpen={(id) => void openSession(id)}
           onNew={() => void newSession()}
           refreshKey={sessionsKey}
         />
+
+        <div className="rail-foot">
+          <RailButton icon="settings" label="Settings" onClick={() => setShowSettings(true)} />
+        </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <div className="topbar-left">
-            <ResearchBar />
-          </div>
-          <div className="topbar-right">
-            <button
-              type="button"
-              className={showMeeting ? "chip active" : "chip"}
-              aria-pressed={showMeeting}
-              onClick={() => setShowMeeting((v) => !v)}
-            >
-              Meeting
-            </button>
-            {/* Search the literature without a model in the loop. For a
-                straight lookup the model is pure overhead, and it can
-                paraphrase a title. */}
-            <button type="button" className="chip" onClick={() => setShowSearch(true)}>
-              Search
-            </button>
-            {/* The audit trail, one click from the conversation. Every run
-                already wrote its search log, screening reasons, source hashes
-                and verification table; until this button existed none of it
-                was reachable from anywhere in the app. */}
-            <button type="button" className="chip" onClick={() => setShowRuns(true)}>
-              Runs
-            </button>
-            <button type="button" className="chip" onClick={() => setShowSettings(true)}>
-              Settings
-            </button>
-          </div>
+          {/* The one thing that belongs at the top: which model is answering.
+              Everything else moved to the rail or into the composer. */}
+          <ModelBar settings={settings} onOpen={() => setShowSettings(true)} />
         </header>
 
         {showMeeting && settings ? <MeetingPanel settings={settings} /> : null}
 
         <div className="thread">
           {items.length === 0 ? (
-            <p className="empty">
-              Ask a question, record a meeting, or start a piece of research.
-            </p>
+            <div className="welcome">
+              <h1>What are you working on?</h1>
+              {/* Three sentences rather than three buttons: these are the
+                  things Karen does, and naming them is more use than a row of
+                  shortcuts to panels that are already one click away. */}
+              <p>
+                Ask a question, record a meeting and get it written up, or start a piece of
+                research that reads the literature and cites what it found.
+              </p>
+            </div>
           ) : null}
 
           {items.map((item) => {
@@ -170,42 +179,71 @@ export function App() {
           <div ref={bottom} />
         </div>
 
+        {/*
+          * The composer owns the controls that change what sending does.
+          *
+          * Research depth used to sit in the top bar, a whole screen away from
+          * the message it governs, which made it read as an app-wide setting
+          * rather than a choice about this question. It is neither decoration
+          * nor navigation: picking Deep gates the tool set for the very next
+          * turn, so it belongs where that turn is written.
+          */}
         <footer className="composer">
-          {progress && busy ? <p className="progress">{progress}</p> : null}
-          <textarea
-            className="input"
-            placeholder="Ask something…"
-            value={draft}
-            rows={1}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          <button
-            type="button"
-            className={dictation.state.phase === "recording" ? "mic active" : "mic"}
-            aria-pressed={dictation.state.phase === "recording"}
-            aria-label={dictation.state.phase === "recording" ? "Stop dictation" : "Dictate"}
-            title="Dictate"
-            onClick={() =>
-              void (dictation.state.phase === "recording" ? dictation.stop() : dictation.start())
-            }
-          >
-            ●
-          </button>
-          {busy ? (
-            <button type="button" className="stop" onClick={abort}>
-              Stop
-            </button>
-          ) : (
-            <button type="button" className="primary" onClick={submit} disabled={!draft.trim()}>
-              Send
-            </button>
-          )}
+          <div className="composer-card">
+            {progress && busy ? <p className="progress">{progress}</p> : null}
+            <textarea
+              className="input"
+              placeholder="Ask a question, or describe what you need"
+              value={draft}
+              rows={1}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+
+            <div className="composer-tools">
+              <ResearchBar />
+              <span className="composer-spacer" />
+              <button
+                type="button"
+                className={dictation.state.phase === "recording" ? "mic active" : "mic"}
+                aria-pressed={dictation.state.phase === "recording"}
+                aria-label={dictation.state.phase === "recording" ? "Stop dictation" : "Dictate"}
+                title="Dictate"
+                onClick={() =>
+                  void (dictation.state.phase === "recording" ? dictation.stop() : dictation.start())
+                }
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                  <path d="M19 11a7 7 0 0 1-14 0M12 18v3" />
+                </svg>
+              </button>
+              {busy ? (
+                <button type="button" className="send stop" onClick={abort} aria-label="Stop">
+                  <span className="stop-square" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="send"
+                  onClick={submit}
+                  disabled={!draft.trim()}
+                  aria-label="Send"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
         </footer>
 
         {usage ? (
