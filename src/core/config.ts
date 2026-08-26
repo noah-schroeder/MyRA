@@ -64,6 +64,14 @@ export interface Settings {
    * a remote meeting transcribes to one side of the conversation.
    */
   meetingCaptureSystemAudio: boolean;
+  /**
+   * Whether first-run setup has been through once.
+   *
+   * Not "is everything installed": someone who deliberately skipped the model
+   * runtime should not be met by the same screen every launch. It records that
+   * the offer was made.
+   */
+  setupCompleted: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -82,6 +90,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
+  setupCompleted: false,
 };
 
 /**

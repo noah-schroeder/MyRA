@@ -107,8 +107,6 @@ function Citation({ n, source }: { n: number; source: CitedSource }) {
  * control of the surrounding block and its whitespace handling.
  */
 export function withCitations(text: string, sources: Map<number, CitedSource>): ReactNode[] {
-  if (sources.size === 0) return [text];
-
   const out: ReactNode[] = [];
   let last = 0;
   let key = 0;
@@ -116,10 +114,34 @@ export function withCitations(text: string, sources: Map<number, CitedSource>): 
   for (const m of text.matchAll(MARKER)) {
     const at = m.index ?? 0;
     const numbers = markerNumbers(m[1]!);
-    // A marker nothing backs stays literal: better an honest "[4]" than a link
-    // that goes nowhere.
+    if (numbers.length === 0) continue;
+
+    /*
+     * A marker nothing backs is shown as unsupported, not as a citation.
+     *
+     * It used to be left as literal text, on the reasoning that an honest "[4]"
+     * beats a link that goes nowhere. That was half right: to a reader, "[4]"
+     * at the end of a sentence *is* the claim that a source exists, and models
+     * write it out of habit — a small one asked a question with searching off
+     * produced "…Rayleigh scattering [1]." with no tool call in the turn. It is
+     * not deleted either, because that would edit what the model said. It is
+     * marked, so the page tells the truth about what is behind it.
+     */
     const resolved = numbers.filter((n) => sources.has(n));
-    if (numbers.length === 0 || resolved.length !== numbers.length) continue;
+    if (resolved.length !== numbers.length) {
+      if (at > last) out.push(text.slice(last, at));
+      out.push(
+        <span
+          key={`v${key++}`}
+          className="cite-void"
+          title="No source backs this. Nothing was cited in this conversation."
+        >
+          {m[0]}
+        </span>,
+      );
+      last = at + m[0].length;
+      continue;
+    }
 
     if (at > last) out.push(text.slice(last, at));
     out.push(

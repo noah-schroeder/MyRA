@@ -464,6 +464,8 @@ function Permissions({
 
 function About() {
   const [engines, setEngines] = useState<Awaited<ReturnType<typeof window.karen.engines>> | undefined>();
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | undefined>();
   const [privacy, setPrivacy] = useState<PrivacyReport | undefined>();
 
   useEffect(() => {
@@ -553,7 +555,7 @@ function About() {
         )
       ) : null}
 
-      <h3>Document conversion</h3>
+      <h3>Document tools</h3>
       {engines ? (
         <ul className="plain">
           <li>
@@ -565,6 +567,25 @@ function About() {
             <li className="warning">
               Without pandoc, documents can only be written as Markdown. Everything else —
               meetings, research, chat — works as normal.
+              {/* The setup screen installs this on first run; this is the way back
+                  for anyone who skipped it, or whose first attempt failed. */}
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={installing}
+                onClick={() => {
+                  setInstalling(true);
+                  setInstallError(undefined);
+                  void window.karen.installPandoc().then((r) => {
+                    setInstalling(false);
+                    if (r.ok) void window.karen.engines().then(setEngines);
+                    else setInstallError(r.error);
+                  });
+                }}
+              >
+                {installing ? "Installing…" : "Install pandoc"}
+              </button>
+              {installError ? <span className="hint"> {installError}</span> : null}
             </li>
           ) : null}
           {!engines.pdftotext ? (

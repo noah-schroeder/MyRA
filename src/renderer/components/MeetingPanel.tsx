@@ -142,9 +142,9 @@ export function MeetingPanel({ settings }: { settings: Settings }) {
 function Meter({ label, level }: { label: string; level: number }) {
   const lit = litSegments(level);
   return (
-    <div className="meter-row">
-      <span className="meter-label">{label}</span>
-      <div className="meter" role="meter" aria-label={`${label} input level`} aria-valuenow={Math.round(level * 100)}>
+    <div className="level-row">
+      <span className="level-label">{label}</span>
+      <div className="level" role="meter" aria-label={`${label} input level`} aria-valuenow={Math.round(level * 100)}>
         {Array.from({ length: 16 }, (_, i) => (
           <span key={i} className={segmentClass(i, lit)} />
         ))}

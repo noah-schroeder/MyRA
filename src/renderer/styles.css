@@ -156,7 +156,6 @@ body {
    YOLO banner -- claimed the 1fr row meant for the conversation and pushed the
    body into an implicit auto row. Flex takes however many children there are
    and still gives the leftover height to exactly one of them. */
-.app { display: flex; flex-direction: column; height: 100%; }
 .app > .topbar, .app > .statusbar, .app > .yolo-banner { flex: none; }
 
 .topbar {
@@ -242,16 +241,11 @@ body {
 /* ---------- pills ---------- */
 
 .pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 560; letter-spacing: 0.015em;
-  padding: 3px 10px; border-radius: 999px;
-  border: 1px solid var(--border); color: var(--text-dim);
-  background: var(--bg-inset);
+  display: inline-block;
+  font-size: 10.5px; font-family: var(--mono);
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-faint);
   white-space: nowrap;
-}
-.pill-dot {
-  width: 5px; height: 5px; border-radius: 50%; background: currentColor;
-  box-shadow: 0 0 6px currentColor;
 }
 .pill.on  { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
 .pill.off { color: var(--text-faint); }
@@ -281,12 +275,6 @@ body {
 .body {
   display: grid; grid-template-columns: auto minmax(0, 1fr);
   flex: 1 1 auto; min-height: 0;
-}
-.main { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
-
-.rail {
-  width: 262px; display: flex; flex-direction: column; min-height: 0;
-  border-right: 1px solid var(--border); background: var(--bg-raised);
 }
 .rail-head {
   display: flex; align-items: center; gap: 4px;
@@ -349,7 +337,6 @@ body {
 .rail-confirm-actions { display: flex; gap: 6px; justify-content: flex-end; }
 
 .scroll { overflow-y: auto; height: 100%; }
-.thread { max-width: 780px; margin: 0 auto; padding: 30px 24px 44px; display: flex; flex-direction: column; gap: 22px; }
 
 .msg { display: flex; flex-direction: column; gap: 7px; }
 .msg-role {
@@ -443,7 +430,6 @@ body {
 
 /* ---------- composer ---------- */
 
-.composer { border-top: 1px solid var(--border); background: var(--bg-raised); box-shadow: var(--lift); padding: 12px 14px 11px; }
 .composer-inner { max-width: 780px; margin: 0 auto; }
 .composer-box {
   display: flex; gap: 9px; align-items: flex-end;
@@ -555,29 +541,12 @@ kbd {
    should not sit there as an empty 28px strip with a rule above it. */
 .statusbar:empty { display: none; }
 
-.empty {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; height: 100%; color: var(--text-faint); text-align: center; padding: 40px;
-  /* Sits slightly above centre: dead-centre in a tall window reads as adrift. */
-  padding-bottom: 12vh;
-  max-width: 46ch; margin: 0 auto;
-}
-/* A notice, not a banner: the same amber, none of the chrome. */
-.empty-notice {
-  color: var(--amber); font-size: 12.5px; line-height: 1.55;
-  text-wrap: pretty; max-width: 44ch;
-}
 .thread-notice {
   color: var(--amber); font-size: 12.5px; line-height: 1.55;
   text-align: center; text-wrap: pretty;
   padding: 4px 0 10px;
 }
 
-.empty-title {
-  font-size: 22px; line-height: 1.25; color: var(--text); font-weight: 600;
-  letter-spacing: -0.015em; text-wrap: balance;
-}
-.empty > div:last-child { font-size: 13.5px; line-height: 1.6; text-wrap: pretty; }
 
 /* ---------------------------------------------------------------- *
  * Research control                                                  *
@@ -589,37 +558,6 @@ kbd {
   gap: 7px;
   flex-wrap: wrap;
   padding: 0 2px 9px;
-}
-
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-float);
-}
-
-.seg-btn {
-  appearance: none;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 12px;
-  cursor: pointer;
-  transition: background var(--t-fast), color var(--t-fast);
-}
-.seg-btn:last-child { border-right: 0; }
-.seg-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
-
-/* The active mode is load-bearing information: it changes which tools the
-   agent can reach at all, so it reads as clearly on as a switch. */
-.seg-btn.on {
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 620;
 }
 
 /* Keeps room for the chevron the base .select draws: without the explicit
@@ -636,7 +574,6 @@ kbd {
 
 /* The mode pill reads as an indicator in the topbar; down here, next to the
    button that commits, it is doing real work, so it gets more weight. */
-.research-bar .pill { font-size: 11px; padding: 3px 11px; }
 
 .research-label {
   font-size: 11.5px;
@@ -712,6 +649,17 @@ kbd {
 /* An IEEE-style marker, rendered as a link to what it cites. Sized down and
    raised slightly so a run of them does not break the line's rhythm. */
 .cite-group { white-space: nowrap; color: var(--text-faint); font-size: 0.88em; }
+
+/* A marker with no source behind it. Dimmed and struck rather than removed:
+   the words are the model's, and the page's job is to say what backs them. */
+.cite-void {
+  white-space: nowrap;
+  font-size: 0.88em;
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--amber) 70%, transparent);
+  cursor: help;
+}
 
 .cite-wrap { position: relative; }
 
@@ -1171,14 +1119,6 @@ kbd {
   gap: 18px;
 }
 
-.empty {
-  margin: auto;
-  max-width: 42ch;
-  text-align: center;
-  color: var(--text-faint);
-  font-size: 13.5px;
-  line-height: 1.6;
-}
 
 .turn { max-width: 74ch; }
 
@@ -1214,7 +1154,10 @@ kbd {
 .source-list li { font-size: 13px; color: var(--text-dim); }
 .source-list a { color: var(--text); text-decoration: none; }
 .source-list a:hover { color: var(--accent-soft); text-decoration: underline; }
-.source-meta { color: var(--text-faint); margin-left: 8px; font-size: 12px; }
+/* The venue and year beside a title in the thread's bibliography. Named apart
+   from the run panel's `.source-meta`, which is a block paragraph: one rule was
+   flattening the other's margin and closing this gap. */
+.source-venue { color: var(--text-faint); margin-left: 8px; font-size: 12px; }
 
 /* ---------- composer ---------- */
 
@@ -1488,9 +1431,12 @@ kbd {
 @keyframes pulse { 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) { .recording-dot { animation: none; } }
 
-.meter-row { display: flex; align-items: center; gap: 12px; }
-.meter-label { font-size: 11.5px; color: var(--text-faint); width: 88px; flex: none; }
-.meter { display: flex; gap: 2px; flex: 1; height: 12px; }
+/* An input level, not the context gauge. These were both called `.meter` and
+   were quietly trading properties: the gauge inherited a 12px height it never
+   asked for and the level bar lost its 2px segment gap to the gauge's 8px. */
+.level-row { display: flex; align-items: center; gap: 12px; }
+.level-label { font-size: 11.5px; color: var(--text-faint); width: 88px; flex: none; }
+.level { display: flex; gap: 2px; flex: 1; height: 12px; }
 
 .meeting-actions { display: flex; gap: 8px; }
 
@@ -1745,8 +1691,7 @@ p.warning { margin: 0; font-size: 12.5px; }
    fit a narrow window, and a wrapped tab row changes the panel's height. */
 .runs-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .runs-tabs::-webkit-scrollbar { display: none; }
-.runs-actions { flex: none; }
-.runs-actions { display: flex; align-items: center; gap: 6px; }
+.runs-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .runs-actions button {
   font: inherit; font-size: 12px;
   padding: 5px 10px; border-radius: var(--radius-sm);
@@ -1820,12 +1765,6 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 /* ---- pills and segmented controls ---- */
 
-.pill {
-  display: inline-block; margin-left: 6px;
-  font-size: 10.5px; font-family: var(--mono);
-  padding: 1px 6px; border-radius: 999px;
-  border: 1px solid var(--border); color: var(--text-faint);
-}
 .pill.bad { color: var(--red); border-color: var(--red); }
 .pill.warn { color: var(--amber); border-color: var(--accent-dim); }
 
@@ -1952,7 +1891,6 @@ p.warning { margin: 0; font-size: 12.5px; }
   color: var(--text-dim); cursor: pointer;
 }
 .result-links button:hover { color: var(--text); border-color: var(--border-hover); }
-.result-links .pill { margin-left: 0; }
 /* Open access is the thing this list offers that Scholar does not, so it is
    the one badge that gets colour. */
 .result-links .pill.open { color: var(--green); border-color: var(--green); }
@@ -2345,7 +2283,6 @@ p.warning { margin: 0; font-size: 12.5px; }
 .local-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
 .local-name { font-size: 13.5px; font-weight: 560; color: var(--text); word-break: break-word; }
 .local-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; }
-.local-meta .pill { margin-left: 0; }
 .local-actions { display: flex; gap: 7px; flex: none; }
 .local-actions button, .hub-controls button:not(.primary-sm) {
   font: inherit; font-size: 12px; padding: 6px 12px; border-radius: var(--radius-sm);
@@ -2566,3 +2503,103 @@ p.warning { margin: 0; font-size: 12.5px; }
   background: var(--bg-inset); border: 1px solid var(--border);
   font-size: 11.5px; color: var(--text-faint);
 }
+
+/* ==========================================================================
+   First run — the two things Karen cannot ship inside itself
+   ==========================================================================
+   A sheet rather than a dialog. There is nothing useful to do in the app until
+   this is answered once, so it takes the whole window and does not pretend the
+   conversation behind it is available.
+   ========================================================================== */
+
+.firstrun-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.firstrun {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 30px 32px 26px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+.firstrun header { display: flex; flex-direction: column; gap: 10px; }
+.firstrun h1 {
+  margin: 0;
+  font-size: 21px; font-weight: 620; letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.firstrun header p {
+  margin: 0;
+  font-size: 13.5px; line-height: 1.6; color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.firstrun-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.firstrun-step {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.firstrun-step.done { border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.firstrun-step.failed { border-color: color-mix(in srgb, var(--amber) 50%, transparent); }
+
+/* A fixed-width column so the three lines of a step start at the same place
+   whatever mark is in front of them. */
+.firstrun-mark {
+  flex: none; width: 18px; text-align: center;
+  font-size: 13px; line-height: 1.5; color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.firstrun-step.done .firstrun-mark { color: var(--green); }
+.firstrun-step.failed .firstrun-mark { color: var(--amber); }
+
+.firstrun-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.firstrun-body h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.firstrun-body p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-dim); text-wrap: pretty; }
+.firstrun-body p.dim { color: var(--text-faint); }
+.firstrun-error { color: var(--amber); }
+
+.firstrun-step > button {
+  flex: none; align-self: center;
+  font: inherit; font-size: 12.5px;
+  padding: 6px 13px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border);
+  color: var(--text); cursor: pointer;
+}
+.firstrun-step > button:hover { border-color: var(--border-hover); }
+
+.firstrun-progress { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+
+.firstrun-foot { display: flex; flex-direction: column; gap: 14px; }
+.firstrun-foot p {
+  margin: 0;
+  font-size: 12px; line-height: 1.55; color: var(--text-faint);
+  text-wrap: pretty;
+}
+.firstrun-foot button {
+  align-self: flex-start;
+  font: inherit; font-size: 13px; font-weight: 500;
+  padding: 9px 20px; border-radius: var(--radius-sm);
+  background: var(--accent); border: 1px solid var(--accent);
+  color: var(--on-accent); cursor: pointer;
+}
+.firstrun-foot button:disabled { opacity: 0.6; cursor: default; }

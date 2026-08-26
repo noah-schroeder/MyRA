@@ -18,30 +18,29 @@ import type { ResearchConfig, ResearchMode } from "../types.ts";
  */
 const MODES: { value: ResearchMode; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "The model answers from what it knows." },
-  { value: "web", label: "Quick", hint: "The model searches and cites. Seconds." },
-  { value: "deep", label: "Deep", hint: "Plan, read, verify, synthesise. Minutes." },
+  { value: "web", label: "Quick", hint: "The model searches OpenAlex and arXiv, and cites what it used. Seconds." },
+  { value: "deep", label: "Deep", hint: "Plan, search, read, verify and synthesise a cited report. Minutes." },
 ];
 
 const LOOKUP_HINT = "Search OpenAlex and arXiv yourself. No model, no waiting, nothing logged.";
 
+/* Scholarly is the only body of literature this build can search, so it is not
+   offered as a choice; it is stored so the setting survives a future one. */
+const CATEGORY = "science";
+
 /**
  * Where to search.
  *
- * The general-web option is listed and disabled rather than hidden. It is a
- * real capability the app supports and simply has no backend for yet, and a
- * control that quietly does not exist teaches the user the feature does not
- * exist either. Offering it as a live choice would be worse: it would fail at
- * search time, several seconds into a run, with an error about providers.
+ * One live option, so no control.
+ *
+ * The general-web choice used to sit here greyed out, on the reasoning that a
+ * capability the app supports should not be hidden just because no backend
+ * ships. In use it reads as a broken control -- the only thing a permanently
+ * disabled item teaches is that something is wrong -- and a select with a
+ * single option is not a choice either. What both searching modes do is said
+ * instead in the tooltip on the mode itself, which is where someone is already
+ * looking when they decide how hard to search.
  */
-const CATEGORIES = [
-  { value: "science", label: "Scholarly", hint: "Searches OpenAlex and arXiv; resolves open-access full text via Semantic Scholar" },
-  {
-    value: "general",
-    label: "General web (no backend yet)",
-    hint: "Scholarly search needs no setup; general web search needs a backend this build does not ship.",
-    disabled: true,
-  },
-];
 
 export function ResearchBar({
   lookup,
@@ -59,7 +58,7 @@ export function ResearchBar({
   }, []);
 
   const apply = (patch: Partial<ResearchConfig>): void => {
-    const next = { ...config, ...patch };
+    const next = { ...config, category: CATEGORY, ...patch };
     setConfig(next);
     void window.karen.setResearch(next);
   };
@@ -96,22 +95,6 @@ export function ResearchBar({
         </button>
       </div>
 
-      {/* Lookup is scholarly by construction -- it queries OpenAlex and arXiv
-          and nothing else -- so the choice does not apply while it is on. */}
-      {config.mode !== "off" && !lookup ? (
-        <select
-          className="research-category"
-          aria-label="Where to search"
-          value={config.category}
-          onChange={(e) => apply({ category: e.target.value })}
-        >
-          {CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value} title={c.hint} disabled={c.disabled ?? false}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      ) : null}
     </div>
   );
 }

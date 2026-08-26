@@ -15,6 +15,7 @@ import { ContextMeter } from "./components/ContextMeter.tsx";
 import { LookupResults } from "./components/LookupResults.tsx";
 import { useLookup } from "./useLookup.ts";
 import { UiDialog } from "./components/UiDialog.tsx";
+import { FirstRun } from "./components/FirstRun.tsx";
 import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
@@ -407,6 +408,17 @@ export function App() {
         onCancel={() => void dictation.cancel()}
       />
 
+      {/* Over everything, including the composer: there is nothing useful to do
+          in the app until this has been answered once. */}
+      {settings && !settings.setupCompleted ? (
+        <FirstRun
+          onDone={() => {
+            setSettings({ ...settings, setupCompleted: true });
+            void window.karen.updateSettings({ setupCompleted: true });
+          }}
+        />
+      ) : null}
+
       {showSettings ? (
         <SettingsModal
           onClose={() => setShowSettings(false)}
@@ -441,7 +453,7 @@ function SourceList({ sources }: { sources: Map<number, CitedSource> }) {
               {s.title || s.url}
             </a>
             {s.venue || s.year ? (
-              <span className="source-meta">
+              <span className="source-venue">
                 {[s.venue, s.year].filter(Boolean).join(", ")}
               </span>
             ) : null}

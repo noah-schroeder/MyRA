@@ -429,6 +429,32 @@ function installIpc(): void {
   ipcMain.handle("karen:engines", () => engines());
 
   /*
+   * Installing pandoc, on a gesture.
+   *
+   * Not a tool, not on a timer, and not reachable by the model: the only caller
+   * is the setup screen. One install can be in flight at a time, so pressing
+   * the button twice does not fetch 34 MB twice.
+   */
+  let pandocInstall: AbortController | undefined;
+  ipcMain.handle("karen:install-pandoc", async () => {
+    if (pandocInstall) return { ok: false, error: "An install is already running." };
+    pandocInstall = new AbortController();
+    try {
+      const { installPandoc } = await import("./tools/pandoc.ts");
+      const result = await installPandoc({
+        signal: pandocInstall.signal,
+        onProgress: (p) => send("karen:setup-progress", p),
+      });
+      return { ok: true, ...result };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    } finally {
+      pandocInstall = undefined;
+      send("karen:setup-progress", undefined);
+    }
+  });
+
+  /*
    * What Settings shows under "what leaves this machine".
    *
    * Rendered from the table rather than written out in the UI, so the claim
@@ -567,8 +593,24 @@ async function main(): Promise<void> {
     if (managed) {
       return { endpoint: { ...config.current.llm, baseUrl: managed.baseUrl }, apiKey: managed.apiKey };
     }
+    /*
+     * No model loaded, so fall back to whatever endpoint the user configured.
+     *
+     * Said out loud when there isn't one. The failure this replaces was silent
+     * and misdirected: with no endpoint set, the request went to a base URL of
+     * "" and surfaced as a fetch error about a malformed address, which reads
+     * as a bug in Karen rather than as "load a model". A stale address from an
+     * older build did worse -- it named a host that had not existed for weeks.
+     */
+    const llm = config.current.llm;
+    if (!llm.baseUrl.trim()) {
+      throw new Error(
+        "No model is loaded. Open Models and load one, or set your own endpoint in " +
+          "Settings → Endpoints.",
+      );
+    }
     const key = await vault.get("llmKey");
-    return { endpoint: config.current.llm, ...(key ? { apiKey: key } : {}) };
+    return { endpoint: llm, ...(key ? { apiKey: key } : {}) };
   });
 
   createWindow();
