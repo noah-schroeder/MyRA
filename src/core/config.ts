@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PermissionMode } from "./policy.ts";
 import { CONFIG_DIR } from "./paths.ts";
+import { isLocalHost } from "./destinations.ts";
 
 const SETTINGS_PATH = join(CONFIG_DIR, "settings.json");
 
@@ -139,32 +140,37 @@ export class ConfigStore {
   #emit(): void {
     for (const fn of this.#listeners) fn(this.#settings);
   }
+}
 
-  /**
-   * The complete set of origins the app itself may contact. Everything the
-   * egress filter permits comes from here, so the allowlist is always derived,
-   * never hand-maintained.
-   *
-   * The LLM endpoint is deliberately NOT included: pi reaches it from inside the
-   * VM, and the host app has no reason to.
-   */
-  /**
-   * Origins the app itself may reach.
-   *
-   * Derived from the user's own endpoint settings; there is no hand-maintained
-   * list anywhere. The LLM endpoint is here because meeting notes are written
-   * on the host: the transcript is private, and the VM is the machine that
-   * fetches arbitrary web pages, so sending meeting transcripts there to be
-   * summarised would move private data towards the less trusted side.
-   */
-  egressAllowlist(): string[] {
-    const llm = this.#settings.llm.baseUrl;
-    return [
-      this.#settings.transcription.baseUrl,
-      llm,
-      // The same server as the app itself reaches it: the setting is the VM's
-      // view, and a host-originated call goes to loopback instead.
-      llm ? llm : "",
-    ].filter(Boolean);
-  }
+/**
+ * The endpoints the user pointed Karen at, described honestly.
+ *
+ * This replaced an `egressAllowlist()` that nothing called: it described a
+ * default-deny filter that was never installed, which made it worse than
+ * absent -- a privacy claim the code did not keep. The filter now exists (see
+ * `onBeforeRequest` in main/index.ts) and applies to the window, which makes
+ * no requests at all; these endpoints are contacted from the main process, and
+ * where they point is the user's decision rather than something to enforce.
+ *
+ * The only judgement made here is local versus not, because that is the line
+ * that decides whether a prompt leaves the machine.
+ */
+export function configuredEndpoints(
+  settings: Settings,
+): { label: string; url: string; local: boolean }[] {
+  const rows: { label: string; url: string; local: boolean }[] = [];
+  const add = (label: string, url: string): void => {
+    if (!url.trim()) return;
+    let local = false;
+    try {
+      local = isLocalHost(new URL(url).hostname);
+    } catch {
+      /* An unparseable URL cannot be called local. */
+    }
+    rows.push({ label, url, local });
+  };
+  add("Chat and reasoning", settings.llm.baseUrl);
+  add("Transcription", settings.transcription.baseUrl);
+  add("Embeddings", settings.embeddings.baseUrl);
+  return rows;
 }

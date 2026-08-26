@@ -198,6 +198,7 @@ export interface KarenApi {
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
   engines(): Promise<{ pandoc: boolean; pandocPath?: string; pandocVersion?: string; pdftotext: boolean }>;
+  privacy(): Promise<PrivacyReport>;
 
   meetingState(): Promise<MeetingState>;
   meetingStart(title: string, tracks: { id: string; label: string; source?: string }[]): Promise<string>;
@@ -237,6 +238,17 @@ export interface KarenApi {
     tag: string,
     backend: string,
   ): Promise<{ ok: boolean; error?: string; devices?: RuntimeDevice[]; accelerated?: boolean; build?: string }>;
+  runtimeUpdate(tag?: string): Promise<{
+    ok: boolean;
+    error?: string;
+    build?: string;
+    from?: string;
+    unchanged?: boolean;
+    devices?: RuntimeDevice[];
+    accelerated?: boolean;
+  }>;
+  runtimeActivate(id: string): Promise<{ ok: boolean; error?: string; build?: string; devices?: RuntimeDevice[] }>;
+  runtimeRemoveBuild(id: string): Promise<{ ok: boolean; error?: string }>;
   runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
   runtimeCancel(): Promise<{ ok: boolean }>;
   runtimeModels(): Promise<LocalModel[]>;
@@ -257,6 +269,19 @@ export interface KarenApi {
 
 declare global {
   interface Window { karen: KarenApi }
+}
+
+/* ------------------------------------------------------------------ *
+ * Privacy                                                             *
+ * ------------------------------------------------------------------ */
+
+export interface PrivacyReport {
+  /** Every fixed host the app can contact, from src/core/destinations.ts. */
+  destinations: { host: string; when: string; sends: string }[];
+  /** Requests the window attempted and the egress filter cancelled. */
+  blocked: { url: string; at: string }[];
+  /** Where the user pointed their own endpoints, and whether that is local. */
+  endpoints: { label: string; url: string; local: boolean }[];
 }
 
 /* ------------------------------------------------------------------ *
@@ -393,11 +418,16 @@ export interface RuntimeState {
   config: RuntimeConfig;
   phase: RuntimePhase;
   server: ServerStatus;
+  /** The build the running process came from; differs from the active one
+   *  between an update and the next restart. */
+  serverBuild?: string;
   suggestion: { backend: Backend; reason: string };
   activeBuild?: { id: string; tag: string; backend: Backend };
   builds: { id: string; tag: string; backend: Backend }[];
   baseline: string;
   devices?: RuntimeDevice[];
+  /** What the probe and the OS say this machine has, for sizing models. */
+  machine?: { vramBytes?: number; ramBytes: number };
 }
 
 export interface LocalModel {
@@ -414,6 +444,9 @@ export interface HfSearchResult {
   downloads?: number;
   likes?: number;
   gated: false | "auto" | "manual";
+  /** Hub tags, shown as text and never interpreted. */
+  tags?: string[];
+  lastModified?: string;
 }
 
 export interface HfFileChoice {

@@ -31,6 +31,7 @@ async function snapshot(runtime: RuntimeManager): Promise<Record<string, unknown
     config: runtime.config,
     phase: runtime.phase,
     server: runtime.server.status,
+    serverBuild: runtime.serverBuild,
     suggestion: runtime.suggestion(),
     activeBuild: build ? { id: build.id, tag: build.tag, backend: build.backend } : undefined,
     builds: builds.map((b) => ({ id: b.id, tag: b.tag, backend: b.backend })),
@@ -50,11 +51,20 @@ export function installRuntimeIpc(
   let inFlight: AbortController | undefined;
 
   const push = (): void => {
-    void snapshot(runtime).then((state) => send("karen:runtime", state));
+    // Devices and the machine figures ride along, because every consumer of
+    // this state wants them: the hub sizes models against VRAM, and a pushed
+    // update that dropped them would blank the numbers on every re-render.
+    void snapshot(runtime).then((state) =>
+      send("karen:runtime", { ...state, devices, machine: runtime.machine(devices) }),
+    );
   };
   runtime.onChange(push);
 
-  ipcMain.handle("karen:runtime-state", async () => ({ ...(await snapshot(runtime)), devices }));
+  ipcMain.handle("karen:runtime-state", async () => ({
+    ...(await snapshot(runtime)),
+    devices,
+    machine: runtime.machine(devices),
+  }));
 
   ipcMain.handle("karen:runtime-config", async (_e, patch: Record<string, unknown>) =>
     runtime.update(patch),
@@ -103,6 +113,77 @@ export function installRuntimeIpc(
          * UI says so rather than implying the user is behind. */
         behind: current && newest ? Number(newest.tag_name.slice(1)) - Number(current.slice(1)) : 0,
       };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  /**
+   * Install a newer build. The button that says "update" now updates.
+   *
+   * Deliberately the same code path as any other install -- download, verify,
+   * unpack, probe, and only then switch -- because an update is exactly that
+   * with the tag filled in for you. The previous build stays on disk, so if the
+   * nightly you just moved to is broken, the fix is one click and no download.
+   */
+  ipcMain.handle("karen:runtime-update", async (_e, tag?: string) => {
+    inFlight?.abort();
+    inFlight = new AbortController();
+    try {
+      const current = await runtime.activeBuild();
+      if (!current) return { ok: false, error: "No runtime is installed yet." };
+
+      const releases = await runtime.fetchReleases(inFlight.signal);
+      const release = tag
+        ? releases.find((r: Release) => r.tag_name === tag)
+        : newestBuild(releases);
+      if (!release) {
+        return { ok: false, error: "That build is no longer offered upstream." };
+      }
+      if (release.tag_name === current.tag) {
+        return { ok: true, unchanged: true, build: current.id };
+      }
+
+      const backend = runtime.config.backendOverride ?? current.backend;
+      const result = await runtime.installBuild(release, backend, inFlight.signal);
+      // The old build is untouched on disk; only the pointer moves, and only
+      // after the new one has proved it starts.
+      await runtime.update({ activeBuild: result.build.id });
+      devices = result.devices;
+      return {
+        ok: true,
+        build: result.build.id,
+        from: current.id,
+        devices,
+        accelerated: result.accelerated,
+      };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    } finally {
+      inFlight = undefined;
+      push();
+    }
+  });
+
+  /** Roll back, or move between backends already downloaded. No network. */
+  ipcMain.handle("karen:runtime-activate", async (_e, id: string) => {
+    try {
+      const build = await runtime.activate(id);
+      const { listDevices } = await import("./server.ts");
+      const { parseDevices } = await import("../../core/runtime/devices.ts");
+      devices = parseDevices(await listDevices(build.binary));
+      return { ok: true, build: build.id, devices };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    } finally {
+      push();
+    }
+  });
+
+  ipcMain.handle("karen:runtime-remove-build", async (_e, id: string) => {
+    try {
+      await runtime.removeBuild(id);
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
@@ -191,6 +272,11 @@ export function installRuntimeIpc(
           downloads: m.downloads,
           likes: m.likes,
           gated: m.gated ?? false,
+          /* Tags carry the things a person actually chooses on -- the base
+           * architecture, the licence, whether it is an instruct tune -- and
+           * are shown as text, never interpreted. */
+          ...(m.tags ? { tags: m.tags.slice(0, 12) } : {}),
+          ...(m.lastModified ? { lastModified: m.lastModified } : {}),
         })),
       };
     } catch (err) {

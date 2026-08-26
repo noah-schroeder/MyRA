@@ -96,7 +96,7 @@ export function fitModel(
   const required = fileBytes + cache + OVERHEAD_BYTES + fileBytes * OVERHEAD_FRACTION;
 
   const gib = (n: number): string => `${(n / GIB).toFixed(1)} GB`;
-  const detail = `needs about ${gib(required)}${estimated ? " (estimated)" : ""}`;
+  const detail = `Needs about ${gib(required)}${estimated ? " (estimated)" : ""}`;
 
   if (machine.vramBytes !== undefined && required <= machine.vramBytes) {
     return {
@@ -135,7 +135,7 @@ export function fitModel(
     requiredBytes: required,
     ...(kv !== undefined ? { kvBytes: kv } : {}),
     estimated,
-    label: `Too large for this machine — ${detail}, and there is ${gib(machine.ramBytes)} of memory.`,
+    label: `Too large for this machine — needs about ${gib(required)}${estimated ? " (estimated)" : ""}, and there is ${gib(machine.ramBytes)} of memory.`,
   };
 }
 

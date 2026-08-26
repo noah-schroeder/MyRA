@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AudioSource, Settings, VaultStatus } from "../types.ts";
+import type { AudioSource, PrivacyReport, Settings, VaultStatus } from "../types.ts";
 import { enumerate } from "../capture.ts";
 import { RuntimePane } from "./RuntimePane.tsx";
 
@@ -27,8 +27,12 @@ const TABS: { id: Tab; label: string }[] = [
 export function SettingsModal({
   onClose,
   onChange,
+  onOpenHub,
 }: {
   onClose: () => void;
+  /* Models moved out of Settings and onto their own screen; the Runtime tab
+   * points at it rather than keeping a second, drifting copy of the list. */
+  onOpenHub?: () => void;
   /* Settings changed here have to reach the app, not just this dialog. The
    * theme made that obvious: the picker updated, and the window stayed dark. */
   onChange?: (s: Settings) => void;
@@ -74,7 +78,7 @@ export function SettingsModal({
 
         <div className="settings-body">
           {tab === "endpoints" ? <Endpoints settings={settings} patch={patch} vault={vault} /> : null}
-          {tab === "runtime" ? <RuntimePane /> : null}
+          {tab === "runtime" ? <RuntimePane {...(onOpenHub ? { onOpenHub } : {})} /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}
@@ -460,24 +464,94 @@ function Permissions({
 
 function About() {
   const [engines, setEngines] = useState<Awaited<ReturnType<typeof window.karen.engines>> | undefined>();
+  const [privacy, setPrivacy] = useState<PrivacyReport | undefined>();
 
   useEffect(() => {
     void window.karen.engines().then(setEngines);
+    void window.karen.privacy().then(setPrivacy);
   }, []);
 
   return (
     <div className="pane">
       <h3>What leaves this machine</h3>
-      <ul className="plain">
-        <li>Your prompts and audio go to the endpoints you configured, and nowhere else.</li>
-        <li>Searches reach OpenAlex and arXiv. Semantic Scholar is asked only whether a
-          paper already found has an open-access PDF.</li>
-        <li>Pages you ask it to read see a request from this machine.</li>
-        <li>
-          Everything else — files, transcripts, meeting audio, conversation history — never
-          crosses the network at all.
-        </li>
-      </ul>
+      <p className="pane-lead">
+        This list is generated from the code that makes the requests, not written out by hand: a
+        test fails the build if the app can reach a host that is not named here. Nothing below
+        happens on a timer — every row names the thing you did.
+      </p>
+
+      <h4 className="pane-sub">Your endpoints</h4>
+      {privacy?.endpoints.length ? (
+        <ul className="plain">
+          {privacy.endpoints.map((e) => (
+            <li key={e.label}>
+              {e.label}: <code>{e.url}</code>{" "}
+              <span className={e.local ? "pill on" : "pill"}>
+                {e.local ? "this machine" : "leaves this machine"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">
+          No endpoints are configured. If you are running a model through Karen&rsquo;s own runtime,
+          prompts are not going anywhere.
+        </p>
+      )}
+
+      <h4 className="pane-sub">Everything else</h4>
+      <table className="privacy-table">
+        <thead>
+          <tr>
+            <th>Host</th>
+            <th>When</th>
+            <th>What it carries</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(privacy?.destinations ?? []).map((d) => (
+            <tr key={d.host}>
+              <td><code>{d.host}</code></td>
+              <td>{d.when}</td>
+              <td>{d.sends}</td>
+            </tr>
+          ))}
+          {/* Not a host, and the one entry that cannot be enumerated: reading
+              the literature means fetching whatever the literature points at. */}
+          <tr>
+            <td className="dim">the page itself</td>
+            <td>A research run reads a source it found</td>
+            <td>Nothing but the request — those sites see this machine&rsquo;s address</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p className="hint">
+        Files, transcripts, meeting audio and conversation history never cross the network at all.
+        There is no telemetry, no crash reporting, and no update check that you did not press.
+      </p>
+
+      <h3>Blocked by the egress filter</h3>
+      <p className="hint">
+        The window itself is not allowed to reach the network — everything above runs in the main
+        process, behind a checked boundary. Two things enforce that: a content policy that refuses
+        the request inside the page, and a filter that cancels it at the network layer. The filter
+        is the one that also covers the traffic Chromium starts on its own, which no page policy
+        can see. Anything either of them stopped is listed here.
+      </p>
+      {privacy ? (
+        privacy.blocked.length === 0 ? (
+          <p className="ok-line">Nothing has been blocked this session, which is the expected result.</p>
+        ) : (
+          <ul className="plain">
+            {privacy.blocked.map((b, i) => (
+              <li key={i} className="warning">
+                <code>{b.url}</code> — {new Date(b.at).toLocaleTimeString()}
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
 
       <h3>Document conversion</h3>
       {engines ? (
