@@ -28,25 +28,36 @@ export function useAgent() {
       switch (event.type) {
         case "text": {
           if (!event.text) break;
-          setItems((prev) => {
-            const id = open.current;
-            const existing = id ? prev.find((i) => i.id === id) : undefined;
-            if (existing && existing.kind === "assistant") {
-              return prev.map((i) =>
-                i.id !== id || i.kind !== "assistant"
-                  ? i
-                  : { ...i, blocks: appendText(i.blocks, event.text!) },
-              );
-            }
-            const created: AssistantItem = {
-              id: nextId(),
-              kind: "assistant",
-              blocks: [{ kind: "text", text: event.text! }],
-              streaming: true,
-            };
-            open.current = created.id;
-            return [...prev, created];
-          });
+          const text = event.text;
+          /*
+           * The id is decided here, not inside the updater.
+           *
+           * `open.current` used to be assigned in the middle of `setItems`, and
+           * React invokes updaters twice in development -- so two deltas
+           * arriving in one batch could each create their own bubble, splitting
+           * a single reply into two messages part-way through the first word.
+           * A state updater has to be a pure function of `prev`; the ref is a
+           * side effect and belongs out here with the other side effects.
+           */
+          if (open.current === undefined) open.current = nextId();
+          const id = open.current;
+          setItems((prev) =>
+            prev.some((i) => i.id === id)
+              ? prev.map((i) =>
+                  i.id !== id || i.kind !== "assistant"
+                    ? i
+                    : { ...i, blocks: appendText(i.blocks, text) },
+                )
+              : [
+                  ...prev,
+                  {
+                    id,
+                    kind: "assistant",
+                    blocks: [{ kind: "text", text }],
+                    streaming: true,
+                  } satisfies AssistantItem,
+                ],
+          );
           break;
         }
 
@@ -104,6 +115,16 @@ export function useAgent() {
                 : i,
             ),
           );
+          break;
+
+        /* Older messages were summarised to make room. Said out loud, because
+           a model that silently forgot the first half of a conversation is
+           indistinguishable from one that is broken. */
+        case "compacted":
+          setItems((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), kind: "notice" as const, text: event.text ?? "" },
+          ]);
           break;
 
         case "done": {

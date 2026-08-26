@@ -563,7 +563,9 @@ function LocalModels({
                   {/* The context it will actually start with, on the row rather
                       than behind the settings panel: it is the setting people
                       most often want to check and least often want to change. */}
-                  {m.context ? <span className="dim">{ctx(m.context)} context</span> : null}
+                  {/* What it will start with. An estimate while llama.cpp is
+                      the one choosing, which is the default. */}
+                  {m.context ? <span className="dim">~{ctx(m.context)} context</span> : null}
                   {active && running ? <span className="pill on">loaded</span> : null}
                   {active && starting ? <span className="pill warn">loading</span> : null}
                 </span>

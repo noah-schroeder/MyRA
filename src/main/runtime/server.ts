@@ -34,6 +34,15 @@ export interface ServerStatus {
   /** Where the OpenAI-compatible API is, once ready. */
   baseUrl?: string | undefined;
   modelPath?: string | undefined;
+  /**
+   * Tokens one conversation actually gets, read from the running server.
+   *
+   * Not what was asked for: with `--fit` doing the sizing, the only way to know
+   * is to ask afterwards. This is the number the context meter counts against,
+   * so it has to be the truth rather than an intention.
+   */
+  contextSize?: number | undefined;
+  slots?: number | undefined;
   error?: string | undefined;
   /** The tail of stderr, for the log panel in Settings. */
   log: string[];
@@ -119,7 +128,12 @@ export class LlamaServer {
       ...(opts.tuning ?? []),
     ];
 
-    this.#set({ state: "starting", baseUrl, modelPath: opts.modelPath, log: [], error: undefined });
+    this.#set({
+      state: "starting", baseUrl, modelPath: opts.modelPath, log: [], error: undefined,
+      // Cleared, not carried: a window from the previous model would leave the
+      // meter counting against a number that is no longer true.
+      contextSize: undefined, slots: undefined,
+    });
 
     const child = spawn(opts.binary, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -191,7 +205,7 @@ export class LlamaServer {
         });
         if (res.ok) {
           this.#restarts = 0;
-          this.#set({ state: "ready", error: undefined });
+          this.#set({ state: "ready", error: undefined, ...(await this.#readProps(port)) });
           return;
         }
       } catch {
@@ -201,6 +215,46 @@ export class LlamaServer {
     }
     await this.stop();
     this.#set({ state: "failed", error: "the model did not finish loading in time." });
+  }
+
+  /**
+   * How big the context actually came out.
+   *
+   * Asked rather than assumed, because with `--fit` sizing it there is nothing
+   * to assume: llama.cpp measures free memory at load and picks. `/props`
+   * reports it per slot, which is the number a single conversation gets and so
+   * the one worth showing.
+   *
+   * A failure here is not a failed start -- the model is loaded and answering.
+   * The meter simply has nothing to count against, and says so.
+   */
+  async #readProps(port: number): Promise<{ contextSize?: number; slots?: number }> {
+    try {
+      /*
+       * Authenticated, unlike /health.
+       *
+       * llama-server leaves /health open so a supervisor can poll it, but
+       * everything else is behind LLAMA_API_KEY -- so this returned 401 and the
+       * meter silently had no denominator. Nothing said so, because a failure
+       * here is deliberately not a failed start.
+       */
+      const res = await fetch(`http://127.0.0.1:${port}/props`, {
+        headers: { authorization: `Bearer ${this.#apiKey}` },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!res.ok) return {};
+      const props = (await res.json()) as {
+        default_generation_settings?: { n_ctx?: number };
+        total_slots?: number;
+      };
+      const context = props.default_generation_settings?.n_ctx;
+      return {
+        ...(typeof context === "number" && context > 0 ? { contextSize: context } : {}),
+        ...(typeof props.total_slots === "number" ? { slots: props.total_slots } : {}),
+      };
+    } catch {
+      return {};
+    }
   }
 
   /**

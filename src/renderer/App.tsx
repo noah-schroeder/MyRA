@@ -11,6 +11,7 @@ import { MeetingPanel } from "./components/MeetingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
 import { ModelHub } from "./components/ModelHub.tsx";
+import { ContextMeter } from "./components/ContextMeter.tsx";
 import { SearchPanel } from "./components/SearchPanel.tsx";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { enumerate } from "./capture.ts";
@@ -205,6 +206,13 @@ export function App() {
             if (item.kind === "tool") {
               return <ToolCard key={item.id} item={item} />;
             }
+            if (item.kind === "notice") {
+              return (
+                <p key={item.id} className="notice">
+                  {item.text}
+                </p>
+              );
+            }
             return (
               <article key={item.id} className="turn assistant">
                 {item.blocks.map((block, i) =>
@@ -313,13 +321,9 @@ export function App() {
           </div>
         </footer>
 
-        {usage ? (
-          <div className="statusbar">
-            <span>
-              {usage.total.toLocaleString()} tokens this conversation
-            </span>
-          </div>
-        ) : null}
+        <div className="statusbar" hidden={showRuns || showHub}>
+          <ContextMeter usage={usage} />
+        </div>
       </main>
 
       <DictationHud

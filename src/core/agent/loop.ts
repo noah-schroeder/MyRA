@@ -15,6 +15,9 @@
 import { chat, type ChatMessage, type ChatUsage, type ToolCall } from "../llm/chat.ts";
 import type { EndpointSettings } from "../config.ts";
 import { UnknownToolError, type ToolRegistry } from "./registry.ts";
+import {
+  KEEP_SHARE, estimateFixedTokens, estimateTokens, needsCompaction, planCompaction, summaryMessage,
+} from "./compact.ts";
 
 /**
  * How many tool rounds one turn may take before it is stopped.
@@ -26,7 +29,7 @@ import { UnknownToolError, type ToolRegistry } from "./registry.ts";
 export const DEFAULT_MAX_STEPS = 12;
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error";
+  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "compacted";
   /** For text: the delta. For tool events: a human-readable note. */
   text?: string;
   toolCallId?: string;
@@ -52,6 +55,28 @@ export interface AgentTurnOptions {
    * file cannot drift out of step with it.
    */
   approve?: (tool: string, params: Record<string, unknown>) => Promise<boolean>;
+  /**
+   * Tokens one conversation may occupy, when it is knowable.
+   *
+   * Only the bundled runtime can say, because only it can ask the server it
+   * started. Undefined means the meter and the compaction below both stand
+   * down -- guessing a limit and summarising against it would rewrite a
+   * conversation that was nowhere near full.
+   */
+  contextLimit?: number;
+  /** Occupancy carried in from the previous turn, in tokens. */
+  contextUsed?: number;
+  /**
+   * A summary already made for this conversation, and how much it covers.
+   *
+   * Carried between turns so the older messages are summarised once rather than
+   * again on every turn past the threshold -- which would mean a whole extra
+   * model call per message, re-reading the same history each time. `upTo` is an
+   * index into `messages`.
+   */
+  compaction?: { upTo: number; summary: string };
+  /** Condense a run of messages into one paragraph. Provided by the host. */
+  summarise?: (messages: ChatMessage[]) => Promise<string>;
 }
 
 export interface AgentTurnResult {
@@ -63,6 +88,16 @@ export interface AgentTurnResult {
   steps: number;
   /** True when the step budget stopped the turn rather than the model. */
   exhausted: boolean;
+  /**
+   * How full the window is now, in tokens: the last reply's prompt plus its
+   * output. Not the sum across steps -- that counts the same prompt again for
+   * every tool call and would read as far more than the conversation occupies.
+   */
+  contextTokens: number;
+  /** Set when older messages were summarised to make room during this turn. */
+  compacted?: { replaced: number; summary: string };
+  /** The summary in force, to carry into the next turn. Reuse, do not redo. */
+  compaction?: { upTo: number; summary: string };
 }
 
 /**
@@ -101,14 +136,93 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
   const usage: ChatUsage = { input: 0, output: 0, total: 0 };
   let steps = 0;
 
+  /*
+   * A local copy, because compaction rewrites it.
+   *
+   * `opts.messages` is the caller's transcript and stays untouched: what is
+   * summarised is the request, never the record. The session file and the
+   * thread keep every message exactly as it happened, so nothing is destroyed
+   * and a larger window later can still use all of it.
+   */
+  let compaction = opts.compaction;
+  /* An existing summary is applied before anything is sent, so a conversation
+     that was compacted last turn does not pay for it again this turn. */
+  let prior =
+    compaction && compaction.upTo > 0 && compaction.upTo <= opts.messages.length
+      ? [summaryMessage(compaction.summary, compaction.upTo), ...opts.messages.slice(compaction.upTo)]
+      : [...opts.messages];
+  let contextTokens = opts.contextUsed ?? 0;
+  let compacted: { replaced: number; summary: string } | undefined;
+  /* Constant for the turn, and re-serialising 3 kB of schemas on every step of
+     every loop would be for nothing. */
+  const fixedTokens = estimateFixedTokens(opts.registry.schemas());
+
   const history = (): ChatMessage[] => [
     ...(opts.system ? [{ role: "system" as const, content: opts.system }] : []),
-    ...opts.messages,
+    ...prior,
     ...produced,
   ];
 
+  /**
+   * Summarise the older part of the conversation when it approaches the window.
+   *
+   * Attempted once per turn. A second attempt inside one turn would mean the
+   * summary itself did not free enough room, and summarising a summary loses
+   * more than it saves.
+   */
+  const makeRoom = async (): Promise<void> => {
+    if (compacted || !opts.summarise) return;
+    /*
+     * Measured against what is about to be sent, not against what came back.
+     *
+     * Occupancy from the last reply cannot see the message the user just typed,
+     * so a conversation that was comfortably inside the window one turn ago can
+     * still be refused on this one -- and by the time the reply says so, the
+     * request has already failed. The estimate is rough; it only has to be
+     * right enough to decide whether to summarise.
+     */
+    const projected = Math.max(contextTokens, estimateTokens(history()) + fixedTokens);
+    if (!needsCompaction(projected, opts.contextLimit)) return;
+
+    const plan = planCompaction(prior, Math.floor((opts.contextLimit ?? 0) * KEEP_SHARE));
+    if (!plan) return;
+
+    try {
+      const summary = await opts.summarise(plan.summarise);
+      if (!summary.trim()) return;
+      prior = [summaryMessage(summary, plan.summarise.length), ...plan.keep];
+      compacted = { replaced: plan.summarise.length, summary };
+      /*
+       * Expressed against the caller's untouched transcript, not against
+       * `prior`: `prior` may already start with a summary standing in for
+       * several messages, so its indices do not line up with the real history.
+       */
+      const covered = opts.messages.length - plan.keep.length;
+      compaction = { upTo: covered, summary };
+      /*
+       * `covered`, not `plan.summarise.length`. On a second pass `prior` already
+       * begins with a summary standing in for several messages, so counting the
+       * list it was cut from would report three where the reader can see ten.
+       */
+      opts.onEvent?.({
+        type: "compacted",
+        text:
+          covered === 1
+            ? "Summarised the earliest message to make room."
+            : `Summarised the earliest ${covered} messages to make room.`,
+      });
+    } catch {
+      /*
+       * A failed summary is not a failed turn. The request goes out at its
+       * full length and llama.cpp does whatever it does at the limit, which is
+       * no worse than the position before this feature existed.
+       */
+    }
+  };
+
   for (;;) {
     if (opts.signal?.aborted) throw new Error("cancelled");
+    await makeRoom();
 
     const reply = await chat({
       endpoint: opts.endpoint,
@@ -124,6 +238,9 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
     usage.input += reply.usage.input;
     usage.output += reply.usage.output;
     usage.total += reply.usage.total;
+    // Occupancy, not consumption: what this exchange leaves sitting in the
+    // window, which is what the next request has to fit alongside.
+    contextTokens = reply.usage.input + reply.usage.output;
 
     const assistant: ChatMessage = {
       role: "assistant",
@@ -133,7 +250,12 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
     produced.push(assistant);
 
     if (reply.toolCalls.length === 0) {
-      return { text: reply.text, messages: produced, usage, steps, exhausted: false };
+      return {
+        text: reply.text, messages: produced, usage, steps, exhausted: false,
+        contextTokens,
+        ...(compacted ? { compacted } : {}),
+        ...(compaction ? { compaction } : {}),
+      };
     }
 
     steps++;
@@ -146,7 +268,12 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
           toolMessage(call, `Stopped: this turn reached its limit of ${maxSteps} tool steps.`),
         );
       }
-      return { text: reply.text, messages: produced, usage, steps, exhausted: true };
+      return {
+        text: reply.text, messages: produced, usage, steps, exhausted: true,
+        contextTokens,
+        ...(compacted ? { compacted } : {}),
+        ...(compaction ? { compaction } : {}),
+      };
     }
 
     for (const call of reply.toolCalls) {
