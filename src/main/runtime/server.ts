@@ -43,17 +43,16 @@ export interface ServerStatus {
 export interface StartOptions {
   binary: string;
   modelPath: string;
-  /** 0 lets llama.cpp take the model's own trained context. */
-  contextSize?: number;
-  /** "auto" is upstream's default and is usually right. */
-  gpuLayers?: number | "auto";
   /**
-   * Concurrent request slots. Pinned rather than left at upstream's -1 (auto):
-   * the research pipeline issues concurrent stage calls, and slot exhaustion
-   * presents as a hang, which is the worst way for it to present.
+   * Everything the user can influence: context, slots, cache type, GPU layers.
+   *
+   * Built by `core/runtime/launch.ts` rather than here, because those flags
+   * interact in ways worth testing on their own -- and because the same
+   * function has to produce both the command line and the memory figure shown
+   * beside it, or the two drift apart. What stays here is what is not the
+   * user's to set: the model path, the address and the port.
    */
-  parallel?: number;
-  extraArgs?: string[];
+  tuning?: string[];
 }
 
 const LOG_LINES = 400;
@@ -117,16 +116,8 @@ export class LlamaServer {
       "-m", opts.modelPath,
       "--host", "127.0.0.1",
       "--port", String(port),
-      // Required for tool calling; upstream enables it by default but being
-      // explicit means a future default change cannot quietly break tools.
-      "--jinja",
-      "-np", String(opts.parallel ?? 2),
-      "-c", String(opts.contextSize ?? 0),
+      ...(opts.tuning ?? []),
     ];
-    if (opts.gpuLayers !== undefined && opts.gpuLayers !== "auto") {
-      args.push("-ngl", String(opts.gpuLayers));
-    }
-    if (opts.extraArgs?.length) args.push(...opts.extraArgs);
 
     this.#set({ state: "starting", baseUrl, modelPath: opts.modelPath, log: [], error: undefined });
 

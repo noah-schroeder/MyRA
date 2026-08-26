@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  DownloadProgress, HfFileChoice, HfSearchResult, LocalModel, ModelFit, RuntimeState,
+  DownloadProgress, HfFileChoice, HfSearchResult, LocalModel, ModelFit, RuntimeDevice, RuntimeState,
 } from "../types.ts";
+import { ModelConfig } from "./ModelConfig.tsx";
 
 /**
  * Finding, sizing and choosing a model — a screen, not a dialog.
@@ -304,10 +305,12 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
           activePath={state?.config.activeModel}
           running={server?.state === "ready"}
           starting={server?.state === "starting"}
+          devices={state?.devices ?? []}
           onUse={(p) => void use(p)}
           onEject={() => void window.karen.runtimeStop()}
           onDelete={(p) => void window.karen.runtimeDeleteModel(p).then(refreshModels)}
           onDiscover={() => setTab("discover")}
+          onChanged={() => void refreshModels()}
         />
       ) : (
         <div className="hub-body">
@@ -513,17 +516,21 @@ function Detail({
 }
 
 function LocalModels({
-  models, activePath, running, starting, onUse, onEject, onDelete, onDiscover,
+  models, activePath, running, starting, devices, onUse, onEject, onDelete, onDiscover, onChanged,
 }: {
   models: LocalModel[];
   activePath: string | undefined;
   running: boolean;
   starting: boolean;
+  devices: RuntimeDevice[];
   onUse: (path: string) => void;
   onEject: () => void;
   onDelete: (path: string) => void;
   onDiscover: () => void;
+  onChanged: () => void;
 }) {
+  const [configuring, setConfiguring] = useState<string | undefined>();
+
   if (models.length === 0) {
     return (
       <div className="hub-blank standalone">
@@ -543,48 +550,100 @@ function LocalModels({
     <ul className="local-list">
       {models.map((m) => {
         const active = m.path === activePath;
+        const open = configuring === m.path;
         return (
           <li key={m.path} className={active ? "active" : ""}>
-            <div className="local-main">
-              <span className="local-name">{m.name}</span>
-              <span className="local-meta">
-                <span className="pill">{m.source}</span>
-                <span className="dim">{gb(m.size)}</span>
-                {m.shape?.architecture ? <span className="dim">{m.shape.architecture}</span> : null}
-                {active && running ? <span className="pill on">loaded</span> : null}
-                {active && starting ? <span className="pill warn">loading</span> : null}
-              </span>
-              {m.fit ? <p className={`fit fit-${m.fit.verdict}`}>{m.fit.label}</p> : null}
-              {m.shape?.hasChatTemplate === false ? (
-                <p className="fit fit-too-large">
-                  This file has no chat template, so it cannot hold a conversation.
-                </p>
-              ) : null}
-            </div>
-            <div className="local-actions">
-              {active && running ? (
-                <button type="button" onClick={onEject}>Eject</button>
-              ) : (
+            <div className="local-head">
+              <div className="local-main">
+                <span className="local-name">{m.name}</span>
+                <span className="local-meta">
+                  <span className="pill">{m.source}</span>
+                  <span className="dim">{gb(m.size)}</span>
+                  {m.shape?.architecture ? <span className="dim">{m.shape.architecture}</span> : null}
+                  {/* The context it will actually start with, on the row rather
+                      than behind the settings panel: it is the setting people
+                      most often want to check and least often want to change. */}
+                  {m.context ? <span className="dim">{ctx(m.context)} context</span> : null}
+                  {active && running ? <span className="pill on">loaded</span> : null}
+                  {active && starting ? <span className="pill warn">loading</span> : null}
+                </span>
+                {m.fit ? <p className={`fit fit-${m.fit.verdict}`}>{m.fit.label}</p> : null}
+                {m.shape?.hasChatTemplate === false ? (
+                  <p className="fit fit-too-large">
+                    This file has no chat template, so it cannot hold a conversation.
+                  </p>
+                ) : null}
+              </div>
+              <div className="local-actions">
+                {active && running ? (
+                  <button type="button" onClick={onEject}>Eject</button>
+                ) : (
+                  <button
+                    type="button"
+                    className="primary-sm"
+                    disabled={starting}
+                    onClick={() => onUse(m.path)}
+                  >
+                    {starting ? "Loading…" : "Load"}
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="primary-sm"
-                  disabled={starting}
-                  onClick={() => onUse(m.path)}
+                  aria-expanded={open}
+                  onClick={() => setConfiguring(open ? undefined : m.path)}
                 >
-                  {starting ? "Loading…" : "Load"}
+                  {open ? "Done" : "Configure"}
                 </button>
-              )}
-              {/* Only ever our own files. Another application's models are
-                  scanned, never managed. */}
-              {m.source === "Karen" ? (
-                <button type="button" className="danger" onClick={() => onDelete(m.path)}>
-                  Delete
-                </button>
-              ) : null}
+                {/* Only ever our own files. Another application's models are
+                    scanned, never managed. */}
+                {m.source === "Karen" ? (
+                  <button type="button" className="danger" onClick={() => onDelete(m.path)}>
+                    Delete
+                  </button>
+                ) : null}
+              </div>
             </div>
+
+            {open ? (
+              <ModelConfig
+                path={m.path}
+                choices={contextRungs(m)}
+                devices={devices}
+                onClose={() => {
+                  setConfiguring(undefined);
+                  onChanged();
+                }}
+                onLoad={(p) => {
+                  setConfiguring(undefined);
+                  onUse(p);
+                  onChanged();
+                }}
+              />
+            ) : null}
           </li>
         );
       })}
     </ul>
   );
+}
+
+/** 32768 reads as a number; "32k" reads as a length. */
+function ctx(n: number): string {
+  return n >= 1024 && n % 1024 === 0 ? `${n / 1024}k` : String(n);
+}
+
+/**
+ * The context lengths this model can be given.
+ *
+ * Capped at what it was trained on, because a longer one is not a bigger
+ * window -- llama.cpp warns about training overflow and the model produces
+ * worse output past the length it learned.
+ */
+const LADDER = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144];
+
+function contextRungs(m: LocalModel): number[] {
+  const trained = m.shape?.contextLength;
+  const rungs = LADDER.filter((c) => !trained || c <= trained);
+  if (trained && !rungs.includes(trained)) rungs.push(trained);
+  return rungs.length ? rungs : [2048];
 }

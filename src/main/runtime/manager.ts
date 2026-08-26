@@ -31,6 +31,10 @@ import {
 } from "../../core/runtime/devices.ts";
 import { modelShape, parseGguf, type ModelShape } from "../../core/runtime/gguf.ts";
 import { fitModel, largestContext, type Fit } from "../../core/runtime/fit.ts";
+import {
+  autoContext, budgetFor, bytesPerElement, defaultSettings, launchArgs,
+  type Budget, type LaunchSettings,
+} from "../../core/runtime/launch.ts";
 import { dedupeFound, knownStores, scanStore, type FoundModel, type WalkFs } from "../../core/runtime/scan.ts";
 import { downloadFile, extractArchive, findExecutable } from "./download.ts";
 import { buildDir, defaultModelsDir, stagingDir } from "./paths.ts";
@@ -60,7 +64,14 @@ export interface RuntimeConfig {
   startOnLaunch: boolean;
   /** The model to start, as an absolute path. */
   activeModel?: string;
-  contextSize?: number;
+  /**
+   * How each model is launched, keyed by its path.
+   *
+   * Per model rather than one global setting, which is what `contextSize` was:
+   * the right context for a 3B and for a 30B are not the same number, and one
+   * field for both meant whichever you set last was wrong for the other.
+   */
+  launch: Record<string, LaunchSettings>;
   /**
    * Send chat and research to the model Karen is serving.
    *
@@ -71,7 +82,11 @@ export interface RuntimeConfig {
   useForChat: boolean;
 }
 
-const DEFAULTS: Omit<RuntimeConfig, "modelsDir"> = { startOnLaunch: false, useForChat: true };
+const DEFAULTS: Omit<RuntimeConfig, "modelsDir"> = {
+  startOnLaunch: false,
+  useForChat: true,
+  launch: {},
+};
 
 export interface InstalledBuild {
   id: string;
@@ -86,6 +101,8 @@ export interface LocalModel {
   path: string;
   name: string;
   size: number;
+  /** The context it will start with, resolved from its settings. */
+  context?: number;
   /** "Downloaded by Karen", or the app whose directory it was found in. */
   source: string;
   shape?: ModelShape;
@@ -105,6 +122,14 @@ export class RuntimeManager {
   #gpu: GpuInfo = { vendorIds: [], supportsVulkan: false };
   /** The binary the running server was launched from. */
   #serverBinary: string | undefined;
+  /**
+   * What the last probe found.
+   *
+   * Held here rather than in the IPC layer, because sizing a model needs it and
+   * `startServer` can be called from places that have no idea a probe ever
+   * happened -- start-on-launch, most obviously.
+   */
+  #devices: Device[] = [];
   #listeners = new Set<() => void>();
 
   get server(): LlamaServer {
@@ -115,6 +140,13 @@ export class RuntimeManager {
   }
   get phase(): Phase {
     return this.#phase;
+  }
+  get devices(): Device[] {
+    return this.#devices;
+  }
+  setDevices(devices: Device[]): void {
+    this.#devices = devices;
+    this.#emit();
   }
 
   onChange(fn: () => void): () => void {
@@ -133,7 +165,11 @@ export class RuntimeManager {
     this.#config = { ...DEFAULTS, modelsDir: defaultModelsDir() };
     try {
       const parsed = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as Partial<RuntimeConfig>;
-      this.#config = { ...this.#config, ...parsed };
+      // `launch` merged explicitly: a spread of a file written before it
+      // existed would set it to undefined, and every read below assumes an
+      // object. The old global `contextSize` is deliberately not carried over
+      // -- nothing ever wrote it, so there is nothing to migrate.
+      this.#config = { ...this.#config, ...parsed, launch: { ...parsed.launch } };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
@@ -373,6 +409,7 @@ export class RuntimeManager {
     this.#setPhase({ kind: "probing", what: id });
     const devices = parseDevices(await listDevices(installed.binary));
     installed.devices = devices;
+    this.#devices = devices;
     this.#setPhase({ kind: "idle" });
 
     return { build: installed, devices, accelerated: hasAccelerator(devices) };
@@ -435,15 +472,25 @@ export class RuntimeManager {
     const rows: LocalModel[] = [];
     for (const found of dedupeFound([...ours, ...borrowed])) {
       const shape = await this.readShape(found.path).catch(() => undefined);
+      /*
+       * Sized at the context this model will actually launch with, not at a
+       * fixed 8192. That constant was the bug: a 128k model was described by
+       * the arithmetic for a context sixteen times smaller than the one it
+       * would be given.
+       */
+      const settings = this.launchSettings(found.path);
+      const context = settings.context ?? autoContext(found.size, machine, settings, shape);
       rows.push({
         path: found.path,
         name: found.name,
         size: found.size,
         source: found.source,
         ...(shape ? { shape } : {}),
+        context,
         fit: fitModel(found.size, machine, {
           ...(shape ? { shape } : {}),
-          context: this.#config.contextSize ?? 8192,
+          context,
+          bytesPerElement: bytesPerElement(settings.cacheType),
         }),
       });
     }
@@ -505,6 +552,47 @@ export class RuntimeManager {
 
   /* -------------------------------------------------------------- running -- */
 
+  /* ------------------------------------------------------- how it launches -- */
+
+  /** What is stored for a model, or the defaults it has not departed from. */
+  launchSettings(path: string): LaunchSettings {
+    return { ...defaultSettings(), ...this.#config.launch[path] };
+  }
+
+  async setLaunchSettings(path: string, patch: Partial<LaunchSettings>): Promise<LaunchSettings> {
+    const next = { ...this.launchSettings(path), ...patch };
+    await this.update({ launch: { ...this.#config.launch, [path]: next } });
+    return next;
+  }
+
+  /**
+   * What a configuration will cost, and the command line it produces.
+   *
+   * One function for both, so the figure the user is shown and the flags the
+   * process is given cannot disagree -- which is precisely how the previous
+   * arrangement went wrong: the panel sized the cache at 8192 while the server
+   * launched with `-c 0`, the model's trained context times the slot count.
+   */
+  async plan(
+    path: string,
+    devices: Device[],
+    override?: Partial<LaunchSettings>,
+  ): Promise<{ settings: LaunchSettings; budget: Budget; args: string[]; error?: string }> {
+    const settings = { ...this.launchSettings(path), ...override };
+    const shape = await this.readShape(path).catch(() => undefined);
+    const size = await stat(path).then((s) => s.size).catch(() => 0);
+    const machine = this.machine(devices);
+    const budget = budgetFor(size, machine, settings, shape);
+    try {
+      return { settings, budget, args: launchArgs(settings, budget.context) };
+    } catch (err) {
+      // A rejected extra argument must not stop the budget rendering: the
+      // person is mid-sentence in a text field, and blanking the panel they
+      // are reading is a poor way to tell them so.
+      return { settings, budget, args: [], error: (err as Error).message };
+    }
+  }
+
   async startServer(modelPath?: string): Promise<ServerStatus> {
     const build = await this.activeBuild();
     if (!build) throw new Error("No llama.cpp runtime is installed yet.");
@@ -515,12 +603,9 @@ export class RuntimeManager {
     await stat(model).catch(() => {
       throw new Error(`That model file is no longer at ${model}. It may have been moved or deleted.`);
     });
+    const { args } = await this.plan(model, this.#devices);
     this.#serverBinary = build.binary;
-    return this.#server.start({
-      binary: build.binary,
-      modelPath: model,
-      ...(this.#config.contextSize !== undefined ? { contextSize: this.#config.contextSize } : {}),
-    });
+    return this.#server.start({ binary: build.binary, modelPath: model, tuning: args });
   }
 
   /**

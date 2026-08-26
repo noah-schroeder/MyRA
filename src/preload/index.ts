@@ -99,6 +99,9 @@ const api = {
   runtimeProbe: () => ipcRenderer.invoke("karen:runtime-probe"),
   runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
   runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),
+  runtimePlan: (path: string, override?: unknown) => ipcRenderer.invoke("karen:runtime-plan", path, override),
+  runtimeSetLaunch: (path: string, patch: unknown) =>
+    ipcRenderer.invoke("karen:runtime-set-launch", path, patch),
   runtimeDeleteModel: (path: string) => ipcRenderer.invoke("karen:runtime-delete-model", path),
   runtimeStart: (modelPath?: string) => ipcRenderer.invoke("karen:runtime-start", modelPath),
   runtimeStop: () => ipcRenderer.invoke("karen:runtime-stop"),
