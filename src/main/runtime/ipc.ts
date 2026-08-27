@@ -21,6 +21,7 @@ import {
   GatedError, type HfModel, type ModelFile,
 } from "../../core/runtime/hf.ts";
 import { fitModel } from "../../core/runtime/fit.ts";
+import { explainTooOld, missingVersions } from "../../core/runtime/libc.ts";
 import { explainNoCudaDevice } from "../../core/runtime/nvidia.ts";
 import { downloadFile } from "./download.ts";
 import type { LaunchSettings } from "../../core/runtime/launch.ts";
@@ -99,10 +100,18 @@ export function installRuntimeIpc(
       if (build) runtime.setProbeLog(await listDevices(build.binary));
     }
     const info = await runtime.nvidia();
+    /*
+     * A build that cannot load outranks anything the driver has to say. The
+     * card, the driver and its CUDA ceiling can all be perfect and the answer
+     * still be "these binaries need a newer Linux than this one" -- reported
+     * from a machine with a 4060 and a 580 driver, where every version check
+     * passed and the loader never got as far as the backend.
+     */
+    const tooOld = missingVersions(runtime.probeLog);
     return {
       nvidia: info,
       probeLog: runtime.probeLog,
-      explanation: explainNoCudaDevice(info),
+      explanation: tooOld.length ? explainTooOld(tooOld) : explainNoCudaDevice(info),
     };
   });
 

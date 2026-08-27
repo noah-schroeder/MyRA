@@ -25,11 +25,15 @@ import { join } from "node:path";
 
 import { makePrivateDir } from "../../core/paths.ts";
 import {
-  appLayers, blobUrl, cudaTag, CUDA_IMAGE, isCudaLib, layersWithHistory, libraryLayers,
+  cRuntimeEssentials, cRuntimePatterns, isSharedObject, LIBC_DIR, parseMissingLibraries,
+} from "../../core/runtime/libc.ts";
+import {
+  appLayers, baseLayers, blobUrl, cudaTag, CUDA_IMAGE, isCudaLib, layersWithHistory, libraryLayers,
   manifestUrl, MANIFEST_ACCEPT, pickPlatform, tokenUrl,
   type Layer, type OciConfig, type OciIndex, type OciManifest,
 } from "../../core/runtime/oci.ts";
 import { DownloadError, downloadFile, type Progress } from "./download.ts";
+import { resolveSpec } from "./loader.ts";
 
 export interface CudaInstallOptions {
   /** Where the build should end up. */
@@ -47,6 +51,8 @@ export interface CudaInstallResult {
   build: string;
   /** True when the CUDA runtime libraries had to be fetched as well. */
   bundledLibraries: boolean;
+  /** True when the build brought its own loader and C library. */
+  bundledLibc: boolean;
 }
 
 /** A pull token. Public images still need one; without it ghcr answers 401. */
@@ -118,15 +124,18 @@ async function extractMatching(archive: string, into: string, patterns: string[]
  * That failure mode is the dangerous one: Karen would have concluded "no GPU",
  * fallen back to the processor build, and told someone with a 4090 that their
  * card could not be used. Asking the linker directly gives a real answer.
+ *
+ * Which linker matters: once the build carries its own C runtime it is started
+ * through its own loader with an explicit search path, so that is what gets
+ * asked. See loader.ts -- a check made against a different search than the one
+ * the process will use is a check that can pass and still be wrong.
  */
 export async function missingLibraries(soPath: string, dir: string): Promise<string[]> {
+  const spec = resolveSpec(soPath, dir);
   const output = await new Promise<string>((resolve) => {
-    const child = spawn("ldd", [soPath], {
+    const child = spawn(spec.command, spec.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        LD_LIBRARY_PATH: [dir, process.env["LD_LIBRARY_PATH"]].filter(Boolean).join(":"),
-      },
+      env: { ...process.env, ...spec.env },
     });
     let out = "";
     child.stdout?.on("data", (b: Buffer) => (out += b.toString()));
@@ -134,12 +143,7 @@ export async function missingLibraries(soPath: string, dir: string): Promise<str
     child.on("error", () => resolve(""));
     child.on("close", () => resolve(out));
   });
-  const missing: string[] = [];
-  for (const line of output.split("\n")) {
-    const m = /^\s*(\S+)\s*=>\s*not found/.exec(line);
-    if (m?.[1]) missing.push(m[1]);
-  }
-  return missing;
+  return parseMissingLibraries(output);
 }
 
 /**
@@ -218,6 +222,18 @@ export async function installLinuxCuda(opts: CudaInstallOptions): Promise<CudaIn
   }
 
   /*
+   * Bring the C library the build was compiled against.
+   *
+   * Not conditional, and that is deliberate. The alternative -- detect an old
+   * system, then bundle -- puts the untested path on exactly the machines that
+   * need it and the tested path on the machines that do not. This way every
+   * install runs the same way, and the way it runs is the one configuration in
+   * which these binaries are known to be correct: their own.
+   */
+  opts.onPhase?.("fetching the C library this build was compiled against");
+  const bundledLibc = await fetchCRuntime(layers, pull, join(unpacked, LIBC_DIR), opts);
+
+  /*
    * Does this machine already have the CUDA runtime?
    *
    * Asked of the linker rather than of `nvidia-smi`: the question is not which
@@ -257,6 +273,7 @@ export async function installLinuxCuda(opts: CudaInstallOptions): Promise<CudaIn
     binary: join(dir, "llama-server"),
     build: buildOf(config) ?? "server-cuda",
     bundledLibraries,
+    bundledLibc,
   };
 }
 
@@ -286,7 +303,13 @@ async function fetchCudaLibraries(
   into: string,
   opts: CudaInstallOptions,
 ): Promise<string[]> {
-  const patterns = ["*libcudart.so*", "*libcublas.so*", "*libcublasLt.so*", "*libnccl.so*"];
+  const patterns = [
+    "*libcudart.so*", "*libcublas.so*", "*libcublasLt.so*", "*libnccl.so*",
+    /* OpenMP, which ggml's CPU backends need. Almost every machine has it, so
+       this costs nothing there; it is listed because the layer that would
+       supply it is searched anyway once something else is missing. */
+    "*libgomp.so*",
+  ];
   let missing = await missingLibraries(backend, into);
 
   for (const layer of libraryLayers(layers)) {
@@ -301,6 +324,51 @@ async function fetchCudaLibraries(
     missing = await missingLibraries(backend, into);
   }
   return missing;
+}
+
+/**
+ * Take the loader, glibc and libstdc++ out of the image's base layer.
+ *
+ * One 30 MB download in practice: a distribution's rootfs layer carries all of
+ * them together. The loop exists for the same reason the CUDA one does -- the
+ * stopping condition is "are the files here", asked of the directory, not "did
+ * a layer with a promising name get extracted".
+ *
+ * A failure here is reported rather than thrown: the build may well run on this
+ * machine without any of it, and refusing to install something that would have
+ * worked is worse than installing something that might not.
+ */
+async function fetchCRuntime(
+  layers: Layer[],
+  pull: (layer: Layer, what: string) => Promise<string>,
+  into: string,
+  opts: CudaInstallOptions,
+): Promise<boolean> {
+  const patterns = cRuntimePatterns(process.arch);
+  const essentials = cRuntimeEssentials(process.arch);
+  const have = async (): Promise<boolean> => {
+    const names = new Set(await readdir(into).catch(() => []));
+    return essentials.every((name) => names.has(name));
+  };
+
+  for (const layer of baseLayers(layers)) {
+    if (await have()) break;
+    const archive = await pull(layer, "the C library this build needs");
+    opts.onPhase?.("unpacking the C library");
+    const found = await extractMatching(archive, into, patterns);
+    await rm(archive, { force: true });
+    for (const name of found) {
+      const path = join(into, name);
+      /* `libstdc++.so.*` also matches the gdb helper script packaged beside it.
+         Nothing should ship out of here that is not a shared object. */
+      if (isSharedObject(name)) await chmod(path, 0o755).catch(() => undefined);
+      else await rm(path, { force: true }).catch(() => undefined);
+    }
+  }
+
+  if (await have()) return true;
+  await rm(into, { recursive: true, force: true }).catch(() => undefined);
+  return false;
 }
 
 /** The llama.cpp build number the image was made from, from its OCI labels. */

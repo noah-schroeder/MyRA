@@ -221,3 +221,20 @@ export function missingCudaLib(message: string): string | undefined {
   const m = /(lib(?:cudart|cublas|cublasLt|nccl|cuda)\.so[.\d]*)/.exec(message);
   return m ? m[1] : undefined;
 }
+
+/**
+ * Where the C runtime lives, in the order worth trying.
+ *
+ * The base rootfs first, identified by the step that created it: a
+ * distribution image begins with `ADD file:<digest> in /`, and that single
+ * 30 MB layer holds the loader, glibc and libstdc++ together — the whole
+ * bundle, from one download. Everything else follows as a fallback so a change
+ * in upstream's base costs bandwidth rather than a failed install.
+ */
+export function baseLayers(layers: Layer[]): Layer[] {
+  const app = new Set(appLayers(layers).map((l) => l.digest));
+  const rest = layers.filter((l) => !app.has(l.digest) && l.size >= MIN_LIBRARY_LAYER);
+  const isRoot = (l: Layer): boolean => /\bADD file:/.test(l.createdBy);
+  const bySize = (a: Layer, b: Layer): number => a.size - b.size;
+  return [...rest.filter(isRoot).sort(bySize), ...rest.filter((l) => !isRoot(l)).sort(bySize)];
+}
