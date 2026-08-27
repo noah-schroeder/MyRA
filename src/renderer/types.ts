@@ -566,6 +566,8 @@ export interface RuntimeState {
     vramDevice?: string;
     /** True when that memory is system RAM shared with a GPU. */
     vramShared?: boolean;
+    /** Why no GPU was chosen, when something was found but did not qualify. */
+    gpuNote?: string;
   };
   /** The backends this platform can be given, best first. From the main process. */
   backends?: Backend[];

@@ -19,15 +19,15 @@ import {
 /** The 13 layers of the real image, in order, with their build steps. */
 const STEPS: [number, string][] = [
   [29_800_000, "/bin/sh -c #(nop) ADD file:6df7753 in / "],
-  [6_900_000, "RUN |1 TARGETARCH=amd64 /bin/sh -c apt-get update && apt-get install -y ca-certificates"],
-  [64_300_000, "RUN |1 TARGETARCH=amd64 /bin/sh -c apt-get update && apt-get install -y cuda-keyring"],
+  [6_900_000, "RUN |1 TARGETARCH=amd64 /bin/sh -c apt-get update && apt-get install -y --no-install-recommends gnupg2 curl ca-certificates && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${NVARCH}/3bf863cc.pub | apt-key add -"],
+  [64_300_000, "RUN |1 TARGETARCH=amd64 /bin/sh -c apt-get update && apt-get install -y --no-install-recommends cuda-cudart-12-8=${NV_CUDA_CUDART_VERSION} cuda-compat-12-8 && rm -rf /var/lib/apt/lists/*"],
   [40_000, 'RUN |1 /bin/sh -c echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/nvidia.conf'],
   [20_000, "COPY NGC-DL-CONTAINER-LICENSE / # buildkit"],
-  [2_058_000_000, "RUN |1 TARGETARCH=amd64 /bin/sh -c apt-get update && apt-get install -y ${NV_LIBCUBLAS_PACKAGE}"],
+  [2_058_000_000, "RUN |1 TARGETARCH=amd64 /bin/sh -c apt-get update && apt-get install -y --no-install-recommends cuda-libraries-12-8=${NV_CUDA_LIB_VERSION} ${NV_LIBNPP_PACKAGE} cuda-nvtx-12-8=${NV_NVTX_VERSION} libcusparse-12-8=${NV_LIBCUSPARSE_VERSION} ${NV_LIBCUBLAS_PACKAGE} ${NV_LIBNCCL_PACKAGE} && rm -rf /var/lib/apt/lists/*"],
   [100_000, "RUN |1 /bin/sh -c apt-mark hold ${NV_LIBCUBLAS_PACKAGE_NAME}"],
   [30_000, "COPY entrypoint.d/ /opt/nvidia/entrypoint.d/ # buildkit"],
   [10_000, "COPY nvidia_entrypoint.sh /opt/nvidia/ # buildkit"],
-  [261_900_000, "RUN |5 BUILD_DATE=2026-08-27 /bin/sh -c apt-get update && apt-get install -y libgomp1"],
+  [261_900_000, "RUN |5 BUILD_DATE=2026-08-27 APP_VERSION=b10644 /bin/sh -c apt-get update && apt-get install -y libgomp1 curl ffmpeg && apt autoremove -y"],
   [165_300_000, "COPY /app/lib/ /app # buildkit"],
   [25_000, "COPY /app/full/llama /app/full/llama-server /app # buildkit"],
   [0, "WORKDIR /app"],
@@ -125,10 +125,32 @@ describe("appLayers", () => {
 });
 
 describe("libraryLayers", () => {
-  it("puts the CUDA base layer first, since that is where cublas is", () => {
+  it("tries cudart's small layer before cublas's enormous one", () => {
+    /*
+     * The two are in different layers, and this order is the whole reason a
+     * real install failed: 64 MB holds libcudart, 2 GB holds libcublas and
+     * libnccl. A machine missing only cudart should pay 64 MB.
+     */
     const libs = libraryLayers(layersWithHistory(manifest, config));
-    assert.equal(libs[0]!.digest, "sha256:layer5");
-    assert.equal(libs[0]!.size, 2_058_000_000);
+    const order = libs.map((l) => l.digest);
+    // cudart's 64 MB layer before cublas's 2 GB one...
+    assert.ok(order.indexOf("sha256:layer2") < order.indexOf("sha256:layer5"), order.join(" "));
+    // ...and both before the layer that only installs ffmpeg and libgomp.
+    assert.ok(order.indexOf("sha256:layer5") < order.indexOf("sha256:layer9"), order.join(" "));
+  });
+
+  it("puts layers that never mention CUDA last, but still keeps them", () => {
+    // A fallback, so a change in upstream's packaging costs bandwidth rather
+    // than a failed install.
+    const libs = libraryLayers(layersWithHistory(manifest, config));
+    const unnamed = libs.findIndex((l) => !/cuda|nvidia|nccl|cublas/i.test(l.createdBy));
+    assert.ok(unnamed > 0, "unnamed layers should not come first");
+    assert.ok(libs.some((l) => l.digest === "sha256:layer9"), "should still be searched");
+  });
+
+  it("skips layers too small to hold a shared library", () => {
+    const libs = libraryLayers(layersWithHistory(manifest, config));
+    assert.ok(!libs.some((l) => l.size < 1024 * 1024));
   });
 
   it("excludes the app layers, which have already been fetched", () => {

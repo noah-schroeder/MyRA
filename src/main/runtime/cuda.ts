@@ -239,11 +239,11 @@ export async function installLinuxCuda(opts: CudaInstallOptions): Promise<CudaIn
   if (missing.length) {
     bundledLibraries = true;
     opts.onPhase?.(`this machine has no CUDA runtime, so Karen will bring one (${missing.join(", ")})`);
-    await fetchCudaLibraries(layers, pull, unpacked, opts);
-    missing = await missingLibraries(backend, unpacked);
+    missing = await fetchCudaLibraries(layers, pull, backend, unpacked, opts);
     if (missing.length) {
       throw new DownloadError(
-        `the CUDA build still cannot find ${missing.join(", ")} after downloading the runtime.`,
+        `the CUDA build still cannot find ${missing.join(", ")} after searching every layer of ` +
+          `the image. This is a bug in Karen rather than a problem with your machine.`,
       );
     }
   }
@@ -260,25 +260,47 @@ export async function installLinuxCuda(opts: CudaInstallOptions): Promise<CudaIn
   };
 }
 
-/** Pull layers, biggest first, until the CUDA libraries have been found. */
+/**
+ * Pull layers until nothing is missing.
+ *
+ * The subtlety that broke this the first time: the libraries are NOT all in one
+ * layer. `libcudart.so.12` is installed by an early 64 MB step and
+ * `libcublas.so.12` by the 2 GB one, so a loop that stopped at the first layer
+ * yielding anything fetched two gigabytes, found cublas and nccl, and returned
+ * satisfied -- leaving cudart missing and the install failing with "still
+ * cannot find libcudart.so.12 after downloading the runtime". Reported from a
+ * real machine; confirmed by listing both layers.
+ *
+ * So the stopping condition is the question we actually care about -- does
+ * anything still fail to resolve -- asked again after every layer, rather than
+ * "did this layer contain a file with a promising name".
+ *
+ * Smallest first, skipping layers too small to hold a shared library, so the
+ * cheap wins come before the expensive one and a machine missing only cudart
+ * pays 64 MB instead of two gigabytes.
+ */
 async function fetchCudaLibraries(
   layers: Layer[],
   pull: (layer: Layer, what: string) => Promise<string>,
+  backend: string,
   into: string,
   opts: CudaInstallOptions,
-): Promise<void> {
+): Promise<string[]> {
   const patterns = ["*libcudart.so*", "*libcublas.so*", "*libcublasLt.so*", "*libnccl.so*"];
+  let missing = await missingLibraries(backend, into);
+
   for (const layer of libraryLayers(layers)) {
-    const archive = await pull(layer, "NVIDIA CUDA runtime");
+    if (!missing.length) break;
+    const archive = await pull(layer, `NVIDIA CUDA runtime (${missing.join(", ")})`);
     opts.onPhase?.("unpacking the CUDA runtime");
     const found = await extractMatching(archive, into, patterns);
     await rm(archive, { force: true });
     for (const name of found.filter(isCudaLib)) {
       await chmod(join(into, name), 0o755).catch(() => undefined);
     }
-    if (found.some(isCudaLib)) return;
+    missing = await missingLibraries(backend, into);
   }
-  throw new DownloadError("the CUDA image did not contain the runtime libraries.");
+  return missing;
 }
 
 /** The llama.cpp build number the image was made from, from its OCI labels. */
