@@ -821,6 +821,7 @@ async function main(): Promise<void> {
     send,
     llm: resolveLlm,
     transcriptionKey: () => vault.get("transcriptionKey"),
+    lemonadeTranscription: () => runtime.lemonadeTranscription(),
   });
   installDictationIpc({ config, vault, send });
 

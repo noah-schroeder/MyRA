@@ -19,7 +19,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
-  apiBase, CONFIG_FILE, lemondArgs, mergeConfig, openAiBase, parseHealth,
+  apiBase, CONFIG_FILE, lemondArgs, mergeConfig, openAiBase, parseHealth, pinnedConfig,
   type LemonadeHealth,
 } from "../../core/runtime/lemonade.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
@@ -49,6 +49,8 @@ export interface LemonadeStartOptions {
   binary: string;
   cacheDir: string;
   configDir: string;
+  /** Karen's existing model library, which the daemon should also list. */
+  modelsDir?: string;
 }
 
 const LOG_LINES = 400;
@@ -104,7 +106,7 @@ export class LemonadeServer {
 
     await makePrivateDir(opts.cacheDir);
     await makePrivateDir(opts.configDir);
-    await this.#pinConfig(opts.configDir);
+    await this.#pinConfig(opts.configDir, opts.modelsDir);
 
     const port = await freePort();
     this.#port = port;
@@ -198,7 +200,7 @@ export class LemonadeServer {
    * anyway. That matters more than it looks, because Lemonade stores cloud
    * provider credentials in this directory via its own API.
    */
-  async #pinConfig(configDir: string): Promise<void> {
+  async #pinConfig(configDir: string, modelsDir?: string): Promise<void> {
     const path = join(configDir, CONFIG_FILE);
     let existing: Record<string, unknown> = {};
     try {
@@ -209,7 +211,7 @@ export class LemonadeServer {
          preserve -- overwriting it restores a known-good state. */
     }
     try {
-      await writeFile(path, `${JSON.stringify(mergeConfig(existing), null, 2)}\n`, {
+      await writeFile(path, `${JSON.stringify(mergeConfig(existing, pinnedConfig(modelsDir)), null, 2)}\n`, {
         mode: OWNER_ONLY_FILE,
       });
     } catch (err) {
@@ -254,6 +256,29 @@ export class LemonadeServer {
     }
     await this.stop();
     this.#set({ state: "failed", error: "Lemonade did not start in time." });
+  }
+
+  /**
+   * Re-read what the daemon has loaded.
+   *
+   * Health is captured once at startup, but what is loaded changes underneath
+   * that -- and chat routing depends on it, so a stale answer means requests
+   * going to a server with no model. Called after anything that loads or
+   * unloads rather than polled, because those are the only things that change
+   * it.
+   */
+  async refreshHealth(): Promise<void> {
+    if (this.#status.state !== "ready") return;
+    try {
+      const res = await fetch(`${apiBase(this.#port)}/health`, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (res.ok) this.#set({ health: parseHealth(await res.json().catch(() => ({}))) });
+    } catch {
+      // Leave the last known answer; the supervisor's own state says whether
+      // the daemon is up, and that has not changed here.
+    }
   }
 
   /**
