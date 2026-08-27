@@ -88,10 +88,17 @@ export function hostLibDirs(arch: string = process.arch, etc = "/etc"): string[]
   return [...dirs, ...defaultLibDirs(arch)];
 }
 
-/** Whether an installed build carries its own C runtime. */
+/**
+ * Whether an installed build carries its own C runtime.
+ *
+ * The loader is looked for beside the binary rather than in LIBC_DIR, and that
+ * placement is load-bearing: ggml locates its backends relative to
+ * `/proc/self/exe`, which under a bundled loader IS the loader. See
+ * core/runtime/libc.ts.
+ */
 export function bundledLoader(dir: string): string | undefined {
   if (process.platform !== "linux") return undefined;
-  const path = join(dir, LIBC_DIR, loaderName(process.arch));
+  const path = join(dir, loaderName(process.arch));
   return existsSync(path) ? path : undefined;
 }
 
