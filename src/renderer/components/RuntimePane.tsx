@@ -310,6 +310,25 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
                     <pre className="runtime-log">{diagnosis.probeLog}</pre>
                   </>
                 ) : null}
+                {/* The remedy, next to the reason.
+                    Without this the only way to reinstall the build you already
+                    have is the Build dropdown -- and choosing the option that is
+                    already selected fires no change, so someone whose CUDA build
+                    needs replacing would have to switch to Vulkan and back to
+                    discover it. */}
+                {diagnosis.repairable && activeBuild ? (
+                  <button
+                    type="button"
+                    onClick={() => void install(activeBuild.backend)}
+                    disabled={busy}
+                  >
+                    {busy
+                      ? "Installing…"
+                      : `Install the ${
+                          BACKEND_LABELS[activeBuild.backend]?.label ?? activeBuild.backend
+                        } build again`}
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
