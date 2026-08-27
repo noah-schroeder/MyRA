@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { makeOwnDir, OWNER_ONLY_FILE } from "../paths.ts";
 
 export const ROLES = ["screener", "analyst", "synthesist", "reviewer"] as const;
 export type Role = (typeof ROLES)[number];
@@ -65,9 +66,12 @@ export function readRoleConfig(path = rolesPath()): RoleConfig {
 }
 
 export async function writeRoleConfig(config: RoleConfig, path = rolesPath()): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
+  await makeOwnDir(dirname(path));
   const tmp = `${path}.tmp`;
-  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", "utf8");
+  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: OWNER_ONLY_FILE,
+  });
   await rename(tmp, path); // atomic: a half-written config would break every stage
 }
 

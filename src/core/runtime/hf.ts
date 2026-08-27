@@ -47,6 +47,27 @@ export function searchUrl(query: string, opts: { limit?: number; sort?: string }
   return `${API}/api/models?${params.toString()}`;
 }
 
+/**
+ * A HuggingFace repo id: exactly `owner/name`, and nothing else.
+ *
+ * The id reaches the main process from the renderer and is used two ways: in a
+ * URL, and -- after `repo.replace("/", "__")` -- as a directory name under the
+ * models folder. That `replace` has no `g`, so it rewrites only the FIRST
+ * slash: an id like `a/b/../../x` became `a__b/../../x`, which `join` then
+ * resolves clean out of the models directory.
+ *
+ * Real ids have exactly one slash, so requiring that is not a restriction. It
+ * also rules out the empty owner, a leading dot, and anything with a separator
+ * the model directory would have to interpret.
+ */
+export function repoId(repo: string): string {
+  const parts = String(repo ?? "").split("/");
+  const ok =
+    parts.length === 2 && parts.every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part));
+  if (!ok) throw new Error(`${JSON.stringify(repo)} is not a HuggingFace repository id.`);
+  return parts.join("/");
+}
+
 export function treeUrl(repo: string): string {
   return `${API}/api/models/${repo}/tree/main?recursive=true`;
 }

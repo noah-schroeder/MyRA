@@ -27,6 +27,7 @@ import {
   writeState, writeTranscript, NOTES_MD, TRANSCRIPT_MD,
 } from "../core/meetings/store.ts";
 import type { WhisperManager } from "./whisper/manager.ts";
+import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 
 export interface MeetingDeps {
   config: ConfigStore;
@@ -105,6 +106,35 @@ export function installMeetingIpc(deps: MeetingDeps): void {
   };
 
   /**
+   * A meeting directory named by the renderer, checked before it is used.
+   *
+   * Every handler below takes a `dir` across IPC, and four of them used it
+   * unchecked -- reading from it, writing `karen.json` into it, revealing it in
+   * the file manager. Only `meeting-delete` compared it against the root.
+   *
+   * Nothing can currently reach these but our own window (there is no `innerHTML`
+   * anywhere in the renderer, so model output cannot become script), and this is
+   * not a hole so much as a rule the project already keeps elsewhere and did not
+   * keep here: `deleteModel`, `resolveInJail` and `sessions.pathFor` all check a
+   * path before touching it, and the last says why in as many words -- "it is
+   * still checked rather than trusted".
+   *
+   * `strict` excludes the root itself. The delete handler compared with
+   * `target !== root && !target.startsWith(root + sep)`, which ACCEPTS the root:
+   * one call naming the meetings folder would have taken every meeting in it
+   * with a recursive remove.
+   */
+  const meetingDir = (dir: unknown, { strict = true } = {}): string => {
+    const root = resolve(config.current.meetingsRoot);
+    const target = resolve(String(dir ?? ""));
+    const inside = strict
+      ? target.startsWith(root + sep)
+      : target === root || target.startsWith(root + sep);
+    if (!inside) throw new Error("that is not a meeting folder.");
+    return target;
+  };
+
+  /**
    * Write a meeting's output, jailed to wherever it is being filed.
    *
    * Resolve, then compare against the root — the same rule the document tools
@@ -119,8 +149,8 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       if (abs !== base && !abs.startsWith(base + sep)) {
         throw new Error(`refusing to write outside ${base}: ${rel}`);
       }
-      await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, content, "utf8");
+      await makePrivateDir(dirname(abs));
+      await writeFile(abs, content, { encoding: "utf8", mode: OWNER_ONLY_FILE });
       return { path: abs, bytes: Buffer.byteLength(content, "utf8") };
     };
 
@@ -302,22 +332,43 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     return record;
   });
 
+  /*
+   * The jail is applied BEFORE `attempt`, not inside it.
+   *
+   * `attempt` records a failure by writing the error into the meeting's own
+   * `karen.json`, so handing it an unchecked directory would turn a rejected
+   * path into a write to that path -- the failure path becoming the thing the
+   * check was there to prevent.
+   */
+  const staged = (
+    dir: unknown,
+    work: (meeting: string) => Promise<string | undefined>,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    let meeting: string;
+    try {
+      meeting = meetingDir(dir);
+    } catch (err) {
+      return Promise.resolve({ ok: false, error: (err as Error).message });
+    }
+    return attempt(meeting, () => work(meeting));
+  };
+
   ipcMain.handle("karen:meeting-transcribe", (_e, dir: string) =>
-    attempt(String(dir), async () => {
-      await transcribe(String(dir));
+    staged(dir, async (meeting) => {
+      await transcribe(meeting);
       return undefined;
     }),
   );
 
   ipcMain.handle("karen:meeting-notes", (_e, dir: string) =>
-    attempt(String(dir), () => takeNotes(String(dir))),
+    staged(dir, (meeting) => takeNotes(meeting)),
   );
 
   ipcMain.handle("karen:meeting-run", (_e, dir: string) =>
-    attempt(String(dir), async () => {
-      const already = await readTranscript(String(dir));
-      if (!already) await transcribe(String(dir));
-      return await takeNotes(String(dir));
+    staged(dir, async (meeting) => {
+      const already = await readTranscript(meeting);
+      if (!already) await transcribe(meeting);
+      return await takeNotes(meeting);
     }),
   );
 
@@ -327,7 +378,11 @@ export function installMeetingIpc(deps: MeetingDeps): void {
   });
 
   ipcMain.handle("karen:meeting-instructions", async (_e, dir: string, text: unknown) => {
-    await writeState(String(dir), { instructions: String(text ?? "") });
+    try {
+      await writeState(meetingDir(dir), { instructions: String(text ?? "") });
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
     await refresh();
     return { ok: true };
   });
@@ -336,24 +391,37 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     const { readFile } = await import("node:fs/promises");
     const name = which === "notes" ? NOTES_MD : TRANSCRIPT_MD;
     try {
-      return await readFile(join(String(dir), name), "utf8");
+      return await readFile(join(meetingDir(dir), name), "utf8");
     } catch {
       return undefined;
     }
   });
 
   ipcMain.handle("karen:meeting-reveal", async (_e, path: string) => {
+    /*
+     * Two roots are legitimate here, not one: a meeting's own folder, and the
+     * vault, because that is where notes are filed when a vault is configured.
+     * Anywhere else is not something this button can have produced.
+     */
+    const target = resolve(String(path ?? ""));
+    const roots = [config.current.meetingsRoot, config.current.vaultRoot]
+      .filter((r) => r.trim())
+      .map((r) => resolve(r));
+    if (!roots.some((root) => target === root || target.startsWith(root + sep))) {
+      return { ok: false, error: "that is not a meeting file." };
+    }
     // Show it in the file manager rather than opening it: the user may want the
     // folder, and a .md opened in whatever claims the extension is rarely it.
-    shell.showItemInFolder(String(path));
+    shell.showItemInFolder(target);
     return { ok: true };
   });
 
   ipcMain.handle("karen:meeting-delete", async (_e, dir: string) => {
-    const root = resolve(config.current.meetingsRoot);
-    const target = resolve(String(dir));
-    if (target !== root && !target.startsWith(root + sep)) {
-      return { ok: false, error: "that is not a meeting folder." };
+    let target: string;
+    try {
+      target = meetingDir(dir);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
     }
     await deleteMeeting(target);
     await refresh();

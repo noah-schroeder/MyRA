@@ -211,8 +211,11 @@ function Endpoint({
         )}
       </label>
 
+      {/* Named for what it now measures. It used to be a total deadline, which
+          cut off long answers that were arriving perfectly well; it counts
+          silence instead, so only a stalled server hits it. */}
       <label>
-        Timeout
+        Give up after
         <input
           type="number"
           min={5}
@@ -220,7 +223,7 @@ function Endpoint({
           value={Math.round(value.timeoutMs / 1000)}
           onChange={(e) => update({ timeoutMs: Math.max(5, Number(e.target.value)) * 1000 })}
         />
-        <span className="unit">seconds</span>
+        <span className="unit">seconds of silence</span>
       </label>
 
       <div className="endpoint-actions">

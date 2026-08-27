@@ -12,10 +12,10 @@
  * truthful, and truthful is the point.
  */
 
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChatMessage } from "./llm/chat.ts";
-import { CONFIG_DIR } from "./paths.ts";
+import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "./paths.ts";
 
 export interface SessionMeta {
   id: string;
@@ -85,7 +85,7 @@ function pathFor(id: string): string {
 }
 
 export async function saveSession(session: Session): Promise<void> {
-  await mkdir(sessionsDir(), { recursive: true });
+  await makeOwnDir(sessionsDir());
   const path = pathFor(session.id);
   const tmp = `${path}.${process.pid}.tmp`;
   const body = {
@@ -97,7 +97,7 @@ export async function saveSession(session: Session): Promise<void> {
   };
   // Atomic: a crash mid-write leaves the previous conversation intact rather
   // than a truncated file that parses as an empty one.
-  await writeFile(tmp, JSON.stringify(body, null, 2) + "\n", { mode: 0o600 });
+  await writeFile(tmp, JSON.stringify(body, null, 2) + "\n", { mode: OWNER_ONLY_FILE });
   await rename(tmp, path);
 }
 

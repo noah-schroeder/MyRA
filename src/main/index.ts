@@ -12,7 +12,9 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
-import { ConfigStore, configuredEndpoints, type EndpointSettings } from "../core/config.ts";
+import {
+  ConfigStore, configuredEndpoints, DEFAULT_SETTINGS, type EndpointSettings,
+} from "../core/config.ts";
 import { DESTINATIONS } from "../core/destinations.ts";
 import { SecretVault, type SecretName } from "./secrets.ts";
 import { ToolRegistry } from "../core/agent/registry.ts";
@@ -38,8 +40,9 @@ import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
-import { readResearchConfig, researchConfigPath } from "../core/research/config.ts";
-import { mkdir, writeFile } from "node:fs/promises";
+import { readResearchConfig, researchConfigPath, researchRoot } from "../core/research/config.ts";
+import { writeFile } from "node:fs/promises";
+import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -671,7 +674,7 @@ function installIpc(): void {
   ipcMain.handle("karen:get-research", () => readResearchConfig());
   ipcMain.handle("karen:set-research", async (_e, next: unknown) => {
     const cfg = next as { mode?: string; category?: string; timeRange?: string };
-    await mkdir(dirname(researchConfigPath()), { recursive: true });
+    await makeOwnDir(dirname(researchConfigPath()));
     // Rebuilt field by field rather than spread: the reader does the same, so
     // anything not listed in both places is silently dropped, and a silently
     // dropped setting is worse than one that was never offered.
@@ -686,7 +689,7 @@ function installIpc(): void {
         null,
         2,
       ) + "\n",
-      { mode: 0o600 },
+      { mode: OWNER_ONLY_FILE },
     );
   });
 }
@@ -694,7 +697,52 @@ function installIpc(): void {
 /* ----------------------------------------------------------------- boot --- */
 
 async function main(): Promise<void> {
+  /*
+   * Close the two directories that are unambiguously ours, before anything
+   * writes into them.
+   *
+   * Both were created with the umask and came out 0775 on a stock Ubuntu --
+   * measured, not assumed. The individual files inside were already 0600, so
+   * nothing secret was ever exposed, but everything Karen wrote WITHOUT an
+   * explicit mode was 0644 and readable by any other account on the machine.
+   * Every writer now passes a mode; this narrows the directories an existing
+   * install already has, which no amount of care in new code would reach.
+   *
+   * `userData` is Electron's, holding models, runtimes and Chromium's own
+   * state; CONFIG_DIR is ours, holding settings, sessions and the keyring
+   * probe. Directories the USER chose are deliberately not touched here -- see
+   * makePrivateDir.
+   */
+  await makeOwnDir(app.getPath("userData")).catch(() => undefined);
+  await makeOwnDir(CONFIG_DIR).catch(() => undefined);
+
   await config.load();
+
+  /*
+   * The content roots too -- but only the ones Karen chose for itself.
+   *
+   * A per-meeting folder is created private now, which protects the transcript
+   * inside it. The folder ABOVE it is a different matter: an install that
+   * predates this has it at 0775, and its entries are named after the meetings
+   * ("2026-08-27T09-46-56-quarterly-review"), so the titles of every meeting
+   * ever recorded stay readable even when the recordings are not.
+   *
+   * The test is whether the path is still the default. Where it is, Karen put
+   * it there and may tighten it. Where the user has pointed it somewhere of
+   * their own -- and always for the Obsidian vault, which is theirs and full of
+   * things that have nothing to do with this app -- it is left alone, because
+   * silently changing the permissions of a directory somebody chose is not a
+   * privacy improvement, it is a surprise.
+   */
+  for (const [current, fallback] of [
+    [config.current.workspaceRoot, DEFAULT_SETTINGS.workspaceRoot],
+    [config.current.meetingsRoot, DEFAULT_SETTINGS.meetingsRoot],
+  ] as const) {
+    if (current === fallback) await makeOwnDir(current).catch(() => undefined);
+  }
+  if (!process.env["KAREN_RESEARCH_ROOT"]) {
+    await makeOwnDir(researchRoot()).catch(() => undefined);
+  }
 
   for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS]) registry.register(def);
 

@@ -166,8 +166,8 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   }
 
   const timeoutMs = endpoint.timeoutMs || 120_000;
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
+  const deadline = idleDeadline(timeoutMs);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, deadline.signal]) : deadline.signal;
   const streaming = typeof opts.onDelta === "function";
 
   let res: Response;
@@ -190,11 +190,14 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       signal,
     });
   } catch (err) {
+    // Stopping deliberately is not a timeout, and must not be described as one.
+    if (opts.signal?.aborted) throw err;
     const name = (err as Error).name;
     if (name === "TimeoutError" || name === "AbortError") {
       throw new LlmError(
-        `The LLM endpoint did not answer within ${timeoutMs / 1000}s. ` +
-          `A long meeting or a large synthesis may simply need a longer timeout in Settings.`,
+        `The LLM endpoint did not respond within ${timeoutMs / 1000}s. ` +
+          `A model still loading into memory can take longer than this on a first request; ` +
+          `raise the timeout in Settings → Endpoints if that is what is happening.`,
       );
     }
     throw new LlmError(
@@ -234,9 +237,25 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     );
   }
 
-  const result = streaming
-    ? await readStream(res, opts.onDelta!)
-    : await readWhole(res);
+  let result: ChatResult;
+  try {
+    result = streaming
+      ? await readStream(res, opts.onDelta!, deadline.touch)
+      : await readWhole(res);
+  } catch (err) {
+    // The user pressing stop is not a failure to describe; let it through as it is.
+    if (opts.signal?.aborted) throw err;
+    if ((err as Error).name === "TimeoutError" || (err as Error).name === "AbortError") {
+      throw new LlmError(
+        `The model stopped producing output for ${timeoutMs / 1000}s and the reply was cut off. ` +
+          `If it is loading a large model or thinking for a long time, raise the timeout in ` +
+          `Settings → Endpoints.`,
+      );
+    }
+    throw err;
+  } finally {
+    deadline.clear();
+  }
 
   // A reply with no text but a tool call is not empty -- it is the normal shape
   // of a turn that decided to use a tool before saying anything.
@@ -244,6 +263,44 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
     throw new LlmError("The LLM endpoint returned an empty reply.");
   }
   return result;
+}
+
+/**
+ * A deadline that measures silence rather than duration.
+ *
+ * This was `AbortSignal.timeout(timeoutMs)`, handed to `fetch` -- and a signal
+ * given to fetch governs the RESPONSE BODY too, not just the wait for headers.
+ * So a model that was streaming perfectly well had its answer cut off mid-token
+ * at 120 seconds, and the error said "the endpoint did not answer within 120s",
+ * which was not true: it had been answering the whole time. Anything slow
+ * enough to matter -- a large model on CPU, a long synthesis, a 70B on a busy
+ * GPU -- hit this exactly when it was working hardest.
+ *
+ * The useful question is not "how long has this taken" but "how long has it
+ * been silent", so the timer is rearmed on every chunk that arrives. A model
+ * producing tokens is never interrupted; one that has genuinely hung still
+ * fails, at the same number the user configured.
+ *
+ * The reason is a TimeoutError so callers can tell a stall from a cancellation.
+ */
+function idleDeadline(ms: number): { signal: AbortSignal; touch: () => void; clear: () => void } {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const arm = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(
+      () => controller.abort(new DOMException(`idle for ${ms}ms`, "TimeoutError")),
+      ms,
+    );
+    // Never hold the process open on our own account.
+    timer.unref?.();
+  };
+  arm();
+  return {
+    signal: controller.signal,
+    touch: arm,
+    clear: () => clearTimeout(timer),
+  };
 }
 
 async function readWhole(res: Response): Promise<ChatResult> {
@@ -305,6 +362,8 @@ function str(v: unknown): string {
 async function readStream(
   res: Response,
   onDelta: (d: string, kind: DeltaKind) => void,
+  /** Called on every frame that arrives, to rearm the idle deadline. */
+  onProgress: () => void = () => {},
 ): Promise<ChatResult> {
   if (!res.body) throw new LlmError("The LLM endpoint returned no response body.");
   const reader = res.body.getReader();
@@ -330,6 +389,9 @@ async function readStream(
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    // Progress, however small: a keep-alive comment frame from llama.cpp counts
+    // just as much as a token, because both prove the server is still there.
+    onProgress();
     buffer += decoder.decode(value, { stream: true });
 
     let sep: number;

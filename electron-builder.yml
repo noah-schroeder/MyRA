@@ -45,15 +45,21 @@ mac:
   # it, and shows this string in the prompt. Written for the person reading it
   # at the moment they press Record, not for a plist.
   extendInfo:
+    # Accurate rather than reassuring. Karen transcribes locally by default, but
+    # the transcription endpoint is a setting and can be pointed at a remote
+    # server -- so a flat "never leaves your computer" here would be a promise
+    # the app does not always keep, in the one dialog the user cannot skip.
     NSMicrophoneUsageDescription: >-
-      Karen records meetings and takes dictation on this machine. Audio is
-      transcribed locally and never leaves your computer.
+      Karen records meetings and takes dictation on this machine. Recordings are
+      kept on your computer and transcribed by whichever service you configure —
+      by default, one running locally.
     # Screen Recording has no Info.plist key of its own -- macOS prompts for it
     # when the capture is attempted -- but system audio is taken through the
     # same API, and this is the only place to explain that beforehand.
     NSAudioCaptureUsageDescription: >-
       Karen records the other side of a call so meeting notes include everyone,
-      not only you. Audio is transcribed locally and never leaves your computer.
+      not only you. Recordings are kept on your computer and transcribed by
+      whichever service you configure — by default, one running locally.
 win:
   target: [nsis]
   icon: build/icon.png

@@ -68,7 +68,7 @@ export async function pdfToText(
   const dir = await mkdtemp(join(tmpdir(), "karen-pdf-"));
   const src = join(dir, "in.pdf");
   try {
-    await writeFile(src, bytes);
+    await writeFile(src, bytes, { mode: 0o600 });
     /*
      * No `-layout`.
      *

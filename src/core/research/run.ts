@@ -17,6 +17,7 @@ import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "nod
 import { join } from "node:path";
 import { researchRoot } from "./config.ts";
 import type { SourceRecord } from "./sources.ts";
+import { makePrivateDir, OWNER_ONLY_FILE } from "../paths.ts";
 
 /** Stages in execution order. A run resumes at the first one with no output. */
 export const STAGES = [
@@ -61,6 +62,21 @@ export function runId(question: string, now = new Date()): string {
   return `${date}-${slug || "research"}-${salt}`;
 }
 
+/**
+ * A run id, refused if it is anything but one.
+ *
+ * Run ids are made by `runId` above, but they arrive back from the
+ * renderer -- `research-run`, `research-source`, `research-reveal` -- and are
+ * joined onto the research root to make a directory that is then read from and
+ * opened in the file manager. Checking costs a regex.
+ */
+export function assertRunId(id: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(id) || id === "." || id === "..") {
+    throw new Error(`no research run named ${JSON.stringify(id)}`);
+  }
+  return id;
+}
+
 export class ResearchRun {
   readonly id: string;
   readonly dir: string;
@@ -72,14 +88,14 @@ export class ResearchRun {
 
   static async create(question: string, root = researchRoot()): Promise<ResearchRun> {
     const run = new ResearchRun(runId(question), root);
-    await mkdir(join(run.dir, "sources"), { recursive: true });
+    await makePrivateDir(join(run.dir, "sources"));
     await run.writeJson("question.json", { question, startedAt: new Date().toISOString() });
     return run;
   }
 
   /** Reopen an existing run, for resuming. */
   static async open(id: string, root = researchRoot()): Promise<ResearchRun> {
-    const run = new ResearchRun(id, root);
+    const run = new ResearchRun(assertRunId(id), root);
     if (!existsSync(run.dir)) throw new Error(`no research run named "${id}"`);
     return run;
   }
@@ -130,9 +146,9 @@ export class ResearchRun {
    */
   async write(name: string, contents: string): Promise<void> {
     const target = this.path(name);
-    await mkdir(join(target, ".."), { recursive: true });
+    await makePrivateDir(join(target, ".."));
     const tmp = `${target}.${process.pid}.tmp`;
-    await writeFile(tmp, contents, "utf8");
+    await writeFile(tmp, contents, { encoding: "utf8", mode: OWNER_ONLY_FILE });
     await rename(tmp, target);
   }
 
@@ -163,8 +179,11 @@ export class ResearchRun {
    * so a partially-screened set is still inspectable.
    */
   async append(name: string, record: unknown): Promise<void> {
-    await mkdir(join(this.path(name), ".."), { recursive: true });
-    await appendFile(this.path(name), JSON.stringify(record) + "\n", "utf8");
+    await makePrivateDir(join(this.path(name), ".."));
+    await appendFile(this.path(name), JSON.stringify(record) + "\n", {
+      encoding: "utf8",
+      mode: OWNER_ONLY_FILE,
+    });
   }
 
   async readJsonl<T>(name: string): Promise<T[]> {
@@ -191,7 +210,7 @@ export class ResearchRun {
    * against, and so a citation can be audited long after the page changed.
    */
   async saveSource(record: SourceRecord, text: string): Promise<void> {
-    await mkdir(this.path("sources", String(record.n)), { recursive: true });
+    await makePrivateDir(this.path("sources", String(record.n)));
     await this.write(join("sources", String(record.n), "text.txt"), text);
     await this.write(join("sources", String(record.n), "meta.json"), JSON.stringify(record, null, 2) + "\n");
     await this.append(join("sources", "index.jsonl"), record);

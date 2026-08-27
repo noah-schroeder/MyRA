@@ -27,6 +27,7 @@ import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MeetingRecord } from "./meeting.ts";
 import type { Line } from "./transcript.ts";
+import { OWNER_ONLY_FILE } from "../paths.ts";
 
 export const RECORD_FILE = "meeting.json";
 export const STATE_FILE = "karen.json";
@@ -93,7 +94,10 @@ export async function writeState(dir: string, patch: Partial<MeetingState>): Pro
   const next = { ...(await readState(dir)), ...patch };
   // Undefined keys mean "clear this", which JSON.stringify already drops; the
   // point of merging first is that a step must not erase what another wrote.
-  await writeFile(join(dir, STATE_FILE), JSON.stringify(next, null, 2) + "\n", "utf8");
+  await writeFile(join(dir, STATE_FILE), JSON.stringify(next, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: OWNER_ONLY_FILE,
+  });
   return next;
 }
 
@@ -102,7 +106,10 @@ export async function readTranscript(dir: string): Promise<StoredTranscript | un
 }
 
 export async function writeTranscript(dir: string, stored: StoredTranscript): Promise<void> {
-  await writeFile(join(dir, TRANSCRIPT_FILE), JSON.stringify(stored, null, 2) + "\n", "utf8");
+  await writeFile(join(dir, TRANSCRIPT_FILE), JSON.stringify(stored, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: OWNER_ONLY_FILE,
+  });
 }
 
 export async function readNotes(dir: string): Promise<string | undefined> {

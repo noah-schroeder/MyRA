@@ -18,6 +18,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { DEFAULT_RUBRICS } from "./rubricText.ts";
+import { makeOwnDir, OWNER_ONLY_FILE } from "../paths.ts";
 
 export const RUBRICS = ["screening", "extraction", "review"] as const;
 export type RubricName = (typeof RUBRICS)[number];
@@ -48,10 +49,10 @@ export async function rubricText(name: RubricName): Promise<string> {
 
   const shipped = DEFAULT_RUBRICS[name];
   try {
-    await mkdir(rubricDir(), { recursive: true });
+    await makeOwnDir(rubricDir());
     // `wx` never clobbers: if two stages race here the first wins, and an
     // edited rubric survives every subsequent run.
-    await writeFile(mine, shipped, { encoding: "utf8", flag: "wx" });
+    await writeFile(mine, shipped, { encoding: "utf8", flag: "wx", mode: OWNER_ONLY_FILE });
   } catch {
     // Already there, or nowhere to write. Either way the text below is right.
   }

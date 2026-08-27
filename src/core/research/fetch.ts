@@ -74,7 +74,13 @@ export async function fetchPage(
       if (declared > MAX_PDF_BYTES) {
         return fail(`PDF is ${(declared / (1024 * 1024)).toFixed(1)}MB, over the ${MAX_PDF_MB}MB limit`);
       }
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      let bytes: Uint8Array;
+      try {
+        bytes = await readCapped(res, MAX_PDF_BYTES);
+      } catch (err) {
+        if (err instanceof TooLarge) return fail(`PDF is over the ${MAX_PDF_MB}MB limit`);
+        throw err;
+      }
       try {
         const text = await pdfToText(bytes);
         const clipped = text.length > maxChars;
@@ -96,7 +102,13 @@ export async function fetchPage(
     const declared = Number(res.headers.get("content-length") ?? 0);
     if (declared > MAX_PAGE_BYTES) return fail(`page too large (${declared} bytes)`);
 
-    const raw = (await res.text()).slice(0, MAX_PAGE_BYTES);
+    let raw: string;
+    try {
+      raw = new TextDecoder().decode(await readCapped(res, MAX_PAGE_BYTES));
+    } catch (err) {
+      if (err instanceof TooLarge) return fail(`page too large (over ${MAX_PAGE_BYTES} bytes)`);
+      throw err;
+    }
     const plain = /text\/plain/.test(type);
     const { title, text } = plain ? { title: "", text: raw } : htmlToText(raw);
     if (!text.trim()) return fail("no readable text found");
@@ -112,6 +124,53 @@ export async function fetchPage(
     if (err instanceof BlockedUrlError) return fail(err.message);
     return fail((err as Error).message);
   }
+}
+
+export class TooLarge extends Error {
+  override readonly name = "TooLarge";
+}
+
+/**
+ * Read a response body, stopping at `limit` bytes instead of after them.
+ *
+ * `await res.text()` and `await res.arrayBuffer()` buffer the WHOLE body before
+ * anything can look at its size, so the previous `(await res.text()).slice(0,
+ * MAX_PAGE_BYTES)` enforced its limit only once the damage was done. The
+ * content-length header is not a defence either: it is optional, a chunked
+ * response omits it, and a hostile server can simply lie.
+ *
+ * That matters here more than it would elsewhere, because the URL is chosen by
+ * a model acting on text written by strangers -- a search snippet, a fetched
+ * page. One link to an endless stream would grow the main process until the
+ * machine started swapping, taking the window and any loaded model with it.
+ *
+ * So the stream is read frame by frame and abandoned the moment it goes over.
+ * Cancelling the reader also closes the connection, so nothing keeps arriving
+ * after we have stopped caring.
+ */
+export async function readCapped(res: Response, limit: number): Promise<Uint8Array> {
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) throw new TooLarge(`body exceeded ${limit} bytes`);
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
 }
 
 /** Run tasks with bounded concurrency, preserving input order. */
