@@ -21,6 +21,7 @@ import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
+import { makePrivateDir } from "../../core/paths.ts";
 
 export class DownloadError extends Error {
   override readonly name = "DownloadError";
@@ -56,7 +57,7 @@ async function sizeOf(path: string): Promise<number> {
  * model looks ready to load.
  */
 export async function downloadFile(url: string, dest: string, opts: DownloadOptions = {}): Promise<void> {
-  await mkdir(dirname(dest), { recursive: true });
+  await makePrivateDir(dirname(dest));
   const part = `${dest}.part`;
   let have = await sizeOf(part);
 
@@ -144,7 +145,7 @@ export async function hashFile(path: string): Promise<string> {
  * path-traversal entry, and no extractor flag would save us.
  */
 export async function extractArchive(archive: string, destDir: string): Promise<void> {
-  await mkdir(destDir, { recursive: true });
+  await makePrivateDir(destDir);
   await new Promise<void>((resolve, reject) => {
     const child = spawn("tar", ["-xf", archive, "-C", destDir], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";

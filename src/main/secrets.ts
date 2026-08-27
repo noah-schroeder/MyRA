@@ -14,12 +14,12 @@
 
 import { safeStorage } from "electron";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 export { CONFIG_DIR } from "../core/paths.ts";
-import { CONFIG_DIR } from "../core/paths.ts";
+import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 const SECRETS_PATH = join(CONFIG_DIR, "secrets.enc.json");
 
 /** Logical secret names. `bridgeToken` authenticates the VM, not a provider. */
@@ -80,16 +80,16 @@ export class SecretVault {
         safeStorage.decryptString(Buffer.from(existing, "base64"));
         return (this.#persistenceOk = true);
       }
-      await mkdir(CONFIG_DIR, { recursive: true });
+      await makeOwnDir(CONFIG_DIR);
       await writeFile(probePath, safeStorage.encryptString("karen-probe").toString("base64"), {
-        mode: 0o600,
+        mode: OWNER_ONLY_FILE,
       });
       // First run cannot prove persistence yet; assume good and re-check next launch.
       return (this.#persistenceOk = true);
     } catch {
       // The probe existed but would not decrypt: the key did not survive.
       await writeFile(probePath, safeStorage.encryptString("karen-probe").toString("base64"), {
-        mode: 0o600,
+        mode: OWNER_ONLY_FILE,
       }).catch(() => undefined);
       return (this.#persistenceOk = false);
     }
@@ -140,9 +140,9 @@ export class SecretVault {
 
   async #save(data: Stored): Promise<void> {
     this.#cache = data;
-    await mkdir(dirname(SECRETS_PATH), { recursive: true });
+    await makeOwnDir(dirname(SECRETS_PATH));
     const tmp = `${SECRETS_PATH}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+    await writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { mode: OWNER_ONLY_FILE });
     await rename(tmp, SECRETS_PATH);
   }
 
@@ -217,8 +217,8 @@ export class SecretVault {
     } else {
       // The token is written to a file deliberately: it must be stable across
       // restarts or pairing breaks, and it already exists in plaintext in the VM.
-      await mkdir(CONFIG_DIR, { recursive: true });
-      await writeFile(fallbackPath, token, { mode: 0o600 });
+      await makeOwnDir(CONFIG_DIR);
+      await writeFile(fallbackPath, token, { mode: OWNER_ONLY_FILE });
     }
     return token;
   }

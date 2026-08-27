@@ -21,7 +21,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { CONFIG_DIR } from "../../core/paths.ts";
+import { CONFIG_DIR, makeOwnDir, makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
 import { downloadUrl, parseTree, treeUrl } from "../../core/runtime/hf.ts";
 import {
   WHISPER_MODELS, WHISPER_REPO, newestWhisperRelease, whisperAsset, whisperUnavailable,
@@ -94,6 +94,24 @@ async function freePort(): Promise<number> {
   });
 }
 
+/**
+ * A model file name, refused if it is anything else.
+ *
+ * `useModel` and `removeModel` take this from the renderer and join it onto the
+ * models directory, and `removeModel` ends in `rm`. A name is all that is ever
+ * meant -- `ggml-base.en-q5_1.bin` -- so anything carrying a separator or a
+ * `..` is not a mistyped model, it is a path, and the honest answer is no.
+ *
+ * The same rule `sessions.pathFor` applies to session ids, for the same reason:
+ * the value lands in a path, so it is checked rather than trusted.
+ */
+export function modelFileName(file: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(file) || file === "." || file === "..") {
+    throw new Error(`${JSON.stringify(file)} is not a model file name.`);
+  }
+  return file;
+}
+
 export class WhisperManager {
   #config: WhisperConfig = { ...DEFAULTS };
   #status: WhisperStatus = { state: "stopped", log: [] };
@@ -160,8 +178,8 @@ export class WhisperManager {
 
   async update(patch: Partial<WhisperConfig>): Promise<WhisperConfig> {
     this.#config = { ...this.#config, ...patch };
-    await mkdir(CONFIG_DIR, { recursive: true });
-    await writeFile(CONFIG_PATH, JSON.stringify(this.#config, null, 2) + "\n", { mode: 0o600 });
+    await makeOwnDir(CONFIG_DIR);
+    await writeFile(CONFIG_PATH, JSON.stringify(this.#config, null, 2) + "\n", { mode: OWNER_ONLY_FILE });
     this.#emit();
     return this.#config;
   }
@@ -201,7 +219,7 @@ export class WhisperManager {
     const dir = join(buildsDir(), release.tag_name);
     const staging = join(CONFIG_DIR, "staging", `whisper-${release.tag_name}`);
     await rm(staging, { recursive: true, force: true });
-    await mkdir(staging, { recursive: true });
+    await makePrivateDir(staging);
     try {
       const archive = join(staging, asset.name);
       const digest = sha256Of(asset);
@@ -225,7 +243,7 @@ export class WhisperManager {
        * binary starts and immediately fails to find a backend.
        */
       await rm(dir, { recursive: true, force: true });
-      await mkdir(join(dir, ".."), { recursive: true });
+      await makePrivateDir(join(dir, ".."));
       const { rename, cp } = await import("node:fs/promises");
       const sourceDir = join(found, "..");
       try {
@@ -280,7 +298,7 @@ export class WhisperManager {
   }
 
   async removeModel(file: string): Promise<void> {
-    const path = join(modelsDir(), file);
+    const path = join(modelsDir(), modelFileName(file));
     if (this.#config.modelPath === path) {
       await this.stop();
       await this.update({ modelPath: undefined, modelFile: undefined });
@@ -290,7 +308,7 @@ export class WhisperManager {
   }
 
   async useModel(file: string): Promise<void> {
-    const path = join(modelsDir(), file);
+    const path = join(modelsDir(), modelFileName(file));
     if (!existsSync(path)) throw new Error(`${file} is not on this machine.`);
     // The running server has the old model mapped; it has to go.
     await this.stop();

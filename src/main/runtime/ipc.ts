@@ -15,7 +15,7 @@ import { join } from "node:path";
 
 import { newestBuild, type Backend, type Release } from "../../core/runtime/assets.ts";
 import {
-  downloadUrl, groupFiles, infoUrl, parseTree, quantOf, searchUrl, treeUrl,
+  downloadUrl, groupFiles, infoUrl, parseTree, quantOf, repoId, searchUrl, treeUrl,
   GatedError, type HfModel, type ModelFile,
 } from "../../core/runtime/hf.ts";
 import { fitModel } from "../../core/runtime/fit.ts";
@@ -382,14 +382,22 @@ export function installRuntimeIpc(
     inFlight = new AbortController();
     const signal = inFlight.signal;
     const token = await hfToken();
-    const dir = join(runtime.config.modelsDir, repo.replace("/", "__"));
+    // Validated, then flattened: `repoId` guarantees exactly one slash, so the
+    // replace below cannot leave one behind for `join` to interpret.
+    let id: string;
+    try {
+      id = repoId(repo);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    const dir = join(runtime.config.modelsDir, id.replaceAll("/", "__"));
 
     try {
       let done = 0;
       const total = parts.reduce((n, p) => n + p.size, 0);
       for (const part of parts) {
         const name = part.path.slice(part.path.lastIndexOf("/") + 1);
-        await downloadFile(downloadUrl(repo, part.path), join(dir, name), {
+        await downloadFile(downloadUrl(id, part.path), join(dir, name), {
           ...(part.sha256 ? { sha256: part.sha256 } : {}),
           ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
           signal,

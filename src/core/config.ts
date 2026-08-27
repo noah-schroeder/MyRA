@@ -7,11 +7,11 @@
  * this file records only the non-secret shape of an endpoint.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PermissionMode } from "./policy.ts";
-import { CONFIG_DIR } from "./paths.ts";
+import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "./paths.ts";
 import { isLocalHost } from "./destinations.ts";
 
 const SETTINGS_PATH = join(CONFIG_DIR, "settings.json");
@@ -21,6 +21,13 @@ export interface EndpointSettings {
   /** Env var name the key is exposed as, e.g. KAREN_LLM_KEY. */
   envVar: string;
   model?: string;
+  /**
+   * How long to wait WITHOUT PROGRESS before giving up.
+   *
+   * Silence, not total duration. A streaming reply that takes ten minutes to
+   * write is not late, it is long, and the previous reading of this field cut
+   * exactly those answers off mid-sentence -- see `idleDeadline` in llm/chat.ts.
+   */
   timeoutMs: number;
 }
 
@@ -177,9 +184,9 @@ export class ConfigStore {
   }
 
   async save(): Promise<void> {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await makeOwnDir(CONFIG_DIR);
     const tmp = `${SETTINGS_PATH}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(this.#settings, null, 2) + "\n", { mode: 0o600 });
+    await writeFile(tmp, JSON.stringify(this.#settings, null, 2) + "\n", { mode: OWNER_ONLY_FILE });
     await rename(tmp, SETTINGS_PATH);
   }
 

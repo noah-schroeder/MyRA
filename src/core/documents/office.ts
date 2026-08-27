@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { toolsDir } from "../paths.ts";
+import { makePrivateDir, OWNER_ONLY_FILE, toolsDir } from "../paths.ts";
 import { FORMATS, extensionOf, outputName, pandocArgs, pandocReader, type Format } from "./formats.ts";
 
 export class DocsError extends Error {
@@ -93,7 +93,7 @@ export function scratchRoot(): string {
 }
 
 async function scratchDir(prefix: string): Promise<string> {
-  await mkdir(scratchRoot(), { recursive: true });
+  await makePrivateDir(scratchRoot());
   return await mkdtemp(join(scratchRoot(), prefix));
 }
 
@@ -231,7 +231,7 @@ const HTML_FORMAT: Format = {
  * output file exists and is not empty.
  */
 export async function convert(source: string, format: Format, outDir: string): Promise<string> {
-  await mkdir(outDir, { recursive: true });
+  await makePrivateDir(outDir);
   const produced = join(outDir, outputName(source, format));
 
   // PDF has no pandoc writer here, so it goes through HTML and the app's own
@@ -290,8 +290,8 @@ async function verify(produced: string, format: Format, stderr: string): Promise
 
 /** Write text to a file, creating the directory it lives in. */
 export async function writeText(abs: string, content: string): Promise<number> {
-  await mkdir(dirname(abs), { recursive: true });
-  await writeFile(abs, content, "utf8");
+  await makePrivateDir(dirname(abs));
+  await writeFile(abs, content, { encoding: "utf8", mode: OWNER_ONLY_FILE });
   return Buffer.byteLength(content, "utf8");
 }
 

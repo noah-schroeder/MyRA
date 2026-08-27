@@ -15,10 +15,11 @@
  * start / write / level / stop / cancel.
  */
 
-import { mkdir, open, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makePrivateDir, OWNER_ONLY_FILE } from "../paths.ts";
 import { levelOf, type Level } from "./meter.ts";
 
 export const RATE = 16_000;
@@ -126,17 +127,27 @@ export class Recorder {
     if (options.dir) {
       this.#dir = options.dir;
       this.#owned = false;
-      await mkdir(options.dir, { recursive: true });
+      await makePrivateDir(options.dir);
     } else {
-      // Not /tmp by name: a snap-confined build gets a private /tmp, and a file
-      // written there is invisible to everything outside the snap.
-      this.#dir = join(tmpdir(), `karen-rec-${process.pid}-${Date.now()}`);
+      /*
+       * `mkdtemp`, not a name we compose ourselves.
+       *
+       * This used to be `karen-rec-<pid>-<Date.now()>`, which is a path anyone
+       * on the machine can predict and therefore create first -- as a symlink
+       * pointing wherever they like, with the recording written through it. It
+       * also inherited the umask, so a meeting's raw audio sat in a shared
+       * /tmp readable by every other account.
+       *
+       * mkdtemp closes both: the suffix is random, it fails rather than reuses
+       * if the name is taken, and the directory is 0700 by definition.
+       */
+      this.#dir = await mkdtemp(join(tmpdir(), "karen-rec-"));
       this.#owned = true;
-      await mkdir(this.#dir, { recursive: true });
     }
 
     this.#path = join(this.#dir, `${options.name ?? "recording"}.wav`);
-    this.#handle = await open(this.#path, "w");
+    // 0600: audio of a meeting is the most sensitive thing this app produces.
+    this.#handle = await open(this.#path, "w", OWNER_ONLY_FILE);
     await this.#handle.write(wavHeader(0), 0, HEADER_BYTES, 0);
     this.#bytes = 0;
     this.#window = Buffer.alloc(0);

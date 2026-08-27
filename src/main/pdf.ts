@@ -12,6 +12,7 @@
 
 import { BrowserWindow } from "electron";
 import { writeFile } from "node:fs/promises";
+import { OWNER_ONLY_FILE } from "../core/paths.ts";
 
 const RENDER_TIMEOUT_MS = 60_000;
 
@@ -39,7 +40,7 @@ export function installPdfRenderer(): (html: string, outPath: string) => Promise
         margins: { top: 0.6, bottom: 0.6, left: 0.7, right: 0.7 },
         pageSize: "A4",
       });
-      await writeFile(outPath, pdf);
+      await writeFile(outPath, pdf, { mode: OWNER_ONLY_FILE });
     } finally {
       if (!win.isDestroyed()) win.destroy();
     }

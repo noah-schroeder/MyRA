@@ -12,12 +12,12 @@
  * call; it happens once, from the setup screen, on a gesture from the user.
  */
 
-import { chmod, copyFile, mkdir, rm } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { installedPandocPath, pandocBinaryName, forgetEngines } from "../../core/documents/office.ts";
-import { toolsDir } from "../../core/paths.ts";
+import { makeOwnDir, toolsDir } from "../../core/paths.ts";
 import { digestOf, pandocAsset } from "../../core/documents/pandocRelease.ts";
 import type { Release } from "../../core/runtime/assets.ts";
 import { DownloadError, downloadFile, extractArchive, findExecutable, type Progress } from "../runtime/download.ts";
@@ -61,10 +61,21 @@ export async function installPandoc(opts: InstallOptions = {}): Promise<InstallR
     );
   }
 
-  const work = join(tmpdir(), `karen-pandoc-${process.pid}`);
+  /*
+   * `mkdtemp`, not `karen-pandoc-<pid>`.
+   *
+   * The predictable name was a real hazard rather than an untidiness: another
+   * account on the machine can create that directory first and wait. The
+   * archive is checksummed, but `findExecutable` then searches the whole
+   * directory for anything named `pandoc` and the app COPIES WHAT IT FINDS into
+   * the tools directory and runs it from then on. A planted binary would be
+   * installed by Karen and executed as the user, for as long as it sat there.
+   *
+   * mkdtemp makes the name unguessable and the directory 0700.
+   */
+  const work = await mkdtemp(join(tmpdir(), "karen-pandoc-"));
   const archive = join(work, asset.name);
   try {
-    await mkdir(work, { recursive: true });
     const sha = digestOf(asset);
     await downloadFile(asset.browser_download_url, archive, {
       ...(sha ? { sha256: sha } : {}),
@@ -81,7 +92,7 @@ export async function installPandoc(opts: InstallOptions = {}): Promise<InstallR
     const found = await findExecutable(work, "pandoc");
     if (!found) throw new DownloadError("the pandoc archive did not contain a pandoc binary");
 
-    await mkdir(toolsDir(), { recursive: true });
+    await makeOwnDir(toolsDir());
     const dest = installedPandocPath();
     /* Copied, not renamed: the temporary directory is often on a different
        filesystem from the config directory, where rename fails with EXDEV. */

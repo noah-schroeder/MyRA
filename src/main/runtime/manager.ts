@@ -22,7 +22,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { join } from "node:path";
 import { homedir, totalmem } from "node:os";
 
-import { CONFIG_DIR } from "../../core/paths.ts";
+import { CONFIG_DIR, makeOwnDir, makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
 import {
   newestBuild, pickAsset, pickCudart, sha256Of, type Backend, type Release, type ReleaseAsset,
 } from "../../core/runtime/assets.ts";
@@ -186,8 +186,8 @@ export class RuntimeManager {
 
   async update(patch: Partial<RuntimeConfig>): Promise<RuntimeConfig> {
     this.#config = { ...this.#config, ...patch };
-    await mkdir(CONFIG_DIR, { recursive: true });
-    await writeFile(CONFIG_PATH, JSON.stringify(this.#config, null, 2) + "\n", { mode: 0o600 });
+    await makeOwnDir(CONFIG_DIR);
+    await writeFile(CONFIG_PATH, JSON.stringify(this.#config, null, 2) + "\n", { mode: OWNER_ONLY_FILE });
     this.#emit();
     return this.#config;
   }
@@ -364,7 +364,7 @@ export class RuntimeManager {
     const dir = buildDir(release.tag_name, backend);
     const staging = join(stagingDir(), id);
     await rm(staging, { recursive: true, force: true });
-    await mkdir(staging, { recursive: true });
+    await makePrivateDir(staging);
 
     const fetchAsset = async (a: ReleaseAsset): Promise<string> => {
       const path = join(staging, a.name);
@@ -399,7 +399,7 @@ export class RuntimeManager {
     if (!binary) throw new Error("the downloaded archive contains no llama-server binary.");
 
     await rm(dir, { recursive: true, force: true });
-    await mkdir(join(dir, ".."), { recursive: true });
+    await makePrivateDir(join(dir, ".."));
     await rename(unpacked, dir);
     await rm(staging, { recursive: true, force: true });
 

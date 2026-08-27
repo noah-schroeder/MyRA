@@ -16,6 +16,7 @@
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { listDevices, Recorder, type AudioSource, type Recording } from "./capture.ts";
+import { OWNER_ONLY_FILE, makePrivateDir } from "../paths.ts";
 
 /** Meetings run long. This is a runaway guard, not an expected limit. */
 const MAX_HOURS = 6;
@@ -233,7 +234,7 @@ export class MeetingRecorder {
     const slug = slugify(title);
     const root = typeof this.#opts.root === "function" ? this.#opts.root() : this.#opts.root;
     const dir = join(root, slug ? `${id}-${slug}` : id);
-    await mkdir(dir, { recursive: true });
+    await makePrivateDir(dir);
 
     const started: string[] = [];
     for (const spec of tracks) {
@@ -315,7 +316,10 @@ export class MeetingRecorder {
 
     // The manifest is written before anything is transcribed, so a meeting that
     // is interrupted afterwards can still be found and picked up by hand.
-    await writeFile(join(dir, "meeting.json"), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    await writeFile(join(dir, "meeting.json"), `${JSON.stringify(record, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: OWNER_ONLY_FILE,
+    });
     return record;
   }
 
