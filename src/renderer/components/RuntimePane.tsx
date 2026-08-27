@@ -12,7 +12,20 @@ import { useCallback, useEffect, useState } from "react";
 import type { RuntimeState } from "../types.ts";
 import { LemonadePane } from "./LemonadePane.tsx";
 
-export function RuntimePane() {
+/**
+ * A model's name, not the path it happens to live at.
+ *
+ * `activeModel` is whatever the daemon calls the model, which for one of the
+ * user's own files is an absolute path -- a checkbox label ran to ninety
+ * characters of `/home/.../LiquidAI__LFM2.5-2.6B-GGUF/...`. The last segment
+ * is the part that identifies it; the full path stays as the title.
+ */
+function shortName(id?: string): string | undefined {
+  if (!id) return undefined;
+  return id.includes("/") ? (id.split("/").pop() ?? id) : id;
+}
+
+export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
   const [state, setState] = useState<RuntimeState | undefined>();
   const [showLog, setShowLog] = useState(false);
 
@@ -31,13 +44,18 @@ export function RuntimePane() {
   };
 
   return (
-    <div className="pane">
+    /* Wider than the 62ch reading measure the other tabs use: this tab is a
+       grid of engine cards, and at 62ch it is a single column with half the
+       dialog empty beside it. The prose inside keeps its own measure. */
+    <div className="pane pane-wide">
       <p className="pane-lead">
         Karen can run models on this machine, so nothing you type leaves it. This is optional — if
         you already point Karen at an endpoint of your own, you can ignore all of it.
       </p>
 
-      <LemonadePane />
+      {/* Engines only. The models themselves are a screen of their own -- this
+          tab points at it rather than keeping a second, drifting copy. */}
+      <LemonadePane section="engines" {...(onOpenHub ? { onOpenModels: onOpenHub } : {})} />
 
       {state ? (
         <section className="pane-block">
@@ -56,7 +74,9 @@ export function RuntimePane() {
               checked={state.config.startOnLaunch}
               onChange={(e) => void patch({ startOnLaunch: e.target.checked })}
             />
-            Load {state.config.activeModel ?? "the last model"} when Karen opens
+            <span title={state.config.activeModel}>
+              Load {shortName(state.config.activeModel) ?? "the last model"} when Karen opens
+            </span>
           </label>
 
           {state.lemonade.log.length ? (
