@@ -28,8 +28,12 @@ export function SettingsModal({
   onClose,
   onChange,
   onOpenHub,
+  initialTab,
 }: {
   onClose: () => void;
+  /* So the Models screen can send someone straight to Runtime when nothing
+     there can run what they are about to download. */
+  initialTab?: Tab;
   /* Models moved out of Settings and onto their own screen; the Runtime tab
    * points at it rather than keeping a second, drifting copy of the list. */
   onOpenHub?: () => void;
@@ -37,7 +41,7 @@ export function SettingsModal({
    * theme made that obvious: the picker updated, and the window stayed dark. */
   onChange?: (s: Settings) => void;
 }) {
-  const [tab, setTab] = useState<Tab>("endpoints");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "endpoints");
   const [settings, setSettings] = useState<Settings | undefined>();
   const [vault, setVault] = useState<VaultStatus | undefined>();
 
@@ -78,7 +82,7 @@ export function SettingsModal({
 
         <div className="settings-body">
           {tab === "endpoints" ? <Endpoints settings={settings} patch={patch} vault={vault} /> : null}
-          {tab === "runtime" ? <RuntimePane /> : null}
+          {tab === "runtime" ? <RuntimePane {...(onOpenHub ? { onOpenHub } : {})} /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}

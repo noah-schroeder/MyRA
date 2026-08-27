@@ -7,7 +7,14 @@
  * from the daemon -- and comes back wider, because Lemonade serves speech,
  * text-to-speech, image and embedding models through the same API as chat.
  *
- * Three decisions shape the layout:
+ * It renders one of two halves, chosen by `section`, because the two answer
+ * different questions and belong in different places. **Engines** are setup --
+ * what this machine can run, installed once, in Settings beside the other
+ * machine-level switches. **Models** are a working choice you come back to, so
+ * they get the whole width of their own screen. Showing both in both places
+ * made each screen half about something the person was not there for.
+ *
+ * Three decisions shape the models half:
  *
  *   - **Models are grouped by what they do, not by which engine runs them.**
  *     "Transcription" is a thing an academic wants; "whispercpp" is an
@@ -129,7 +136,18 @@ function enginePriority(id: string): number {
   return i === -1 ? ENGINE_ORDER.length : i;
 }
 
-export function LemonadePane() {
+export function LemonadePane({
+  section,
+  onOpenModels,
+  onOpenRuntime,
+}: {
+  /** `engines` is Settings → Runtime; `models` is the Models screen. */
+  section: "engines" | "models";
+  /** Offered from the engines half, which is where you finish and move on. */
+  onOpenModels?: () => void;
+  /** Offered from the models half when no engine is installed to run them. */
+  onOpenRuntime?: () => void;
+}) {
   const [info, setInfo] = useState<MachineInfo | undefined>();
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [installed, setInstalled] = useState<{ id: string; downloaded?: boolean }[]>([]);
@@ -219,6 +237,11 @@ export function LemonadePane() {
     [info?.engines, showAllEngines],
   );
 
+  /* Whether anything at all can run a model yet, which is the one fact the
+     models half needs from the engines half. */
+  const noEngine =
+    info !== undefined && !(info.engines ?? []).some((e) => e.backends.some((b) => b.state === "installed"));
+
   const groups = useMemo(() => groupCatalog(catalog), [catalog]);
   /* Models the daemon knows that the catalogue does not -- the user's own
      files, reached through `extra_models_dir`. Their own drawer, always last. */
@@ -275,7 +298,7 @@ export function LemonadePane() {
 
       {!info && !error ? <p className="lem-waiting">Looking at this machine…</p> : null}
 
-      {info ? (
+      {info && section === "engines" ? (
         <>
           {/* ---------------- this machine ---------------- */}
           <section className="lem-section">
@@ -394,14 +417,52 @@ export function LemonadePane() {
             <button type="button" className="lem-more" onClick={() => setShowAllEngines(!showAllEngines)}>
               {showAllEngines ? "Show only what this machine can run" : "Show every engine, including the ones this machine cannot run"}
             </button>
-          </section>
 
+            {/* Where you go once an engine is in place. The models themselves
+                live on their own screen and are not repeated here. */}
+            {onOpenModels ? (
+              <button type="button" className="lem-more" onClick={onOpenModels}>
+                Choose and download models →
+              </button>
+            ) : null}
+          </section>
+        </>
+      ) : null}
+
+      {info && section === "models" ? (
+        <>
           {/* ---------------- models ---------------- */}
           <section className="lem-section">
             <header className="lem-head">
               <h3>Models</h3>
               <p>Grouped by what they do. Sizes are the download; the fit allows for working memory too.</p>
             </header>
+
+            {/* One line rather than the machine strip, which belongs on the
+                Runtime page: without it the verdict column is a colour with
+                nothing behind it, and with it this screen is about models. */}
+            <p className="lem-group-hint">
+              Fit is measured against {gb(info.ramBytes)} of memory
+              {machine.vramBytes ? ` and ${gb(machine.vramBytes)} of graphics memory` : ", with no graphics acceleration"}.
+            </p>
+
+            {/* Downloading a model that nothing can run is a wasted transfer,
+                and it is not obvious from here that an engine is a separate
+                thing. Say so before the list, not after the download. */}
+            {noEngine ? (
+              <div className="lem-callout">
+                <p className="lem-callout-title">No engine is installed yet.</p>
+                <p className="lem-callout-body">
+                  A model needs an engine to run it. Install one under Settings → Runtime first;
+                  downloading a model on its own will not give you anything that answers.
+                </p>
+                {onOpenRuntime ? (
+                  <button type="button" className="lem-more" onClick={onOpenRuntime}>
+                    Open Settings → Runtime →
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Sticky as one piece: the chat group is 178 rows, and a search
                 box that scrolls off the top is a search box you cannot use

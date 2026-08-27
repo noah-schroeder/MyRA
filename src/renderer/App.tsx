@@ -29,6 +29,8 @@ export function App() {
   const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
+  /* Which tab Settings opens on, when something sent you there for a reason. */
+  const [settingsTab, setSettingsTab] = useState<"runtime" | undefined>();
   /*
    * One page at a time, held in one variable.
    *
@@ -249,7 +251,13 @@ export function App() {
             with nowhere to scroll. */}
         {page === "models" ? (
           <div className="models-page">
-            <LemonadePane />
+            <LemonadePane
+              section="models"
+              onOpenRuntime={() => {
+                setSettingsTab("runtime");
+                setShowSettings(true);
+              }}
+            />
           </div>
         ) : null}
 
@@ -428,10 +436,15 @@ export function App() {
 
       {showSettings ? (
         <SettingsModal
-          onClose={() => setShowSettings(false)}
+          onClose={() => {
+            setShowSettings(false);
+            setSettingsTab(undefined);
+          }}
+          {...(settingsTab ? { initialTab: settingsTab } : {})}
           onChange={setSettings}
           onOpenHub={() => {
             setShowSettings(false);
+            setSettingsTab(undefined);
             setPage("models");
           }}
         />

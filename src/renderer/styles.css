@@ -3086,5 +3086,35 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 
 /* Settings → Runtime wraps the same pane, and needs one grouping box for the
-   two switches that are Karen's own rather than the daemon's. */
-.pane-block { display: flex; flex-direction: column; gap: 9px; }
+   two switches that are Karen's own rather than the daemon's. `flex-start`
+   because a checkbox row that stretches to the pane's full width puts its
+   label an inch from its box. */
+.pane-block { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+
+/*
+ * A checkbox row is a row.
+ *
+ * `.check` sets `display: flex` and nothing else, and `.pane label` -- which
+ * comes later in this file and wins -- sets `flex-direction: column` for the
+ * stacked label-over-input fields that make up the rest of Settings. Inside a
+ * pane the checkbox therefore sat centred ABOVE its own label. Restated here
+ * rather than reordered, because the stacked direction is right for every
+ * other label in Settings.
+ */
+.pane label.check { flex-direction: row; align-items: center; }
+
+/* A button that reads as a link: used for "show the engine log", which is a
+   disclosure rather than an action. Had no rule at all, so it rendered as a
+   default browser button -- a full-width white bar in a dark dialog. */
+.link {
+  align-self: flex-start;
+  font: inherit; font-size: 12px;
+  background: none; border: 0; padding: 2px 0;
+  color: var(--text-dim); cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--border-hover);
+  text-underline-offset: 3px;
+}
+.link:hover { color: var(--accent-soft); }
+
+/* Tabs whose content is a grid rather than a form; see RuntimePane. */
+.pane-wide { max-width: none; }
