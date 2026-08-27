@@ -252,7 +252,12 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
               {...(machine.vramDevice ? { title: machine.vramDevice } : {})}
             />
           ) : (
-            <Stat label="GPU" value="none found" dim />
+            <Stat
+              label="GPU"
+              value="none found"
+              dim
+              {...(machine?.gpuNote ? { title: machine.gpuNote } : {})}
+            />
           )}
           {machine?.ramBytes ? <Stat label="RAM" value={gb(machine.ramBytes)} /> : null}
           <Stat label="Downloaded" value={String(models.length)} />

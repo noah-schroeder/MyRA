@@ -153,19 +153,42 @@ export function appLayers(layers: Layer[]): Layer[] {
 }
 
 /**
- * Everything else, biggest first — where the CUDA runtime libraries live.
+ * Where the CUDA runtime libraries live, in the order worth trying.
  *
- * Only fetched when the machine turns out not to have them. They come from the
- * `nvidia/cuda` base image in one ~2 GB layer, and there is no way to read part
- * of a gzip stream, so this is a real download; we extract only the handful of
- * files that are needed and throw the Ubuntu rootfs away.
+ * They are NOT all in one layer, which is the mistake that made a real install
+ * fail. Upstream's base image installs them in two separate steps:
  *
- * Biggest first because the libraries are certain to be in the big layer, so
- * the common case finds them on the first try.
+ *     layer 2   (64 MB)  apt-get install cuda-cudart-12-8    -> libcudart.so.12
+ *     layer 5 (2058 MB)  apt-get install ${NV_LIBCUBLAS_PACKAGE}
+ *                                        ${NV_LIBNCCL_PACKAGE}
+ *                                                            -> libcublas, libnccl
+ *
+ * A loop that stopped at the first layer yielding *a* library fetched the two
+ * gigabytes, found cublas and nccl, and returned satisfied — leaving cudart
+ * missing. Reported from a real machine, confirmed by listing both layers.
+ *
+ * The ordering uses what the image already tells us. Each layer carries the
+ * command that built it, and the CUDA ones say so by name, so those are tried
+ * first (smallest among them first, since cudart's layer is a thirtieth the
+ * size of cublas's). Everything else follows as a fallback, so a change in
+ * upstream's packaging costs some wasted bandwidth rather than a failed
+ * install. Layers too small to contain a shared library are skipped.
  */
+const MIN_LIBRARY_LAYER = 1024 * 1024;
+/* No word boundaries: the packages appear as `${NV_LIBCUBLAS_PACKAGE}` and
+   `${NV_LIBNCCL_PACKAGE}`, where an underscore is a word character, so `\b`
+   would match neither -- which sent the 2 GB cublas layer to the back of the
+   queue behind three layers that could not possibly help. */
+const NAMES_CUDA = /(cuda|cudart|cublas|nccl|nvidia)/i;
+
 export function libraryLayers(layers: Layer[]): Layer[] {
   const app = new Set(appLayers(layers).map((l) => l.digest));
-  return layers.filter((l) => !app.has(l.digest)).sort((a, b) => b.size - a.size);
+  const rest = layers.filter((l) => !app.has(l.digest) && l.size >= MIN_LIBRARY_LAYER);
+  const bySize = (a: Layer, b: Layer): number => a.size - b.size;
+  return [
+    ...rest.filter((l) => NAMES_CUDA.test(l.createdBy)).sort(bySize),
+    ...rest.filter((l) => !NAMES_CUDA.test(l.createdBy)).sort(bySize),
+  ];
 }
 
 /**

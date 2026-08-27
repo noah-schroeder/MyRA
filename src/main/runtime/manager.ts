@@ -27,7 +27,8 @@ import {
   newestBuild, pickAsset, pickCudart, sha256Of, type Backend, type Release, type ReleaseAsset,
 } from "../../core/runtime/assets.ts";
 import {
-  hasAccelerator, parseDevices, pickVram, suggestBackend, type Device, type GpuInfo,
+  hasAccelerator, isSoftwareRenderer, parseDevices, pickVram, suggestBackend,
+  type Device, type GpuInfo,
 } from "../../core/runtime/devices.ts";
 import { modelShape, parseGguf, type ModelShape } from "../../core/runtime/gguf.ts";
 import { fitModel, largestContext, type Fit } from "../../core/runtime/fit.ts";
@@ -542,6 +543,8 @@ export class RuntimeManager {
   machine(devices: Device[]): {
     vramBytes?: number;
     ramBytes: number;
+    /** Why no GPU was chosen, when something was there but did not qualify. */
+    gpuNote?: string;
     /** Which device that memory belongs to, so a wrong figure is visible. */
     vramDevice?: string;
     /** True when it is system RAM seen through a GPU, not memory on a card. */
@@ -551,9 +554,28 @@ export class RuntimeManager {
     // RAM is passed in because it is what distinguishes a card's memory from an
     // integrated GPU's slice of the machine's own -- see pickVram.
     const choice = pickVram(devices, ramBytes);
+
+    /*
+     * When nothing qualified, say what WAS there.
+     *
+     * "none found" is true and useless. The case that prompted this: a machine
+     * with an RTX 4060 whose Vulkan build enumerated only llvmpipe -- Mesa's
+     * software renderer -- so the honest answer is not "you have no GPU" but
+     * "the card is not visible to this backend", which is a different problem
+     * with a different fix.
+     */
+    const software = devices.filter(
+      (d) => !/^cpu/i.test(d.id) && isSoftwareRenderer(d.description),
+    );
+    const note = !choice && software.length
+      ? `Only a software renderer was found (${software[0]!.description}). Your card is not ` +
+        `visible to this backend — with an NVIDIA card, try the CUDA build.`
+      : undefined;
+
     return {
       ...(choice ? { vramBytes: choice.bytes, vramDevice: choice.device.description } : {}),
       ...(choice?.shared ? { vramShared: true } : {}),
+      ...(note ? { gpuNote: note } : {}),
       ramBytes,
     };
   }
