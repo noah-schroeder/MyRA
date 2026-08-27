@@ -22,7 +22,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
-import { dirname } from "node:path";
+
+import { launchSpec } from "./loader.ts";
 
 export type ServerState = "stopped" | "starting" | "ready" | "failed";
 
@@ -136,7 +137,8 @@ export class LlamaServer {
       contextSize: undefined, slots: undefined,
     });
 
-    const child = spawn(opts.binary, args, {
+    const launch = launchSpec(opts.binary, args);
+    const child = spawn(launch.command, launch.args, {
       stdio: ["ignore", "pipe", "pipe"],
       // Not detached: this process must remain our child so that closing the
       // app can find and kill it.
@@ -150,7 +152,7 @@ export class LlamaServer {
        * is owner-only, which is the boundary we can actually enforce. Upstream
        * documents LLAMA_API_KEY as the environment form of the same flag.
        */
-      env: { ...process.env, ...libraryEnv(opts.binary), LLAMA_API_KEY: this.#apiKey },
+      env: { ...process.env, ...launch.env, LLAMA_API_KEY: this.#apiKey },
     });
     this.#child = child;
     this.#set({ pid: child.pid ?? undefined });
@@ -316,34 +318,14 @@ export class LlamaServer {
  * before a model is downloaded -- is the entire reason the runtime is installed
  * before the model is chosen.
  */
-/**
- * The environment a llama.cpp build needs to find its own shared libraries.
- *
- * Necessary because of one detail in the CUDA build taken from upstream's
- * container image: its RUNPATH is the absolute `/app/build/bin:`, the path
- * inside the image where it was compiled. That directory does not exist on a
- * user's machine, so without this the loader finds nothing beside the binary
- * and the CUDA backend silently does not load -- which presents as "no GPU
- * detected" on a machine with a perfectly good card, the worst possible
- * symptom because it looks like an answer rather than a fault.
- *
- * Harmless for the release-asset builds, which find their libraries anyway.
- */
-export function libraryEnv(binary: string): Record<string, string | undefined> {
-  if (process.platform === "win32") return {};
-  const dir = dirname(binary);
-  const key = process.platform === "darwin" ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH";
-  const existing = process.env[key];
-  return { [key]: existing ? `${dir}:${existing}` : dir };
-}
-
 export async function listDevices(binary: string, timeoutMs = 20_000): Promise<string> {
   return new Promise((resolve) => {
     let out = "";
-    const child = spawn(binary, ["--list-devices"], {
+    const launch = launchSpec(binary, ["--list-devices"]);
+    const child = spawn(launch.command, launch.args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, ...libraryEnv(binary) },
+      env: { ...process.env, ...launch.env },
     });
     const done = setTimeout(() => {
       child.kill("SIGKILL");
