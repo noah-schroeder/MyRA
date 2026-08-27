@@ -243,7 +243,15 @@ export function App() {
           <MeetingsPage settings={settings} onClose={toChat} />
         ) : null}
         {page === "runs" ? <RunPanel onClose={toChat} /> : null}
-        {page === "models" ? <div className="pane">{<LemonadePane />}</div> : null}
+        {/* Its own scroll region at full width: the models page is a browser
+            over 228 entries, and `.pane`'s 62ch reading measure -- right for a
+            settings form -- turns the catalogue into a single squeezed column
+            with nowhere to scroll. */}
+        {page === "models" ? (
+          <div className="models-page">
+            <LemonadePane />
+          </div>
+        ) : null}
 
         {page === "chat" && lookup ? (
           <LookupResults
