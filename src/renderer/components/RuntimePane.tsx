@@ -64,6 +64,25 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
     const next = (await window.karen.runtimeState()) as RuntimeState & { devices?: RuntimeDevice[] };
     setState(next);
     if (next.devices?.length) setDevices(next.devices);
+
+    /*
+     * Diagnose whenever there is nothing to accelerate with, not only in the
+     * moment after an install.
+     *
+     * The first version of this asked only inside `install()`, which meant the
+     * explanation appeared once, in a note, and was gone as soon as the pane was
+     * reopened -- so someone looking at "No graphics acceleration was found" on
+     * an already-installed CUDA build, which is exactly the person who needs it,
+     * saw nothing at all.
+     *
+     * Guarded on a build being installed, because with no runtime at all the
+     * answer is "install one" rather than anything about drivers.
+     */
+    if (next.activeBuild && !next.devices?.length) {
+      setDiagnosis(await window.karen.runtimeDiagnose());
+    } else {
+      setDiagnosis(undefined);
+    }
   }, []);
 
   const refreshModels = useCallback(async () => {
@@ -116,7 +135,6 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
         : "";
       if (result.accelerated) {
         setNote(model || undefined);
-        setDiagnosis(undefined);
       } else {
         /*
          * "found no GPU" is true and useless on its own.
@@ -130,8 +148,8 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
         setNote(
           `That build started, but found no GPU on this machine — it will run on the processor. ${model}`,
         );
-        setDiagnosis(await window.karen.runtimeDiagnose());
       }
+      // refresh() fetches the diagnosis when there is one to fetch.
       await refresh();
     } else {
       setError(result.error);
@@ -269,6 +287,32 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
               </p>
             )}
 
+            {/* The reason, when one can be established. Sits directly under the
+                message it explains: ggml cannot tell "driver too old" from "no
+                card", so without this both read as "you have no GPU". */}
+            {diagnosis && !devices.length ? (
+              <div className="diagnosis">
+                {diagnosis.explanation ? <p className="hint note">{diagnosis.explanation}</p> : null}
+                {diagnosis.nvidia.driverVersion ? (
+                  <p className="hint">
+                    Driver {diagnosis.nvidia.driverVersion}
+                    {diagnosis.nvidia.cudaCeiling
+                      ? `, supports CUDA up to ${diagnosis.nvidia.cudaCeiling}`
+                      : ""}
+                    {diagnosis.nvidia.names.length ? ` — ${diagnosis.nvidia.names.join(", ")}` : ""}
+                  </p>
+                ) : (
+                  <p className="hint">nvidia-smi found no driver on this machine.</p>
+                )}
+                {diagnosis.probeLog ? (
+                  <>
+                    <p className="hint">What the build printed when it looked for devices:</p>
+                    <pre className="runtime-log">{diagnosis.probeLog}</pre>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+
             <label>
               Build
               <select
@@ -306,31 +350,6 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
               </button>
             </div>
             {updateNote ? <p className="hint note">{updateNote}</p> : null}
-
-            {/* Shown only when a build found nothing, because that is the only
-                time anybody needs it — and then it is the whole answer. */}
-            {diagnosis ? (
-              <div className="diagnosis">
-                {diagnosis.explanation ? <p className="hint note">{diagnosis.explanation}</p> : null}
-                {diagnosis.nvidia.driverVersion ? (
-                  <p className="hint">
-                    Driver {diagnosis.nvidia.driverVersion}
-                    {diagnosis.nvidia.cudaCeiling
-                      ? `, supports CUDA up to ${diagnosis.nvidia.cudaCeiling}`
-                      : ""}
-                    {diagnosis.nvidia.names.length ? ` — ${diagnosis.nvidia.names.join(", ")}` : ""}
-                  </p>
-                ) : (
-                  <p className="hint">nvidia-smi found no driver on this machine.</p>
-                )}
-                {diagnosis.probeLog ? (
-                  <>
-                    <p className="hint">What the build printed when it looked for devices:</p>
-                    <pre className="runtime-log">{diagnosis.probeLog}</pre>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
 
             {/*
               * Every build ever installed, and a way back to it.

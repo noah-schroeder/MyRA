@@ -84,6 +84,20 @@ export function installRuntimeIpc(
    * process launch.
    */
   ipcMain.handle("karen:runtime-diagnose", async () => {
+    /*
+     * Probe again if nothing is remembered.
+     *
+     * The log is held in memory, so it is empty on every fresh launch -- and
+     * the person who most needs this is looking at an already-installed build
+     * after a restart, which is exactly when there would have been nothing to
+     * show. The probe takes a second and prints the one thing that explains the
+     * failure, so it is worth re-running rather than reporting its absence.
+     */
+    if (!runtime.probeLog) {
+      const { listDevices } = await import("./server.ts");
+      const build = await runtime.activeBuild();
+      if (build) runtime.setProbeLog(await listDevices(build.binary));
+    }
     const info = await runtime.nvidia();
     return {
       nvidia: info,
