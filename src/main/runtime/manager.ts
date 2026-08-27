@@ -366,6 +366,13 @@ export class RuntimeManager {
       activeBuild: build.id,
       ...(pinBackend ? { backendOverride: build.backend } : {}),
     });
+    /*
+     * The probe log describes one build. Keeping it across a switch means the
+     * runtime pane explains the new build's silence with the old build's
+     * output -- which is worse than explaining nothing, because it looks like
+     * an answer. Cleared, so the next diagnosis re-probes what is now active.
+     */
+    this.#probeLog = "";
     return { build, ...(model ? { unloaded: model.slice(model.lastIndexOf("/") + 1) } : {}) };
   }
 

@@ -112,6 +112,10 @@ export function installRuntimeIpc(
       nvidia: info,
       probeLog: runtime.probeLog,
       explanation: tooOld.length ? explainTooOld(tooOld) : explainNoCudaDevice(info),
+      /* Only this cause has a remedy Karen can carry out. A missing driver or a
+         ceiling too low needs something done outside the app, and offering a
+         button that cannot help would be worse than offering none. */
+      repairable: tooOld.length > 0,
     };
   });
 

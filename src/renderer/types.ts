@@ -556,6 +556,8 @@ export interface RuntimeDiagnosis {
   nvidia: { driverVersion?: string; cudaCeiling?: string; names: string[] };
   /** The raw stdout+stderr of `llama-server --list-devices`. */
   probeLog: string;
+  /** True when reinstalling the build would fix what the explanation describes. */
+  repairable?: boolean;
   /** A plain-English cause, when one can be established. */
   explanation?: string;
 }
