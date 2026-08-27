@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import type { LocalModel, RuntimeDevice, RuntimeState } from "../types.ts";
+import type {
+  LocalModel, RuntimeDevice, RuntimeDiagnosis, RuntimeState,
+} from "../types.ts";
 
 /**
  * Running a model on this machine, without a terminal.
@@ -54,6 +56,7 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [updateNote, setUpdateNote] = useState<string | undefined>();
+  const [diagnosis, setDiagnosis] = useState<RuntimeDiagnosis | undefined>();
   /** Set once a check has found a build newer than the running one. */
   const [available, setAvailable] = useState<string | undefined>();
 
@@ -108,13 +111,27 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
     setBusy(false);
     if (result.ok) {
       setDevices(result.devices ?? []);
-      const gpu = result.accelerated
-        ? ""
-        : "That build started, but found no GPU on this machine — it will run on the processor. ";
       const model = result.unloaded
         ? `${result.unloaded} was unloaded — press Start to load it again.`
         : "";
-      setNote(gpu + model || undefined);
+      if (result.accelerated) {
+        setNote(model || undefined);
+        setDiagnosis(undefined);
+      } else {
+        /*
+         * "found no GPU" is true and useless on its own.
+         *
+         * ggml loads its backends with dlopen and treats one that fails to
+         * initialise exactly like one that is absent, so a driver too old for
+         * the build reads identically to a machine with no card. The driver
+         * can distinguish them; ask it, and show what the probe actually
+         * printed, rather than leaving someone with a working 4060 to guess.
+         */
+        setNote(
+          `That build started, but found no GPU on this machine — it will run on the processor. ${model}`,
+        );
+        setDiagnosis(await window.karen.runtimeDiagnose());
+      }
       await refresh();
     } else {
       setError(result.error);
@@ -289,6 +306,31 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
               </button>
             </div>
             {updateNote ? <p className="hint note">{updateNote}</p> : null}
+
+            {/* Shown only when a build found nothing, because that is the only
+                time anybody needs it — and then it is the whole answer. */}
+            {diagnosis ? (
+              <div className="diagnosis">
+                {diagnosis.explanation ? <p className="hint note">{diagnosis.explanation}</p> : null}
+                {diagnosis.nvidia.driverVersion ? (
+                  <p className="hint">
+                    Driver {diagnosis.nvidia.driverVersion}
+                    {diagnosis.nvidia.cudaCeiling
+                      ? `, supports CUDA up to ${diagnosis.nvidia.cudaCeiling}`
+                      : ""}
+                    {diagnosis.nvidia.names.length ? ` — ${diagnosis.nvidia.names.join(", ")}` : ""}
+                  </p>
+                ) : (
+                  <p className="hint">nvidia-smi found no driver on this machine.</p>
+                )}
+                {diagnosis.probeLog ? (
+                  <>
+                    <p className="hint">What the build printed when it looked for devices:</p>
+                    <pre className="runtime-log">{diagnosis.probeLog}</pre>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
 
             {/*
               * Every build ever installed, and a way back to it.
