@@ -273,10 +273,38 @@ function Folders({
 
       <label className="folder">
         Report subfolder
-        <span className="hint">Inside the vault. Meeting notes are filed here.</span>
+        <span className="hint">
+          Inside the vault. With no vault set, notes are filed in the meeting&rsquo;s own folder
+          beside the recording.
+        </span>
         <input
           value={settings.meetingReportDir}
           onChange={(e) => void patch({ meetingReportDir: e.target.value })}
+        />
+      </label>
+
+      {/*
+        * The steer, not the prompt.
+        *
+        * The extraction and composition prompts are long and carefully argued —
+        * what counts as an action versus a status update, why an owner must not
+        * be inferred — and handing a user a textarea over them would be a way
+        * to make notes worse without meaning to. This is the paragraph that
+        * says what *your* meetings are like, and it is appended to both stages.
+        * Any single meeting can override it from the Meetings page.
+        */}
+      <label className="folder">
+        Default note instructions
+        <span className="hint">
+          Added to every write-up. A single meeting can override this from its own row on the
+          Meetings page.
+        </span>
+        <textarea
+          className="settings-prose"
+          rows={3}
+          value={settings.meetingInstructions}
+          placeholder="e.g. We are a research group. Keep methodological objections in full, and always list what I agreed to read."
+          onChange={(e) => void patch({ meetingInstructions: e.target.value })}
         />
       </label>
 

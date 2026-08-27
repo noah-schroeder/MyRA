@@ -98,6 +98,7 @@ export interface Settings {
   meetingsRoot: string;
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
+  meetingInstructions: string;
   setupCompleted: boolean;
 }
 
@@ -157,7 +158,65 @@ export interface MeetingState {
   progress?: MeetingProgress;
   result?: MeetingResult;
   reportPath?: string;
+  /** The meeting directory a stage is currently working on. */
+  workingOn?: string;
   error?: string;
+}
+
+/** What a meeting has been through, as the page lists it. */
+export interface MeetingArtifacts {
+  instructions?: string;
+  transcribedAt?: string;
+  transcriptModel?: string;
+  notedAt?: string;
+  notesModel?: string;
+  filedNotePath?: string;
+  filedTranscriptPath?: string;
+  error?: string;
+}
+
+export interface MeetingSummary {
+  id: string;
+  dir: string;
+  title: string;
+  startedAt: string;
+  seconds: number;
+  tracks: string[];
+  hasAudio: boolean;
+  audioBytes: number;
+  transcribed: boolean;
+  noted: boolean;
+  state: MeetingArtifacts;
+}
+
+/** One Whisper model Karen offers to download. */
+export interface WhisperModel {
+  file: string;
+  label: string;
+  bytes: number;
+  multilingual: boolean;
+  hint: string;
+}
+
+export interface WhisperSnapshot {
+  config: {
+    binary?: string;
+    tag?: string;
+    modelPath?: string;
+    modelFile?: string;
+    useForTranscription: boolean;
+  };
+  server: {
+    state: "stopped" | "starting" | "ready" | "failed";
+    baseUrl?: string;
+    error?: string;
+    log: string[];
+    pid?: number;
+  };
+  installed: string[];
+  /** Set on a platform whisper.cpp publishes no build for. */
+  unavailable?: string;
+  catalogue: WhisperModel[];
 }
 
 export interface AgentEvent {
@@ -238,6 +297,28 @@ export interface KarenApi {
   meetingDiscard(): Promise<void>;
   meetingLevels(): Promise<Record<string, number>>;
   onMeeting(cb: (state: MeetingState) => void): () => void;
+  onMeetings(cb: (list: MeetingSummary[]) => void): () => void;
+  meetingList(): Promise<MeetingSummary[]>;
+  meetingTranscribe(dir: string): Promise<{ ok: boolean; error?: string }>;
+  meetingNotes(dir: string): Promise<{ ok: boolean; error?: string }>;
+  meetingRun(dir: string): Promise<{ ok: boolean; error?: string }>;
+  meetingCancel(): Promise<{ ok: boolean }>;
+  meetingInstructions(dir: string, text: string): Promise<{ ok: boolean }>;
+  meetingRead(dir: string, which: "notes" | "transcript"): Promise<string | undefined>;
+  meetingReveal(path: string): Promise<{ ok: boolean }>;
+  meetingDelete(dir: string): Promise<{ ok: boolean; error?: string }>;
+
+  whisperState(): Promise<WhisperSnapshot>;
+  whisperConfig(patch: { useForTranscription?: boolean }): Promise<unknown>;
+  whisperInstall(): Promise<{ ok: boolean; error?: string; tag?: string }>;
+  whisperModelInstall(file: string): Promise<{ ok: boolean; error?: string }>;
+  whisperModelUse(file: string): Promise<{ ok: boolean; error?: string }>;
+  whisperModelRemove(file: string): Promise<{ ok: boolean; error?: string }>;
+  whisperStart(): Promise<{ ok: boolean; error?: string }>;
+  whisperStop(): Promise<{ ok: boolean }>;
+  whisperCancel(): Promise<{ ok: boolean }>;
+  onWhisper(cb: (state: WhisperSnapshot) => void): () => void;
+  onWhisperDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
   reportDevices(devices: AudioSource[]): Promise<void>;
 
   dictationStart(): Promise<void>;

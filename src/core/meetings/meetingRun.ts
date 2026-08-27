@@ -40,33 +40,43 @@ export interface RunProgress {
   fraction: number;
 }
 
-export interface RunOptions {
+export interface TranscribeOptions {
   record: MeetingRecord;
   context: MeetingContext;
   transcription: EndpointSettings;
-  llm: EndpointSettings;
   transcriptionKey?: string;
+  onProgress?: (progress: RunProgress) => void;
+  signal?: AbortSignal;
+}
+
+export interface NoteOptions {
+  record: MeetingRecord;
+  context: MeetingContext;
+  llm: EndpointSettings;
   llmKey?: string;
-  /** Vault-relative directory for the report, e.g. "Meetings". */
+  /** The transcript to write from, as produced by `transcribeMeeting`. */
+  lines: Line[];
+  transcript: string;
+  /** Directory for the report, relative to wherever `save` files things. */
   reportDir?: string;
   /** Remove the WAVs once a transcript exists. */
   deleteAudio?: boolean;
-  /** Writes into the vault, jailed and audited by the broker. */
+  /** Writes the note out, jailed by the caller. */
   save: (rel: string, content: string) => Promise<{ path: string; bytes: number }>;
   onProgress?: (progress: RunProgress) => void;
   signal?: AbortSignal;
 }
 
-export interface RunResult {
+export interface NoteResult {
   notes: MeetingNotes;
-  transcript: string;
-  lines: Line[];
-  /** Absolute path of the report in the vault. */
+  /** Absolute path of the filed report. */
   reportPath: string;
   transcriptPath: string;
   actions: VerifiedItem[];
   audioDeleted: boolean;
 }
+
+
 
 /** Vault-safe name for the note: 2026-08-21-weekly-project-sync. */
 export function noteName(record: MeetingRecord): string {
@@ -158,7 +168,18 @@ export function renderTranscript(record: MeetingRecord, transcript: string): str
   ].join("\n");
 }
 
-export async function runMeeting(opts: RunOptions): Promise<RunResult> {
+/**
+ * Stage one: audio in, timed lines out.
+ *
+ * Split from note-taking because the two cost wildly different amounts. A
+ * forty-minute meeting takes minutes to transcribe on a processor and seconds
+ * to write notes from, and the note is the part people want to redo -- with a
+ * different steer, a different model, or simply because the first attempt
+ * missed something. Redoing the cheap step must not redo the expensive one.
+ */
+export async function transcribeMeeting(
+  opts: TranscribeOptions,
+): Promise<{ lines: Line[]; transcript: string }> {
   const { record, context } = opts;
   const report = (stage: RunStage, fraction: number, detail?: string) =>
     opts.onProgress?.({ stage, fraction, ...(detail ? { detail } : {}) });
@@ -212,7 +233,7 @@ export async function runMeeting(opts: RunOptions): Promise<RunResult> {
     }
   }
 
-  report("assembling", 0.72);
+  report("assembling", 0.9);
   // The sink monitor is the clean digital copy of the remote voices; where the
   // microphone caught the same words through a speaker, its version loses.
   const authoritative = record.tracks.find((t) => t.id !== "me")?.id;
@@ -220,7 +241,21 @@ export async function runMeeting(opts: RunOptions): Promise<RunResult> {
     mergeTracks(tracks, authoritative ? { authoritative } : {}),
   );
   if (lines.length === 0) throw new MeetingRunError("The meeting transcribed to nothing at all.");
-  const transcript = formatTranscript(lines);
+  report("done", 1);
+  return { lines, transcript: formatTranscript(lines) };
+}
+
+/**
+ * Stage two: timed lines in, a filed note out.
+ *
+ * Takes the transcript rather than the audio, so it can be run again as many
+ * times as the user likes -- against a different model, or with different
+ * instructions -- without touching the recording.
+ */
+export async function noteMeeting(opts: NoteOptions): Promise<NoteResult> {
+  const { record, context, lines, transcript } = opts;
+  const report = (stage: RunStage, fraction: number, detail?: string) =>
+    opts.onProgress?.({ stage, fraction, ...(detail ? { detail } : {}) });
 
   const notes = await generateNotes({
     endpoint: opts.llm,
@@ -230,11 +265,14 @@ export async function runMeeting(opts: RunOptions): Promise<RunResult> {
     ...(opts.llmKey ? { apiKey: opts.llmKey } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
     onProgress: (stage) =>
-      report(stage, stage === "extracting" ? 0.75 : stage === "verifying" ? 0.85 : 0.88),
+      report(stage, stage === "extracting" ? 0.2 : stage === "verifying" ? 0.6 : 0.75),
   });
 
   report("filing", 0.95);
-  const dir = opts.reportDir || "Meetings";
+  /* An empty string is a real answer: it means "the root you were given is the
+     destination". Only an *absent* reportDir falls back to a subfolder, which
+     is what a vault wants and a meeting's own directory does not. */
+  const dir = opts.reportDir ?? "Meetings";
   const name = noteName(record);
   const transcriptRel = join(dir, `${name} — transcript.md`);
   const reportRel = join(dir, `${name}.md`);
@@ -242,14 +280,18 @@ export async function runMeeting(opts: RunOptions): Promise<RunResult> {
   // The transcript is written first: the report links to it, and a link to a
   // file that does not exist is worse than no link.
   const transcriptFile = await opts.save(transcriptRel, renderTranscript(record, transcript));
-  const reportFile = await opts.save(
-    reportRel,
-    renderReport(record, notes, transcriptRel.replace(/\.md$/, "")),
-  );
+  /*
+   * The link names the file that was actually written, not the one we asked
+   * for. `save` is allowed to rename -- filing into a meeting's own folder
+   * writes `transcript.md` rather than a dated name -- and a wiki link built
+   * from the requested name would then point at nothing.
+   */
+  const linkTarget = basename(transcriptFile.path).replace(/\.md$/, "");
+  const reportFile = await opts.save(reportRel, renderReport(record, notes, linkTarget));
 
   let audioDeleted = false;
   if (opts.deleteAudio) {
-    // Only now, with the transcript safely in the vault.
+    // Only now, with the transcript safely filed.
     await deleteAudio(record.dir);
     audioDeleted = true;
   }
@@ -257,11 +299,19 @@ export async function runMeeting(opts: RunOptions): Promise<RunResult> {
   report("done", 1);
   return {
     notes,
-    transcript,
-    lines,
     reportPath: reportFile.path,
     transcriptPath: transcriptFile.path,
     actions: notes.actions,
     audioDeleted,
   };
 }
+
+/*
+ * There is no `runMeeting` any more.
+ *
+ * "Transcribe and take notes" is one button in the UI, but it is two calls: the
+ * transcript is written to disk between them, so a failure while writing notes
+ * leaves the expensive half done and the button offering only the cheap half
+ * again. A combined function that held the transcript in memory would throw it
+ * away on exactly the failure it most needs to survive.
+ */
