@@ -18,6 +18,7 @@
  */
 
 import { app } from "electron";
+import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir, totalmem } from "node:os";
@@ -31,6 +32,9 @@ import {
   type Device, type GpuInfo,
 } from "../../core/runtime/devices.ts";
 import { modelShape, parseGguf, type ModelShape } from "../../core/runtime/gguf.ts";
+import {
+  explainNoCudaDevice, parseNvidiaSmi, type NvidiaInfo,
+} from "../../core/runtime/nvidia.ts";
 import { fitModel, largestContext, type Fit } from "../../core/runtime/fit.ts";
 import {
   autoContext, budgetFor, bytesPerElement, defaultSettings, launchArgs,
@@ -131,6 +135,17 @@ export class RuntimeManager {
    * happened -- start-on-launch, most obviously.
    */
   #devices: Device[] = [];
+  /**
+   * The last probe's raw output, kept rather than parsed and dropped.
+   *
+   * When a CUDA build starts and finds nothing, ggml says why on stderr --
+   * "system has unsupported display driver / cuda driver combination", or a
+   * forward-compatibility complaint naming two versions. `parseDevices`
+   * deliberately ignores every line that is not a device, so all of that was
+   * being read and thrown away, leaving the user with "no GPU found" and
+   * nothing to act on. Kept here and shown in the Runtime pane.
+   */
+  #probeLog = "";
   #listeners = new Set<() => void>();
 
   get server(): LlamaServer {
@@ -144,6 +159,47 @@ export class RuntimeManager {
   }
   get devices(): Device[] {
     return this.#devices;
+  }
+  /** What the last `--list-devices` actually printed, stdout and stderr. */
+  get probeLog(): string {
+    return this.#probeLog;
+  }
+
+  /**
+   * Ask the driver about itself.
+   *
+   * Only meaningful when a CUDA build found nothing, and only possible when
+   * `nvidia-smi` exists -- which is exactly when there is a driver to ask.
+   */
+  async nvidia(): Promise<NvidiaInfo> {
+    const run = (args: string[]): Promise<string> =>
+      new Promise((resolve) => {
+        const child = spawn("nvidia-smi", args, { stdio: ["ignore", "pipe", "pipe"] });
+        let out = "";
+        const done = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve(out);
+        }, 8_000);
+        child.stdout?.on("data", (b: Buffer) => (out += b.toString()));
+        child.on("error", () => {
+          clearTimeout(done);
+          resolve("");
+        });
+        child.on("close", () => {
+          clearTimeout(done);
+          resolve(out);
+        });
+      });
+    // The header carries the CUDA ceiling; the csv carries the card names.
+    const [header, rows] = await Promise.all([
+      run([]),
+      run(["--query-gpu=name,driver_version", "--format=csv,noheader"]),
+    ]);
+    return parseNvidiaSmi(`${header}\n${rows}`);
+  }
+  setProbeLog(text: string): void {
+    this.#probeLog = text.trim();
+    this.#emit();
   }
   setDevices(devices: Device[]): void {
     this.#devices = devices;
@@ -421,7 +477,9 @@ export class RuntimeManager {
     if (!installed) throw new Error("the build did not install correctly.");
 
     this.#setPhase({ kind: "probing", what: id });
-    const devices = parseDevices(await listDevices(installed.binary));
+    const probe = await listDevices(installed.binary);
+    this.setProbeLog(probe);
+    const devices = parseDevices(probe);
     installed.devices = devices;
     this.#devices = devices;
     this.#setPhase({ kind: "idle" });
@@ -476,7 +534,9 @@ export class RuntimeManager {
 
     this.#setPhase({ kind: "probing", what: id });
     const binary = join(dir, "llama-server");
-    const devices = parseDevices(await listDevices(binary));
+    const probe = await listDevices(binary);
+    this.setProbeLog(probe);
+    const devices = parseDevices(probe);
     this.#devices = devices;
     this.#setPhase({ kind: "idle" });
 

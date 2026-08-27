@@ -377,6 +377,8 @@ export interface KarenApi {
   }>;
   runtimeRemoveBuild(id: string): Promise<{ ok: boolean; error?: string }>;
   runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
+  /** Why a build found no GPU. Asked only when one did not, since it shells out. */
+  runtimeDiagnose(): Promise<RuntimeDiagnosis>;
   runtimeCancel(): Promise<{ ok: boolean }>;
   runtimeModels(): Promise<LocalModel[]>;
   runtimePlan(path: string, override?: Partial<LaunchSettings>): Promise<LaunchPlan>;
@@ -547,6 +549,15 @@ export interface ServerStatus {
   /** Tokens one conversation gets, read from the running server's /props. */
   contextSize?: number;
   slots?: number;
+}
+
+/** The answer to "why did this build find no GPU". */
+export interface RuntimeDiagnosis {
+  nvidia: { driverVersion?: string; cudaCeiling?: string; names: string[] };
+  /** The raw stdout+stderr of `llama-server --list-devices`. */
+  probeLog: string;
+  /** A plain-English cause, when one can be established. */
+  explanation?: string;
 }
 
 export interface RuntimeState {

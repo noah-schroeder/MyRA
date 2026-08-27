@@ -21,6 +21,7 @@ import {
   GatedError, type HfModel, type ModelFile,
 } from "../../core/runtime/hf.ts";
 import { fitModel } from "../../core/runtime/fit.ts";
+import { explainNoCudaDevice } from "../../core/runtime/nvidia.ts";
 import { downloadFile } from "./download.ts";
 import type { LaunchSettings } from "../../core/runtime/launch.ts";
 import { BASELINE_BUILD, RuntimeManager, type LocalModel } from "./manager.ts";
@@ -74,6 +75,22 @@ export function installRuntimeIpc(
      */
     backends: availableBackends(process.platform, process.arch),
   }));
+
+  /*
+   * Why a build found no GPU, asked only when one did not.
+   *
+   * Separate from runtime-state because it shells out to nvidia-smi, and the
+   * state is read on every render. A diagnosis nobody asked for is not worth a
+   * process launch.
+   */
+  ipcMain.handle("karen:runtime-diagnose", async () => {
+    const info = await runtime.nvidia();
+    return {
+      nvidia: info,
+      probeLog: runtime.probeLog,
+      explanation: explainNoCudaDevice(info),
+    };
+  });
 
   ipcMain.handle("karen:runtime-config", async (_e, patch: Record<string, unknown>) =>
     runtime.update(patch),

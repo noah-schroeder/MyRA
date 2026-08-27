@@ -130,6 +130,8 @@ const api = {
   runtimeActivate: (id: string) => ipcRenderer.invoke("karen:runtime-activate", id),
   runtimeRemoveBuild: (id: string) => ipcRenderer.invoke("karen:runtime-remove-build", id),
   runtimeProbe: () => ipcRenderer.invoke("karen:runtime-probe"),
+  /** Why no GPU was found: the driver\u2019s own answer plus the raw probe output. */
+  runtimeDiagnose: () => ipcRenderer.invoke("karen:runtime-diagnose"),
   runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
   runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),
   runtimePlan: (path: string, override?: unknown) => ipcRenderer.invoke("karen:runtime-plan", path, override),
