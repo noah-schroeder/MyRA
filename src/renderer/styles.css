@@ -1405,17 +1405,6 @@ kbd {
 
 /* ---------- meeting ---------- */
 
-.meeting {
-  flex: none;
-  margin: 14px 26px 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-  box-shadow: var(--lift);
-  display: flex; flex-direction: column; gap: 12px;
-}
-
 .meeting-start { display: flex; gap: 10px; }
 .meeting-title { flex: 1; }
 
@@ -1442,9 +1431,19 @@ kbd {
 
 .meeting-progress { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .meeting-progress p { margin: 0; }
+/* Otherwise the column stretches it to the full width of the row, and a
+   full-width Cancel reads as the primary action. */
+.meeting-progress button {
+  align-self: flex-start;
+  font: inherit; font-size: 12px;
+  padding: 4px 11px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+}
+.meeting-progress button:hover { color: var(--text); border-color: var(--border-hover); }
 .meeting-progress .detail { color: var(--text-faint); font-size: 12px; }
 .bar { height: 4px; border-radius: 2px; background: var(--bg-inset); overflow: hidden; }
-.fill { height: 100%; background: var(--accent); transition: width var(--t-med); }
+.bar > span, .fill { display: block; height: 100%; background: var(--accent); transition: width var(--t-med); }
 
 .meeting-done { margin: 0; font-size: 13px; color: var(--green); }
 .meeting-done code { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
@@ -2603,3 +2602,174 @@ p.warning { margin: 0; font-size: 12.5px; }
   color: var(--on-accent); cursor: pointer;
 }
 .firstrun-foot button:disabled { opacity: 0.6; cursor: default; }
+
+
+/* ==========================================================================
+   Meetings — a page, and the three things that happen to a recording
+   ==========================================================================
+   Record, transcribe, take notes. The stages are visibly separate because they
+   cost wildly different amounts: transcription is minutes and note-taking is
+   seconds, so the page has to make it obvious that redoing the note does not
+   redo the transcription.
+   ========================================================================== */
+
+.meetings { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.meetings-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 26px 28px; }
+
+.meeting-start-card {
+  max-width: 620px;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.meeting-start-card h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.meeting-start-card p { margin: 0; font-size: 13px; line-height: 1.6; text-wrap: pretty; }
+
+.meeting-live {
+  max-width: 620px;
+  padding: 20px 22px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.meet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.meet-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 13px 15px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.meet-row.working { border-color: var(--accent-dim); }
+
+.meet-head { display: flex; align-items: flex-start; gap: 12px; }
+.meet-open {
+  flex: 1; min-width: 0; text-align: left;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px; color: inherit; font: inherit;
+}
+.meet-title { font-size: 14px; font-weight: 560; }
+.meet-open:hover .meet-title { color: var(--accent); }
+.meet-meta { font-size: 12px; color: var(--text-faint); }
+
+/* The three stages, always in the same order, so the row reads as a pipeline
+   rather than as three unrelated labels. */
+.meet-stages { display: flex; gap: 4px; flex: none; }
+.meet-stage {
+  font-size: 10.5px; letter-spacing: 0.02em;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.meet-stage.done {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+}
+
+.meet-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.meet-actions button {
+  font: inherit; font-size: 12px;
+  padding: 5px 11px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+}
+.meet-actions button:hover:not(:disabled) { color: var(--text); border-color: var(--border-hover); }
+.meet-actions button:disabled { opacity: 0.45; cursor: default; }
+.meet-actions button.primary-sm {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+}
+.meet-actions button.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.meet-spacer { flex: 1 1 0; min-width: 0; }
+
+.meet-error { margin: 0; font-size: 12.5px; color: var(--amber); text-wrap: pretty; }
+
+.meet-body {
+  display: flex; flex-direction: column; gap: 12px;
+  padding-top: 4px; border-top: 1px solid var(--border);
+}
+.meet-text { max-height: 46vh; overflow-y: auto; font-size: 13.5px; }
+.meet-filed { font-size: 12px; }
+.meet-filed code { font-family: var(--mono); font-size: 11.5px; }
+
+.meet-prompt { display: flex; flex-direction: column; gap: 8px; }
+.meet-prompt p { margin: 0; font-size: 12.5px; line-height: 1.55; }
+.meet-prompt textarea {
+  font: inherit; font-size: 13px; line-height: 1.55;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-inset); border: 1px solid var(--border); color: var(--text);
+  resize: vertical;
+}
+.meet-prompt textarea:focus-visible { outline: none; border-color: var(--accent-dim); }
+.meet-prompt-foot { display: flex; align-items: center; gap: 8px; }
+.meet-prompt-foot button {
+  font: inherit; font-size: 12px;
+  padding: 5px 11px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+}
+.meet-prompt-foot button.primary-sm {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+}
+
+/* A button that reads as a link, for a sentence that has an action in it. */
+.linkish {
+  background: none; border: 0; padding: 0;
+  font: inherit; color: var(--accent-soft); cursor: pointer;
+  border-bottom: 1px solid currentColor;
+}
+
+/* ---------- transcription setup ---------- */
+
+.whisper { display: flex; flex-direction: column; gap: 22px; max-width: 720px; }
+.whisper-block { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.whisper-block h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.whisper-block p { margin: 0; font-size: 13px; line-height: 1.6; text-wrap: pretty; }
+.whisper-block > button.primary-sm {
+  font: inherit; font-size: 12.5px;
+  padding: 6px 14px; border-radius: var(--radius-sm);
+  background: var(--accent); border: 1px solid var(--accent);
+  color: var(--on-accent); cursor: pointer;
+}
+
+.whisper-models { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.whisper-model {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.whisper-model.active { border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.whisper-model-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.whisper-model-body strong { font-size: 13.5px; font-weight: 560; }
+.whisper-model-body p { flex-basis: 100%; margin: 2px 0 0; font-size: 12px; }
+.whisper-model-actions { display: flex; gap: 6px; flex: none; }
+.whisper-model-actions button {
+  font: inherit; font-size: 12px;
+  padding: 5px 11px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+}
+.whisper-model-actions button:hover:not(:disabled) { color: var(--text); border-color: var(--border-hover); }
+.whisper-model-actions button:disabled { opacity: 0.45; cursor: default; }
+
+.whisper-log {
+  width: 100%; max-height: 180px; overflow: auto;
+  margin: 0; padding: 10px 12px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.5;
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+
+/* A prose field in Settings: bigger than an input, and it wraps. */
+.settings-prose {
+  font: inherit; font-size: 13px; line-height: 1.55;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--bg-inset); border: 1px solid var(--border); color: var(--text);
+  resize: vertical;
+}
+.settings-prose:focus-visible { outline: none; border-color: var(--accent-dim); }

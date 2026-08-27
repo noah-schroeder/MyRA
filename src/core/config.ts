@@ -65,6 +65,16 @@ export interface Settings {
    */
   meetingCaptureSystemAudio: boolean;
   /**
+   * The default steer for meeting notes, used when a meeting has none of its own.
+   *
+   * Not the whole prompt: the extraction and composition prompts are long,
+   * carefully argued, and not something to hand a user a textarea for. This is
+   * the paragraph that says what *this* person's meetings are like -- "we are a
+   * research group, keep the methodological objections" -- and it is appended
+   * to both stages. Empty is the normal case.
+   */
+  meetingInstructions: string;
+  /**
    * Whether first-run setup has been through once.
    *
    * Not "is everything installed": someone who deliberately skipped the model
@@ -90,6 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
+  meetingInstructions: "",
   setupCompleted: false,
 };
 

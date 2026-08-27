@@ -11,8 +11,8 @@
 
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { ConfigStore, configuredEndpoints } from "../core/config.ts";
+import { basename, dirname, join } from "node:path";
+import { ConfigStore, configuredEndpoints, type EndpointSettings } from "../core/config.ts";
 import { DESTINATIONS } from "../core/destinations.ts";
 import { SecretVault, type SecretName } from "./secrets.ts";
 import { ToolRegistry } from "../core/agent/registry.ts";
@@ -28,6 +28,8 @@ import {
   sessionId, titleFrom, type Session,
 } from "../core/sessions.ts";
 import { installMeetingIpc } from "./meetings.ts";
+import { WhisperManager } from "./whisper/manager.ts";
+import { installWhisperIpc } from "./whisper/ipc.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -76,6 +78,9 @@ const config = new ConfigStore();
 const vault = new SecretVault();
 const registry = new ToolRegistry();
 const runtime = new RuntimeManager();
+/* Transcription runs in its own server: llama.cpp cannot produce the segment
+   timestamps a two-track meeting is assembled from. See core/runtime/whisperAssets.ts. */
+const whisper = new WhisperManager();
 
 let window_: BrowserWindow | undefined;
 let session_: Session | undefined;
@@ -703,22 +708,36 @@ async function main(): Promise<void> {
     onProgress: (note) => send("karen:research-progress", note),
   });
 
-  installIpc();
-  installMeetingIpc({ config, vault, send });
-  installDictationIpc({ config, vault, send });
-
   await runtime.load();
   installRuntimeIpc(runtime, send, () => vault.get("hfToken"), () => window_);
+
   /*
-   * Research stages follow chat to whichever model is actually answering. Left
-   * alone they would read settings.json and find either a stale port or the
-   * user's own endpoint, so a run would silently use a different model than the
-   * conversation that started it.
+   * Everything that talks to a model resolves its endpoint here.
+   *
+   * Chat, research stages and meeting notes must all follow the model that is
+   * actually loaded. Reading `settings.llm` directly finds either a stale port
+   * or the user's own endpoint, so a run would silently use a different model
+   * than the conversation that started it -- and meeting notes did worse than
+   * that: with the endpoint field empty, which is the normal state for someone
+   * running a local model, they failed with "No LLM endpoint is configured"
+   * while a model sat loaded three feet away.
    */
-  setEndpointResolver(async () => {
+  const resolveLlm = async (): Promise<{
+    endpoint: EndpointSettings;
+    apiKey?: string;
+    /** What to write down as the model that did the work. */
+    label?: string;
+  }> => {
     const managed = runtime.chatEndpoint();
     if (managed) {
-      return { endpoint: { ...config.current.llm, baseUrl: managed.baseUrl }, apiKey: managed.apiKey };
+      return {
+        endpoint: { ...config.current.llm, baseUrl: managed.baseUrl },
+        apiKey: managed.apiKey,
+        // The file name, not the port. A meeting note recording
+        // "http://127.0.0.1:37617/v1" as the model that wrote it says nothing
+        // a month later, when the port is long gone.
+        label: basename(runtime.config.activeModel ?? "") || config.current.llm.model || "a local model",
+      };
     }
     /*
      * No model loaded, so fall back to whatever endpoint the user configured.
@@ -737,8 +756,25 @@ async function main(): Promise<void> {
       );
     }
     const key = await vault.get("llmKey");
-    return { endpoint: llm, ...(key ? { apiKey: key } : {}) };
+    return {
+      endpoint: llm,
+      ...(key ? { apiKey: key } : {}),
+      label: llm.model || llm.baseUrl,
+    };
+  };
+  setEndpointResolver(resolveLlm);
+
+  installIpc();
+  await whisper.load();
+  installWhisperIpc({ whisper, send });
+  installMeetingIpc({
+    config,
+    whisper,
+    send,
+    llm: resolveLlm,
+    transcriptionKey: () => vault.get("transcriptionKey"),
   });
+  installDictationIpc({ config, vault, send });
 
   createWindow();
   setPdfRenderer(installPdfRenderer());
@@ -823,5 +859,11 @@ app.on("window-all-closed", () => {
  * children with it there. Leaving an 8 GB process behind after the window
  * closes is the single most annoying failure a local-model app can have.
  */
-app.on("before-quit", () => runtime.killNow());
-process.on("exit", () => runtime.killNow());
+app.on("before-quit", () => {
+  runtime.killNow();
+  whisper.killNow();
+});
+process.on("exit", () => {
+  runtime.killNow();
+  whisper.killNow();
+});

@@ -32,6 +32,8 @@ export interface ReleaseAsset {
 export interface Release {
   tag_name: string;
   prerelease: boolean;
+  /** GitHub marks an unpublished release; whisper.cpp's feed carries them. */
+  draft?: boolean;
   published_at: string;
   assets: ReleaseAsset[];
 }

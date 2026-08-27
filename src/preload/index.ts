@@ -75,6 +75,35 @@ const api = {
   meetingDiscard: () => ipcRenderer.invoke("karen:meeting-discard"),
   meetingLevels: () => ipcRenderer.invoke("karen:meeting-levels"),
   onMeeting: (cb: (state: unknown) => void) => on("karen:meeting", cb),
+  onMeetings: (cb: (list: unknown) => void) => on("karen:meetings", cb),
+  meetingList: () => ipcRenderer.invoke("karen:meeting-list"),
+  meetingTranscribe: (dir: string) => ipcRenderer.invoke("karen:meeting-transcribe", dir),
+  meetingNotes: (dir: string) => ipcRenderer.invoke("karen:meeting-notes", dir),
+  meetingRun: (dir: string) => ipcRenderer.invoke("karen:meeting-run", dir),
+  meetingCancel: () => ipcRenderer.invoke("karen:meeting-cancel"),
+  meetingInstructions: (dir: string, text: string) =>
+    ipcRenderer.invoke("karen:meeting-instructions", dir, text),
+  meetingRead: (dir: string, which: "notes" | "transcript") =>
+    ipcRenderer.invoke("karen:meeting-read", dir, which),
+  meetingReveal: (path: string) => ipcRenderer.invoke("karen:meeting-reveal", path),
+  meetingDelete: (dir: string) => ipcRenderer.invoke("karen:meeting-delete", dir),
+
+  /* ---- transcription runtime ----
+   *
+   * A second runtime beside llama.cpp, because llama.cpp cannot produce the
+   * segment timestamps a two-track meeting is assembled from. Nothing here is
+   * reachable by the model. */
+  whisperState: () => ipcRenderer.invoke("karen:whisper-state"),
+  whisperConfig: (patch: unknown) => ipcRenderer.invoke("karen:whisper-config", patch),
+  whisperInstall: () => ipcRenderer.invoke("karen:whisper-install"),
+  whisperModelInstall: (file: string) => ipcRenderer.invoke("karen:whisper-model-install", file),
+  whisperModelUse: (file: string) => ipcRenderer.invoke("karen:whisper-model-use", file),
+  whisperModelRemove: (file: string) => ipcRenderer.invoke("karen:whisper-model-remove", file),
+  whisperStart: () => ipcRenderer.invoke("karen:whisper-start"),
+  whisperStop: () => ipcRenderer.invoke("karen:whisper-stop"),
+  whisperCancel: () => ipcRenderer.invoke("karen:whisper-cancel"),
+  onWhisper: (cb: (state: unknown) => void) => on("karen:whisper", cb),
+  onWhisperDownload: (cb: (p: unknown) => void) => on("karen:whisper-download", cb),
 
   /* The renderer is the only thing that can enumerate capture devices, so it
    * reports them up rather than main asking down. */

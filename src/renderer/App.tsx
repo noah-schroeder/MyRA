@@ -7,7 +7,7 @@ import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
-import { MeetingPanel } from "./components/MeetingPanel.tsx";
+import { MeetingsPage } from "./components/MeetingsPage.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
 import { ModelHub } from "./components/ModelHub.tsx";
@@ -23,13 +23,12 @@ import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models";
+type Page = "chat" | "runs" | "models" | "meetings";
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
-  const [showMeeting, setShowMeeting] = useState(false);
   /*
    * One page at a time, held in one variable.
    *
@@ -179,16 +178,15 @@ export function App() {
 
         <nav className="rail-nav" aria-label="Sections">
           <RailButton icon="new" label="New conversation" onClick={() => void newSession()} />
+          {/* A page, not a panel over the conversation. A meeting has a past --
+              the recordings, transcripts and notes of every one you have held --
+              and a strip above the thread could only ever show the one you were
+              in the middle of. */}
           <RailButton
             icon="meeting"
-            label="Meeting"
-            active={showMeeting}
-            onClick={() => {
-              // The meeting panel sits over the conversation, so asking for it
-              // from another page means asking to go back to the conversation.
-              setShowMeeting((v) => !v);
-              setPage("chat");
-            }}
+            label="Meetings"
+            active={page === "meetings"}
+            onClick={() => setPage((p) => (p === "meetings" ? "chat" : "meetings"))}
           />
           {/* The audit trail. Every run already wrote its search log, screening
               reasons, source hashes and verification table; until this existed
@@ -233,8 +231,6 @@ export function App() {
           />
         </header>
 
-        {page === "chat" && showMeeting && settings ? <MeetingPanel settings={settings} /> : null}
-
         {/*
           * Runs replace the conversation rather than covering it.
           *
@@ -243,6 +239,9 @@ export function App() {
           * interruption to be dismissed, over a thread you could not consult
           * while reading it.
           */}
+        {page === "meetings" && settings ? (
+          <MeetingsPage settings={settings} onClose={toChat} />
+        ) : null}
         {page === "runs" ? <RunPanel onClose={toChat} /> : null}
         {page === "models" ? <ModelHub onClose={toChat} /> : null}
 
