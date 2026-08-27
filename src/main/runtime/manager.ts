@@ -41,9 +41,12 @@ import {
   type Budget, type LaunchSettings,
 } from "../../core/runtime/launch.ts";
 import { dedupeFound, knownStores, scanStore, type FoundModel, type WalkFs } from "../../core/runtime/scan.ts";
-import { downloadFile, extractArchive, findExecutable } from "./download.ts";
-import { buildDir, defaultModelsDir, stagingDir } from "./paths.ts";
+import { downloadFile, extractArchive, findExecutable, type Progress } from "./download.ts";
+import { buildDir, defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, stagingDir } from "./paths.ts";
+import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
+import { LemonadeApi } from "./lemonadeApi.ts";
+import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
 import { LlamaServer, listDevices, type ServerStatus } from "./server.ts";
 
 const RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=30";
@@ -133,6 +136,18 @@ export class RuntimeManager {
    * yet started by anything; that arrives with the backend work.
    */
   #lemonade = new LemonadeServer();
+
+  /**
+   * The client for whatever Lemonade is running, or nothing when it is not.
+   *
+   * A live target rather than a stored base URL: the daemon gets a fresh port
+   * on every start, so a client that captured one would keep working until the
+   * first restart and then fail in a way that looked like the daemon was down.
+   */
+  #api = new LemonadeApi(() => {
+    const { adminUrl } = this.#lemonade.status;
+    return adminUrl ? { base: adminUrl, headers: this.#lemonade.authHeaders() } : undefined;
+  });
   #phase: Phase = { kind: "idle" };
   #gpu: GpuInfo = { vendorIds: [], supportsVulkan: false };
   /** The binary the running server was launched from. */
@@ -164,6 +179,50 @@ export class RuntimeManager {
 
   get lemonade(): LemonadeServer {
     return this.#lemonade;
+  }
+
+  get api(): LemonadeApi {
+    return this.#api;
+  }
+
+  /**
+   * Have a Lemonade running, installing it the first time.
+   *
+   * Idempotent and cheap when it is already up, because everything that wants
+   * the daemon calls this rather than assuming someone else did -- there is no
+   * single moment in the app's life when "the backend is ready" is true, and
+   * pretending otherwise is how a race gets written.
+   */
+  async ensureLemonade(opts: {
+    signal?: AbortSignal;
+    onPhase?: (what: string) => void;
+    onProgress?: (p: Progress & { what: string }) => void;
+  } = {}): Promise<LemonadeApi> {
+    if (this.#lemonade.status.state === "ready") return this.#api;
+
+    const dir = lemonadeDir(LEMONADE_VERSION);
+    let binary = await findLemonade(dir);
+    if (!binary) {
+      const install = await installLemonade({
+        dir,
+        staging: join(stagingDir(), "lemonade"),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(opts.onPhase ? { onPhase: opts.onPhase } : {}),
+        ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+      });
+      binary = install.binary;
+    }
+
+    opts.onPhase?.("starting Lemonade");
+    const status = await this.#lemonade.start({
+      binary,
+      cacheDir: this.#config.modelsDir || lemonadeCacheDir(),
+      configDir: lemonadeConfigDir(),
+    });
+    if (status.state !== "ready") {
+      throw new Error(status.error ?? "Lemonade did not start.");
+    }
+    return this.#api;
   }
   get config(): RuntimeConfig {
     return this.#config;

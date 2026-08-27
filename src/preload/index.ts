@@ -132,6 +132,11 @@ const api = {
   runtimeProbe: () => ipcRenderer.invoke("karen:runtime-probe"),
   /** Why no GPU was found: the driver\u2019s own answer plus the raw probe output. */
   runtimeDiagnose: () => ipcRenderer.invoke("karen:runtime-diagnose"),
+  lemonadeEnsure: () => ipcRenderer.invoke("karen:lemonade-ensure"),
+  lemonadeInfo: () => ipcRenderer.invoke("karen:lemonade-info"),
+  lemonadeInstallBackend: (recipe: string, backend: string) =>
+    ipcRenderer.invoke("karen:lemonade-install-backend", recipe, backend),
+  lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
   runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
   runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),
   runtimePlan: (path: string, override?: unknown) => ipcRenderer.invoke("karen:runtime-plan", path, override),

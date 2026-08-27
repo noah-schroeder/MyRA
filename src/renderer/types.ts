@@ -1,3 +1,4 @@
+import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 /**
  * What the renderer renders.
  *
@@ -379,6 +380,13 @@ export interface KarenApi {
   runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
   /** Why a build found no GPU. Asked only when one did not, since it shells out. */
   runtimeDiagnose(): Promise<RuntimeDiagnosis>;
+  lemonadeEnsure(): Promise<{ ok: boolean; error?: string }>;
+  lemonadeInfo(): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
+  lemonadeInstallBackend(
+    recipe: string,
+    backend: string,
+  ): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
+  lemonadeDownloads(): Promise<{ ok: boolean; jobs: DownloadJob[] }>;
   runtimeCancel(): Promise<{ ok: boolean }>;
   runtimeModels(): Promise<LocalModel[]>;
   runtimePlan(path: string, override?: Partial<LaunchSettings>): Promise<LaunchPlan>;
