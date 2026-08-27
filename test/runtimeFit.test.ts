@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CONTEXT_LADDER, fitModel, kvCacheBytes, largestContext, quantRank } from "../src/core/runtime/fit.ts";
-import type { ModelShape } from "../src/core/runtime/gguf.ts";
+import type { ModelShape } from "../src/core/runtime/fit.ts";
 
 const GIB = 1024 ** 3;
 

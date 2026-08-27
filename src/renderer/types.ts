@@ -1,3 +1,4 @@
+import type { CatalogEntry } from "../core/runtime/catalog.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 /**
  * What the renderer renders.
@@ -308,18 +309,6 @@ export interface KarenApi {
   meetingRead(dir: string, which: "notes" | "transcript"): Promise<string | undefined>;
   meetingReveal(path: string): Promise<{ ok: boolean }>;
   meetingDelete(dir: string): Promise<{ ok: boolean; error?: string }>;
-
-  whisperState(): Promise<WhisperSnapshot>;
-  whisperConfig(patch: { useForTranscription?: boolean }): Promise<unknown>;
-  whisperInstall(): Promise<{ ok: boolean; error?: string; tag?: string }>;
-  whisperModelInstall(file: string): Promise<{ ok: boolean; error?: string }>;
-  whisperModelUse(file: string): Promise<{ ok: boolean; error?: string }>;
-  whisperModelRemove(file: string): Promise<{ ok: boolean; error?: string }>;
-  whisperStart(): Promise<{ ok: boolean; error?: string }>;
-  whisperStop(): Promise<{ ok: boolean }>;
-  whisperCancel(): Promise<{ ok: boolean }>;
-  onWhisper(cb: (state: WhisperSnapshot) => void): () => void;
-  onWhisperDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
   reportDevices(devices: AudioSource[]): Promise<void>;
 
   dictationStart(): Promise<void>;
@@ -344,42 +333,7 @@ export interface KarenApi {
   /* The bundled runtime. All user-driven: no tool reaches any of this. */
   runtimeState(): Promise<RuntimeState>;
   runtimeConfig(patch: Partial<RuntimeConfig>): Promise<RuntimeConfig>;
-  runtimeDetect(): Promise<{ gpu: unknown; suggestion: { backend: Backend; reason: string } }>;
-  runtimeSetUp(): Promise<{ ok: boolean; note?: string; error?: string; devices?: RuntimeDevice[]; build?: string }>;
-  runtimeCheckUpdates(): Promise<{ ok: boolean; current?: string; newest?: string; behind?: number; error?: string }>;
-  runtimeInstall(
-    tag: string,
-    backend: string,
-  ): Promise<{
-    ok: boolean;
-    error?: string;
-    devices?: RuntimeDevice[];
-    accelerated?: boolean;
-    build?: string;
-    unloaded?: string;
-  }>;
-  runtimeUpdate(tag?: string): Promise<{
-    ok: boolean;
-    error?: string;
-    build?: string;
-    from?: string;
-    unchanged?: boolean;
-    devices?: RuntimeDevice[];
-    accelerated?: boolean;
-    /** The model file that was unloaded to make the switch, if one was. */
-    unloaded?: string;
-  }>;
-  runtimeActivate(id: string): Promise<{
-    ok: boolean;
-    error?: string;
-    build?: string;
-    devices?: RuntimeDevice[];
-    unloaded?: string;
-  }>;
-  runtimeRemoveBuild(id: string): Promise<{ ok: boolean; error?: string }>;
-  runtimeProbe(): Promise<{ ok: boolean; devices?: RuntimeDevice[]; error?: string }>;
   /** Why a build found no GPU. Asked only when one did not, since it shells out. */
-  runtimeDiagnose(): Promise<RuntimeDiagnosis>;
   lemonadeEnsure(): Promise<{ ok: boolean; error?: string }>;
   lemonadeInfo(): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
   lemonadeInstallBackend(
@@ -387,6 +341,7 @@ export interface KarenApi {
     backend: string,
   ): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
   lemonadeDownloads(): Promise<{ ok: boolean; jobs: DownloadJob[] }>;
+  lemonadeCatalog(): Promise<{ ok: boolean; error?: string; catalog: CatalogEntry[] }>;
   lemonadeModels(): Promise<{
     ok: boolean;
     error?: string;
@@ -399,26 +354,9 @@ export interface KarenApi {
     name: string,
     checkpoint?: string,
   ): Promise<{ ok: boolean; error?: string; models?: { id: string; downloaded?: boolean }[] }>;
-  runtimeCancel(): Promise<{ ok: boolean }>;
-  runtimeModels(): Promise<LocalModel[]>;
-  runtimePlan(path: string, override?: Partial<LaunchSettings>): Promise<LaunchPlan>;
-  runtimeSetLaunch(
-    path: string,
-    patch: Partial<LaunchSettings>,
-  ): Promise<{ ok: boolean; settings?: LaunchSettings; error?: string }>;
-  runtimeDeleteModel(path: string): Promise<{ ok: boolean; error?: string }>;
-  runtimeStart(modelPath?: string): Promise<{ ok: boolean; status?: ServerStatus; error?: string }>;
-  runtimeStop(): Promise<{ ok: boolean }>;
   onRuntime(cb: (state: RuntimeState) => void): () => void;
   onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
 
-  hfSearch(query: string, sort?: string): Promise<{ ok: boolean; models?: HfSearchResult[]; error?: string }>;
-  hfFiles(repo: string): Promise<{ ok: boolean; files?: HfFileChoice[]; error?: string; gated?: boolean }>;
-  hfInspect(repo: string, entry: string, size: number): Promise<{ shape?: unknown; fit: ModelFit; largestContext?: number }>;
-  hfDownload(
-    repo: string,
-    parts: { path: string; size: number; sha256?: string }[],
-  ): Promise<{ ok: boolean; path?: string; error?: string }>;
 }
 
 declare global {
@@ -544,12 +482,9 @@ export interface ModelFit {
 }
 
 export interface RuntimeConfig {
-  activeBuild?: string;
-  backendOverride?: Backend;
   modelsDir: string;
   startOnLaunch: boolean;
   activeModel?: string;
-  contextSize?: number;
   useForChat: boolean;
 }
 
@@ -584,26 +519,13 @@ export interface RuntimeDiagnosis {
 
 export interface RuntimeState {
   config: RuntimeConfig;
-  phase: RuntimePhase;
-  server: ServerStatus;
-  suggestion: { backend: Backend; reason: string };
-  activeBuild?: { id: string; tag: string; backend: Backend };
-  builds: { id: string; tag: string; backend: Backend }[];
-  baseline: string;
-  devices?: RuntimeDevice[];
-  /** What the probe and the OS say this machine has, for sizing models. */
-  machine?: {
-    vramBytes?: number;
-    ramBytes: number;
-    /** Which device the VRAM figure belongs to. */
-    vramDevice?: string;
-    /** True when that memory is system RAM shared with a GPU. */
-    vramShared?: boolean;
-    /** Why no GPU was chosen, when something was found but did not qualify. */
-    gpuNote?: string;
+  /** The Lemonade daemon: whether it is up, and what it is holding. */
+  lemonade: {
+    state: string;
+    error?: string;
+    loaded?: string;
+    log: string[];
   };
-  /** The backends this platform can be given, best first. From the main process. */
-  backends?: Backend[];
 }
 
 export type CacheType = "f16" | "q8_0" | "q4_0";
@@ -644,10 +566,10 @@ export interface LaunchPlan {
 export interface LocalModel {
   path: string;
   name: string;
-  size: number;
+  size?: number;
   /** The context it will start with, resolved from its settings. */
   context?: number;
-  source: string;
+  source?: string;
   shape?: { layers?: number; contextLength?: number; hasChatTemplate?: boolean; architecture?: string };
   fit?: ModelFit;
 }

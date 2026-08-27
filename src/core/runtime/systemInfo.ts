@@ -41,13 +41,28 @@ export interface BackendOption {
   version?: string | undefined;
 }
 
+/** One engine and every backend it could run on. */
+export interface EngineInfo {
+  id: string;
+  backends: BackendOption[];
+}
+
 export interface MachineInfo {
   devices: Device[];
   /** Total system memory, when it could be read. */
   ramBytes?: number | undefined;
   /** Free bytes where models are stored. */
   modelStorageFreeBytes?: number | undefined;
+  /** The llama.cpp backends, which is what chat runs on. */
   backends: BackendOption[];
+  /**
+   * Every engine Lemonade offers, with the state of each of its backends.
+   *
+   * Not only llama.cpp: speech, text-to-speech, image and the rest are separate
+   * engines with their own backends and their own hardware support, and each
+   * has to be installed before the models that need it will run.
+   */
+  engines: EngineInfo[];
   /** The NVIDIA driver version, when there is one. */
   driverVersion?: string | undefined;
   osVersion?: string | undefined;
@@ -150,6 +165,15 @@ export function installableBackends(backends: BackendOption[]): BackendOption[] 
   return backends.filter((b) => b.state === "installable" || b.state === "installed");
 }
 
+/** Every engine in the payload, in a stable order. */
+export function parseEngines(raw: unknown): EngineInfo[] {
+  const recipes = obj(obj(raw)["recipes"]);
+  return Object.keys(recipes)
+    .sort()
+    .map((id) => ({ id, backends: parseBackends(raw, id) }))
+    .filter((e) => e.backends.length);
+}
+
 export function parseSystemInfo(raw: unknown): MachineInfo {
   const root = obj(raw);
   const devices = obj(root["devices"]);
@@ -159,6 +183,7 @@ export function parseSystemInfo(raw: unknown): MachineInfo {
   return {
     devices: parseDevices(raw),
     backends: parseBackends(raw),
+    engines: parseEngines(raw),
     ...(toBytes(root["Physical Memory"]) ? { ramBytes: toBytes(root["Physical Memory"]) } : {}),
     ...(typeof free === "number" ? { modelStorageFreeBytes: free } : {}),
     ...(str(nvidia["driver_version"]) ? { driverVersion: str(nvidia["driver_version"]) } : {}),

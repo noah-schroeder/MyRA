@@ -26,12 +26,10 @@ import {
   deleteMeeting, filingRoot, listMeetings, readRecord, readState, readTranscript,
   writeState, writeTranscript, NOTES_MD, TRANSCRIPT_MD,
 } from "../core/meetings/store.ts";
-import type { WhisperManager } from "./whisper/manager.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 
 export interface MeetingDeps {
   config: ConfigStore;
-  whisper: WhisperManager;
   /**
    * The model that is actually answering, resolved the same way chat resolves
    * it. Not `settings.llm`: with a local model loaded that field is empty, and
@@ -86,7 +84,7 @@ interface MeetingState {
 }
 
 export function installMeetingIpc(deps: MeetingDeps): void {
-  const { config, whisper, send } = deps;
+  const { config, send } = deps;
   let recorder: MeetingRecorder | undefined;
   let state: MeetingState = { phase: "idle" };
   let running: AbortController | undefined;
@@ -160,20 +158,16 @@ export function installMeetingIpc(deps: MeetingDeps): void {
   /**
    * The transcription endpoint to use.
    *
-   * Karen's own whisper-server when one is installed and switched on, otherwise
-   * whatever the user configured. Started on demand rather than at launch: it
-   * holds a model in memory and most sessions never transcribe anything.
+   * Lemonade's speech model when one is installed, otherwise whatever endpoint
+   * the user configured. Nothing is started here: the daemon is brought up by
+   * the runtime pane, and transcription should not be what pays to boot it.
    */
   const transcriptionEndpoint = async (): Promise<{ endpoint: EndpointSettings; apiKey?: string }> => {
-    if (whisper.ready) {
-      await whisper.start();
-      const local = whisper.endpoint();
-      if (local) return { endpoint: { ...config.current.transcription, baseUrl: local.baseUrl } };
-    }
-    /* Lemonade, when it is up and has a speech model. Tried after Karen's own
-       whisper-server so an existing setup keeps behaving exactly as it did, and
-       before the error below so that having Lemonade running is enough -- there
-       is nothing further to configure. */
+    /* Lemonade first: it manages the speech engine and its models the same way
+       it manages everything else, so there is nothing to set up separately.
+       The model name travels with the address because the configured default is
+       OpenAI's `whisper-1`, which this daemon has never heard of -- sending it
+       would fail against a server that is working perfectly. */
     const lemonade = await deps.lemonadeTranscription?.();
     if (lemonade) {
       return {
@@ -185,8 +179,8 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     const settings = config.current.transcription;
     if (!settings.baseUrl.trim()) {
       throw new Error(
-        "No transcription model is set up. Open Meetings → Transcription to download one, " +
-          "or set an endpoint in Settings.",
+        "No transcription model is set up. Open Settings → Runtime and download one under " +
+          "Transcription, or set an endpoint of your own.",
       );
     }
     const key = await deps.transcriptionKey();
@@ -227,7 +221,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       await saver(dir)(TRANSCRIPT_MD, renderTranscript(record, transcript));
       await writeState(dir, {
         transcribedAt: new Date().toISOString(),
-        transcriptModel: whisper.config.modelFile ?? endpoint.model ?? endpoint.baseUrl,
+        transcriptModel: endpoint.model ?? endpoint.baseUrl,
         error: undefined,
       });
     } finally {

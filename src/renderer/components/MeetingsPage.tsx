@@ -5,7 +5,6 @@ import type {
 import { MeetingCapture, CaptureError } from "../capture.ts";
 import { litSegments, segmentClass } from "./meterBars.ts";
 import { Markdown } from "./Markdown.tsx";
-import { WhisperSetup } from "./WhisperSetup.tsx";
 
 /**
  * Meetings: recording one, and everything that happens to it afterwards.
@@ -75,7 +74,8 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   const [tab, setTab] = useState<Tab>("record");
   const [state, setState] = useState<MeetingState>({ phase: "idle" });
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
-  const [whisper, setWhisper] = useState<WhisperSnapshot | undefined>();
+  /* What the local engine has loaded, when it is Karen's own. */
+  const [whisper, setWhisper] = useState<{ loaded?: string } | undefined>();
   const [title, setTitle] = useState("");
   const [warning, setWarning] = useState<string | undefined>();
   const [levels, setLevels] = useState<Record<string, number>>({});
@@ -89,14 +89,11 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   useEffect(() => {
     const offState = window.karen.onMeeting(setState);
     const offList = window.karen.onMeetings((list) => setMeetings(list));
-    const offWhisper = window.karen.onWhisper(setWhisper);
     void window.karen.meetingState().then(setState);
-    void window.karen.whisperState().then(setWhisper);
     void refresh();
     return () => {
       offState();
       offList();
-      offWhisper();
     };
   }, [refresh]);
 
@@ -184,7 +181,7 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   };
 
   const busy = state.phase === "processing";
-  const ready = Boolean(whisper?.config.modelFile) || Boolean(settings.transcription.baseUrl.trim());
+  const ready = Boolean(whisper?.loaded) || Boolean(settings.transcription.baseUrl.trim());
 
   return (
     <section className="meetings">
@@ -197,7 +194,7 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
           <Stat label="Recorded" value={String(meetings.length)} />
           <Stat
             label="Transcription"
-            value={whisper?.config.modelFile ? whisper.config.modelFile.replace(/^ggml-|\.bin$/g, "") : ready ? "your endpoint" : "not set up"}
+            value={whisper?.loaded ?? (ready ? "your endpoint" : "not set up")}
             dim={!ready}
           />
         </div>
@@ -242,7 +239,6 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
         </div>
       ) : tab === "setup" ? (
         <div className="meetings-body">
-          <WhisperSetup snapshot={whisper} settings={settings} />
         </div>
       ) : (
         <div className="meetings-body">

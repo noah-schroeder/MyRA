@@ -12,7 +12,6 @@ import { describe, it } from "node:test";
 
 import { repoId } from "../src/core/runtime/hf.ts";
 import { assertRunId } from "../src/core/research/run.ts";
-import { modelFileName } from "../src/main/whisper/manager.ts";
 
 describe("repoId", () => {
   it("accepts the shape HuggingFace actually uses", () => {
@@ -42,18 +41,6 @@ describe("assertRunId", () => {
   it("refuses a separator or a climb", () => {
     for (const bad of ["..", ".", "../secrets", "a/b", "", "a\0b"]) {
       assert.throws(() => assertRunId(bad), /no research run named/, `accepted ${bad}`);
-    }
-  });
-});
-
-describe("modelFileName", () => {
-  it("accepts a whisper model file name", () => {
-    assert.equal(modelFileName("ggml-base.en-q5_1.bin"), "ggml-base.en-q5_1.bin");
-  });
-
-  it("refuses a path, which is what makes removeModel safe", () => {
-    for (const bad of ["../../.ssh/id_rsa", "..", "a/b.bin", "/etc/passwd", ""]) {
-      assert.throws(() => modelFileName(bad), /is not a model file name/, `accepted ${bad}`);
     }
   });
 });

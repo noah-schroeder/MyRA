@@ -46,14 +46,15 @@ export function ContextMeter({ usage }: { usage: Usage | undefined }) {
     return window.karen.onRuntime(setRuntime);
   }, []);
 
-  const loaded = runtime?.config.useForChat && runtime.server.state === "ready";
+  const loaded = runtime?.config.useForChat && runtime.lemonade.state === "ready";
   /*
-   * The running server wins over the figure that came back with the last reply.
-   * Reloading a model with a different context would otherwise leave the meter
-   * counting against the window of a model that is no longer loaded, until the
-   * next reply happened to correct it.
+   * Only what the last reply reported. The old llama-server was asked directly
+   * via /props; Lemonade does not expose a per-conversation window, so there is
+   * no better figure available and a guess would be worse than the honest one
+   * that arrives with each response.
    */
-  const limit = (loaded ? runtime?.server.contextSize : undefined) ?? usage?.contextLimit;
+  const limit = usage?.contextLimit;
+  void loaded;
   const used = usage?.contextTokens ?? 0;
 
   if (!usage && !limit) return null;

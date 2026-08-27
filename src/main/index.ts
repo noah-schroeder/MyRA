@@ -30,8 +30,6 @@ import {
   sessionId, titleFrom, type Session,
 } from "../core/sessions.ts";
 import { installMeetingIpc } from "./meetings.ts";
-import { WhisperManager } from "./whisper/manager.ts";
-import { installWhisperIpc } from "./whisper/ipc.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -81,9 +79,6 @@ const config = new ConfigStore();
 const vault = new SecretVault();
 const registry = new ToolRegistry();
 const runtime = new RuntimeManager();
-/* Transcription runs in its own server: llama.cpp cannot produce the segment
-   timestamps a two-track meeting is assembled from. See core/runtime/whisperAssets.ts. */
-const whisper = new WhisperManager();
 
 let window_: BrowserWindow | undefined;
 let session_: Session | undefined;
@@ -351,7 +346,10 @@ async function handleSend(text: string): Promise<void> {
      * no honest number, so the meter and the compaction both stand down rather
      * than act on a guess.
      */
-    const limit = managed ? runtime.server.status.contextSize : undefined;
+    /* Lemonade does not report a per-conversation context window, so there is
+       no honest denominator for the meter here either -- the same stand-down
+       that already applies to an endpoint someone else runs. */
+    const limit = undefined;
 
     const result = await runTurn({
       registry,
@@ -813,26 +811,21 @@ async function main(): Promise<void> {
   setEndpointResolver(resolveLlm);
 
   installIpc();
-  await whisper.load();
-  installWhisperIpc({ whisper, send });
   installMeetingIpc({
     config,
-    whisper,
     send,
     llm: resolveLlm,
     transcriptionKey: () => vault.get("transcriptionKey"),
-    lemonadeTranscription: () => runtime.lemonadeTranscription(),
+    lemonadeTranscription: () => runtime.transcriptionEndpoint(),
   });
   installDictationIpc({ config, vault, send });
 
   createWindow();
   setPdfRenderer(installPdfRenderer());
 
-  if (runtime.config.startOnLaunch && runtime.config.activeModel) {
-    // Deliberately not awaited: a large model takes minutes to map and the
-    // window must not wait on it.
-    void runtime.startServer().catch(() => {});
-  }
+  // Deliberately not awaited: a large model takes minutes to map and the
+  // window must not wait on it.
+  void runtime.startOnLaunch().catch(() => {});
 }
 
 app.whenReady().then(() => {
@@ -910,9 +903,7 @@ app.on("window-all-closed", () => {
  */
 app.on("before-quit", () => {
   runtime.killNow();
-  whisper.killNow();
 });
 process.on("exit", () => {
   runtime.killNow();
-  whisper.killNow();
 });

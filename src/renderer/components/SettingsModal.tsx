@@ -78,7 +78,7 @@ export function SettingsModal({
 
         <div className="settings-body">
           {tab === "endpoints" ? <Endpoints settings={settings} patch={patch} vault={vault} /> : null}
-          {tab === "runtime" ? <RuntimePane {...(onOpenHub ? { onOpenHub } : {})} /> : null}
+          {tab === "runtime" ? <RuntimePane /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}

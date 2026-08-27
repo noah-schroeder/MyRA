@@ -93,17 +93,6 @@ const api = {
    * A second runtime beside llama.cpp, because llama.cpp cannot produce the
    * segment timestamps a two-track meeting is assembled from. Nothing here is
    * reachable by the model. */
-  whisperState: () => ipcRenderer.invoke("karen:whisper-state"),
-  whisperConfig: (patch: unknown) => ipcRenderer.invoke("karen:whisper-config", patch),
-  whisperInstall: () => ipcRenderer.invoke("karen:whisper-install"),
-  whisperModelInstall: (file: string) => ipcRenderer.invoke("karen:whisper-model-install", file),
-  whisperModelUse: (file: string) => ipcRenderer.invoke("karen:whisper-model-use", file),
-  whisperModelRemove: (file: string) => ipcRenderer.invoke("karen:whisper-model-remove", file),
-  whisperStart: () => ipcRenderer.invoke("karen:whisper-start"),
-  whisperStop: () => ipcRenderer.invoke("karen:whisper-stop"),
-  whisperCancel: () => ipcRenderer.invoke("karen:whisper-cancel"),
-  onWhisper: (cb: (state: unknown) => void) => on("karen:whisper", cb),
-  onWhisperDownload: (cb: (p: unknown) => void) => on("karen:whisper-download", cb),
 
   /* The renderer is the only thing that can enumerate capture devices, so it
    * reports them up rather than main asking down. */
@@ -122,43 +111,22 @@ const api = {
    * downloads a model, or starts a process. */
   runtimeState: () => ipcRenderer.invoke("karen:runtime-state"),
   runtimeConfig: (patch: unknown) => ipcRenderer.invoke("karen:runtime-config", patch),
-  runtimeDetect: () => ipcRenderer.invoke("karen:runtime-detect"),
-  runtimeSetUp: () => ipcRenderer.invoke("karen:runtime-setup"),
-  runtimeCheckUpdates: () => ipcRenderer.invoke("karen:runtime-check-updates"),
-  runtimeInstall: (tag: string, backend: string) => ipcRenderer.invoke("karen:runtime-install", tag, backend),
-  runtimeUpdate: (tag?: string) => ipcRenderer.invoke("karen:runtime-update", tag),
-  runtimeActivate: (id: string) => ipcRenderer.invoke("karen:runtime-activate", id),
-  runtimeRemoveBuild: (id: string) => ipcRenderer.invoke("karen:runtime-remove-build", id),
-  runtimeProbe: () => ipcRenderer.invoke("karen:runtime-probe"),
   /** Why no GPU was found: the driver\u2019s own answer plus the raw probe output. */
-  runtimeDiagnose: () => ipcRenderer.invoke("karen:runtime-diagnose"),
   lemonadeEnsure: () => ipcRenderer.invoke("karen:lemonade-ensure"),
   lemonadeInfo: () => ipcRenderer.invoke("karen:lemonade-info"),
   lemonadeInstallBackend: (recipe: string, backend: string) =>
     ipcRenderer.invoke("karen:lemonade-install-backend", recipe, backend),
   lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
+  lemonadeCatalog: () => ipcRenderer.invoke("karen:lemonade-catalog"),
   lemonadeModels: () => ipcRenderer.invoke("karen:lemonade-models"),
   lemonadeLoad: (name: string) => ipcRenderer.invoke("karen:lemonade-load", name),
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>
     ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
-  runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
-  runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),
-  runtimePlan: (path: string, override?: unknown) => ipcRenderer.invoke("karen:runtime-plan", path, override),
-  runtimeSetLaunch: (path: string, patch: unknown) =>
-    ipcRenderer.invoke("karen:runtime-set-launch", path, patch),
-  runtimeDeleteModel: (path: string) => ipcRenderer.invoke("karen:runtime-delete-model", path),
-  runtimeStart: (modelPath?: string) => ipcRenderer.invoke("karen:runtime-start", modelPath),
-  runtimeStop: () => ipcRenderer.invoke("karen:runtime-stop"),
   onRuntime: (cb: (state: unknown) => void) => on("karen:runtime", cb),
   onRuntimeDownload: (cb: (p: unknown) => void) => on("karen:runtime-download", cb),
 
   /* ---- model search ---- */
-  hfSearch: (query: string, sort?: string) => ipcRenderer.invoke("karen:hf-search", query, sort),
-  hfFiles: (repo: string) => ipcRenderer.invoke("karen:hf-files", repo),
-  hfInspect: (repo: string, entry: string, size: number) =>
-    ipcRenderer.invoke("karen:hf-inspect", repo, entry, size),
-  hfDownload: (repo: string, parts: unknown[]) => ipcRenderer.invoke("karen:hf-download", repo, parts),
 
   /* ---- research ---- */
   /** Academic search the user runs directly. No model in the loop. */
