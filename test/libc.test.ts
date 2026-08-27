@@ -77,14 +77,20 @@ describe("the bundle's contents", () => {
     assert.ok(cRuntimePatterns("arm64").every((p) => p.includes("aarch64-linux-gnu")));
   });
 
-  it("requires the loader and libc together, never one alone", () => {
-    /* A libc without its matching loader is worse than neither: the host loader
-       pairs with a libc it does not match and the process dies on
-       `undefined symbol: __nptl_change_stack_perm`. Measured. */
-    const need = cRuntimeEssentials("x64");
-    assert.ok(need.includes("ld-linux-x86-64.so.2"));
+  it("requires both C libraries that were reported missing", () => {
+    const need = cRuntimeEssentials();
     assert.ok(need.includes("libc.so.6"));
     assert.ok(need.includes("libstdc++.so.6"));
+  });
+
+  it("does not expect the loader among them, because it lives elsewhere", () => {
+    /* The loader sits beside the binary, not in LIBC_DIR. ggml finds its
+       backends relative to /proc/self/exe, which under a bundled loader is the
+       loader -- so with the loader one directory down ggml searched that
+       directory, found no backends, and reported "(none)". Measured: 28
+       backends natively, 0 through a loader in a subdirectory, 28 again with
+       the loader beside the binary. */
+    assert.ok(!cRuntimeEssentials().includes(loaderName("x64")));
   });
 
   it("ships shared objects and not the gdb script packaged beside them", () => {

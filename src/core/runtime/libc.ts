@@ -29,9 +29,26 @@
  *
  *     ld-linux-x86-64.so.2 --library-path <libc>:<app>:<host…> llama-server …
  *
- * Which is why the C runtime lives in its own subdirectory: `--library-path`
+ * Which is why the C LIBRARIES live in their own subdirectory: `--library-path`
  * is the only thing that ever names it, so no ordinary launch can pick up a
  * libc that does not match the loader running it.
+ *
+ * The LOADER, though, has to sit beside the binary, and that took a second
+ * round to find. Running through a loader changes what `/proc/self/exe` points
+ * at -- it becomes the loader, not the program -- and that is exactly how ggml
+ * finds its backends: it looks for `libggml-*.so` in the directory of the
+ * running executable. With the loader in a subdirectory ggml searched THAT
+ * directory, found no backends at all, and reported "Available devices:
+ * (none)" -- the same silence as before, now for a completely different
+ * reason. Measured: 28 backends loaded natively, 0 through a loader one
+ * directory down, 28 again with the loader beside the binary.
+ *
+ * `GGML_BACKEND_PATH` does not rescue this; it was tried and changed nothing.
+ *
+ * Keeping the loader beside the binary and the libraries below it gives both
+ * properties at once: ggml's search lands in the right directory, and no
+ * `libc.so.6` is ever sitting somewhere an ordinary LD_LIBRARY_PATH launch
+ * could find it.
  *
  * `--library-path` also REPLACES the system search rather than extending it,
  * so the host directories have to be listed explicitly -- including whatever
@@ -40,7 +57,7 @@
  * for another.
  */
 
-/** Where the bundled C runtime sits, relative to the binary. */
+/** Where the bundled C libraries sit, relative to the binary. */
 export const LIBC_DIR = "libc";
 
 /** The dynamic loader's name, which is architecture-specific. */
@@ -84,9 +101,15 @@ export function cRuntimePatterns(arch: string): string[] {
   ];
 }
 
-/** The files that must be present for the bundle to be usable. */
-export function cRuntimeEssentials(arch: string): string[] {
-  return [loaderName(arch), "libc.so.6", "libm.so.6", "libstdc++.so.6"];
+/**
+ * The libraries that must be present, inside LIBC_DIR, for the bundle to work.
+ *
+ * The loader is not in this list because it does not live here: it belongs
+ * beside the binary, so that ggml's backend search finds the build's own
+ * directory rather than this one.
+ */
+export function cRuntimeEssentials(): string[] {
+  return ["libc.so.6", "libm.so.6", "libstdc++.so.6"];
 }
 
 /** A shared object, as opposed to the gdb helper script shipped beside one. */

@@ -25,7 +25,8 @@ import { join } from "node:path";
 
 import { makePrivateDir } from "../../core/paths.ts";
 import {
-  cRuntimeEssentials, cRuntimePatterns, isSharedObject, LIBC_DIR, parseMissingLibraries,
+  cRuntimeEssentials, cRuntimePatterns, isSharedObject, LIBC_DIR, loaderName,
+  parseMissingLibraries,
 } from "../../core/runtime/libc.ts";
 import {
   appLayers, baseLayers, blobUrl, cudaTag, CUDA_IMAGE, isCudaLib, layersWithHistory, libraryLayers,
@@ -231,7 +232,7 @@ export async function installLinuxCuda(opts: CudaInstallOptions): Promise<CudaIn
    * which these binaries are known to be correct: their own.
    */
   opts.onPhase?.("fetching the C library this build was compiled against");
-  const bundledLibc = await fetchCRuntime(layers, pull, join(unpacked, LIBC_DIR), opts);
+  const bundledLibc = await fetchCRuntime(layers, pull, unpacked, opts);
 
   /*
    * Does this machine already have the CUDA runtime?
@@ -341,33 +342,46 @@ async function fetchCudaLibraries(
 async function fetchCRuntime(
   layers: Layer[],
   pull: (layer: Layer, what: string) => Promise<string>,
-  into: string,
+  appDir: string,
   opts: CudaInstallOptions,
 ): Promise<boolean> {
   const patterns = cRuntimePatterns(process.arch);
-  const essentials = cRuntimeEssentials(process.arch);
+  const essentials = cRuntimeEssentials();
+  const loader = loaderName(process.arch);
+  const libDir = join(appDir, LIBC_DIR);
+
   const have = async (): Promise<boolean> => {
-    const names = new Set(await readdir(into).catch(() => []));
-    return essentials.every((name) => names.has(name));
+    const libs = new Set(await readdir(libDir).catch(() => []));
+    if (!essentials.every((name) => libs.has(name))) return false;
+    return Boolean(await stat(join(appDir, loader)).catch(() => undefined));
   };
 
   for (const layer of baseLayers(layers)) {
     if (await have()) break;
     const archive = await pull(layer, "the C library this build needs");
     opts.onPhase?.("unpacking the C library");
-    const found = await extractMatching(archive, into, patterns);
+    const found = await extractMatching(archive, libDir, patterns);
     await rm(archive, { force: true });
     for (const name of found) {
-      const path = join(into, name);
+      const path = join(libDir, name);
       /* `libstdc++.so.*` also matches the gdb helper script packaged beside it.
          Nothing should ship out of here that is not a shared object. */
-      if (isSharedObject(name)) await chmod(path, 0o755).catch(() => undefined);
-      else await rm(path, { force: true }).catch(() => undefined);
+      if (!isSharedObject(name)) {
+        await rm(path, { force: true }).catch(() => undefined);
+        continue;
+      }
+      await chmod(path, 0o755).catch(() => undefined);
+      /* The loader moves up beside the binary. ggml finds its backends in the
+         directory of /proc/self/exe, which when a bundled loader is used is
+         the loader -- so this placement is what makes the CUDA backend
+         discoverable at all. See core/runtime/libc.ts. */
+      if (name === loader) await rename(path, join(appDir, name));
     }
   }
 
   if (await have()) return true;
-  await rm(into, { recursive: true, force: true }).catch(() => undefined);
+  await rm(libDir, { recursive: true, force: true }).catch(() => undefined);
+  await rm(join(appDir, loader), { force: true }).catch(() => undefined);
   return false;
 }
 
