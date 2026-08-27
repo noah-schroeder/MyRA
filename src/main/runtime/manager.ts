@@ -352,6 +352,19 @@ export class RuntimeManager {
     signal?: AbortSignal,
   ): Promise<{ build: InstalledBuild; devices: Device[]; accelerated: boolean }> {
     const target = { platform: process.platform, arch: process.arch, backend };
+
+    /*
+     * Linux CUDA comes from the container registry, not the release page.
+     *
+     * Upstream builds it and publishes it there instead; `pickAsset` correctly
+     * finds nothing, and the honest response to that is to go where the build
+     * actually is rather than to tell the user their card cannot be used. See
+     * core/runtime/oci.ts.
+     */
+    if (backend === "cuda" && process.platform === "linux") {
+      return await this.#installLinuxCuda(release, signal);
+    }
+
     const asset = pickAsset(release, target);
     if (!asset) {
       throw new Error(
@@ -416,6 +429,63 @@ export class RuntimeManager {
   }
 
   /**
+   * Linux CUDA, from upstream's container image.
+   *
+   * Shaped to return exactly what installBuild returns, so every caller --
+   * first run, the update button, a manual backend change -- is unaffected by
+   * where the bytes came from. The build id keeps the same `<tag>-<backend>`
+   * form the rest of the manager parses, using the llama.cpp build number the
+   * image records in its own OCI labels rather than the release tag, because
+   * the image is built from a commit and may be a build or two behind.
+   */
+  async #installLinuxCuda(
+    release: Release,
+    signal?: AbortSignal,
+  ): Promise<{ build: InstalledBuild; devices: Device[]; accelerated: boolean }> {
+    const { installLinuxCuda } = await import("./cuda.ts");
+    const staging = join(stagingDir(), `cuda-${release.tag_name}`);
+    await rm(staging, { recursive: true, force: true });
+
+    // Provisional: replaced below with the build the image actually reports.
+    let dir = buildDir(release.tag_name, "cuda");
+    const result = await installLinuxCuda({
+      dir,
+      staging,
+      ...(signal ? { signal } : {}),
+      onPhase: (what) => this.#setPhase({ kind: "extracting", what }),
+      onProgress: (p) =>
+        this.#setPhase({
+          kind: "downloading",
+          what: p.what,
+          receivedBytes: p.receivedBytes,
+          ...(p.totalBytes ? { totalBytes: p.totalBytes } : {}),
+          bytesPerSecond: p.bytesPerSecond,
+        }),
+    });
+
+    // Rename to the build the image reports, so the pane does not claim a
+    // version that was never installed.
+    const id = `${result.build}-cuda`;
+    const settled = buildDir(result.build, "cuda");
+    if (settled !== dir) {
+      await rm(settled, { recursive: true, force: true });
+      await rename(dir, settled).catch(() => undefined);
+      dir = settled;
+    }
+
+    this.#setPhase({ kind: "probing", what: id });
+    const binary = join(dir, "llama-server");
+    const devices = parseDevices(await listDevices(binary));
+    this.#devices = devices;
+    this.#setPhase({ kind: "idle" });
+
+    const build: InstalledBuild = {
+      id, tag: result.build, backend: "cuda", dir, binary, devices,
+    };
+    return { build, devices, accelerated: hasAccelerator(devices) };
+  }
+
+  /**
    * The whole first-run path: pick a backend, install it, and fall back to CPU
    * if the probe says the accelerated build found nothing.
    */
@@ -427,8 +497,32 @@ export class RuntimeManager {
     if (!release) throw new Error("no llama.cpp build releases were found.");
 
     const { backend, reason } = this.suggestion();
-    let result = await this.installBuild(release, backend, signal);
     let note = reason;
+    let result: { build: InstalledBuild; devices: Device[]; accelerated: boolean };
+
+    try {
+      result = await this.installBuild(release, backend, signal);
+    } catch (err) {
+      /*
+       * A backend that will not install must not end first-run.
+       *
+       * This became reachable when Linux started preferring CUDA: the install
+       * checks whether the NVIDIA driver is present and refuses outright when
+       * it is not, which is the right answer to give but the wrong place to
+       * stop. Vulkan runs on the same card without the driver's CUDA half, so
+       * it is the honest second choice -- and the reason is carried forward so
+       * the user is told what happened rather than quietly given something
+       * slower than they asked for.
+       */
+      if (backend === "cpu" || (err as Error).name === "AbortError") throw err;
+      const fallback: Backend = backend === "cuda" ? "vulkan" : "cpu";
+      note = `${(err as Error).message} Karen installed the ${fallback} build instead.`;
+      result = await this.installBuild(release, fallback, signal).catch(async (second) => {
+        if ((second as Error).name === "AbortError") throw second;
+        note = `${(err as Error).message} Karen installed the processor build instead.`;
+        return await this.installBuild(release, "cpu", signal);
+      });
+    }
 
     if (!result.accelerated && backend !== "cpu" && backend !== "metal") {
       // The guess was wrong -- a card with no working driver, most likely. CPU

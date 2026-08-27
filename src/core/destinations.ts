@@ -65,6 +65,16 @@ export const DESTINATIONS: readonly Destination[] = [
     sends: "Nothing but the request",
   },
   {
+    host: "ghcr.io",
+    when: "You install the CUDA runtime on Linux, which upstream publishes only as a container image",
+    sends: "Nothing but the request",
+  },
+  {
+    host: ".ghcr.io",
+    when: "GitHub redirects that download to its own blob host",
+    sends: "Nothing but the request",
+  },
+  {
     host: "huggingface.co",
     when: "You search for or download a model",
     sends: "The search terms you type",
