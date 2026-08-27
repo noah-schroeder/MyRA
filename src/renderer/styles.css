@@ -1041,6 +1041,7 @@ kbd {
 }
 
 .rail-brand {
+  flex: none;
   display: flex; align-items: center; gap: 9px;
   padding: 6px 9px 12px;
   font-size: 14px; font-weight: 620; letter-spacing: -0.015em;
@@ -1054,7 +1055,7 @@ kbd {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-.rail-nav { display: flex; flex-direction: column; gap: 1px; }
+.rail-nav { flex: none; display: flex; flex-direction: column; gap: 1px; }
 
 .rail-nav-item {
   display: flex; align-items: center; gap: 10px;
@@ -1076,8 +1077,14 @@ kbd {
   padding: 14px 10px 6px; margin: 0;
 }
 
-/* Pushed to the bottom, outside the scrolling list above it. */
-.rail-foot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
+/* Pushed to the bottom, outside the scrolling list above it.
+   `flex: none` is not decoration: without it a long history shrinks this to
+   nothing before the list ever scrolls, and Settings goes off the bottom of
+   the window with no way to reach it. */
+.rail-foot {
+  flex: none;
+  margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border);
+}
 
 .main {
   display: flex;
@@ -1298,7 +1305,29 @@ kbd {
 
 /* ---------- history rail ---------- */
 
-.sessions { display: flex; flex-direction: column; gap: 4px; padding: 12px 10px; }
+/*
+ * The one scrolling region in the rail.
+ *
+ * This carried no overflow at all, so the list simply grew: past twenty or so
+ * conversations it pushed Settings off the bottom of the window, and the only
+ * way back to it was to delete history. `min-height: 0` is the half that is
+ * easy to miss -- a flex child's default `min-height: auto` refuses to shrink
+ * below its content, and `overflow-y` on its own then never has anything to
+ * scroll.
+ */
+.sessions {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 4px; padding: 0 2px 4px;
+}
+/* Stays put while the list moves under it, so the section keeps its label. */
+.sessions .rail-heading {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-inset);
+  padding: 12px 8px 6px;
+}
 
 .new-session {
   font: inherit; font-size: 12.5px;
@@ -2773,3 +2802,289 @@ p.warning { margin: 0; font-size: 12.5px; }
   resize: vertical;
 }
 .settings-prose:focus-visible { outline: none; border-color: var(--accent-dim); }
+
+/* ==========================================================================
+   Models page — engines and the catalogue
+   ==========================================================================
+
+   This page previously carried two class names, `.pane-block` and
+   `.device-list`, that were never defined anywhere in this file: it rendered
+   as bulleted lists of unstyled buttons. It is the one screen in Karen that is
+   scanned rather than read -- 228 models, fifteen engines, four verdicts -- so
+   it is built as information design: state encoded in form as well as in text,
+   and the summary above the detail.
+
+   Semantic colour here is separate from the amber accent. Amber means "this is
+   the one you chose"; green/amber/red mean "this will/might/will not run". */
+
+.models-page {
+  /* Named so the sticky bar below can bleed back out through them. */
+  --page-pad-x: 26px;
+  --page-pad-y: 22px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--page-pad-y) var(--page-pad-x) 48px;
+}
+
+.lem { display: flex; flex-direction: column; gap: 30px; }
+
+.lem-section { display: flex; flex-direction: column; gap: 12px; }
+
+.lem-head { display: flex; flex-direction: column; gap: 3px; }
+.lem-head h3 {
+  margin: 0; font-size: 15px; font-weight: 620;
+  letter-spacing: -0.012em; color: var(--text);
+  text-wrap: balance;
+}
+.lem-head.sub { margin-top: 8px; }
+.lem-head h4 { margin: 0; font-size: 13px; font-weight: 620; color: var(--text); }
+.lem-head p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-dim); max-width: 68ch; }
+
+.lem-waiting { margin: 0; font-size: 12.5px; color: var(--text-dim); }
+
+/* ---------- status and progress ---------- */
+
+.lem-status {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid var(--accent-dim); border-radius: var(--radius);
+  background: var(--accent-wash);
+}
+.lem-status.bad { border-color: color-mix(in srgb, var(--red) 45%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.lem-status.bad .lem-status-line { color: var(--red); }
+.lem-status-line {
+  margin: 0; display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--text);
+}
+
+.lem-spinner {
+  width: 11px; height: 11px; flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent-dim);
+  border-top-color: var(--accent);
+  animation: lem-spin 700ms linear infinite;
+}
+@keyframes lem-spin { to { transform: rotate(360deg); } }
+
+.lem-job { display: flex; flex-direction: column; gap: 5px; }
+.lem-job-head { display: flex; align-items: baseline; gap: 10px; font-size: 11.5px; }
+.lem-job-name { font-family: var(--mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lem-job-figure { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lem-bar { height: 4px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
+.lem-bar-fill { height: 100%; background: var(--accent); transition: width var(--t-med); }
+
+/* ---------- machine ---------- */
+
+.lem-stats {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+.lem-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 11px 13px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); box-shadow: var(--lift);
+}
+/* The accelerator is the answer to the question this page exists to ask. */
+.lem-stat.accel { border-color: var(--accent-dim); background: var(--accent-wash); }
+.lem-stat-key {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-faint);
+}
+.lem-stat-value {
+  font-size: 13.5px; color: var(--text); line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.lem-stat.accel .lem-stat-value { color: var(--accent-soft); }
+.lem-stat-figure { font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+.lem-callout {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 11px 13px 11px 14px;
+  border-left: 2px solid var(--accent-dim);
+  background: var(--bg-inset);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.lem-callout-title { margin: 0; font-size: 12.5px; color: var(--text); }
+.lem-callout-body { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-dim); }
+
+/* ---------- engines ---------- */
+
+.lem-grid {
+  display: grid; gap: 9px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+.lem-card {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 12px 13px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); box-shadow: var(--lift);
+}
+.lem-card.ready { border-color: color-mix(in srgb, var(--green) 32%, var(--border)); }
+.lem-card-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.lem-card-head h4 { margin: 0; font-size: 13px; font-weight: 620; color: var(--text); }
+.lem-card-impl { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); }
+
+.lem-backends { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.lem-install {
+  font: inherit; font-size: 11.5px;
+  padding: 4px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--bg-float);
+  color: var(--text-dim); cursor: pointer; white-space: nowrap;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.lem-install:hover:not(:disabled) { color: var(--accent-soft); border-color: var(--accent-dim); background: var(--accent-wash); }
+.lem-install:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.lem-blocked { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.lem-blocked li { font-size: 11px; line-height: 1.45; color: var(--text-faint); }
+
+.lem-more {
+  align-self: flex-start;
+  font: inherit; font-size: 11.5px;
+  background: none; border: 0; padding: 2px 0;
+  color: var(--text-dim); cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--border-hover);
+  text-underline-offset: 3px;
+}
+.lem-more:hover { color: var(--accent-soft); }
+
+/* ---------- chips ---------- */
+
+.lem-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex: none;
+  font-size: 10.5px; font-family: var(--mono);
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-faint);
+  white-space: nowrap;
+}
+.lem-chip.good   { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: color-mix(in srgb, var(--green) 8%, transparent); }
+.lem-chip.warn   { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 42%, transparent); background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.lem-chip.bad    { color: var(--red);   border-color: color-mix(in srgb, var(--red) 38%, transparent); }
+.lem-chip.dim    { color: var(--text-faint); }
+.lem-chip.accent { color: var(--accent-soft); border-color: var(--accent-dim); background: var(--accent-wash); }
+
+/* ---------- catalogue ---------- */
+
+/*
+ * Tabs and search travel together, pinned to the top of the scroll region.
+ *
+ * The chat group is 178 rows. A filter control that leaves the viewport as
+ * soon as you scroll into the thing it filters is a control you have to scroll
+ * back up to reach, every time.
+ */
+.lem-browser-bar {
+  position: sticky;
+  /* A sticky element pins against the scroll container's CONTENT edge, so the
+     page's own top padding left a 22px slot that rows scrolled through above
+     the bar. Pull the bar out through the padding on all three sides and give
+     it that space back as its own, so it covers the gutter it sits in. The
+     fallbacks are what make this same component correct inside Settings,
+     where there is no page padding to escape. */
+  top: calc(-1 * var(--page-pad-y, 0px));
+  margin: 0 calc(-1 * var(--page-pad-x, 0px));
+  padding: calc(var(--page-pad-y, 0px) + 4px) var(--page-pad-x, 0px) 10px;
+  z-index: 2;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.lem-tabs {
+  display: flex; flex-wrap: wrap; gap: 2px;
+}
+.lem-tab {
+  display: flex; align-items: center; gap: 7px;
+  font: inherit; font-size: 12.5px;
+  padding: 7px 11px; margin-bottom: -1px;
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--text-dim); cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+.lem-tab:hover { color: var(--text); }
+.lem-tab.on { color: var(--accent-soft); border-bottom-color: var(--accent); }
+.lem-tab:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: -2px; border-radius: var(--radius-sm); }
+.lem-tab-count {
+  font-size: 10px; font-variant-numeric: tabular-nums;
+  padding: 1px 5px; border-radius: 999px;
+  background: var(--bg-float); color: var(--text-faint);
+}
+.lem-tab.on .lem-tab-count { background: var(--accent-wash); color: var(--accent-soft); }
+
+.lem-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lem-search {
+  flex: 1 1 240px; min-width: 0;
+  font: inherit; font-size: 12.5px;
+  padding: 7px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-inset); color: var(--text);
+}
+.lem-search::placeholder { color: var(--text-faint); }
+.lem-search:focus-visible {
+  outline: none; border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.lem-toggle {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--text-dim); cursor: pointer; white-space: nowrap;
+}
+.lem-toggle input { accent-color: var(--accent); cursor: pointer; }
+
+.lem-group-hint { margin: 0; font-size: 12px; color: var(--text-faint); }
+
+.lem-models { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+
+/*
+ * A row, not a card: at ninety entries a grid of cards is a wall, and the
+ * three things being compared -- name, size, whether it fits -- line up into
+ * scannable columns only if the row is a row.
+ */
+.lem-model {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.lem-model:hover { border-color: var(--border-strong); }
+.lem-model.loaded { border-color: var(--accent-dim); background: var(--accent-wash); }
+
+.lem-model-id { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 7px; }
+.lem-model-name {
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lem-model-size {
+  flex: none; width: 68px; text-align: right;
+  font-size: 11.5px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* Fixed width so the verdicts stack into a column the eye can run down. */
+.lem-model .lem-chip { width: 88px; justify-content: center; }
+
+.lem-act {
+  flex: none; min-width: 84px;
+  font: inherit; font-size: 11.5px;
+  padding: 4px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--bg-float);
+  color: var(--text-dim); cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.lem-act:hover:not(:disabled) { color: var(--text); border-color: var(--border-hover); }
+.lem-act.get:hover:not(:disabled) { color: var(--accent-soft); border-color: var(--accent-dim); background: var(--accent-wash); }
+.lem-act:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.lem-none { font-size: 12px; color: var(--text-faint); padding: 14px 11px; }
+
+/* Narrow windows and the settings pane: the verdict keeps its meaning, the
+   size column is what goes. */
+@media (max-width: 620px) {
+  .lem-model-size { display: none; }
+  .lem-model .lem-chip { width: auto; }
+}
+
+/* Settings → Runtime wraps the same pane, and needs one grouping box for the
+   two switches that are Karen's own rather than the daemon's. */
+.pane-block { display: flex; flex-direction: column; gap: 9px; }
