@@ -387,6 +387,18 @@ export interface KarenApi {
     backend: string,
   ): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
   lemonadeDownloads(): Promise<{ ok: boolean; jobs: DownloadJob[] }>;
+  lemonadeModels(): Promise<{
+    ok: boolean;
+    error?: string;
+    models: { id: string; downloaded?: boolean }[];
+    loaded?: string;
+  }>;
+  lemonadeLoad(name: string): Promise<{ ok: boolean; error?: string; loaded?: string }>;
+  lemonadeUnload(): Promise<{ ok: boolean; error?: string }>;
+  lemonadePull(
+    name: string,
+    checkpoint?: string,
+  ): Promise<{ ok: boolean; error?: string; models?: { id: string; downloaded?: boolean }[] }>;
   runtimeCancel(): Promise<{ ok: boolean }>;
   runtimeModels(): Promise<LocalModel[]>;
   runtimePlan(path: string, override?: Partial<LaunchSettings>): Promise<LaunchPlan>;

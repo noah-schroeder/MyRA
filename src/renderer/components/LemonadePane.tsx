@@ -33,6 +33,8 @@ export function LemonadePane() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [phase, setPhase] = useState<string | undefined>();
+  const [models, setModels] = useState<{ id: string; downloaded?: boolean }[]>([]);
+  const [loaded, setLoaded] = useState<string | undefined>();
   const running = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -41,6 +43,11 @@ export function LemonadePane() {
       setInfo(res.info);
       setError(undefined);
     } else if (res.error) setError(res.error);
+    const list = await window.karen.lemonadeModels();
+    if (list.ok) {
+      setModels(list.models);
+      setLoaded(list.loaded);
+    }
   }, []);
 
   const start = useCallback(async (): Promise<void> => {
@@ -79,6 +86,16 @@ export function LemonadePane() {
     setJobs([]);
     if (!res.ok) setError(res.error);
     else if (res.info) setInfo(res.info);
+  };
+
+  const load = async (id: string): Promise<void> => {
+    setBusy(true);
+    setPhase(`loading ${id}`);
+    const res = id === loaded ? await window.karen.lemonadeUnload() : await window.karen.lemonadeLoad(id);
+    setBusy(false);
+    setPhase(undefined);
+    if (!res.ok) setError(res.error);
+    setLoaded(id === loaded ? undefined : id);
   };
 
   const installable = (info?.backends ?? []).filter((b) => b.state !== "unsupported");
@@ -137,6 +154,28 @@ export function LemonadePane() {
               </li>
             ))}
           </ul>
+
+          <h4 className="pane-sub">Models</h4>
+          {models.length ? (
+            <ul className="device-list">
+              {models.map((m) => (
+                <li key={m.id}>
+                  <span className="build-tag">{m.id}</span>
+                  {m.downloaded ? <span className="pill">on this machine</span> : null}
+                  {m.id === loaded ? <span className="pill">loaded</span> : null}
+                  <span className="build-spacer" />
+                  <button type="button" onClick={() => void load(m.id)} disabled={busy}>
+                    {m.id === loaded ? "Unload" : "Load"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hint">
+              No models yet. Anything already in Karen&apos;s models folder is picked up
+              automatically.
+            </p>
+          )}
 
           {blocked.length ? (
             <p className="hint">

@@ -137,6 +137,11 @@ const api = {
   lemonadeInstallBackend: (recipe: string, backend: string) =>
     ipcRenderer.invoke("karen:lemonade-install-backend", recipe, backend),
   lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
+  lemonadeModels: () => ipcRenderer.invoke("karen:lemonade-models"),
+  lemonadeLoad: (name: string) => ipcRenderer.invoke("karen:lemonade-load", name),
+  lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
+  lemonadePull: (name: string, checkpoint?: string) =>
+    ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
   runtimeCancel: () => ipcRenderer.invoke("karen:runtime-cancel"),
   runtimeModels: () => ipcRenderer.invoke("karen:runtime-models"),
   runtimePlan: (path: string, override?: unknown) => ipcRenderer.invoke("karen:runtime-plan", path, override),

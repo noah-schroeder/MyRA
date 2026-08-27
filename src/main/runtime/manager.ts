@@ -186,6 +186,45 @@ export class RuntimeManager {
   }
 
   /**
+   * A transcription endpoint, when Lemonade has a speech model to offer.
+   *
+   * Returns the model name as well as the address, because the two are not
+   * separable here: the configured default is OpenAI's `whisper-1`, which this
+   * daemon has never heard of, so sending that would fail on a server that is
+   * working perfectly. Whichever Whisper is actually present is used instead.
+   *
+   * Nothing is started for this. If the daemon is not already running, the
+   * answer is "no" -- transcription should not be what pays to boot it.
+   */
+  async lemonadeTranscription(): Promise<{ baseUrl: string; apiKey: string; model: string } | undefined> {
+    const status = this.#lemonade.status;
+    if (status.state !== "ready" || !status.baseUrl) return undefined;
+    try {
+      const models = await this.#api.listModels();
+      const speech = models.find((m) => /whisper|moonshine/i.test(m.id) && m.downloaded !== false);
+      if (!speech) return undefined;
+      return { baseUrl: status.baseUrl, apiKey: this.#lemonade.apiKey, model: speech.id };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Load a model in Lemonade and let chat routing see it. */
+  async loadLemonadeModel(name: string): Promise<void> {
+    await this.ensureLemonade();
+    await this.#api.loadModel(name);
+    await this.#lemonade.refreshHealth();
+    this.#emit();
+  }
+
+  async unloadLemonadeModel(): Promise<void> {
+    if (this.#lemonade.status.state !== "ready") return;
+    await this.#api.unloadModel();
+    await this.#lemonade.refreshHealth();
+    this.#emit();
+  }
+
+  /**
    * Have a Lemonade running, installing it the first time.
    *
    * Idempotent and cheap when it is already up, because everything that wants
@@ -216,8 +255,10 @@ export class RuntimeManager {
     opts.onPhase?.("starting Lemonade");
     const status = await this.#lemonade.start({
       binary,
-      cacheDir: this.#config.modelsDir || lemonadeCacheDir(),
+      cacheDir: lemonadeCacheDir(),
       configDir: lemonadeConfigDir(),
+      // So the library built up under the old runtime is simply there.
+      modelsDir: this.#config.modelsDir || defaultModelsDir(),
     });
     if (status.state !== "ready") {
       throw new Error(status.error ?? "Lemonade did not start.");
@@ -891,9 +932,22 @@ export class RuntimeManager {
    * listening produces a connection error where "you have not started a model"
    * is the truth.
    */
+  /**
+   * Where chat should send its requests, when Karen is hosting the model.
+   *
+   * Lemonade first, then the llama-server it is replacing. Both speak the same
+   * OpenAI-compatible shape, so the caller does not care which answered -- and
+   * during the migration a machine may legitimately have either, so preferring
+   * one and falling back is what keeps both working.
+   */
   chatEndpoint(): { baseUrl: string; apiKey: string } | undefined {
+    if (!this.#config.useForChat) return undefined;
+    const lemonade = this.#lemonade.status;
+    if (lemonade.state === "ready" && lemonade.baseUrl && lemonade.health?.modelLoaded) {
+      return { baseUrl: lemonade.baseUrl, apiKey: this.#lemonade.apiKey };
+    }
     const status = this.#server.status;
-    if (!this.#config.useForChat || status.state !== "ready" || !status.baseUrl) return undefined;
+    if (status.state !== "ready" || !status.baseUrl) return undefined;
     return { baseUrl: status.baseUrl, apiKey: this.#server.apiKey };
   }
 

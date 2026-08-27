@@ -41,6 +41,9 @@ export interface MeetingDeps {
   llm: () => Promise<{ endpoint: EndpointSettings; apiKey?: string; label?: string }>;
   /** Only needed when transcription goes to someone else's endpoint. */
   transcriptionKey: () => Promise<string | undefined>;
+  /** Lemonade's transcription endpoint, when it is running and has a model. */
+  lemonadeTranscription?: () =>
+    Promise<{ baseUrl: string; apiKey: string; model: string } | undefined>;
   send: (channel: string, payload?: unknown) => void;
 }
 
@@ -167,6 +170,18 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       const local = whisper.endpoint();
       if (local) return { endpoint: { ...config.current.transcription, baseUrl: local.baseUrl } };
     }
+    /* Lemonade, when it is up and has a speech model. Tried after Karen's own
+       whisper-server so an existing setup keeps behaving exactly as it did, and
+       before the error below so that having Lemonade running is enough -- there
+       is nothing further to configure. */
+    const lemonade = await deps.lemonadeTranscription?.();
+    if (lemonade) {
+      return {
+        endpoint: { ...config.current.transcription, baseUrl: lemonade.baseUrl, model: lemonade.model },
+        apiKey: lemonade.apiKey,
+      };
+    }
+
     const settings = config.current.transcription;
     if (!settings.baseUrl.trim()) {
       throw new Error(

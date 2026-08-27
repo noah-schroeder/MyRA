@@ -159,12 +159,22 @@ export function parseHealth(body: unknown): LemonadeHealth {
  * at localhost. It is pinned anyway: a guarantee that rests on someone else's
  * default is not a guarantee, and this file is the cheapest place to hold it.
  */
-export function pinnedConfig(): Record<string, unknown> {
+export function pinnedConfig(modelsDir?: string): Record<string, unknown> {
   return {
     broadcast: false,
     auto_check_model_updates: false,
     auto_update_models: false,
     telemetry: { enabled: false },
+    /*
+     * Where Karen's existing models already are.
+     *
+     * This is the whole of the migration. Lemonade scans this directory and
+     * lists what it finds as downloaded models, so a library built up under the
+     * old runtime is simply there -- no per-model registration, and nothing
+     * re-downloaded. Measured against a real models directory: both GGUF files
+     * in it appeared, both marked as already present.
+     */
+    ...(modelsDir ? { extra_models_dir: modelsDir } : {}),
   };
 }
 

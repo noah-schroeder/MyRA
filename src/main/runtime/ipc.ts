@@ -161,6 +161,44 @@ export function installRuntimeIpc(
     }
   });
 
+  ipcMain.handle("karen:lemonade-models", async () => {
+    try {
+      await runtime.ensureLemonade();
+      return { ok: true, models: await runtime.api.listModels(),
+               loaded: runtime.lemonade.status.health?.modelLoaded };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message, models: [] };
+    }
+  });
+
+  ipcMain.handle("karen:lemonade-load", async (_e, name: string) => {
+    try {
+      await runtime.loadLemonadeModel(String(name));
+      return { ok: true, loaded: runtime.lemonade.status.health?.modelLoaded };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("karen:lemonade-unload", async () => {
+    try {
+      await runtime.unloadLemonadeModel();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("karen:lemonade-pull", async (_e, name: string, checkpoint?: string) => {
+    try {
+      await runtime.ensureLemonade();
+      await runtime.api.pullModel(String(name), checkpoint ? String(checkpoint) : undefined);
+      return { ok: true, models: await runtime.api.listModels() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle("karen:lemonade-downloads", async () => {
     try {
       return { ok: true, jobs: await runtime.api.downloads() };
