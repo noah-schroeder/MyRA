@@ -43,6 +43,7 @@ import {
 import { dedupeFound, knownStores, scanStore, type FoundModel, type WalkFs } from "../../core/runtime/scan.ts";
 import { downloadFile, extractArchive, findExecutable } from "./download.ts";
 import { buildDir, defaultModelsDir, stagingDir } from "./paths.ts";
+import { LemonadeServer } from "./lemonade.ts";
 import { LlamaServer, listDevices, type ServerStatus } from "./server.ts";
 
 const RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=30";
@@ -123,6 +124,15 @@ export type Phase =
 export class RuntimeManager {
   #config: RuntimeConfig = { ...DEFAULTS, modelsDir: "" };
   #server = new LlamaServer();
+  /*
+   * The Lemonade daemon, which is taking over inference.
+   *
+   * Held here from the start of the migration so that the one guarantee that
+   * must never lapse -- nothing we spawn outlives the app -- covers it the
+   * moment anything starts it, rather than being remembered later. It is not
+   * yet started by anything; that arrives with the backend work.
+   */
+  #lemonade = new LemonadeServer();
   #phase: Phase = { kind: "idle" };
   #gpu: GpuInfo = { vendorIds: [], supportsVulkan: false };
   /** The binary the running server was launched from. */
@@ -150,6 +160,10 @@ export class RuntimeManager {
 
   get server(): LlamaServer {
     return this.#server;
+  }
+
+  get lemonade(): LemonadeServer {
+    return this.#lemonade;
   }
   get config(): RuntimeConfig {
     return this.#config;
@@ -826,10 +840,12 @@ export class RuntimeManager {
 
   async stopServer(): Promise<void> {
     await this.#server.stop();
+    await this.#lemonade.stop();
     this.#serverBinary = undefined;
   }
 
   killNow(): void {
     this.#server.killNow();
+    this.#lemonade.killNow();
   }
 }

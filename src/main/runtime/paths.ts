@@ -31,3 +31,29 @@ export function defaultModelsDir(): string {
 export function stagingDir(): string {
   return join(app.getPath("userData"), "staging");
 }
+
+/**
+ * Where the Lemonade daemon and its state live.
+ *
+ * Versioned, so an upgrade installs beside the old one rather than over it --
+ * the same discipline the llama.cpp builds use, and for the same reason: a bad
+ * version should be recoverable without a download.
+ *
+ * The cache holds downloaded backends and models and reaches tens of gigabytes,
+ * so it is deliberately separate from the daemon itself and is passed in rather
+ * than assumed -- Settings already owns a models directory, and this should be
+ * able to follow it.
+ */
+export function lemonadeDir(version: string): string {
+  return join(runtimesDir(), "lemonade", version);
+}
+
+/** Lemonade's own JSON state: config.json, jobs.json. Small, ours, disposable. */
+export function lemonadeConfigDir(): string {
+  return join(app.getPath("userData"), "lemonade", "config");
+}
+
+/** Default cache location, used until the models directory setting is wired in. */
+export function lemonadeCacheDir(): string {
+  return join(app.getPath("userData"), "lemonade", "cache");
+}
