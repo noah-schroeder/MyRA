@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+
+import { LemonadePane } from "./LemonadePane.tsx";
 import type {
   LocalModel, RuntimeDevice, RuntimeDiagnosis, RuntimeState,
 } from "../types.ts";
@@ -240,6 +242,7 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
 
   return (
     <div className="pane">
+      <LemonadePane />
       <p className="pane-lead">
         Karen can run a model on this machine, so nothing you type leaves it. This is optional — if
         you already point Karen at an endpoint of your own, you can ignore all of it.

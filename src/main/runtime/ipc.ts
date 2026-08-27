@@ -119,6 +119,57 @@ export function installRuntimeIpc(
     };
   });
 
+  /*
+   * Lemonade.
+   *
+   * These sit beside the llama.cpp handlers rather than replacing them while
+   * the migration is in progress, so that a machine that has not yet moved
+   * still has a working runtime pane.
+   */
+  ipcMain.handle("karen:lemonade-ensure", async () => {
+    try {
+      await runtime.ensureLemonade({
+        onPhase: (what) => send("karen:runtime-phase", { what }),
+        onProgress: (p) => send("karen:runtime-download", {
+          what: p.what,
+          receivedBytes: p.receivedBytes,
+          ...(p.totalBytes ? { totalBytes: p.totalBytes } : {}),
+          bytesPerSecond: p.bytesPerSecond,
+        }),
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("karen:lemonade-info", async () => {
+    try {
+      return { ok: true, info: await runtime.api.systemInfo() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("karen:lemonade-install-backend", async (_e, recipe: string, backend: string) => {
+    try {
+      await runtime.ensureLemonade();
+      await runtime.api.installBackend(String(recipe), String(backend));
+      return { ok: true, info: await runtime.api.systemInfo() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("karen:lemonade-downloads", async () => {
+    try {
+      return { ok: true, jobs: await runtime.api.downloads() };
+    } catch {
+      // Polled on a timer; a failure here is not worth a dialog.
+      return { ok: false, jobs: [] };
+    }
+  });
+
   ipcMain.handle("karen:runtime-config", async (_e, patch: Record<string, unknown>) =>
     runtime.update(patch),
   );
