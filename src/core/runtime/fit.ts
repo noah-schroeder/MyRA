@@ -14,7 +14,31 @@
  * load, which is worse than saying nothing.
  */
 
-import type { ModelShape } from "./gguf.ts";
+/**
+ * As much of a model's architecture as affects the KV cache.
+ *
+ * Read from a GGUF header when Karen parsed those itself. Nothing supplies it
+ * now that Lemonade owns the model files -- its catalogue gives a download size
+ * and no architecture -- so every estimate here currently takes the rule-of-
+ * thumb path and says so via `estimated`. Kept because the exact arithmetic is
+ * correct and hard-won, and a shape may become available again through the
+ * daemon.
+ */
+export interface ModelShape {
+  architecture?: string;
+  layers?: number;
+  embeddingLength?: number;
+  headCount?: number;
+  /** Grouped-query models have fewer KV heads than attention heads. */
+  headCountKv?: number;
+  /** Per-layer KV head counts, for hybrids that keep no cache on some layers. */
+  headCountKvPerLayer?: number[];
+  keyLength?: number;
+  valueLength?: number;
+  contextLength?: number;
+  hasChatTemplate?: boolean | undefined;
+  name?: string;
+}
 
 const GIB = 1024 ** 3;
 

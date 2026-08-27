@@ -16,6 +16,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 
 import {
@@ -24,7 +25,19 @@ import {
 } from "../../core/runtime/lemonade.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
 import { launchSpec } from "./loader.ts";
-import { freePort } from "./server.ts";
+
+/** An unused port, obtained by letting the OS pick one and handing it back. */
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      probe.close(() => (port ? resolve(port) : reject(new Error("could not obtain a port"))));
+    });
+  });
+}
 
 export type LemonadeState = "stopped" | "starting" | "ready" | "failed";
 

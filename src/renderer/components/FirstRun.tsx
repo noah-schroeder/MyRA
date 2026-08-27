@@ -5,7 +5,7 @@ import type { DownloadProgress, RuntimeState } from "../types.ts";
  * The first launch.
  *
  * Karen needs two things it cannot ship inside the application bundle: pandoc,
- * to write Word and OpenDocument files, and a llama.cpp build to run a model.
+ * to write Word and OpenDocument files, and Lemonade to run a model.
  * Before this screen existed neither was mentioned anywhere — the runtime was
  * reachable only by opening Settings and finding a pane, and pandoc was not
  * reachable at all, so "write this as a .docx" failed with an error about a
@@ -77,20 +77,19 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const installRuntime = async (): Promise<void> => {
     setRuntime("working");
     setRuntimeNote(undefined);
-    const result = await window.karen.runtimeSetUp();
+    const result = await window.karen.lemonadeEnsure();
     if (result.ok) {
       setRuntime("done");
-      setRuntimeNote(result.note);
+      setRuntimeNote(undefined);
     } else {
       setRuntime("failed");
       setRuntimeNote(result.error);
     }
   };
 
-  const build = state?.activeBuild;
-  // The device list is what the runtime probe found; a discrete card is the
-  // one worth naming, since it decides which build is worth downloading.
-  const gpu = state?.devices?.find((d) => (d.totalBytes ?? 0) > 0);
+  /* Lemonade is either running or it is not; which engine and which card it
+     chose is its business and is shown in Settings rather than here. */
+  const ready = state?.lemonade.state === "ready";
   const busy = pandoc === "working" || runtime === "working";
 
   return (
@@ -115,16 +114,16 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
           <Step
             title="Model runtime"
             what={
-              build
-                ? `llama.cpp ${build.tag} (${build.backend}) is installed.`
-                : gpu
-                  ? `llama.cpp, matched to your ${gpu.description}. A few hundred megabytes.`
+              ready
+                ? "The local engine is installed and running."
+                : true
+                  ? "Lemonade, which downloads the right engine for your hardware."
                   : "llama.cpp, to run a model on this machine. A few hundred megabytes."
             }
-            phase={build ? "done" : runtime}
+            phase={ready ? "done" : runtime}
             note={runtimeNote}
             action={
-              build || runtime === "working"
+              ready || runtime === "working"
                 ? undefined
                 : { label: runtime === "failed" ? "Try again" : "Install", run: () => void installRuntime() }
             }
@@ -155,7 +154,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             downloads from GitHub and nothing else leaves your machine.
           </p>
           <button type="button" className="primary" onClick={onDone} disabled={busy}>
-            {busy ? "Working…" : build ? "Start using Karen" : "Continue without a runtime"}
+            {busy ? "Working…" : ready ? "Start using Karen" : "Continue without a local engine"}
           </button>
         </footer>
       </section>

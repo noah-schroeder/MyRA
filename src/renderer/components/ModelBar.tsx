@@ -49,10 +49,13 @@ export function ModelBar({
     return window.karen.onRuntime(setRuntime);
   }, []);
 
-  // Only when the menu opens: this walks several directories looking for GGUF
-  // files, which is not something to do on every render of the top bar.
+  // Only when the menu opens. Lemonade answers from what it has registered,
+  // which is cheap, but there is no reason to ask on every render of the bar.
   useEffect(() => {
-    if (open) void window.karen.runtimeModels().then(setModels);
+    if (open) {
+      void window.karen.lemonadeModels().then((r) =>
+        setModels(r.models.map((m) => ({ path: m.id, name: m.id }))));
+    }
   }, [open]);
 
   /* Close on a click anywhere else, and on Escape -- a popover that can only be
@@ -73,10 +76,10 @@ export function ModelBar({
     };
   }, [open]);
 
-  const server = runtime?.server;
+  const backend = runtime?.lemonade;
   const usingLocal = runtime?.config.useForChat === true;
-  const local = usingLocal && server?.state === "ready";
-  const loading = usingLocal && server?.state === "starting";
+  const local = usingLocal && backend?.state === "ready" && Boolean(backend.loaded);
+  const loading = usingLocal && backend?.state === "starting";
   const activePath = runtime?.config.activeModel;
 
   let label: string;
@@ -101,7 +104,7 @@ export function ModelBar({
   const load = async (path: string): Promise<void> => {
     setError(undefined);
     setOpen(false);
-    const result = await window.karen.runtimeStart(path);
+    const result = await window.karen.lemonadeLoad(path);
     if (!result.ok && result.error) setError(result.error);
   };
 
@@ -115,7 +118,7 @@ export function ModelBar({
         onClick={() => setOpen((v) => !v)}
         title={
           tone === "local"
-            ? `Running on this machine. ${runtime?.activeBuild?.backend ?? ""}`.trim()
+            ? `Running on this machine. ${runtime?.lemonade.loaded ?? ""}`.trim()
             : tone === "remote"
               ? `Answering from ${settings?.llm.baseUrl}`
               : "Choose where Karen gets its answers"
@@ -136,9 +139,9 @@ export function ModelBar({
 
           {models.length === 0 ? (
             <p className="modelmenu-empty">
-              {runtime?.activeBuild
+              {runtime?.lemonade.state === "ready"
                 ? "No models downloaded yet."
-                : "No local runtime is set up yet, so nothing can run here."}
+                : "The local engine is not running yet, so nothing can run here."}
             </p>
           ) : (
             <ul className="modelmenu-list">
@@ -158,7 +161,7 @@ export function ModelBar({
                     >
                       <span className="modelmenu-name">{shorten(m.name)}</span>
                       <span className="modelmenu-meta">
-                        {gb(m.size)}
+                        {m.size ? gb(m.size) : null}
                         {isActive && local ? <span className="pill on">loaded</span> : null}
                         {isActive && loading ? <span className="pill warn">loading</span> : null}
                       </span>
@@ -176,7 +179,7 @@ export function ModelBar({
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  void window.karen.runtimeStop();
+                  void window.karen.lemonadeUnload();
                 }}
               >
                 Eject model

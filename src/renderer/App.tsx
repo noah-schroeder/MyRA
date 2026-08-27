@@ -10,7 +10,7 @@ import { ResearchBar } from "./components/ResearchBar.tsx";
 import { MeetingsPage } from "./components/MeetingsPage.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
-import { ModelHub } from "./components/ModelHub.tsx";
+import { LemonadePane } from "./components/LemonadePane.tsx";
 import { ContextMeter } from "./components/ContextMeter.tsx";
 import { LookupResults } from "./components/LookupResults.tsx";
 import { useLookup } from "./useLookup.ts";
@@ -243,7 +243,7 @@ export function App() {
           <MeetingsPage settings={settings} onClose={toChat} />
         ) : null}
         {page === "runs" ? <RunPanel onClose={toChat} /> : null}
-        {page === "models" ? <ModelHub onClose={toChat} /> : null}
+        {page === "models" ? <div className="pane">{<LemonadePane />}</div> : null}
 
         {page === "chat" && lookup ? (
           <LookupResults
