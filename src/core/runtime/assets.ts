@@ -170,7 +170,20 @@ export function availableBackends(platform: NodeJS.Platform, arch: string): Back
   if (platform === "win32") {
     return arch === "arm64" ? ["cuda", "cpu"] : ["cuda", "vulkan", "rocm", "cpu"];
   }
-  if (platform === "linux") return ["vulkan", "rocm", "cpu"];
+  /*
+   * CUDA first on Linux, and it does not come from the release page.
+   *
+   * Upstream publishes no Linux CUDA asset -- checked against the live feed:
+   * of 27 assets on b10655, every cuda one is `-win-`. They DO build it, into
+   * `ghcr.io/ggml-org/llama.cpp:server-cuda`, so Karen takes it from there.
+   * See core/runtime/oci.ts; `pickAsset` deliberately finds nothing for this
+   * combination and the manager routes around it.
+   */
+  if (platform === "linux") {
+    return arch === "x64" || arch === "arm64"
+      ? ["cuda", "vulkan", "rocm", "cpu"]
+      : ["cpu"];
+  }
   return ["cpu"];
 }
 

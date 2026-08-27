@@ -117,8 +117,15 @@ test("the newest CUDA toolchain wins when a release carries several", () => {
 
 test("Apple is offered no backend choice, because there is none to make", () => {
   assert.deepEqual(availableBackends("darwin", "arm64"), ["metal"]);
-  assert.ok(availableBackends("linux", "x64").includes("vulkan"));
-  assert.ok(!availableBackends("linux", "x64").includes("cuda"));
+});
+
+test("Linux is offered CUDA first, then the backends that need no toolkit", () => {
+  // CUDA does not come from the release page on Linux -- pickAsset finds
+  // nothing for it and the manager fetches upstream's container image instead.
+  assert.deepEqual(availableBackends("linux", "x64"), ["cuda", "vulkan", "rocm", "cpu"]);
+  assert.deepEqual(availableBackends("linux", "arm64"), ["cuda", "vulkan", "rocm", "cpu"]);
+  // An architecture upstream builds nothing accelerated for still gets an answer.
+  assert.deepEqual(availableBackends("linux", "s390x"), ["cpu"]);
 });
 
 test("a digest is only accepted in the form GitHub actually sends", () => {

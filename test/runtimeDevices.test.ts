@@ -34,12 +34,16 @@ test("Vulkan is preferred wherever it is available", () => {
   }
 });
 
-test("an NVIDIA card on Linux is told why it is not getting CUDA", () => {
+test("an NVIDIA card on Linux is offered CUDA, not Vulkan", () => {
+  /*
+   * This test used to assert the opposite, on the grounds that llama.cpp
+   * publishes no Linux CUDA release asset -- which is true and was the wrong
+   * conclusion. Upstream builds it into their container image instead, so the
+   * card gets what it is for. See core/runtime/oci.ts.
+   */
   const s = suggestBackend("linux", "x64", { vendorIds: [VENDOR.nvidia], supportsVulkan: true });
-  assert.equal(s.backend, "vulkan");
-  // Otherwise the user's conclusion is "this app is slow", not "upstream ships
-  // no Linux CUDA build".
-  assert.match(s.reason, /no Linux CUDA build/);
+  assert.equal(s.backend, "cuda");
+  assert.match(s.reason, /NVIDIA/);
 });
 
 test("Windows falls back to CUDA only when Vulkan is genuinely absent", () => {

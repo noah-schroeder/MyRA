@@ -68,11 +68,10 @@ export function suggestBackend(platform: NodeJS.Platform, arch: string, gpu: Gpu
     const who = has(VENDOR.nvidia) ? "NVIDIA" : has(VENDOR.amd) ? "AMD" : has(VENDOR.intel) ? "Intel" : "your";
     if (platform === "linux" && has(VENDOR.nvidia)) {
       return {
-        backend: "vulkan",
-        // Stated plainly rather than left to be discovered as "why is Linux slower".
+        backend: "cuda",
         reason:
-          "NVIDIA card detected. llama.cpp publishes no Linux CUDA build, so this uses Vulkan — " +
-          "it works on your card, and is somewhat slower than CUDA would be.",
+          "NVIDIA card detected. Karen will fetch llama.cpp's CUDA build from upstream's " +
+          "container registry, which is where they publish it for Linux.",
       };
     }
     return { backend: "vulkan", reason: `${who} GPU with Vulkan support detected.` };
