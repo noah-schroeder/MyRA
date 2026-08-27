@@ -27,7 +27,7 @@ import {
   newestBuild, pickAsset, pickCudart, sha256Of, type Backend, type Release, type ReleaseAsset,
 } from "../../core/runtime/assets.ts";
 import {
-  hasAccelerator, largestDeviceBytes, parseDevices, suggestBackend, type Device, type GpuInfo,
+  hasAccelerator, parseDevices, pickVram, suggestBackend, type Device, type GpuInfo,
 } from "../../core/runtime/devices.ts";
 import { modelShape, parseGguf, type ModelShape } from "../../core/runtime/gguf.ts";
 import { fitModel, largestContext, type Fit } from "../../core/runtime/fit.ts";
@@ -539,9 +539,23 @@ export class RuntimeManager {
 
   /* -------------------------------------------------------------- models --- */
 
-  machine(devices: Device[]): { vramBytes?: number; ramBytes: number } {
-    const vram = largestDeviceBytes(devices);
-    return { ...(vram !== undefined ? { vramBytes: vram } : {}), ramBytes: totalmem() };
+  machine(devices: Device[]): {
+    vramBytes?: number;
+    ramBytes: number;
+    /** Which device that memory belongs to, so a wrong figure is visible. */
+    vramDevice?: string;
+    /** True when it is system RAM seen through a GPU, not memory on a card. */
+    vramShared?: boolean;
+  } {
+    const ramBytes = totalmem();
+    // RAM is passed in because it is what distinguishes a card's memory from an
+    // integrated GPU's slice of the machine's own -- see pickVram.
+    const choice = pickVram(devices, ramBytes);
+    return {
+      ...(choice ? { vramBytes: choice.bytes, vramDevice: choice.device.description } : {}),
+      ...(choice?.shared ? { vramShared: true } : {}),
+      ramBytes,
+    };
   }
 
   /** Models we downloaded, plus anything found in another app's store. */

@@ -13,7 +13,9 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import { join } from "node:path";
 
-import { newestBuild, type Backend, type Release } from "../../core/runtime/assets.ts";
+import {
+  availableBackends, newestBuild, type Backend, type Release,
+} from "../../core/runtime/assets.ts";
 import {
   downloadUrl, groupFiles, infoUrl, parseTree, quantOf, repoId, searchUrl, treeUrl,
   GatedError, type HfModel, type ModelFile,
@@ -61,6 +63,16 @@ export function installRuntimeIpc(
     ...(await snapshot(runtime)),
     devices: runtime.devices,
     machine: runtime.machine(runtime.devices),
+    /*
+     * Which backends this machine can actually be given.
+     *
+     * Sent from here because only the main process knows the platform. The
+     * Runtime pane used to carry its own hardcoded list of all five, so it
+     * offered Metal on Linux and described CUDA as "Windows only" -- which,
+     * once Linux CUDA started working, was a label telling the user not to
+     * pick the thing they wanted.
+     */
+    backends: availableBackends(process.platform, process.arch),
   }));
 
   ipcMain.handle("karen:runtime-config", async (_e, patch: Record<string, unknown>) =>

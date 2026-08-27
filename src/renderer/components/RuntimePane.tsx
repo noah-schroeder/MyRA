@@ -14,13 +14,26 @@ import type { LocalModel, RuntimeDevice, RuntimeState } from "../types.ts";
  * it is a button.
  */
 
-const BACKENDS: { id: string; label: string; hint: string }[] = [
-  { id: "vulkan", label: "Vulkan", hint: "Works with NVIDIA, AMD and Intel cards" },
-  { id: "cuda", label: "CUDA", hint: "NVIDIA only, Windows only, and a much larger download" },
-  { id: "rocm", label: "ROCm", hint: "AMD's own driver stack" },
-  { id: "metal", label: "Metal", hint: "Built into the macOS build" },
-  { id: "cpu", label: "Processor", hint: "Always works, and is much slower" },
-];
+/**
+ * How each backend is described. WHICH of them appear is decided by the main
+ * process, in `availableBackends` -- this pane used to hold its own list of all
+ * five and show every one on every platform, so Linux was offered Metal, and
+ * CUDA carried the label "Windows only" long after Linux CUDA started working.
+ * A dropdown that talks someone out of the right choice is worse than one that
+ * omits it.
+ */
+const BACKEND_LABELS: Record<string, { label: string; hint: string }> = {
+  vulkan: { label: "Vulkan", hint: "Works with NVIDIA, AMD and Intel cards" },
+  cuda: {
+    label: "CUDA",
+    hint: "NVIDIA only, and the fastest option on their cards",
+  },
+  rocm: { label: "ROCm", hint: "AMD's own driver stack" },
+  metal: { label: "Metal", hint: "Built into the macOS build" },
+  cpu: { label: "Processor", hint: "Always works, and is much slower" },
+};
+
+const FALLBACK_BACKENDS = ["vulkan", "cpu"];
 
 function gb(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -246,11 +259,14 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
                 onChange={(e) => void install(e.target.value)}
                 disabled={busy}
               >
-                {BACKENDS.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.label} — {b.hint}
-                  </option>
-                ))}
+                {(state?.backends ?? FALLBACK_BACKENDS).map((id) => {
+                  const b = BACKEND_LABELS[id] ?? { label: id, hint: "" };
+                  return (
+                    <option key={id} value={id}>
+                      {b.hint ? `${b.label} — ${b.hint}` : b.label}
+                    </option>
+                  );
+                })}
               </select>
             </label>
 

@@ -73,7 +73,17 @@ function split(repo: string): { owner: string; name: string } {
 type Tab = "discover" | "local";
 
 export function ModelHub({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>("discover");
+  /*
+   * Open on whichever tab has something to act on.
+   *
+   * Discover was always the landing tab, which is right on a fresh install and
+   * wrong the moment there are models on the machine: someone with 59 of them
+   * arrived at a search box and a "worth starting with" list, and Load,
+   * Configure and Delete -- everything you do with a model you already have --
+   * were one unmarked click away. `undefined` until the scan answers, so the
+   * choice is made once, with the facts, rather than flickering.
+   */
+  const [tab, setTab] = useState<Tab | undefined>();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("downloads");
   const [results, setResults] = useState<HfSearchResult[] | undefined>();
@@ -85,12 +95,19 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState<DownloadProgress | undefined>();
   const [checking, setChecking] = useState<string | undefined>();
   const [models, setModels] = useState<LocalModel[]>([]);
+  const decided = useRef(false);
   const [state, setState] = useState<RuntimeState | undefined>();
   const box = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
 
   const refreshModels = useCallback(async () => {
-    setModels(await window.karen.runtimeModels());
+    const found = await window.karen.runtimeModels();
+    setModels(found);
+    // Once, on the first scan: after that the tab is wherever the user put it.
+    if (!decided.current) {
+      decided.current = true;
+      setTab(found.length ? "local" : "discover");
+    }
   }, []);
 
   useEffect(() => {
@@ -126,7 +143,7 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (tab !== "discover") return;
+    if (tab && tab !== "discover") return;
     const q = query.trim();
     // Below two characters there is nothing to match on, so the shortlist is
     // more use than ten thousand repositories -- and clearing the box puts it
@@ -219,8 +236,21 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
           * difference between a model that answers and one that swaps.
           */}
         <div className="hub-stats">
+          {/*
+            * Named, not just numbered.
+            *
+            * The figure was silently wrong on a machine with both a card and an
+            * integrated GPU -- it reported the integrated one's slice of system
+            * RAM as though it were video memory. Saying which device it came
+            * from turns a number the user cannot check into one they can, and
+            * "shared" says plainly when it is not really VRAM at all.
+            */}
           {machine?.vramBytes ? (
-            <Stat label="VRAM" value={gb(machine.vramBytes)} />
+            <Stat
+              label={machine.vramShared ? "SHARED" : "VRAM"}
+              value={gb(machine.vramBytes)}
+              {...(machine.vramDevice ? { title: machine.vramDevice } : {})}
+            />
           ) : (
             <Stat label="GPU" value="none found" dim />
           )}
@@ -242,7 +272,7 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
         <div className="seg">
           <button
             type="button"
-            className={tab === "discover" ? "active" : ""}
+            className={tab !== "local" ? "active" : ""}
             onClick={() => setTab("discover")}
           >
             Discover
@@ -256,7 +286,7 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {tab === "discover" ? (
+        {tab !== "local" ? (
           <>
             <div className="hub-search">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -399,9 +429,11 @@ export function ModelHub({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Stat({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
+function Stat({
+  label, value, dim, title,
+}: { label: string; value: string; dim?: boolean; title?: string }) {
   return (
-    <div className={dim ? "hub-stat dim" : "hub-stat"}>
+    <div className={dim ? "hub-stat dim" : "hub-stat"} {...(title ? { title } : {})}>
       <span className="hub-stat-value">{value}</span>
       <span className="hub-stat-label">{label}</span>
     </div>
