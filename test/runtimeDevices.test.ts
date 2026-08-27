@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  hasAccelerator, largestDeviceBytes, parseDevices, suggestBackend, VENDOR, vendorName,
+  hasAccelerator, largestDeviceBytes, parseDevices, pickVram, suggestBackend, VENDOR,
+  vendorName, type Device,
 } from "../src/core/runtime/devices.ts";
 
 test("Apple hardware is not asked a question it cannot answer", () => {
@@ -130,4 +131,68 @@ test("Windows NVIDIA still prefers CUDA over a hopeful Vulkan", () => {
   // is a real CUDA build to download, so a card with no Vulkan takes it.
   const s = suggestBackend("win32", "x64", { vendorIds: [VENDOR.nvidia], supportsVulkan: false });
   assert.equal(s.backend, "cuda");
+});
+
+/* ------------------------------------------------- which memory is VRAM -- */
+
+const GB = 1024 ** 3;
+const dev = (id: string, description: string, totalBytes?: number): Device =>
+  ({ id, description, ...(totalBytes === undefined ? {} : { totalBytes }) });
+
+test("a card is preferred over an integrated GPU reporting system RAM", () => {
+  /*
+   * The reported machine: RTX 4060 (8 GB) plus integrated graphics, 64 GB RAM.
+   * Vulkan enumerates both, and the integrated one claims a slice of system
+   * memory -- so taking the largest figure reported "46.9 GB VRAM" on a
+   * machine with 8 GB of it, and would size models against a number three
+   * times too big.
+   */
+  const devices = [
+    dev("Vulkan0", "AMD Radeon Graphics (RADV)", 46.9 * GB),
+    dev("Vulkan1", "NVIDIA GeForce RTX 4060", 8 * GB),
+    dev("CPU", "CPU"),
+  ];
+  const choice = pickVram(devices, 64 * GB);
+  assert.equal(choice?.bytes, 8 * GB);
+  assert.match(choice!.device.description, /RTX 4060/);
+  assert.equal(choice?.shared, false);
+});
+
+test("device order does not decide it", () => {
+  const devices = [
+    dev("Vulkan0", "NVIDIA GeForce RTX 4060", 8 * GB),
+    dev("Vulkan1", "Intel(R) UHD Graphics", 46.9 * GB),
+  ];
+  assert.equal(pickVram(devices, 64 * GB)?.bytes, 8 * GB);
+});
+
+test("two real cards still take the larger", () => {
+  const devices = [
+    dev("CUDA0", "NVIDIA GeForce RTX 4060", 8 * GB),
+    dev("CUDA1", "NVIDIA GeForce RTX 4090", 24 * GB),
+  ];
+  assert.equal(pickVram(devices, 64 * GB)?.bytes, 24 * GB);
+});
+
+test("an integrated GPU on its own is reported, and marked shared", () => {
+  // A laptop with no discrete card is not a machine with no GPU -- but the
+  // number is system RAM, and the UI has to be able to say so.
+  const choice = pickVram([dev("Vulkan0", "Intel(R) Iris Xe Graphics", 24 * GB)], 32 * GB);
+  assert.equal(choice?.bytes, 24 * GB);
+  assert.equal(choice?.shared, true);
+});
+
+test("a software renderer is not a GPU", () => {
+  // llvmpipe enumerates as a normal Vulkan device and reports plenty of
+  // "memory". Loading a model onto it is slower than the CPU backend.
+  const devices = [dev("Vulkan0", "llvmpipe (LLVM 19.1.0, 256 bits)", 30 * GB)];
+  assert.equal(pickVram(devices, 64 * GB), undefined);
+  assert.equal(hasAccelerator(devices), false);
+});
+
+test("with no RAM figure to compare against, the largest is still the answer", () => {
+  // Better than refusing: the shared-memory test needs system RAM to make
+  // sense, and without it the old behaviour is the honest fallback.
+  const devices = [dev("Vulkan0", "NVIDIA GeForce RTX 4060", 8 * GB)];
+  assert.equal(pickVram(devices, undefined)?.bytes, 8 * GB);
 });

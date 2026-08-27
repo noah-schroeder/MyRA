@@ -209,17 +209,77 @@ export function parseDevices(stdout: string): Device[] {
 }
 
 /** Does the probe show anything that is not the CPU? */
-export function hasAccelerator(devices: Device[]): boolean {
-  return devices.some((d) => !/^cpu/i.test(d.id) && !/^cpu\b/i.test(d.description));
+/**
+ * Renderers that are not hardware at all.
+ *
+ * Mesa's software Vulkan (`llvmpipe`, `lavapipe`) and Chromium's SwiftShader
+ * enumerate as perfectly ordinary Vulkan devices and report a great deal of
+ * "memory", because their memory is system RAM. Treating one as a GPU means
+ * loading a model onto a CPU renderer, which is slower than the CPU backend
+ * and looks like acceleration while it happens.
+ */
+const SOFTWARE = /\b(llvmpipe|lavapipe|softpipe|swiftshader|virgl)\b/i;
+
+export function isSoftwareRenderer(description: string): boolean {
+  return SOFTWARE.test(description);
 }
 
-/** The largest device memory the probe reported, which is what a model must fit in. */
-export function largestDeviceBytes(devices: Device[]): number | undefined {
-  let best: number | undefined;
-  for (const d of devices) {
-    if (/^cpu/i.test(d.id)) continue;
-    const value = d.totalBytes;
-    if (value !== undefined && (best === undefined || value > best)) best = value;
-  }
-  return best;
+export function hasAccelerator(devices: Device[]): boolean {
+  return devices.some(
+    (d) => !/^cpu/i.test(d.id) && !/^cpu\b/i.test(d.description) && !isSoftwareRenderer(d.description),
+  );
+}
+
+export interface VramChoice {
+  device: Device;
+  bytes: number;
+  /**
+   * True when this memory is the machine's RAM seen through a GPU, rather than
+   * memory on a card.
+   */
+  shared: boolean;
+}
+
+/**
+ * A device reporting more than this share of system RAM is not reporting VRAM.
+ *
+ * No card has half the machine's memory soldered to it; an integrated GPU, on
+ * the other hand, reports a slice of system RAM as its own, and drivers
+ * commonly offer around three quarters of it.
+ */
+const SHARED_RAM_SHARE = 0.5;
+
+/**
+ * Which device's memory a model has to fit in.
+ *
+ * This used to be "the largest number any device reported", and that is wrong
+ * on the most ordinary desktop there is. A machine with an RTX 4060 and an
+ * integrated GPU enumerates BOTH under Vulkan: the card says 8 GB, the
+ * integrated one says a share of system RAM -- about 47 GB on a 64 GB machine.
+ * Taking the maximum picked the integrated one, so Karen reported "46.9 GB
+ * VRAM" on a machine with 8 GB of it, and would happily recommend a 30B model
+ * that cannot possibly fit.
+ *
+ * Preference order: a real card, largest first; then, only if there is nothing
+ * else, a shared-memory device, marked as such so the UI can say so rather than
+ * quietly present it as VRAM.
+ */
+export function pickVram(devices: Device[], ramBytes?: number): VramChoice | undefined {
+  const candidates = devices.filter(
+    (d) => !/^cpu/i.test(d.id) && !isSoftwareRenderer(d.description) && d.totalBytes !== undefined,
+  );
+  const shares = (d: Device): boolean =>
+    ramBytes !== undefined && ramBytes > 0 && (d.totalBytes ?? 0) > ramBytes * SHARED_RAM_SHARE;
+
+  const dedicated = candidates.filter((d) => !shares(d));
+  const pool = dedicated.length ? dedicated : candidates;
+  let best: Device | undefined;
+  for (const d of pool) if (!best || (d.totalBytes ?? 0) > (best.totalBytes ?? 0)) best = d;
+  if (!best) return undefined;
+  return { device: best, bytes: best.totalBytes!, shared: !dedicated.length && shares(best) };
+}
+
+/** The memory a model must fit in. See `pickVram` for why this is not a max. */
+export function largestDeviceBytes(devices: Device[], ramBytes?: number): number | undefined {
+  return pickVram(devices, ramBytes)?.bytes;
 }

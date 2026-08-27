@@ -559,7 +559,16 @@ export interface RuntimeState {
   baseline: string;
   devices?: RuntimeDevice[];
   /** What the probe and the OS say this machine has, for sizing models. */
-  machine?: { vramBytes?: number; ramBytes: number };
+  machine?: {
+    vramBytes?: number;
+    ramBytes: number;
+    /** Which device the VRAM figure belongs to. */
+    vramDevice?: string;
+    /** True when that memory is system RAM shared with a GPU. */
+    vramShared?: boolean;
+  };
+  /** The backends this platform can be given, best first. From the main process. */
+  backends?: Backend[];
 }
 
 export type CacheType = "f16" | "q8_0" | "q4_0";
