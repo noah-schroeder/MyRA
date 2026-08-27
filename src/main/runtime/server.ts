@@ -71,7 +71,7 @@ const HEALTH_TIMEOUT_MS = 15 * 60_000; // A very large model on a slow disk.
 const HEALTH_INTERVAL_MS = 500;
 
 /** An unused port, obtained by letting the OS pick one and handing it back. */
-async function freePort(): Promise<number> {
+export async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
     probe.once("error", reject);
