@@ -14,6 +14,21 @@ import { join } from "node:path";
 export const OPENALEX_MAILTO = process.env["KAREN_OPENALEX_MAILTO"] ?? "";
 
 export const FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * How long to wait on a search backend, as opposed to a page.
+ *
+ * Shorter than `FETCH_TIMEOUT_MS` because these are two different waits. A
+ * page fetch is the thing you asked for, and a slow publisher is worth twenty
+ * seconds. A search is a fan-out across backends where the slowest one sets
+ * the pace for all of them, and a backend that is down costs that wait on
+ * every single query.
+ *
+ * Measured: OpenAlex answers a 50-result query in roughly 900ms. Ten seconds
+ * is an order of magnitude of headroom for a backend that is working, and
+ * halves what an outage costs.
+ */
+export const SEARCH_TIMEOUT_MS = 10_000;
 export const MAX_PAGE_BYTES = 3_000_000;
 export const DEFAULT_PAGE_CHARS = 8_000;
 export const FETCH_CONCURRENCY = 4;
