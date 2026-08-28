@@ -38,11 +38,13 @@ export class ApiManager {
   constructor(deps: {
     upstream: () => Upstream | undefined;
     models: () => Promise<{ id: string; loaded: boolean }[]>;
+    loadModel: (id: string) => Promise<void>;
   }) {
     this.#gateway = new ApiGateway({
       config: () => this.#config,
       upstream: deps.upstream,
       models: deps.models,
+      loadModel: deps.loadModel,
       log: this.#log,
       onKeyUsed: (id) => this.#noteKeyUse(id),
     });

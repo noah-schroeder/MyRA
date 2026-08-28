@@ -14,7 +14,7 @@ import {
   API_DEFAULTS, baseUrl, mergeApiConfig, refuseReason, validPort,
 } from "../src/core/api/config.ts";
 import {
-  RequestLog, modelFrom, tokensPerSecond, truncateBody, usageFrom,
+  RequestLog, modelFrom, tokensPerSecond, usageFrom,
 } from "../src/core/api/log.ts";
 import {
   KEY_PREFIX, bearerFrom, displayKey, findKey, hashKey, mintKey,
@@ -214,9 +214,23 @@ test("tokens per second measures generation, not time spent reading the prompt",
   assert.equal(speed, 50);
 });
 
-test("a body is truncated rather than held whole", () => {
-  const long = "x".repeat(10_000);
-  const out = truncateBody(long);
-  assert.ok(out.length < long.length);
-  assert.match(out, /more characters/);
+test("there is no way to record a prompt, by construction", () => {
+  /* Body logging was removed rather than shipped switched off. This asserts
+     the absence: a record has nowhere to put a prompt, and the config has no
+     switch that would ask for one. */
+  const record = { ...rec("a") } as Record<string, unknown>;
+  assert.ok(!("body" in record));
+  assert.ok(!("logBodies" in mergeApiConfig({ logBodies: true })));
+});
+
+test("the default port avoids the tools this app sits beside", () => {
+  // 1234 is LM Studio's and 11434 is Ollama's; claiming either breaks them.
+  assert.notEqual(API_DEFAULTS.port, 1234);
+  assert.notEqual(API_DEFAULTS.port, 11434);
+  assert.ok(validPort(API_DEFAULTS.port));
+});
+
+test("load-on-demand is on, and is a switch rather than a constant", () => {
+  assert.equal(API_DEFAULTS.loadOnDemand, true);
+  assert.equal(mergeApiConfig({ loadOnDemand: false }).loadOnDemand, false);
 });
