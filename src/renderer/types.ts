@@ -1,4 +1,6 @@
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
+import type { ForeignModel } from "../core/runtime/foreign.ts";
+import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 /**
  * What the renderer renders.
@@ -345,15 +347,23 @@ export interface KarenApi {
   lemonadeModels(): Promise<{
     ok: boolean;
     error?: string;
-    models: { id: string; downloaded?: boolean }[];
+    models: InstalledModel[];
     loaded?: string;
+    /** LM Studio and Ollama models found on this machine. */
+    foreign?: ForeignModel[];
+  }>;
+  /** Re-read the model folders and restart the daemon so it sees the result. */
+  lemonadeRescan(): Promise<{
+    ok: boolean;
+    error?: string;
+    found?: { source: string; dir: string; count: number }[];
   }>;
   lemonadeLoad(name: string): Promise<{ ok: boolean; error?: string; loaded?: string }>;
   lemonadeUnload(): Promise<{ ok: boolean; error?: string }>;
   lemonadePull(
     name: string,
     checkpoint?: string,
-  ): Promise<{ ok: boolean; error?: string; models?: { id: string; downloaded?: boolean }[] }>;
+  ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
   onRuntime(cb: (state: RuntimeState) => void): () => void;
   onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
 
@@ -486,6 +496,9 @@ export interface RuntimeConfig {
   startOnLaunch: boolean;
   activeModel?: string;
   useForChat: boolean;
+  /** Offer models already downloaded by LM Studio and Ollama. */
+  importForeignModels: boolean;
+  extraModelDirs?: string[];
 }
 
 export type RuntimePhase =

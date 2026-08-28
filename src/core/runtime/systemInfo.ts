@@ -75,10 +75,31 @@ const obj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 
-/** Candidate keys for a device's memory; see the header for why there are several. */
-const MEMORY_KEYS = [
-  "memory_bytes", "memory_total_bytes", "total_bytes",
-  "memory_mb", "memory_total", "total_memory", "memory", "vram_mb", "vram",
+/**
+ * Where a device's memory is reported, and in what unit.
+ *
+ * `vram_gb` is Lemonade's own key, confirmed against the daemon rather than
+ * guessed -- an earlier candidate list here missed it, and an RTX 4060 showed
+ * its name with a dash where the memory should be. The unit is read from the
+ * key rather than inferred from the number, because `vram_gb: 8` is 8 GB and
+ * every size heuristic in the world reads a bare 8 as something else.
+ *
+ * The rest stay as fallbacks: this payload is not versioned, and a key that
+ * disappears should degrade to "unknown", not to a wrong number.
+ */
+const MEMORY_KEYS: [key: string, scale: number | undefined][] = [
+  ["vram_gb", 1024 ** 3],
+  ["vram_mb", 1024 ** 2],
+  ["memory_gb", 1024 ** 3],
+  ["memory_mb", 1024 ** 2],
+  ["memory_bytes", 1],
+  ["memory_total_bytes", 1],
+  ["total_bytes", 1],
+  // No unit in the name: fall back to sniffing the value.
+  ["memory_total", undefined],
+  ["total_memory", undefined],
+  ["memory", undefined],
+  ["vram", undefined],
 ];
 
 /**
@@ -108,11 +129,14 @@ export function toBytes(value: unknown): number | undefined {
 }
 
 function deviceMemory(entry: Obj): number | undefined {
-  for (const key of MEMORY_KEYS) {
-    if (key in entry) {
-      const bytes = toBytes(entry[key]);
-      if (bytes) return bytes;
+  for (const [key, scale] of MEMORY_KEYS) {
+    if (!(key in entry)) continue;
+    const raw = entry[key];
+    if (scale !== undefined && typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      return Math.round(raw * scale);
     }
+    const bytes = toBytes(raw);
+    if (bytes) return bytes;
   }
   return undefined;
 }

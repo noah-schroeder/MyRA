@@ -104,6 +104,11 @@ export class LemonadeServer {
     for (const fn of this.#listeners) fn(this.#status);
   }
 
+  /** A line from Karen rather than from the daemon, for the same log panel. */
+  note(line: string): void {
+    this.#log(line);
+  }
+
   #log(line: string): void {
     this.#set({ log: [...this.#status.log, line].slice(-LOG_LINES) });
   }

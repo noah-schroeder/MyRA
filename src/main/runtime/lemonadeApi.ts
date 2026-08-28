@@ -22,6 +22,15 @@ export interface ApiTarget {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+export interface InstalledModel {
+  id: string;
+  downloaded?: boolean;
+  /** Converted from the catalogue's gigabytes. */
+  sizeBytes?: number;
+  /** `extra_models_dir` for anything found rather than downloaded. */
+  source?: string;
+}
+
 export class LemonadeApi {
   #target: () => ApiTarget | undefined;
 
@@ -109,9 +118,26 @@ export class LemonadeApi {
     await this.#post("/unload", {});
   }
 
-  async listModels(): Promise<{ id: string; downloaded?: boolean }[]> {
-    const body = await this.#call<{ data?: { id?: string; downloaded?: boolean }[] }>("/models");
+  /**
+   * Every model the daemon knows about.
+   *
+   * `size` arrives in gigabytes and is converted here, because every other
+   * size in Karen is bytes and a unit that changes at an API boundary is a bug
+   * waiting for a big number. `source` distinguishes a model the daemon
+   * downloaded from one it found in the directory Karen points it at.
+   */
+  async listModels(): Promise<InstalledModel[]> {
+    type Raw = { id?: string; downloaded?: boolean; size?: number; source?: string; labels?: string[] };
+    const body = await this.#call<{ data?: Raw[] }>("/models");
     return (body.data ?? [])
-      .filter((m): m is { id: string; downloaded?: boolean } => typeof m.id === "string");
+      .filter((m): m is Raw & { id: string } => typeof m.id === "string")
+      .map((m) => ({
+        id: m.id,
+        ...(m.downloaded !== undefined ? { downloaded: m.downloaded } : {}),
+        ...(typeof m.size === "number" && m.size > 0
+          ? { sizeBytes: Math.round(m.size * 1024 ** 3) }
+          : {}),
+        ...(m.source ? { source: m.source } : {}),
+      }));
   }
 }

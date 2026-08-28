@@ -53,6 +53,18 @@ export function lemonadeConfigDir(): string {
   return join(app.getPath("userData"), "lemonade", "config");
 }
 
+/**
+ * The single directory Lemonade is told about, built out of symlinks.
+ *
+ * `extra_models_dir` takes one path and one only, so everything Karen can
+ * offer -- its own downloads, and whatever LM Studio and Ollama already hold --
+ * has to be reachable from here. Disposable: it is rebuilt from scratch on
+ * every start and contains no data of its own.
+ */
+export function lemonadeIndexDir(): string {
+  return join(app.getPath("userData"), "lemonade", "models-index");
+}
+
 /** Default cache location, used until the models directory setting is wired in. */
 export function lemonadeCacheDir(): string {
   return join(app.getPath("userData"), "lemonade", "cache");
