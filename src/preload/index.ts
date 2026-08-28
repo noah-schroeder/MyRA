@@ -123,6 +123,7 @@ const api = {
 
   /* The API server. `apiKeyCreate` is the one call in the whole bridge that
      returns a secret, and it does so exactly once. */
+  trayAvailable: () => ipcRenderer.invoke("karen:tray-available"),
   apiState: () => ipcRenderer.invoke("karen:api-state"),
   apiConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke("karen:api-config", patch),
   apiStart: () => ipcRenderer.invoke("karen:api-start"),

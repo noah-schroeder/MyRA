@@ -140,6 +140,14 @@ function Serving({
   onKeys: () => void;
 }) {
   const url = state.status.url ?? `http://127.0.0.1:${String(state.config.port)}`;
+  /* Whether closing the window would leave this serving. Read rather than
+     assumed, so the sentence below is never the opposite of the truth. */
+  const [tray, setTray] = useState(false);
+  useEffect(() => {
+    void Promise.all([window.karen.getSettings(), window.karen.trayAvailable()]).then(
+      ([s, ok]) => setTray(s.keepRunningInTray && ok),
+    );
+  }, []);
 
   return (
     <section className="lem-section">
@@ -163,6 +171,12 @@ function Serving({
           <p className="api-note">
             Karen will not serve without a key.{" "}
             <button type="button" className="link" onClick={onKeys}>Create one first</button>.
+          </p>
+        ) : null}
+        {serving && tray ? (
+          <p className="api-note">
+            Closing Karen&apos;s window will not stop this — Karen stays in your tray and keeps
+            answering. Quit from the tray icon when you are done.
           </p>
         ) : null}
         {state.lanUrl ? (

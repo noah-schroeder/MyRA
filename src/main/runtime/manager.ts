@@ -121,7 +121,14 @@ export class RuntimeManager {
       const parsed = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as Partial<RuntimeConfig>;
       this.#config = { ...this.#config, ...parsed };
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      /* A missing file is the first run. A file that will not parse is a
+         force-quit or a power cut caught mid-write, and it must not throw out
+         of startup: this runs inside `main()`, and everything registered after
+         it -- the runtime's whole IPC surface -- would never happen. The
+         defaults already assigned above are a working configuration. */
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`runtime.json could not be read (${(err as Error).message}); using defaults.`);
+      }
     }
     this.#lemonade.onChange(() => this.#emit());
     return this.#config;

@@ -9,7 +9,7 @@
  * loop running in this same process.
  */
 
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, Notification, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import {
@@ -36,6 +36,7 @@ import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
 import { ApiManager } from "./api/manager.ts";
 import { installApiIpc } from "./api/ipc.ts";
+import { KarenTray, claimSingleInstance, reveal } from "./tray.ts";
 import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
@@ -111,6 +112,15 @@ const api = new ApiManager({
 });
 
 let window_: BrowserWindow | undefined;
+/**
+ * Whether the app is on its way out, as opposed to the window merely closing.
+ *
+ * With a tray, those stopped being the same event: closing the window hides it
+ * and Karen keeps serving. This flag is what tells the close handler which one
+ * is happening, and it is set only by the tray's Quit and by `before-quit`.
+ */
+let quitting = false;
+let tray: KarenTray | undefined;
 let session_: Session | undefined;
 let inFlight: AbortController | undefined;
 
@@ -166,6 +176,24 @@ function createWindow(): void {
   });
 
   window_.once("ready-to-show", () => window_?.show());
+
+  /*
+   * Closing the window hides it; quitting is done from the tray.
+   *
+   * Guarded three ways, because an application that hides with no way back is
+   * worse than one that quits when you did not mean it to: the setting has to
+   * be on, the app must not already be quitting, and a tray icon must actually
+   * have been created. On a desktop with no status area the last of those is
+   * false and the window closes normally.
+   */
+  window_.on("close", (event) => {
+    if (quitting) return;
+    if (!config.current.keepRunningInTray) return;
+    if (!tray?.available) return;
+    event.preventDefault();
+    window_?.hide();
+    noteHidden();
+  });
 
   /*
    * System audio on macOS, and the reason it is silent without this.
@@ -495,6 +523,11 @@ function installIpc(): void {
   });
 
   ipcMain.handle("karen:get-settings", () => config.current);
+
+  /* Whether this desktop actually shows a tray icon, which decides whether
+     "keep running when closed" can do anything at all. Linux answers this
+     differently per desktop, so it is reported rather than assumed. */
+  ipcMain.handle("karen:tray-available", () => tray?.available ?? false);
   ipcMain.handle("karen:update-settings", (_e, patch: unknown) =>
     config.update(patch as Partial<typeof config.current>),
   );
@@ -864,7 +897,46 @@ async function main(): Promise<void> {
   void runtime.startOnLaunch().catch(() => {});
 }
 
-app.whenReady().then(() => {
+/**
+ * One Karen at a time.
+ *
+ * Two would each start a Lemonade daemon and the second would fail to bind the
+ * API port. It is also the way back to a hidden window when no tray icon is
+ * visible: launching Karen again raises the one already running.
+ */
+const soleInstance = claimSingleInstance(() => reveal(window_));
+if (!soleInstance) {
+  /* `app.quit()` is asynchronous, so without gating the startup below on this
+     the second instance still builds a window and a tray icon before it goes,
+     which flickers a second icon into the tray and briefly races the first
+     instance for the API port. */
+  app.quit();
+}
+
+/**
+ * Say once that closing the window did not stop Karen.
+ *
+ * A tray icon is easy to miss, and an app that appears to have quit while
+ * holding several gigabytes of model is exactly the surprise this should not
+ * spring on anyone. Shown the first time only -- after that the behaviour is
+ * known, and a notification on every close would be nagging.
+ */
+let toldAboutTray = false;
+function noteHidden(): void {
+  if (toldAboutTray) return;
+  toldAboutTray = true;
+  try {
+    if (!Notification.isSupported()) return;
+    new Notification({
+      title: "Karen is still running",
+      body: "Your model and the API stay up. Quit from the Karen icon in your tray.",
+    }).show();
+  } catch {
+    // A desktop without notifications is not a reason to fail a window close.
+  }
+}
+
+if (soleInstance) app.whenReady().then(() => {
   /*
    * No remote assets, ever. Set here rather than in the HTML so a page that
    * forgot its meta tag still cannot reach out.
@@ -920,12 +992,50 @@ app.whenReady().then(() => {
 
   void main();
 
+  /*
+   * The tray is created after the window so that "Open Karen" always has
+   * something to open, and its menu is refreshed from the two things that
+   * change underneath it: which model is loaded, and whether the API serves.
+   */
+  tray = new KarenTray({
+    show: () => {
+      if (!window_ || window_.isDestroyed()) createWindow();
+      else reveal(window_);
+    },
+    quit: () => {
+      quitting = true;
+      app.quit();
+    },
+    state: () => ({
+      ...(runtime.lemonade.status.health?.modelLoaded
+        ? { model: runtime.lemonade.status.health.modelLoaded }
+        : {}),
+      ...(api.state.status.url ? { apiUrl: api.state.status.url } : {}),
+    }),
+  });
+  const trayOk = tray.start();
+  /* Printed because it decides whether closing the window quits Karen, and
+     because on Linux the answer depends on the desktop rather than on
+     anything Karen controls: GNOME shows no status area without an
+     AppIndicator extension installed. */
+  console.log(
+    trayOk
+      ? "Tray icon created; closing the window will keep Karen running."
+      : "No tray icon could be created on this desktop; closing the window will quit Karen.",
+  );
+  runtime.onChange(() => tray?.refresh());
+  api.onChange(() => tray?.refresh());
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else reveal(window_);
   });
 });
 
 app.on("window-all-closed", () => {
+  /* A hidden window is not a closed one, so this does not fire while Karen is
+     in the tray. It fires when the window was really destroyed, which now only
+     happens on the way out or when the tray is unavailable. */
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -938,6 +1048,11 @@ app.on("window-all-closed", () => {
  * closes is the single most annoying failure a local-model app can have.
  */
 app.on("before-quit", () => {
+  /* Set here as well as in the tray's Quit, so a shutdown that starts anywhere
+     else -- the desktop's session end, Cmd-Q, a signal -- also lets the window
+     close rather than being blocked by the hide-on-close handler. */
+  quitting = true;
+  tray?.destroy();
   runtime.killNow();
   /* The listening socket must not outlive the window either -- and the key
      usage counters are only flushed on stop. */

@@ -88,6 +88,18 @@ export interface Settings {
    * runtime should not be met by the same screen every launch. It records that
    * the offer was made.
    */
+  /**
+   * Closing the window leaves Karen running in the tray.
+   *
+   * On, because the case that motivates it is the one where a window is
+   * actively in the way: another app is using Karen's API, and closing the
+   * window should not take the model and the gateway down with it.
+   *
+   * Ignored when no tray icon could be created -- on a desktop with no status
+   * area the window closes normally, because an application you cannot see and
+   * cannot reach is worse than one that quit when you did not mean it to.
+   */
+  keepRunningInTray: boolean;
   setupCompleted: boolean;
 }
 
@@ -108,6 +120,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
   meetingInstructions: "",
+  keepRunningInTray: true,
   setupCompleted: false,
 };
 

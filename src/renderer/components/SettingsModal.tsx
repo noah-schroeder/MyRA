@@ -411,12 +411,46 @@ function Appearance({
   settings: Settings;
   patch: (p: Partial<Settings>) => Promise<void>;
 }) {
+  const [trayOk, setTrayOk] = useState<boolean | undefined>();
+  useEffect(() => {
+    void window.karen.trayAvailable().then(setTrayOk);
+  }, []);
+
   return (
     <div className="pane">
       <p className="pane-lead">
         Karen follows the theme you pick here rather than the system one, so a desktop that
         switches at sunset will not change the app underneath you mid-sentence.
       </p>
+
+      {/* Window behaviour rather than colour, but this is the tab that already
+          owns how the app presents itself, and a tab of its own for one
+          checkbox would be worse. */}
+      <fieldset className="endpoint">
+        <legend>Window</legend>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.keepRunningInTray}
+            onChange={(e) => void patch({ keepRunningInTray: e.target.checked })}
+          />
+          <span>Keep Karen running when the window is closed</span>
+        </label>
+        <p className="hint">
+          Karen stays in your tray with the model loaded and, if you are serving it, the API
+          still answering. Quit from the tray icon. Turn this off and closing the window quits
+          Karen as it used to.
+        </p>
+        {/* Said plainly rather than left as a checkbox that does nothing:
+            GNOME shows no status area unless an AppIndicator extension is
+            installed, and Karen closes normally when there is nowhere to go. */}
+        {trayOk === false ? (
+          <p className="hint note">
+            Your desktop is not showing tray icons, so this has no effect and closing the window
+            quits Karen. On GNOME this needs the AppIndicator extension.
+          </p>
+        ) : null}
+      </fieldset>
 
       <fieldset className="endpoint">
         <legend>Theme</legend>

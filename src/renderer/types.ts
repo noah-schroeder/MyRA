@@ -109,6 +109,8 @@ export interface Settings {
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
   meetingInstructions: string;
+  /** Closing the window leaves Karen running in the tray. */
+  keepRunningInTray: boolean;
   setupCompleted: boolean;
 }
 
@@ -370,6 +372,8 @@ export interface KarenApi {
     name: string,
     checkpoint?: string,
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
+  /** Whether this desktop shows tray icons at all. */
+  trayAvailable(): Promise<boolean>;
   apiState(): Promise<ApiState>;
   apiConfig(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string; state: ApiState }>;
   apiStart(): Promise<{ ok: boolean; error?: string; state: ApiState }>;
