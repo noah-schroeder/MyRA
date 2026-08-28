@@ -42,6 +42,15 @@ export interface SearchOptions {
   timeRange?: string;
   page?: number;
   signal?: AbortSignal;
+  /**
+   * Query these backends instead of the registered ones.
+   *
+   * The registry is module-level, which is right -- there is one set of
+   * backends and it is known at compile time -- but it leaves the merge and
+   * failure-reporting logic untestable without hitting the network, and that
+   * logic is precisely the part that was wrong. This is the seam.
+   */
+  providers?: SearchProvider[];
 }
 
 export interface SearchProvider {

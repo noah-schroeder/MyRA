@@ -228,13 +228,17 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         checkpoint("discover");
         say(`searching ${i + 1}/${plan.queries.length} (page ${page}): ${query}`);
         try {
-          const found = dedupe(
-            await search(query, {
-              categories: plan.category,
-              page,
-              ...(opts.signal ? { signal: opts.signal } : {}),
-            }),
-          );
+          const outcome = await search(query, {
+            categories: plan.category,
+            page,
+            ...(opts.signal ? { signal: opts.signal } : {}),
+          });
+          /* A run that swept half the literature because a backend was down
+             must say so in its own log: this file is the audit trail, and a
+             report whose recall silently halved is exactly the thing it
+             exists to make visible. */
+          for (const failure of outcome.failures) say(`search backend unavailable — ${failure}`);
+          const found = dedupe(outcome.hits);
           let fresh = 0;
           for (const hit of found) {
             const key = canonicalUrl(hit.url ?? "");

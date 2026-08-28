@@ -2,7 +2,7 @@
  * arXiv's Atom API. Free, keyless, and asks for one request every 3 seconds.
  */
 
-import { FETCH_TIMEOUT_MS } from "./config.ts";
+import { SEARCH_TIMEOUT_MS } from "./config.ts";
 import { decodeEntities } from "./html.ts";
 
 export interface Preprint {
@@ -47,6 +47,56 @@ export function parseArxivEntries(xml: string): Preprint[] {
   });
 }
 
+/*
+ * Words that constrain nothing but can still exclude something.
+ *
+ * The terms below are ANDed, so every one of them has to appear somewhere in a
+ * paper. A stopword that arXiv's index happens not to hold for a given record
+ * then removes an otherwise perfect match, which is a strange way to lose a
+ * paper.
+ */
+const STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in",
+  "into", "is", "it", "of", "on", "or", "the", "to", "via", "with", "what",
+  "which", "that", "this", "using", "use", "between", "their", "its",
+]);
+
+/** More than this and the ANDs start excluding papers rather than focusing. */
+const MAX_TERMS = 12;
+
+/**
+ * Turn a natural-language query into something arXiv's parser answers well.
+ *
+ * This was `all:"the whole query"`, which is an **exact phrase search**, and it
+ * quietly cost most of arXiv's usefulness. Measured against the live API:
+ *
+ *   all:"transformer attention mechanism"            ->        74 results
+ *   all:transformer attention mechanism              ->   484,889 results
+ *   all:transformer AND all:attention AND all:...    ->     6,587 results
+ *
+ *   all:"qualitative coding inter-rater reliability" ->         0 results
+ *
+ * Zero. A four-word question -- which is what an academic query looks like --
+ * returned nothing at all, so arXiv contributed nothing to a merged search and
+ * the results looked like OpenAlex on its own. The bare form is too broad to
+ * be meaningful; ANDing the terms keeps the same top hits as the bare form
+ * while cutting the field by two orders of magnitude.
+ */
+export function arxivQuery(query: string): string {
+  const terms = query
+    .toLowerCase()
+    // arXiv's parser has its own syntax; these characters break the query.
+    .replace(/["'()\[\]{}:^~?*\\]/g, " ")
+    .split(/[\s,;/]+/)
+    .map((t) => t.replace(/^[-+.]+|[-+.]+$/g, ""))
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t))
+    .slice(0, MAX_TERMS);
+
+  // Nothing survived the filter -- a query of pure stopwords, or punctuation.
+  if (terms.length === 0) return `all:${query.trim().replace(/["\\]/g, "") || "*"}`;
+  return terms.map((t) => `all:${t}`).join(" AND ");
+}
+
 /** `page` is 1-based; arXiv pages by result offset rather than page number. */
 export async function arxivSearch(
   query: string,
@@ -58,12 +108,12 @@ export async function arxivSearch(
   const url =
     "http://export.arxiv.org/api/query?" +
     new URLSearchParams({
-      search_query: `all:"${query.replace(/"/g, "")}"`,
+      search_query: arxivQuery(query),
       start: String(Math.max(0, page - 1) * max),
       max_results: String(max),
       sortBy: "relevance",
     });
-  const res = await fetch(url, { signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const res = await fetch(url, { signal: signal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`arXiv returned ${res.status} ${res.statusText}`);
   return parseArxivEntries(await res.text());
 }

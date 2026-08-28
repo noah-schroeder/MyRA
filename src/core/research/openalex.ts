@@ -9,7 +9,7 @@
  * fills exactly that gap.
  */
 
-import { FETCH_TIMEOUT_MS, OPENALEX_MAILTO } from "./config.ts";
+import { FETCH_TIMEOUT_MS, OPENALEX_MAILTO, SEARCH_TIMEOUT_MS } from "./config.ts";
 
 const SELECT = [
   "id", "doi", "title", "publication_year", "cited_by_count", "authorships",
@@ -146,7 +146,7 @@ export async function openAlexSearch(
       per_page: String(Math.min(perPage, MAX_PER_PAGE)),
       ...(page > 1 ? { page: String(page) } : {}),
     }),
-    { signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+    { signal: signal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS) },
   );
   recordBudget(res);
   if (res.status === 429) {

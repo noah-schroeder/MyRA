@@ -76,20 +76,27 @@ export const webSearchTool: ToolDef = {
     const wanted = String(params["time_range"] ?? cfg.timeRange ?? "");
     const timeRange = wanted && supportsTimeRange(category) ? wanted : "";
 
-    const hits = await search(query, {
+    const { hits, failures } = await search(query, {
       categories: category,
       ...(timeRange ? { timeRange } : {}),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
-    const note =
-      wanted && !timeRange
-        ? `\n\n(The ${wanted} filter was not applied: no ${category} backend can filter by date.)`
-        : "";
+    const notes: string[] = [];
+    if (wanted && !timeRange) {
+      notes.push(`The ${wanted} filter was not applied: no ${category} backend can filter by date.`);
+    }
+    /* Said to the model, not just logged, so it can hedge a claim about how
+       much literature exists instead of presenting half a sweep as the whole
+       of it. */
+    if (failures.length) {
+      notes.push(`Some sources were unreachable and are missing from these results — ${failures.join("; ")}.`);
+    }
+    const note = notes.length ? `\n\n(${notes.join(" ")})` : "";
     return {
       content: hits.length
         ? `${formatHits(hits)}${note}`
         : `No results for ${JSON.stringify(query)} in ${category}.${note}`,
-      detail: { hits, category, timeRange },
+      detail: { hits, category, timeRange, failures },
     };
   },
 };

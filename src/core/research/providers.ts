@@ -181,8 +181,22 @@ export function supportsTimeRange(category: string | undefined): boolean {
  * empty array there would be indistinguishable from "nothing matched", which
  * is the exact failure that made v1's scholarly searches look broken.
  */
-export async function search(query: string, opts: SearchOptions = {}): Promise<SearchHit[]> {
-  const chosen = providersFor(opts.categories);
+/**
+ * Query every provider for a category and merge what comes back.
+ *
+ * Returns the failures alongside the hits rather than discarding them. One
+ * backend failing is not a failed search -- arXiv rate-limits hard and has
+ * outages, OpenAlex meters its free tier -- but a quietly halved result set
+ * reads as a thin literature rather than a thin search, and the person
+ * reading it has no way to tell the difference. `academicLookup` has always
+ * reported this; the agent's own search did not, so a Quick search during an
+ * arXiv outage returned OpenAlex-only results and said nothing at all.
+ */
+export async function search(
+  query: string,
+  opts: SearchOptions = {},
+): Promise<{ hits: SearchHit[]; failures: string[] }> {
+  const chosen = opts.providers ?? providersFor(opts.categories);
   if (chosen.length === 0) {
     throw new NoProviderError(
       isScholarlyCategory(opts.categories)
@@ -197,11 +211,35 @@ export async function search(query: string, opts: SearchOptions = {}): Promise<S
   const failures: string[] = [];
   settled.forEach((r, i) => {
     if (r.status === "fulfilled") hits.push(...r.value);
-    else failures.push(`${chosen[i]!.id}: ${(r.reason as Error)?.message ?? "failed"}`);
+    else failures.push(`${chosen[i]!.label}: ${reasonOf(r.reason)}`);
   });
 
   if (hits.length === 0 && failures.length === chosen.length) {
     throw new NoProviderError(`Every search provider failed — ${failures.join("; ")}`);
   }
-  return dedupe(hits);
+  return { hits: dedupe(hits), failures };
+}
+
+/**
+ * Why a provider failed, in words rather than in a stack.
+ *
+ * `AbortSignal.timeout` rejects with a bare `TimeoutError` whose message is
+ * "The operation was aborted due to timeout", which tells a reader nothing
+ * about which service was slow or what it means for their results.
+ */
+function reasonOf(reason: unknown): string {
+  const err = reason as Error | undefined;
+  if (err?.name === "TimeoutError" || err?.name === "AbortError") return "did not respond in time";
+  return err?.message ?? "failed";
+}
+
+/**
+ * The hits alone, for callers that have nowhere to put a warning.
+ *
+ * Kept deliberately small and deliberately named: swallowing a partial failure
+ * should be something a caller opts into on one visible line, not the default
+ * every caller gets for free.
+ */
+export async function searchHits(query: string, opts: SearchOptions = {}): Promise<SearchHit[]> {
+  return (await search(query, opts)).hits;
 }
