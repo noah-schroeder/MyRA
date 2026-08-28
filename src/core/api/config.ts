@@ -16,16 +16,17 @@ export interface ApiConfig {
    */
   enabled: boolean;
   /**
-   * 1234 because a great many tutorials hardcode `localhost:1234/v1`, and
-   * drop-in compatibility is worth more here than originality.
+   * 4444, chosen to be free rather than familiar.
    *
-   * It is also LM Studio's port, so it will be taken if LM Studio is running.
-   * That is handled by failing with a sentence that says so, not by picking a
-   * different port silently -- an address that moves is the thing this whole
-   * feature exists to avoid.
+   * The obvious candidates are all taken on the machines this is for: 1234 is
+   * LM Studio's and 11434 is Ollama's, and claiming either would break a tool
+   * the user already runs -- a rude thing to do on first install, and worse
+   * than the small convenience of a port some tutorials hardcode.
    *
-   * Ollama's 11434 is deliberately not the default: taking it would break the
-   * user's Ollama, which is a rude thing for a tool to do on first run.
+   * 4444 is not free of history either (Selenium Grid's hub uses it), but a
+   * conflict there is far less likely on a working machine, and a taken port
+   * fails with a sentence rather than by silently moving. An address that
+   * moves is the thing this whole feature exists to avoid.
    */
   port: number;
   /**
@@ -40,22 +41,30 @@ export interface ApiConfig {
   /** Start serving when Karen opens. */
   startOnLaunch: boolean;
   /**
-   * Record request and response bodies in the log.
+   * Load the model a request asks for, if it is not the one already loaded.
    *
-   * Off, and labelled for what it is: bodies are prompts. Kept in memory only,
-   * like the rest of the log.
+   * What makes Karen usable from an app where you pick a model in a dropdown:
+   * without it, every client is stuck with whatever was last chosen in Karen's
+   * own window.
+   *
+   * Restricted to models already downloaded. A request naming something Karen
+   * does not have is an error, never a download -- `pull` stays unreachable,
+   * so no API client can spend the user's disk or bandwidth.
+   *
+   * The cost is real and worth stating: this changes the model Karen's own
+   * chat window is using, which is why it is a switch and not a constant.
    */
-  logBodies: boolean;
+  loadOnDemand: boolean;
   keys: ApiKey[];
 }
 
 export const API_DEFAULTS: ApiConfig = {
   enabled: false,
-  port: 1234,
+  port: 4444,
   lan: false,
   cors: false,
   startOnLaunch: false,
-  logBodies: false,
+  loadOnDemand: true,
   keys: [],
 };
 
@@ -81,7 +90,7 @@ export function mergeApiConfig(stored: unknown): ApiConfig {
     lan: bool(raw.lan, API_DEFAULTS.lan),
     cors: bool(raw.cors, API_DEFAULTS.cors),
     startOnLaunch: bool(raw.startOnLaunch, API_DEFAULTS.startOnLaunch),
-    logBodies: bool(raw.logBodies, API_DEFAULTS.logBodies),
+    loadOnDemand: bool(raw.loadOnDemand, API_DEFAULTS.loadOnDemand),
     keys: Array.isArray(raw.keys) ? raw.keys.filter(isKey) : [],
   };
 }

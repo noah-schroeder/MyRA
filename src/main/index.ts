@@ -103,6 +103,11 @@ const api = new ApiManager({
       .filter((m) => m.downloaded !== false)
       .map((m) => ({ id: m.id, loaded: m.id === loaded }));
   },
+  /* Loading is reached only this way -- through the model a client names in a
+     normal request, checked against what is already downloaded. Lemonade's own
+     `/load`, `/pull` and `/install` stay unreachable, so an API client can
+     switch between models the user already has and can do nothing else. */
+  loadModel: (id) => runtime.loadModel(id),
 });
 
 let window_: BrowserWindow | undefined;

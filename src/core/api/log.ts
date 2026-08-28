@@ -6,9 +6,12 @@
  * sensitive population puts it all through this socket. So the default record
  * holds who asked, what for, and how it went, and nothing about what was said.
  *
- * Bodies are a separate switch, off by default, labelled for what it is; and
- * nothing here is ever written to disk. Closing Karen loses the log, which is
- * the right trade for a debugging aid.
+ * There is deliberately no option to record bodies. One existed briefly and
+ * was removed rather than shipped switched off: a prompt log is the single
+ * most sensitive artefact this application could hold, and the strongest
+ * guarantee is code that cannot produce one. Nothing here is written to disk
+ * either -- closing Karen loses the log, which is the right trade for what is
+ * only a debugging aid.
  */
 
 /** How far a request got. `open` means it is still streaming. */
@@ -34,12 +37,9 @@ export interface RequestRecord {
   promptTokens?: number | undefined;
   completionTokens?: number | undefined;
   error?: string | undefined;
-  /** Only when body logging is on, and truncated. */
-  body?: string | undefined;
 }
 
 const MAX_ENTRIES = 500;
-const MAX_BODY_CHARS = 4000;
 
 /**
  * A fixed-size ring of recent requests, newest first.
@@ -139,19 +139,6 @@ export function usageFrom(body: string): { prompt?: number; completion?: number 
   } catch {
     return {};
   }
-}
-
-/**
- * A body, truncated, for when body logging is on.
- *
- * Truncated rather than summarised: a prompt's beginning is what identifies it
- * to the person debugging, and keeping a whole 100k-token context in a ring of
- * 500 would be hundreds of megabytes of the user's most sensitive text held in
- * memory for no benefit.
- */
-export function truncateBody(body: string): string {
-  if (body.length <= MAX_BODY_CHARS) return body;
-  return `${body.slice(0, MAX_BODY_CHARS)}\n… (${body.length - MAX_BODY_CHARS} more characters)`;
 }
 
 /** Tokens per second, when there is enough to compute it honestly. */

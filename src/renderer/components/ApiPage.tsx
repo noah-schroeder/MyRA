@@ -212,13 +212,19 @@ function Serving({
         <label className="check">
           <input
             type="checkbox"
-            checked={state.config.logBodies}
-            onChange={(e) => void run(() => window.karen.apiConfig({ logBodies: e.target.checked }))}
+            checked={state.config.loadOnDemand}
+            onChange={(e) => void run(() => window.karen.apiConfig({ loadOnDemand: e.target.checked }))}
           />
-          <span title="Kept in memory only, never written to disk.">
-            Record prompts in the request log
+          <span title="Only models you have already downloaded. Nothing is ever downloaded by an app.">
+            Switch to the model an app asks for
           </span>
         </label>
+        {state.config.loadOnDemand ? (
+          <p className="api-note">
+            An app naming a different model will change what Karen itself is using. Only models
+            you have already downloaded — nothing is fetched.
+          </p>
+        ) : null}
       </div>
 
       <Setup url={url} />
@@ -328,7 +334,8 @@ function Surface() {
           <p className="api-note">
             Nothing else. An app using this cannot install runtimes, download or delete models,
             read what this machine is, change any setting, or see your conversations — those
-            requests are refused before they reach anything.
+            requests are refused before they reach anything. It can switch between models you
+            have already downloaded, by naming one, if that setting is on.
           </p>
         </>
       ) : null}
@@ -370,7 +377,7 @@ function Requests({ entries, onRefresh }: { entries: RequestRecord[]; onRefresh:
 
       <header className="lem-head sub">
         <h4>Recent</h4>
-        <p>Metadata only, kept in memory, and cleared when Karen closes.</p>
+        <p>Metadata only — Karen has no way to record what was said. Kept in memory, and gone when Karen closes.</p>
       </header>
 
       {done.length ? (
@@ -425,9 +432,7 @@ function Row({ record }: { record: RequestRecord }) {
           ) : null}
           {speed ? <div><dt>Speed</dt><dd>{speed} tokens/sec</dd></div> : null}
           {record.error ? <div><dt>Error</dt><dd>{record.error}</dd></div> : null}
-          {record.body ? (
-            <div className="api-detail-body"><dt>Body</dt><dd><pre>{record.body}</pre></dd></div>
-          ) : null}
+
         </dl>
       ) : null}
     </li>

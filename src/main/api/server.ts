@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 
 import { baseUrl, refuseReason, type ApiConfig } from "../../core/api/config.ts";
 import { bearerFrom, findKey, type ApiKey } from "../../core/api/keys.ts";
-import { modelFrom, truncateBody, usageFrom, RequestLog } from "../../core/api/log.ts";
+import { modelFrom, usageFrom, RequestLog } from "../../core/api/log.ts";
 import { routeFor, type Route } from "../../core/api/routes.ts";
 
 /** Where to forward to, resolved per request so a restart is picked up. */
@@ -34,6 +34,8 @@ export interface GatewayOptions {
   upstream: () => Upstream | undefined;
   /** The models a client may be told about. */
   models: () => Promise<{ id: string; loaded: boolean }[]>;
+  /** Load a downloaded model, for `loadOnDemand`. */
+  loadModel: (id: string) => Promise<void>;
   log: RequestLog;
   /** Persist a key's usage counters. Called at most once per request. */
   onKeyUsed?: (keyId: string) => void;
@@ -59,6 +61,16 @@ export class ApiGateway {
   /** Abort handles for requests still in flight, so the UI can cancel one. */
   #inflight = new Map<string, AbortController>();
   #opts: GatewayOptions;
+  /**
+   * Serialises on-demand loads.
+   *
+   * Two clients asking for two different models at the same moment would
+   * otherwise issue two overlapping loads, and Lemonade holds one model: the
+   * pair would fight, and both requests could run against whichever won. The
+   * chain makes the second wait for the first, after which its own check sees
+   * the real state.
+   */
+  #loading: Promise<unknown> = Promise.resolve();
 
   constructor(opts: GatewayOptions) {
     this.#opts = opts;
@@ -121,10 +133,16 @@ export class ApiGateway {
       /* The likely failure, and worth saying in words: 1234 is LM Studio's
          port. A person running both should be told which program to look at,
          not shown EADDRINUSE. */
+      const known: Record<number, string> = {
+        1234: "LM Studio uses 1234",
+        11434: "Ollama uses 11434",
+        4444: "Selenium Grid uses 4444",
+      };
+      const culprit = known[config.port];
       const message =
         code === "EADDRINUSE"
-          ? `Something else is already using port ${String(config.port)}. ` +
-            `LM Studio uses 1234 by default — close it, or choose another port here.`
+          ? `Something else is already using port ${String(config.port)}.` +
+            (culprit ? ` ${culprit} by default — close it, or choose another port here.` : " Choose another port here.")
           : code === "EACCES"
             ? `Port ${String(config.port)} needs privileges Karen does not have. Choose a port above 1024.`
             : (err as Error).message;
@@ -232,6 +250,38 @@ export class ApiGateway {
   }
 
   /**
+   * Load the model a request asked for, when it is not the one already loaded.
+   *
+   * Only models already downloaded, and only when the client actually named
+   * one. A request for something Karen does not have is answered with the list
+   * of what it does have -- never with a download, because `pull` is not
+   * reachable through this gateway and a client must not be able to spend the
+   * user's bandwidth.
+   */
+  async #ensureModel(wanted: string | undefined): Promise<string | undefined> {
+    if (!wanted) return undefined;
+    const attempt = this.#loading.then(async () => {
+      const models = await this.#opts.models().catch(() => []);
+      const match = models.find((m) => m.id === wanted);
+      if (!match) {
+        const names = models.map((m) => m.id).slice(0, 8).join(", ");
+        return `Karen does not have a model called ${JSON.stringify(wanted)}. ` +
+          `Downloaded models: ${names || "none"}. Download it in Karen first.`;
+      }
+      if (match.loaded) return undefined;
+      await this.#opts.loadModel(wanted);
+      return undefined;
+    });
+    // Kept as the tail of the chain whether it resolved or threw.
+    this.#loading = attempt.catch(() => undefined);
+    try {
+      return await attempt;
+    } catch (err) {
+      return `Karen could not load ${JSON.stringify(wanted)}: ${(err as Error).message}`;
+    }
+  }
+
+  /**
    * Forward a request to Lemonade and stream the answer back.
    *
    * The disconnect handling below is the part most likely to be wrong, and the
@@ -248,11 +298,27 @@ export class ApiGateway {
     key: ApiKey | undefined,
     config: ApiConfig,
   ): Promise<void> {
+    /* Read the body before resolving the upstream: with load-on-demand the
+       model named in it decides which model the upstream will be serving. */
+    const body = route.binary ? req : await readBody(req);
+    const bodyText = typeof body === "string" ? body : undefined;
+    const wanted = modelFrom(bodyText);
+
+    if (config.loadOnDemand && wanted) {
+      const problem = await this.#ensureModel(wanted);
+      if (problem) {
+        sendJson(res, 404, { error: { message: problem, type: "model_not_found" } });
+        return;
+      }
+    }
+
     const upstream = this.#opts.upstream();
     if (!upstream) {
       sendJson(res, 503, {
         error: {
-          message: "No model is loaded in Karen. Open Karen, choose a model, and try again.",
+          message: config.loadOnDemand
+            ? "No model is loaded in Karen, and none was named in the request."
+            : "No model is loaded in Karen. Open Karen, choose a model, and try again.",
           type: "service_unavailable",
         },
       });
@@ -264,13 +330,6 @@ export class ApiGateway {
     const controller = new AbortController();
     this.#inflight.set(id, controller);
 
-    /* Read the body first for JSON routes so the model can be logged and the
-       length is known. Audio and speech stream through untouched: buffering a
-       recording would copy the user's most sensitive material through Karen's
-       heap for no benefit. */
-    const body = route.binary ? req : await readBody(req);
-    const bodyText = typeof body === "string" ? body : undefined;
-
     this.#opts.log.start({
       id,
       startedAt: new Date(startedAt).toISOString(),
@@ -279,9 +338,8 @@ export class ApiGateway {
       method: route.method,
       path: route.path,
       dialect: route.dialect,
-      ...(modelFrom(bodyText) ? { model: modelFrom(bodyText) } : {}),
+      ...(wanted ? { model: wanted } : {}),
       state: "open",
-      ...(config.logBodies && bodyText ? { body: truncateBody(bodyText) } : {}),
     });
 
     const finish = (patch: Parameters<RequestLog["update"]>[1]): void => {
