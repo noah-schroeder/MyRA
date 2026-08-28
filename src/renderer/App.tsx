@@ -3,6 +3,7 @@ import { useAgent } from "./useAgent.ts";
 import { Markdown } from "./components/Markdown.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
 import { Reasoning } from "./components/Reasoning.tsx";
+import { ApiPage } from "./components/ApiPage.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
@@ -23,7 +24,7 @@ import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings";
+type Page = "chat" | "runs" | "models" | "meetings" | "api";
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
@@ -208,6 +209,13 @@ export function App() {
             active={page === "models"}
             onClick={() => setPage((p) => (p === "models" ? "chat" : "models"))}
           />
+          {/* Below Models, because it serves what Models chose. */}
+          <RailButton
+            icon="api"
+            label="API"
+            active={page === "api"}
+            onClick={() => setPage((p) => (p === "api" ? "chat" : "api"))}
+          />
         </nav>
 
         <SessionList
@@ -249,6 +257,11 @@ export function App() {
             over 228 entries, and `.pane`'s 62ch reading measure -- right for a
             settings form -- turns the catalogue into a single squeezed column
             with nowhere to scroll. */}
+        {page === "api" ? (
+          <div className="models-page">
+            <ApiPage />
+          </div>
+        ) : null}
         {page === "models" ? (
           <div className="models-page">
             <LemonadePane

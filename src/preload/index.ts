@@ -120,6 +120,28 @@ const api = {
   lemonadeCatalog: () => ipcRenderer.invoke("karen:lemonade-catalog"),
   lemonadeModels: () => ipcRenderer.invoke("karen:lemonade-models"),
   lemonadeRescan: () => ipcRenderer.invoke("karen:lemonade-rescan"),
+
+  /* The API server. `apiKeyCreate` is the one call in the whole bridge that
+     returns a secret, and it does so exactly once. */
+  apiState: () => ipcRenderer.invoke("karen:api-state"),
+  apiConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke("karen:api-config", patch),
+  apiStart: () => ipcRenderer.invoke("karen:api-start"),
+  apiStop: () => ipcRenderer.invoke("karen:api-stop"),
+  apiKeyCreate: (label: string) => ipcRenderer.invoke("karen:api-key-create", label),
+  apiKeyRevoke: (id: string) => ipcRenderer.invoke("karen:api-key-revoke", id),
+  apiRequests: () => ipcRenderer.invoke("karen:api-requests"),
+  apiCancel: (id: string) => ipcRenderer.invoke("karen:api-cancel", id),
+  apiClearLog: () => ipcRenderer.invoke("karen:api-clear-log"),
+  onApi: (cb: (state: unknown) => void) => {
+    const fn = (_e: unknown, state: unknown): void => cb(state);
+    ipcRenderer.on("karen:api", fn);
+    return () => ipcRenderer.removeListener("karen:api", fn);
+  },
+  onApiLog: (cb: (entries: unknown) => void) => {
+    const fn = (_e: unknown, entries: unknown): void => cb(entries);
+    ipcRenderer.on("karen:api-log", fn);
+    return () => ipcRenderer.removeListener("karen:api-log", fn);
+  },
   lemonadeLoad: (name: string) => ipcRenderer.invoke("karen:lemonade-load", name),
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>

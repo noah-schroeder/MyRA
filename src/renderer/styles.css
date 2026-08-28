@@ -3118,3 +3118,166 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 /* Tabs whose content is a grid rather than a form; see RuntimePane. */
 .pane-wide { max-width: none; }
+
+/* ==========================================================================
+   API page
+   ==========================================================================
+
+   The page has one job to do well: get an address and a key into another
+   program quickly. So the address block is the largest thing on it, and the
+   snippets are set in the monospace voice used everywhere else for things the
+   machine produced or a person must copy exactly. */
+
+.api-page {
+  display: flex; flex-direction: column; gap: 22px;
+  max-width: 78rem;
+}
+
+/* ---------- the address, which is the point of the page ---------- */
+
+.api-address {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 15px 17px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); box-shadow: var(--lift);
+}
+.api-address.on { border-color: color-mix(in srgb, var(--green) 34%, var(--border)); }
+
+.api-address-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+
+/* Serving or not is the first thing to read, so it is a light, not a word
+   competing with the address beside it. */
+.api-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  background: var(--text-faint);
+}
+.api-dot.on {
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+}
+.api-state { font-size: 13px; font-weight: 620; color: var(--text); }
+
+.api-url {
+  font-family: var(--mono); font-size: 14px; color: var(--accent-soft);
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  background: var(--bg-inset); border: 1px solid var(--border);
+  user-select: all;
+}
+
+.api-note { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-dim); }
+.api-note code { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+/* Publishing to a network is the one thing here that changes who can reach
+   the machine, so it says so in the accent rather than in grey. */
+.api-note.warn {
+  color: var(--amber);
+  border-left: 2px solid color-mix(in srgb, var(--amber) 50%, transparent);
+  padding-left: 10px;
+}
+
+/* ---------- settings ---------- */
+
+.api-settings {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 9px;
+  padding: 13px 15px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+.api-port { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--text-dim); }
+.api-port input {
+  width: 90px;
+  font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums;
+  padding: 5px 9px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-raised); color: var(--text);
+}
+.api-port input:focus-visible {
+  outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* ---------- paste-ready setup ---------- */
+
+.api-setup { display: flex; flex-direction: column; gap: 10px; }
+
+.api-code { position: relative; }
+.api-code pre {
+  margin: 0;
+  padding: 13px 15px; padding-right: 92px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
+  color: var(--text-dim);
+  overflow-x: auto;
+  white-space: pre;
+}
+.api-code .lem-act { position: absolute; top: 10px; right: 10px; }
+
+/* ---------- what is reachable ---------- */
+
+.api-surface { display: flex; flex-direction: column; gap: 9px; align-items: flex-start; }
+.api-routes {
+  list-style: none; margin: 0; padding: 0; width: 100%;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.api-routes li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 11px; border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: 12px;
+}
+.api-routes code { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+.api-routes .lem-chip { width: 76px; justify-content: center; }
+.api-route-what { margin-left: auto; color: var(--text-faint); font-size: 11.5px; }
+
+/* ---------- requests ---------- */
+
+.api-row { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+.api-row-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  font: inherit; text-align: left; cursor: pointer;
+  padding: 8px 11px;
+  background: none; border: 0; color: inherit;
+}
+.api-figure {
+  font-size: 11.5px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.api-detail {
+  margin: 0; padding: 4px 11px 12px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px;
+  border-top: 1px solid var(--border);
+}
+.api-detail > div { display: flex; flex-direction: column; gap: 1px; }
+.api-detail dt {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-faint);
+}
+.api-detail dd {
+  margin: 0; font-size: 12px; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.api-detail code { font-family: var(--mono); font-size: 11.5px; }
+.api-detail-body { grid-column: 1 / -1; }
+.api-detail-body pre {
+  margin: 0; max-height: 220px; overflow: auto;
+  font-family: var(--mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-dim);
+  background: var(--bg-inset); border-radius: var(--radius-sm); padding: 9px 11px;
+}
+
+/* ---------- keys ---------- */
+
+.api-newkey { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.api-newkey .lem-search { flex: 1 1 260px; }
+
+/* Shown once and never again, so it is styled as something to act on now. */
+.api-secret {
+  display: flex; flex-direction: column; gap: 9px; align-items: flex-start;
+  padding: 13px 15px;
+  border: 1px solid var(--accent-dim); border-radius: var(--radius);
+  background: var(--accent-wash);
+}
+.api-secret-title { margin: 0; font-size: 12.5px; font-weight: 620; color: var(--accent-soft); }
+.api-secret .api-code pre { color: var(--text); background: var(--bg-inset); }
+
+.api-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.api-danger:hover:not(:disabled) { color: var(--red); border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }

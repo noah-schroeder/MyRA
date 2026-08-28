@@ -1,4 +1,10 @@
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
+import type { ApiState } from "../main/api/manager.ts";
+
+/* Re-exported so the renderer imports it from one place, the way every
+   other shared shape in this file is reached. */
+export type { ApiState };
+import type { RequestRecord } from "../core/api/log.ts";
 import type { ForeignModel } from "../core/runtime/foreign.ts";
 import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
@@ -364,6 +370,18 @@ export interface KarenApi {
     name: string,
     checkpoint?: string,
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
+  apiState(): Promise<ApiState>;
+  apiConfig(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string; state: ApiState }>;
+  apiStart(): Promise<{ ok: boolean; error?: string; state: ApiState }>;
+  apiStop(): Promise<{ ok: boolean; error?: string; state: ApiState }>;
+  /** The only call that returns a key's plaintext, and only at creation. */
+  apiKeyCreate(label: string): Promise<{ ok: boolean; error?: string; state: ApiState; secret?: string }>;
+  apiKeyRevoke(id: string): Promise<{ ok: boolean; error?: string; state: ApiState }>;
+  apiRequests(): Promise<{ ok: boolean; entries: RequestRecord[] }>;
+  apiCancel(id: string): Promise<{ ok: boolean }>;
+  apiClearLog(): Promise<{ ok: boolean; entries: RequestRecord[] }>;
+  onApi(cb: (state: ApiState) => void): () => void;
+  onApiLog(cb: (entries: RequestRecord[]) => void): () => void;
   onRuntime(cb: (state: RuntimeState) => void): () => void;
   onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
 

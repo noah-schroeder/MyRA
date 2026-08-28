@@ -46,6 +46,14 @@ const ICONS: Record<string, ReactNode> = {
       <path d="m4 16.5 8 4.5 8-4.5" />
     </>
   ),
+  /* Angle brackets: what a person recognises as "this is for programs",
+     and distinct at 16px from the layered stack above it. */
+  api: (
+    <>
+      <path d="m8 8-4 4 4 4" />
+      <path d="m16 8 4 4-4 4" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />
