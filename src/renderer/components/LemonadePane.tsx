@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import { SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
 import { fitModel, type Verdict } from "../../core/runtime/fit.ts";
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
 
@@ -150,7 +151,12 @@ export function LemonadePane({
 }) {
   const [info, setInfo] = useState<MachineInfo | undefined>();
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [installed, setInstalled] = useState<{ id: string; downloaded?: boolean }[]>([]);
+  const [installed, setInstalled] = useState<
+    { id: string; downloaded?: boolean; sizeBytes?: number }[]
+  >([]);
+  /** LM Studio and Ollama models, by the id Lemonade reports them under. */
+  const [foreign, setForeign] = useState<Map<string, ForeignModel>>(new Map());
+  const [rescanning, setRescanning] = useState(false);
   const [loaded, setLoaded] = useState<string | undefined>();
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [busy, setBusy] = useState(false);
@@ -173,6 +179,7 @@ export function LemonadePane({
     if (listRes.ok) {
       setInstalled(listRes.models);
       setLoaded(listRes.loaded);
+      setForeign(new Map((listRes.foreign ?? []).map((m) => [m.id, m])));
     }
     if (catRes.ok) setCatalog(catRes.catalog);
   }, []);
@@ -563,31 +570,72 @@ export function LemonadePane({
             {mine.length ? (
               <>
                 <header className="lem-head sub">
-                  <h4>Your own models</h4>
-                  <p>Found in your models folder. Karen did not download these and will not move them.</p>
+                  <h4>Already on this machine</h4>
+                  <p>
+                    Your own model folder, plus anything LM Studio or Ollama has already
+                    downloaded. Karen reads these where they are — nothing is copied, moved or
+                    re-downloaded.
+                  </p>
                 </header>
                 <ul className="lem-models">
-                  {mine.map((m) => (
-                    <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
-                      <div className="lem-model-id">
-                        <span className="lem-model-name">{m.id}</span>
-                        {m.id === loaded ? <span className="lem-chip accent">Loaded</span> : null}
-                      </div>
-                      <span className="lem-model-size">—</span>
-                      <span className="lem-chip dim">on disk</span>
-                      <button
-                        type="button"
-                        className="lem-act"
-                        disabled={busy}
-                        onClick={() => loadOrUnload(m.id)}
-                      >
-                        {m.id === loaded ? "Unload" : "Load"}
-                      </button>
-                    </li>
-                  ))}
+                  {mine.map((m) => {
+                    const from = foreign.get(m.id);
+                    /* The label from the manifest, not the directory name: the
+                       index has to flatten `llama3.2:3b` to build a path, and
+                       the colon is how anyone using Ollama refers to it. */
+                    const name = from?.label ?? m.id;
+                    const fit = m.sizeBytes && machine.ramBytes
+                      ? fitModel(m.sizeBytes, machine)
+                      : undefined;
+                    const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
+                    return (
+                      <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
+                        <div className="lem-model-id">
+                          <span className="lem-model-name" title={from?.path ?? m.id}>{name}</span>
+                          {from ? (
+                            <span className="lem-chip">{SOURCE_LABELS[from.source]}</span>
+                          ) : null}
+                          {m.id === loaded ? <span className="lem-chip accent">Loaded</span> : null}
+                        </div>
+                        <span className="lem-model-size">{gb(m.sizeBytes)}</span>
+                        {chip ? (
+                          <span className={`lem-chip ${chip.tone}`} title={fit?.label}>{chip.short}</span>
+                        ) : (
+                          <span className="lem-chip dim">on disk</span>
+                        )}
+                        <button
+                          type="button"
+                          className="lem-act"
+                          disabled={busy}
+                          onClick={() => loadOrUnload(m.id)}
+                        >
+                          {m.id === loaded ? "Unload" : "Load"}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </>
             ) : null}
+
+            {/* The daemon reads the model folders once, when it starts. Someone
+                who downloads a model in LM Studio while Karen is open has no
+                other way to make it appear. */}
+            <button
+              type="button"
+              className="lem-more"
+              disabled={busy || rescanning}
+              onClick={() => {
+                setRescanning(true);
+                void window.karen.lemonadeRescan().then(async (r) => {
+                  setRescanning(false);
+                  if (!r.ok) setError(r.error);
+                  else await refresh();
+                });
+              }}
+            >
+              {rescanning ? "Looking again…" : "Look again for LM Studio and Ollama models"}
+            </button>
           </section>
         </>
       ) : null}

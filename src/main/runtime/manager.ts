@@ -26,7 +26,10 @@ import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
-import { defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, stagingDir } from "./paths.ts";
+import { buildIndex, readIndexSources, type IndexResult } from "./foreignScan.ts";
+import {
+  defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
+} from "./paths.ts";
 import type { Progress } from "./download.ts";
 
 const CONFIG_PATH = join(CONFIG_DIR, "runtime.json");
@@ -47,11 +50,23 @@ export interface RuntimeConfig {
    * get their own back by switching this off, not by retyping a URL.
    */
   useForChat: boolean;
+  /**
+   * Offer models already downloaded with LM Studio or Ollama.
+   *
+   * On by default. Someone arriving from either tool has the weights already,
+   * and the alternative is asking them to spend an evening re-downloading
+   * files that are sitting on the same disk. Reading those directories is
+   * local and read-only; nothing about it reaches the network.
+   */
+  importForeignModels: boolean;
+  /** Extra directories of GGUF files the user named themselves. */
+  extraModelDirs?: string[];
 }
 
 const DEFAULTS: Omit<RuntimeConfig, "modelsDir"> = {
   startOnLaunch: false,
   useForChat: true,
+  importForeignModels: true,
 };
 
 export interface EnsureOptions {
@@ -62,6 +77,8 @@ export interface EnsureOptions {
 
 export class RuntimeManager {
   #config: RuntimeConfig = { ...DEFAULTS, modelsDir: "" };
+  /** What the last index build found, for the UI to report. */
+  #index: IndexResult | undefined;
   #lemonade = new LemonadeServer();
   #listeners = new Set<() => void>();
 
@@ -120,6 +137,35 @@ export class RuntimeManager {
     return this.#config;
   }
 
+  /**
+   * The LM Studio and Ollama models in the current index.
+   *
+   * Read from what the last build recorded rather than rescanned: the answer
+   * cannot change without a rebuild, and a rescan on every list would walk two
+   * directory trees to tell the UI something it already knew.
+   */
+  get foreignModels(): IndexResult["foreign"] {
+    return this.#index?.foreign ?? [];
+  }
+
+  /** Which stores were found, and how many models each held. */
+  get foreignStores(): IndexResult["found"] {
+    return this.#index?.found ?? [];
+  }
+
+  /**
+   * Rebuild the index and restart the daemon so it rescans.
+   *
+   * Lemonade reads `extra_models_dir` once at startup, so a model added in LM
+   * Studio while Karen is open cannot appear without this.
+   */
+  async rescanModels(): Promise<IndexResult["found"]> {
+    await this.stop();
+    this.#index = undefined;
+    await this.ensureLemonade();
+    return this.foreignStores;
+  }
+
   /* ------------------------------------------------------------- backend -- */
 
   /**
@@ -146,13 +192,39 @@ export class RuntimeManager {
       binary = install.binary;
     }
 
+    /*
+     * Everything Karen can offer has to be reachable from one directory,
+     * because that is all `extra_models_dir` accepts. Built before the daemon
+     * starts, since the daemon scans it once at startup.
+     *
+     * A failure here must not stop the backend: losing the LM Studio models is
+     * a disappointment, and losing the daemon because of it would be a fault.
+     * The fallback is the models directory itself, which is exactly what was
+     * passed before any of this existed.
+     */
+    opts.onPhase?.("looking for models you already have");
+    const modelsDir = this.#config.modelsDir || defaultModelsDir();
+    let indexDir = modelsDir;
+    try {
+      this.#index = await buildIndex({
+        indexDir: lemonadeIndexDir(),
+        modelsDir,
+        includeForeign: this.#config.importForeignModels,
+        ...(this.#config.extraModelDirs ? { extraDirs: this.#config.extraModelDirs } : {}),
+      });
+      indexDir = this.#index.dir;
+    } catch (err) {
+      this.#index = undefined;
+      this.#lemonade.note(`Could not index your model folders: ${(err as Error).message}`);
+    }
+
     opts.onPhase?.("starting Lemonade");
     const status = await this.#lemonade.start({
       binary,
       cacheDir: lemonadeCacheDir(),
       configDir: lemonadeConfigDir(),
       // So a library built up under the old runtime is simply there.
-      modelsDir: this.#config.modelsDir || defaultModelsDir(),
+      modelsDir: indexDir,
     });
     if (status.state !== "ready") throw new Error(status.error ?? "Lemonade did not start.");
     return this.#api;

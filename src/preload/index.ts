@@ -119,6 +119,7 @@ const api = {
   lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
   lemonadeCatalog: () => ipcRenderer.invoke("karen:lemonade-catalog"),
   lemonadeModels: () => ipcRenderer.invoke("karen:lemonade-models"),
+  lemonadeRescan: () => ipcRenderer.invoke("karen:lemonade-rescan"),
   lemonadeLoad: (name: string) => ipcRenderer.invoke("karen:lemonade-load", name),
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>

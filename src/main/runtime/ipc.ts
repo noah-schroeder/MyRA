@@ -107,9 +107,23 @@ export function installRuntimeIpc(
         ok: true,
         models: await runtime.api.listModels(),
         loaded: runtime.lemonade.status.health?.modelLoaded,
+        /* Where each found model came from, so the list can say "LM Studio"
+           rather than leaving a person to recognise their own filenames. */
+        foreign: runtime.foreignModels,
       };
     } catch (err) {
       return { ok: false, error: (err as Error).message, models: [] };
+    }
+  });
+
+  /* Lemonade reads `extra_models_dir` once at startup, so picking up a model
+     added in LM Studio a minute ago means restarting the daemon. Explicit
+     rather than automatic: it drops whatever is loaded. */
+  ipcMain.handle("karen:lemonade-rescan", async () => {
+    try {
+      return { ok: true, found: await runtime.rescanModels() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
     }
   });
 

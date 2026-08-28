@@ -71,6 +71,16 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
           <label className="check">
             <input
               type="checkbox"
+              checked={state.config.importForeignModels}
+              onChange={(e) => void patch({ importForeignModels: e.target.checked })}
+            />
+            <span title="Read-only, and entirely local — no network request is involved.">
+              Offer models already downloaded by LM Studio and Ollama
+            </span>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
               checked={state.config.startOnLaunch}
               onChange={(e) => void patch({ startOnLaunch: e.target.checked })}
             />
