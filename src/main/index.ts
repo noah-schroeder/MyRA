@@ -34,6 +34,8 @@ import { installDictationIpc } from "./dictation.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
+import { ApiManager } from "./api/manager.ts";
+import { installApiIpc } from "./api/ipc.ts";
 import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
@@ -79,6 +81,29 @@ const config = new ConfigStore();
 const vault = new SecretVault();
 const registry = new ToolRegistry();
 const runtime = new RuntimeManager();
+
+/**
+ * The gateway that serves Karen's model to other apps.
+ *
+ * It is handed accessors rather than the runtime itself: what it needs is
+ * "where do I forward to, right now" and "what may I say exists", and both
+ * change under it as the daemon restarts and models load. Nothing else about
+ * the runtime is its business -- in particular it has no way to reach
+ * `installBackend` or `pullModel`, which is the whole point of the design.
+ */
+const api = new ApiManager({
+  upstream: () => runtime.chatEndpoint(),
+  models: async () => {
+    const loaded = runtime.lemonade.status.health?.modelLoaded;
+    /* Only what is downloaded. Offering the whole 228-entry catalogue would
+       invite a client to ask for something that is not here, and Karen does
+       not expose model loading through the API. */
+    const models = await runtime.api.listModels().catch(() => []);
+    return models
+      .filter((m) => m.downloaded !== false)
+      .map((m) => ({ id: m.id, loaded: m.id === loaded }));
+  },
+});
 
 let window_: BrowserWindow | undefined;
 let session_: Session | undefined;
@@ -757,6 +782,12 @@ async function main(): Promise<void> {
   await runtime.load();
   installRuntimeIpc(runtime, send, () => vault.get("hfToken"), () => window_);
 
+  await api.load();
+  installApiIpc(api, send);
+  /* After the runtime, because serving with nothing to serve answers 503 --
+     honest, but a poor first impression for someone who left it switched on. */
+  void api.startOnLaunch();
+
   /*
    * Everything that talks to a model resolves its endpoint here.
    *
@@ -903,6 +934,9 @@ app.on("window-all-closed", () => {
  */
 app.on("before-quit", () => {
   runtime.killNow();
+  /* The listening socket must not outlive the window either -- and the key
+     usage counters are only flushed on stop. */
+  void api.stop();
 });
 process.on("exit", () => {
   runtime.killNow();
