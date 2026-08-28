@@ -7,7 +7,7 @@
  * should be able to point at the file that does that.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 
@@ -89,12 +89,35 @@ export class ApiManager {
 
   /* --------------------------------------------------------------- state -- */
 
+  /**
+   * Read `api.json`, surviving a file that is not valid JSON.
+   *
+   * `mergeApiConfig` defends against a malformed *object*, but the parse
+   * happens first, and a truncated file throws before the merge is reached.
+   * That is not hypothetical: a power cut or a force-quit mid-write leaves a
+   * partial file, and this threw out of `main()` -- taking the API's IPC
+   * registration with it, so the page loaded and every call to it hung.
+   *
+   * The unreadable file is moved aside rather than overwritten. It holds key
+   * hashes, and the next save would destroy whatever could still be recovered
+   * from it by hand.
+   */
   async load(): Promise<ApiConfig> {
+    let raw: string;
     try {
-      this.#config = mergeApiConfig(JSON.parse(await readFile(CONFIG_PATH, "utf8")));
+      raw = await readFile(CONFIG_PATH, "utf8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       this.#config = { ...API_DEFAULTS };
+      return this.#config;
+    }
+    try {
+      this.#config = mergeApiConfig(JSON.parse(raw));
+    } catch {
+      this.#config = { ...API_DEFAULTS };
+      const aside = `${CONFIG_PATH}.unreadable`;
+      await rename(CONFIG_PATH, aside).catch(() => {});
+      console.error(`api.json could not be read and was moved to ${aside}; starting with no keys.`);
     }
     return this.#config;
   }
