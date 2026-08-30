@@ -245,14 +245,18 @@ export function RegistrySearch({
             <>No registry is enabled, so there is nothing to search.</>
           ) : (
             <>
-              Pressing Search sends “{query.trim() || "…"}” to{" "}
+              {/* Quoting an empty box back as “…” claimed Karen would send
+                  an ellipsis, which is both untrue and the sort of small
+                  inaccuracy that makes the rest of the sentence -- the part
+                  about what leaves this machine -- less believable. */}
+              {query.trim() ? <>Pressing Search sends “{query.trim()}” to{" "}</> : <>Nothing is sent until you press Search. Then what you typed goes to{" "}</>}
               {chosen.map((s, i) => (
                 <span key={s}>
                   {i > 0 ? " and " : ""}
                   <strong className={`reg-inline ${s}`}>{REGISTRY_LABEL[s]}</strong>
                 </span>
               ))}
-              . Typing sends nothing.
+              {query.trim() ? <>. Typing sends nothing.</> : <>, and nothing else does.</>}
             </>
           )}
         </p>
@@ -288,6 +292,18 @@ export function RegistrySearch({
 
       {/* ---------------- results ---------------- */}
       {hits.length ? (
+        <>
+        {/* Headings, because "↓ 13M" and "♥ 933" are two glyphs a person has
+            to guess at, and one of them is the closest thing a registry gives
+            to a quality signal. */}
+        <div className="reg-cols" aria-hidden="true">
+          <span>Repository</span>
+          <span>Registry</span>
+          <span>Format</span>
+          <span className="num">Downloads</span>
+          <span className="num">Likes</span>
+          <span />
+        </div>
         <ul className="reg-hits">
           {hits.map((hit) => {
             const key = `${hit.source}/${hit.id}`;
@@ -301,7 +317,6 @@ export function RegistrySearch({
                   onClick={() => void openRepo(hit)}
                   aria-expanded={isOpen}
                 >
-                  <span className={`reg-tag ${hit.source}`}>{REGISTRY_LABEL[hit.source]}</span>
                   <span className="reg-hit-id">
                     <span className="reg-hit-name">{hit.id}</span>
                     {/* A registry's own display name can differ from the
@@ -311,6 +326,21 @@ export function RegistrySearch({
                     {hit.name && hit.name !== hit.id.split("/").pop() ? (
                       <span className="reg-hit-alt">{hit.name}</span>
                     ) : null}
+                  </span>
+                  {/*
+                    * The registry, moved out of the leading badge and into a
+                    * column of its own.
+                    *
+                    * It has to be on every row -- an unlabelled row is
+                    * ambiguous to someone checking an institutional policy,
+                    * which is the whole reason this is shown. But as a bright
+                    * pill at the start of forty-eight rows it was the loudest
+                    * thing on the page while being the same on all of them.
+                    * In a column, forty-eight identical values read instantly
+                    * as "all from one place", which is the actual question.
+                    */}
+                  <span className={`reg-hit-src ${hit.source}`} title={REGISTRY_NAME[hit.source]}>
+                    {REGISTRY_LABEL[hit.source]}
                   </span>
                   {hit.hasGguf ? <span className="lem-chip good">GGUF</span> : (
                     <span className="lem-chip dim" title="No GGUF files; Karen may not be able to run this">
@@ -358,6 +388,7 @@ export function RegistrySearch({
             );
           })}
         </ul>
+        </>
       ) : null}
 
       {ran && !hits.length && !busy && !Object.values(status).some((s) => s?.error) ? (

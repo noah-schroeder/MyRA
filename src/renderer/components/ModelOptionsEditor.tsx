@@ -59,6 +59,14 @@ function toDraft(options: ModelOptions, fields: OptionField[]): Draft {
       draft[field.key] = "";
       continue;
     }
+    /* `-1` is how the daemon spells "work it out at load time", and printing
+       it into the box undoes the work the hint underneath does to explain
+       what auto means. "auto" reads back as -1 through `readContextSize`, so
+       nothing is lost on the way out. */
+    if (field.kind === "context" && value === -1) {
+      draft[field.key] = "auto";
+      continue;
+    }
     draft[field.key] = field.kind === "toggle" ? (value === true ? "true" : "false") : String(value);
   }
   return draft;
@@ -292,10 +300,29 @@ function Field({
       {/* What "auto" actually means on this machine, and what the number costs.
           Auto-tune resolving a 128k model down to 4k is invisible otherwise. */}
       {field.kind === "context" ? <ContextHint options={options} value={value} machine={machine} /> : null}
+      {/* A bare "300" in a box labelled "Unload after idle" is a number with
+          no unit, and the two plausible readings -- five minutes or five
+          hours -- are an hour apart. */}
+      {field.kind === "seconds" ? <Seconds value={value} /> : null}
       {field.help ? <p className="mopt-help">{field.help}</p> : null}
     </div>
   );
 }
+
+/** The same number in the units a person thinks in. */
+function Seconds({ value }: { value: string }) {
+  const n = Number(value.trim());
+  if (!value.trim() || !Number.isFinite(n) || n <= 0) return null;
+  const words =
+    n < 90
+      ? `${n} seconds`
+      : n < 5400
+        ? `${round(n / 60)} minutes`
+        : `${round(n / 3600)} hours`;
+  return <p className="mopt-hint">Seconds — {words}.</p>;
+}
+
+const round = (n: number): string => (Math.round(n * 10) / 10).toString();
 
 function ContextHint({
   options,

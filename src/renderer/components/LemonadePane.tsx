@@ -27,7 +27,7 @@
  *     into it.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegistrySearch } from "./RegistrySearch.tsx";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
@@ -36,6 +36,9 @@ import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
 import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
 import { fitModel, type Verdict } from "../../core/runtime/fit.ts";
+import {
+  engineStates, partitionByRunnable, runnable, type Runnable,
+} from "../../core/runtime/runnable.ts";
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
 
 const BACKEND_LABELS: Record<string, string> = {
@@ -107,6 +110,41 @@ const FIT_CHIP: Record<Verdict, { short: string; tone: string }> = {
   "too-large": { short: "Too large", tone: "bad" },
 };
 
+/**
+ * The engine verdict as a chip, in the same slot as the fit verdict.
+ *
+ * One column, not two: they answer the same question -- "what happens if I
+ * press Download" -- and only one of them is ever the real answer. Memory only
+ * matters once something can execute the model at all.
+ */
+/**
+ * Capability labels in the words of what they do.
+ *
+ * `tool-calling` and `omni` are terms from the model-hosting world, and this
+ * page is read by people who write papers. Anything not listed falls through
+ * as the label itself rather than being dropped -- a capability Karen has not
+ * heard of is still worth showing.
+ */
+const LABEL_WORDS: Record<string, string> = {
+  reasoning: "Reasoning",
+  coding: "Code",
+  vision: "Reads images",
+  omni: "Reads images",
+  "tool-calling": "Tools",
+  embedding: "Embeddings",
+  reranking: "Reranking",
+  transcription: "Transcription",
+  "realtime-transcription": "Live transcription",
+  tts: "Speech",
+  image: "Image generation",
+};
+
+const RUN_CHIP: Record<Runnable, { short: string; tone: string }> = {
+  ready: { short: "Ready", tone: "good" },
+  "needs-engine": { short: "Needs engine", tone: "warn" },
+  unsupported: { short: "Cannot run", tone: "bad" },
+};
+
 function gb(bytes?: number): string {
   return bytes ? `${(bytes / 1024 ** 3).toFixed(bytes < 1024 ** 3 ? 2 : 1)} GB` : "—";
 }
@@ -170,6 +208,10 @@ export function LemonadePane({
   const [query, setQuery] = useState("");
   const [onlyMine, setOnlyMine] = useState(false);
   const [showAllEngines, setShowAllEngines] = useState(false);
+  /* Models whose engine this machine cannot run. Hidden by default and
+     counted out loud -- see `runnable.ts` for why they are not simply
+     listed alongside the rest. */
+  const [showBlocked, setShowBlocked] = useState(false);
   /* The curated catalogue or the registries. Two different acts -- "show me
      what Karen suggests" and "go and look this up" -- and mixing them would
      put a box that reaches the internet next to one that does not. */
@@ -269,16 +311,45 @@ export function LemonadePane({
     [installed, catalog],
   );
 
+  /** What each engine can do here, built once rather than per row. */
+  const states = useMemo(() => engineStates(info?.engines ?? []), [info?.engines]);
+  /** The engines with a backend installed, named rather than counted. */
+  const readyEngines = useMemo(
+    () => [...states].filter(([, v]) => v === "ready").map(([id]) => id),
+    [states],
+  );
+
   const active = groups.find((g) => g.id === group) ?? groups[0];
-  const rows = useMemo(() => {
+  const { rows, blockedCount } = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = active?.entries ?? [];
     if (q) list = list.filter((m) => m.id.toLowerCase().includes(q));
     if (onlyMine) list = list.filter((m) => have.has(m.id));
-    /* Downloaded models float to the top of whatever is showing: they are the
-       ones you can act on right now. */
-    return [...list].sort((a, b) => Number(have.has(b.id)) - Number(have.has(a.id)));
-  }, [active, query, onlyMine, have]);
+
+    /* The models this machine has no engine for are separated before anything
+       else, because their count is shown and because leaving them mixed in is
+       what made the list offer 95 downloads that could never be loaded. */
+    const { usable, blocked } = partitionByRunnable(list, states);
+    const shown = showBlocked ? [...usable, ...blocked] : usable;
+
+    /* Downloaded first -- they are the ones you can act on right now -- then
+       what will actually run, then upstream's suggestions, then smallest.
+       Size last rather than first: sorting by size alone put 135M-parameter
+       models at the top of a list an academic reads for research work. */
+    const order = (m: CatalogEntry): number =>
+      runnable(m.recipe, states).state === "ready" ? 0
+        : runnable(m.recipe, states).state === "needs-engine" ? 1 : 2;
+    return {
+      rows: [...shown].sort(
+        (a, b) =>
+          Number(have.has(b.id)) - Number(have.has(a.id)) ||
+          order(a) - order(b) ||
+          Number(b.suggested) - Number(a.suggested) ||
+          (a.sizeBytes ?? Infinity) - (b.sizeBytes ?? Infinity),
+      ),
+      blockedCount: blocked.length,
+    };
+  }, [active, query, onlyMine, have, states, showBlocked]);
 
   const loadOrUnload = (id: string): void => {
     void run(id === loaded ? `Unloading ${id}` : `Loading ${id}`, () =>
@@ -455,19 +526,46 @@ export function LemonadePane({
             <header className="lem-head">
               <h3>Models</h3>
               <p>
-                Grouped by what they do. Sizes are the download; the fit allows for working memory
-                too. Every row names the registry it would be fetched from — some institutions
+                Grouped by what they do, and filtered to what this machine can actually run.
+                Every row names the registry it would be fetched from — some institutions
                 restrict which of those staff may use.
               </p>
             </header>
 
-            {/* One line rather than the machine strip, which belongs on the
-                Runtime page: without it the verdict column is a colour with
-                nothing behind it, and with it this screen is about models. */}
-            <p className="lem-group-hint">
-              Fit is measured against {gb(info.ramBytes)} of memory
-              {machine.vramBytes ? ` and ${gb(machine.vramBytes)} of graphics memory` : ", with no graphics acceleration"}.
-            </p>
+            {/*
+              * The constraint every verdict on this page is derived from, said
+              * once, at the size of a fact rather than of a footnote.
+              *
+              * It was a 12px grey sentence under the heading, which is where
+              * you put something you do not expect to be read -- and it is the
+              * single most decision-relevant thing here: every "fits" and
+              * "too large" below is measured against these two numbers, and
+              * whether a model can run at all is measured against the third.
+              */}
+            <div className="lem-machine" aria-label="What this machine can run">
+              <div className="lem-machine-cell">
+                <span className="lem-machine-key">Memory</span>
+                <span className="lem-machine-value">{gb(info.ramBytes)}</span>
+              </div>
+              <div className={machine.vramBytes ? "lem-machine-cell accel" : "lem-machine-cell"}>
+                <span className="lem-machine-key">Graphics</span>
+                <span className="lem-machine-value">
+                  {machine.vramBytes ? gb(machine.vramBytes) : "None"}
+                </span>
+              </div>
+              <div className={noEngine ? "lem-machine-cell warn" : "lem-machine-cell"}>
+                <span className="lem-machine-key">Engines</span>
+                <span className="lem-machine-value">
+                  {noEngine
+                    ? "None installed"
+                    /* The implementation, which is what "engine" means
+                       here -- `engineName` returns what the engine is FOR
+                       ("Chat models"), and "Engines: Chat models" is not a
+                       sentence. */
+                    : readyEngines.map((id) => ENGINE_IMPL[id] ?? id).join(", ")}
+                </span>
+              </div>
+            </div>
 
             {/* Downloading a model that nothing can run is a wasted transfer,
                 and it is not obvious from here that an engine is a separate
@@ -532,7 +630,12 @@ export function LemonadePane({
                     onClick={() => setGroup(g.id)}
                   >
                   {g.title}
-                  <span className="lem-tab-count">{g.entries.length}</span>
+                  {/* What this tab will show, not what the catalogue holds.
+                      "168" over a list of 73 is a number the user can check
+                      by scrolling, and it fails that check. */}
+                  <span className="lem-tab-count">
+                    {partitionByRunnable(g.entries, states).usable.length}
+                  </span>
                 </button>
                 ))}
               </div>
@@ -542,7 +645,7 @@ export function LemonadePane({
                   <input
                     type="search"
                     className="lem-search"
-                    placeholder={`Search ${active.entries.length} ${active.title.toLowerCase()} models`}
+                    placeholder={`Search ${partitionByRunnable(active.entries, states).usable.length} ${active.title.toLowerCase()} models`}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     aria-label={`Search ${active.title}`}
@@ -565,77 +668,179 @@ export function LemonadePane({
                   <p className="lem-group-hint">{GROUP_HINT[active.id]}</p>
                 ) : null}
 
+                {/* Column headings, because the row is now a table and a
+                    table with unlabelled columns is a puzzle. The registry
+                    column especially: aligning 168 identical values is what
+                    answers "are these all from one place?" at a glance, which
+                    168 inline pills did not. */}
+                <div className="lem-cols" aria-hidden="true">
+                  <span>Model</span>
+                  <span>Registry</span>
+                  <span className="num">Download</span>
+                  <span>Runs here</span>
+                  <span />
+                </div>
+
                 <ul className="lem-models">
-                  {rows.map((m) => {
+                  {rows.map((m, i) => {
+                    const verdict = runnable(m.recipe, states);
                     const fit = m.sizeBytes && machine.ramBytes ? fitModel(m.sizeBytes, machine) : undefined;
                     const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
                     const here = have.has(m.id);
+                    /* Two different verdicts, and the engine one wins. A model
+                       that fits comfortably in memory and has no engine to run
+                       it is not "Fits on GPU"; showing that was the bug. */
+                    const runChip = { ready: RUN_CHIP.ready, other: RUN_CHIP[verdict.state] };
+                    /* Where the runnable models end. Without a line here the
+                       blocked ones simply fade in, and a dimmed row looks like
+                       a rendering artefact rather than a different category. */
+                    const firstBlocked =
+                      verdict.state === "unsupported" &&
+                      rows[i - 1] !== undefined &&
+                      runnable(rows[i - 1]!.recipe, states).state !== "unsupported";
                     return (
-                      <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
+                      <Fragment key={m.id}>
+                      {firstBlocked ? (
+                        <li className="lem-divider">
+                          Below here: nothing on this machine can run these.
+                        </li>
+                      ) : null}
+                      <li
+                        className={[
+                          "lem-model",
+                          m.id === loaded ? "loaded" : "",
+                          verdict.state === "unsupported" ? "blocked" : "",
+                        ].filter(Boolean).join(" ")}
+                      >
                         <div className="lem-model-id">
                           <span className="lem-model-name">{m.id}</span>
-                          {/* On every row, including Hugging Face ones. A badge shown only on
-                              the exceptions makes an unlabelled row ambiguous -- it could mean
-                              "the usual registry" or "nobody checked" -- and someone verifying
-                              against an institutional policy cannot tell those apart. */}
-                          <span
-                            className={
-                              m.source === "huggingface"
-                                ? "lem-chip lem-src"
-                                : "lem-chip lem-src foreign"
-                            }
-                            title={REGISTRY_HOST[m.source]}
-                          >
-                            {REGISTRY_LABEL[m.source]}
-                          </span>
-                          {m.suggested ? (
-                            <span className="lem-chip accent" title="Recommended by Lemonade">
-                              Suggested
-                            </span>
-                          ) : null}
-                          {m.id === loaded ? <span className="lem-chip accent">Loaded</span> : null}
+                          <div className="lem-model-meta">
+                            {/*
+                              * No "Suggested" badge, though the sort still
+                              * uses it.
+                              *
+                              * 66 of the 73 chat models this machine can run
+                              * are on upstream's shortlist. A mark that
+                              * appears on nine rows in ten is not a
+                              * recommendation, it is the baseline -- and in
+                              * the accent colour it pulled the eye sixty-six
+                              * times to say nothing, crowding out the labels
+                              * that do differ. It stays a sort key, where it
+                              * is genuinely useful, and stops being a badge.
+                              */}
+                            {/* "chat" is the group heading already, and the
+                                engine ids -- llamacpp, whispercpp -- are the
+                                implementation detail this page exists to keep
+                                people from having to learn. */}
+                            {m.labels
+                              .filter((l) => l !== "chat" && !ENGINE_IMPL[l] && !ENGINE_LABELS[l])
+                              .slice(0, 3)
+                              .map((l) => (
+                                <span key={l} className="lem-tag">{LABEL_WORDS[l] ?? l}</span>
+                              ))}
+                            {m.id === loaded ? <span className="lem-tag accent">Loaded</span> : null}
+                            {here && m.id !== loaded ? (
+                              <span className="lem-tag">Downloaded</span>
+                            ) : null}
+                          </div>
                         </div>
+
+                        {/* On every row, including Hugging Face ones. A badge shown only on
+                            the exceptions makes an unlabelled row ambiguous -- it could mean
+                            "the usual registry" or "nobody checked" -- and someone verifying
+                            against an institutional policy cannot tell those apart. */}
+                        <span
+                          className={
+                            m.source === "huggingface" ? "lem-model-src" : "lem-model-src foreign"
+                          }
+                          title={REGISTRY_HOST[m.source]}
+                        >
+                          {REGISTRY_LABEL[m.source]}
+                        </span>
+
                         <span className="lem-model-size">{gb(m.sizeBytes)}</span>
-                        {chip ? (
-                          <span className={`lem-chip ${chip.tone}`} title={fit?.label}>
-                            {chip.short}
-                          </span>
-                        ) : (
-                          <span className="lem-chip dim">—</span>
-                        )}
-                        {/* Only for models that are here: there is nothing to
-                            tune about a model that has not been downloaded. */}
-                        {here ? (
+
+                        {/* Once the engine is there, memory is the live
+                            question again and the fit verdict is the useful
+                            one; before that it is noise. Text and colour are
+                            taken from the SAME verdict -- reading the words
+                            off one and the tone off the other painted "Too
+                            large" in the green reserved for "fits". */}
+                        {(() => {
+                          const shown =
+                            verdict.state === "ready" ? (chip ?? runChip.ready) : runChip.other;
+                          return (
+                            <span
+                              className={`lem-chip ${shown.tone}`}
+                              title={
+                                verdict.state === "ready" && fit
+                                  ? `${verdict.reason} ${fit.label}`
+                                  : verdict.reason
+                              }
+                            >
+                              {shown.short}
+                            </span>
+                          );
+                        })()}
+
+                        <div className="lem-model-acts">
+                          {/* Only for models that are here: there is nothing to
+                              tune about a model that has not been downloaded. */}
+                          {here ? (
+                            <button
+                              type="button"
+                              className="lem-act"
+                              onClick={() => setTuning(tuning === m.id ? undefined : m.id)}
+                              title="How this model loads: context size, backend, arguments"
+                            >
+                              Tune
+                            </button>
+                          ) : null}
                           <button
                             type="button"
-                            className="lem-act"
-                            onClick={() => setTuning(tuning === m.id ? undefined : m.id)}
-                            title="How this model loads: context size, backend, arguments"
+                            className={here ? "lem-act" : "lem-act get"}
+                            /* Downloading something nothing can run is the one
+                               action on this page that cannot be undone
+                               cheaply -- it is somebody's bandwidth, possibly
+                               metered. The tooltip says why rather than
+                               leaving a dead button. */
+                            disabled={busy || (!here && verdict.state === "unsupported")}
+                            title={verdict.state === "unsupported" ? verdict.reason : undefined}
+                            onClick={() =>
+                              here
+                                ? loadOrUnload(m.id)
+                                : void run(`Downloading ${m.id}`, () => window.karen.lemonadePull(m.id))
+                            }
                           >
-                            Tune
+                            {here ? (m.id === loaded ? "Unload" : "Load") : "Download"}
                           </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className={here ? "lem-act" : "lem-act get"}
-                          disabled={busy}
-                          onClick={() =>
-                            here
-                              ? loadOrUnload(m.id)
-                              : void run(`Downloading ${m.id}`, () => window.karen.lemonadePull(m.id))
-                          }
-                        >
-                          {here ? (m.id === loaded ? "Unload" : "Load") : "Download"}
-                        </button>
+                        </div>
                       </li>
+                      </Fragment>
                     );
                   })}
                   {rows.length === 0 ? (
                     <li className="lem-none">
-                      {query ? `Nothing matching “${query}”.` : "Nothing downloaded in this group yet."}
+                      {query ? `Nothing matching \u201c${query}\u201d.` : "Nothing downloaded in this group yet."}
                     </li>
                   ) : null}
                 </ul>
+
+                {/* Counted out loud rather than silently filtered. Someone who
+                    read about a model elsewhere and cannot find it here needs
+                    to know it was withheld and why, or they conclude the list
+                    is broken. */}
+                {blockedCount ? (
+                  <button
+                    type="button"
+                    className="lem-hidden"
+                    onClick={() => setShowBlocked(!showBlocked)}
+                  >
+                    {showBlocked
+                      ? `Hide the ${blockedCount} this machine cannot run`
+                      : `${blockedCount} more need hardware this machine does not have — show them anyway`}
+                  </button>
+                ) : null}
               </>
             ) : null}
 
@@ -667,33 +872,43 @@ export function LemonadePane({
                       <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
                         <div className="lem-model-id">
                           <span className="lem-model-name" title={from?.path ?? m.id}>{name}</span>
-                          {from ? (
-                            <span className="lem-chip">{SOURCE_LABELS[from.source]}</span>
-                          ) : null}
-                          {m.id === loaded ? <span className="lem-chip accent">Loaded</span> : null}
+                          <div className="lem-model-meta">
+                            {m.id === loaded ? <span className="lem-tag accent">Loaded</span> : null}
+                            {/* Where the file came from, which is not the same
+                                question as which registry a download would
+                                use -- these are already here. */}
+                            {from ? <span className="lem-tag">{SOURCE_LABELS[from.source]}</span> : null}
+                          </div>
                         </div>
+                        {/* The registry column stays empty rather than being
+                            collapsed: these were not fetched by Karen, and
+                            naming one would be a claim about their provenance
+                            that Karen cannot make. */}
+                        <span className="lem-model-src">—</span>
                         <span className="lem-model-size">{gb(m.sizeBytes)}</span>
                         {chip ? (
                           <span className={`lem-chip ${chip.tone}`} title={fit?.label}>{chip.short}</span>
                         ) : (
-                          <span className="lem-chip dim">on disk</span>
+                          <span className="lem-chip dim">On disk</span>
                         )}
-                        <button
-                          type="button"
-                          className="lem-act"
-                          onClick={() => setTuning(tuning === m.id ? undefined : m.id)}
-                          title="How this model loads: context size, backend, arguments"
-                        >
-                          Tune
-                        </button>
-                        <button
-                          type="button"
-                          className="lem-act"
-                          disabled={busy}
-                          onClick={() => loadOrUnload(m.id)}
-                        >
-                          {m.id === loaded ? "Unload" : "Load"}
-                        </button>
+                        <div className="lem-model-acts">
+                          <button
+                            type="button"
+                            className="lem-act"
+                            onClick={() => setTuning(tuning === m.id ? undefined : m.id)}
+                            title="How this model loads: context size, backend, arguments"
+                          >
+                            Tune
+                          </button>
+                          <button
+                            type="button"
+                            className="lem-act"
+                            disabled={busy}
+                            onClick={() => loadOrUnload(m.id)}
+                          >
+                            {m.id === loaded ? "Unload" : "Load"}
+                          </button>
+                        </div>
                       </li>
                     );
                   })}

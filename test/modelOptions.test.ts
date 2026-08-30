@@ -17,6 +17,7 @@ import {
   parseModelOptions,
   patchFrom,
   readContextSize,
+  type ModelOptions,
 } from "../src/core/runtime/modelOptions.ts";
 
 const LLAMACPP = {
@@ -152,4 +153,36 @@ test("turning an unset option off explicitly is still a change", () => {
   const options = parseModelOptions(LLAMACPP);
   assert.deepEqual(patchFrom(options, { auto_evict: false }), { auto_evict: false });
   assert.deepEqual(patchFrom(options, { auto_evict: true }), { auto_evict: true });
+});
+
+/* --------------------------------------------------- auto, as a word -- */
+
+test("“auto” and -1 are the same value, so showing the word writes no override", () => {
+  // The editor renders `ctx_size: -1` as the word "auto" rather than as the
+  // number, and this is what makes that safe: opening the panel and saving
+  // without touching anything must not pin an override.
+  const options: ModelOptions = {
+    modelName: "m",
+    recipe: "llamacpp",
+    defaults: { ctx_size: -1 },
+    saved: {},
+    effective: { ctx_size: -1 },
+  };
+
+  assert.deepEqual(readContextSize("auto"), { value: -1 });
+  assert.deepEqual(patchFrom(options, { ctx_size: -1 }), {});
+  assert.deepEqual(patchFrom(options, { ctx_size: -1 }), {});
+});
+
+test("a real size typed over “auto” is still written", () => {
+  const options: ModelOptions = {
+    modelName: "m",
+    recipe: "llamacpp",
+    defaults: { ctx_size: -1 },
+    saved: {},
+    effective: { ctx_size: -1 },
+  };
+  const read = readContextSize("32k");
+  assert.deepEqual(read, { value: 32768 });
+  assert.deepEqual(patchFrom(options, { ctx_size: 32768 }), { ctx_size: 32768 });
 });

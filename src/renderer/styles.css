@@ -3109,16 +3109,47 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .lem-group-hint { margin: 0; font-size: 12px; color: var(--text-faint); }
 
-.lem-models { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.lem-models { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 
 /*
- * A row, not a card: at ninety entries a grid of cards is a wall, and the
- * three things being compared -- name, size, whether it fits -- line up into
- * scannable columns only if the row is a row.
+ * A row, not a card -- and now a grid rather than a flex line.
+ *
+ * At 168 entries the three things being compared have to land on the same x
+ * position in every row or they are not a comparison, they are 168 separate
+ * readings. Flex with `flex: 1 1 auto` on the name gave each row its own
+ * column positions, so the registry pill sat at a different place in each one;
+ * the eye cannot run down a column that moves.
+ *
+ * The template is also what makes the repeated values legible. Every row here
+ * says "Hugging Face [US]", and in a column that reads instantly as "all from
+ * one place" -- which is the compliance question -- where 168 inline pills
+ * read as 168 pieces of decoration.
  */
+.lem-cols,
 .lem-model {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 11px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 116px 76px 104px auto;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Column headings: quiet, small caps, and aligned to the data beneath them. */
+.lem-cols {
+  padding: 0 11px 5px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.lem-cols .num { text-align: right; }
+
+.lem-model {
+  /* A fixed floor rather than padding alone: most rows carry a meta line and
+     some do not, and letting the height follow the content made a 73-row list
+     breathe unevenly. With a floor and centred content, a row without meta
+     centres its name instead of leaving a gap under it. */
+  min-height: 46px;
+  padding: 6px 11px;
   border: 1px solid transparent; border-radius: var(--radius-sm);
   background: var(--bg-inset);
   transition: border-color var(--t-fast), background var(--t-fast);
@@ -3126,34 +3157,79 @@ p.warning { margin: 0; font-size: 12.5px; }
 .lem-model:hover { border-color: var(--border-strong); }
 .lem-model.loaded { border-color: var(--accent-dim); background: var(--accent-wash); }
 
-.lem-model-id { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 7px; }
+/*
+ * A row this machine cannot run, shown only on request.
+ *
+ * Dimmed rather than struck through or tinted red: it is not an error, it is a
+ * model for different hardware. The verdict chip carries the colour; making
+ * the whole row red would put ninety-five alarms on one screen.
+ */
+.lem-model.blocked { opacity: 0.5; }
+.lem-model.blocked:hover { opacity: 1; }
+
+/* Name over meta, so the differentiating detail has somewhere to live that is
+   not competing with the name for the same line. */
+.lem-model-id { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .lem-model-name {
   font-family: var(--mono); font-size: 12px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.lem-model-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lem-model-meta:empty { display: none; }
+
+/*
+ * A tag, not a chip.
+ *
+ * The chips are Karen's verdicts and carry borders and colour because they are
+ * decisions. These are facts about the model -- what it is for, whether
+ * upstream suggests it -- and at two or three per row across 168 rows a border
+ * apiece turns the list into a mesh. Weight comes from the text alone.
+ */
+.lem-tag {
+  position: relative;
+  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  font-weight: 600; color: var(--text-faint); white-space: nowrap;
+}
+/* Uppercase 10px with only a gap between them reads as one long word --
+   "READS IMAGES TOOLS". A separator is what makes them two facts. */
+.lem-tag + .lem-tag::before {
+  content: "";
+  position: absolute; left: -4.5px; top: 50%;
+  width: 2px; height: 2px; border-radius: 50%;
+  background: var(--text-faint); opacity: 0.6;
+}
+.lem-tag.accent { color: var(--accent); }
+
+/*
+ * The registry, as a column rather than a badge beside the name.
+ *
+ * Some institutions restrict which registries staff may fetch from, so this is
+ * a compliance control and not decoration -- which is exactly why it belongs
+ * in a fixed column: a person checking a policy wants to run their eye down
+ * one line and see whether anything differs, not read 168 identical pills.
+ * The non-default registry gets the warm colour so it breaks that column
+ * visibly, without the red that would read as "broken".
+ */
+.lem-model-src {
+  font-size: 10.5px; font-family: var(--mono);
+  color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lem-model-src.foreign {
+  color: var(--amber); font-weight: 600;
+}
+
 .lem-model-size {
-  flex: none; width: 68px; text-align: right;
+  text-align: right;
   font-size: 11.5px; color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
-/* Fixed width so the verdicts stack into a column the eye can run down. */
-.lem-model .lem-chip { width: 88px; justify-content: center; }
 
-/* The registry a row downloads from, which some institutions restrict.
-   Sized to its text rather than to the verdict column: it sits beside the name
-   as part of the model's identity, not in the column of judgements Karen makes
-   about it. The non-default registry is given the warmer colour so a list can
-   be scanned for it, without the red that would read as "broken". */
-.lem-model .lem-chip.lem-src {
-  width: auto;
-  color: var(--text-faint);
-  border-color: var(--border);
-}
-.lem-model .lem-chip.lem-src.foreign {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 42%, transparent);
-  background: color-mix(in srgb, var(--amber) 8%, transparent);
-}
+/* Full width of its column, so the verdicts stack into a bar the eye runs
+   down rather than a ragged edge. */
+.lem-model .lem-chip { width: 100%; justify-content: center; }
+
+.lem-model-acts { display: flex; gap: 6px; justify-content: flex-end; }
 
 .lem-act {
   flex: none; min-width: 84px;
@@ -3169,11 +3245,48 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .lem-none { font-size: 12px; color: var(--text-faint); padding: 14px 11px; }
 
-/* Narrow windows and the settings pane: the verdict keeps its meaning, the
-   size column is what goes. */
+/*
+ * What this machine has, at the top of the page.
+ *
+ * Every verdict below is measured against these three numbers, and they were a
+ * 12px grey sentence -- the typographic size of something nobody is expected
+ * to read. As a strip of figures they are the premise of the page, which is
+ * what they actually are.
+ */
+.lem-machine {
+  display: flex; flex-wrap: wrap; gap: 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); box-shadow: var(--lift);
+  overflow: hidden;
+}
+.lem-machine-cell {
+  flex: 1 1 150px; min-width: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 14px;
+  border-left: 1px solid var(--border);
+}
+.lem-machine-cell:first-child { border-left: none; }
+.lem-machine-key {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.lem-machine-value {
+  font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lem-machine-cell.accel .lem-machine-value { color: var(--accent-soft); }
+.lem-machine-cell.warn .lem-machine-value { color: var(--amber); }
+
+/* Narrow windows and the settings pane: the size column is what goes, then
+   the registry -- the verdict keeps its meaning at any width, and the name
+   without the verdict is a list of files. */
+@media (max-width: 760px) {
+  .lem-cols, .lem-model { grid-template-columns: minmax(0, 1fr) 76px 104px auto; }
+  .lem-cols span:nth-child(2), .lem-model-src { display: none; }
+}
 @media (max-width: 620px) {
-  .lem-model-size { display: none; }
-  .lem-model .lem-chip { width: auto; }
+  .lem-cols, .lem-model { grid-template-columns: minmax(0, 1fr) 104px auto; }
+  .lem-cols span:nth-child(3), .lem-model-size { display: none; }
 }
 
 /* Settings → Runtime wraps the same pane, and needs one grouping box for the
@@ -3385,21 +3498,57 @@ p.warning { margin: 0; font-size: 12.5px; }
    colour is the fast signal; the bracketed country is the one that is actually
    readable, and it never appears without it.                                */
 
-.lem-modes { display: flex; gap: 8px; margin: 4px 0 14px; }
+/*
+ * Two modes, as a segmented control rather than two cards.
+ *
+ * They were 260px-wide boxes with two lines each, which gave a binary choice
+ * the visual weight of the model list it sits above -- and the choice is not
+ * that important. What it does need is to stay legible, because the two
+ * modes differ in whether Karen touches the network at all: one reads a file
+ * inside the install, the other sends a query to a registry. So the subtitle
+ * stays; it is the acreage that goes.
+ */
+.lem-modes {
+  display: inline-flex; align-self: flex-start; gap: 2px;
+  padding: 2px; margin: 2px 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-inset);
+}
 .lem-mode {
-  flex: 0 1 260px; display: flex; flex-direction: column; gap: 3px;
-  font: inherit; font-size: 12.5px; text-align: left;
-  padding: 9px 13px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); background: var(--bg-inset);
+  display: flex; flex-direction: column; gap: 1px;
+  font: inherit; font-size: 12px; text-align: left;
+  padding: 6px 14px; border-radius: var(--radius-sm);
+  border: 1px solid transparent; background: transparent;
   color: var(--text-dim); cursor: pointer;
   transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
 }
-.lem-mode:hover { color: var(--text); border-color: var(--border-hover); }
+.lem-mode:hover { color: var(--text); }
 .lem-mode.on {
   color: var(--text); border-color: var(--accent-dim);
   background: var(--accent-wash); box-shadow: var(--lift);
 }
-.lem-mode-sub { font-size: 10.5px; color: var(--text-faint); }
+.lem-mode:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
+.lem-mode-sub { font-size: 10px; color: var(--text-faint); }
+.lem-mode.on .lem-mode-sub { color: var(--accent-dim); }
+
+/*
+ * The disclosure for models this machine cannot run.
+ *
+ * Not `.lem-more`, which renders as a quiet link: this one is a statement
+ * that ninety-five rows have been withheld, and it has to carry enough weight
+ * that somebody hunting for a model they read about elsewhere finds it rather
+ * than concluding the list is incomplete.
+ */
+.lem-hidden {
+  align-self: flex-start;
+  font: inherit; font-size: 11.5px;
+  margin-top: 8px; padding: 7px 12px;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+.lem-hidden:hover { color: var(--text); border-color: var(--border-hover); }
+.lem-hidden:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
 .lem-mode.on .lem-mode-sub { color: var(--text-dim); }
 
 .reg { display: flex; flex-direction: column; gap: 14px; }
@@ -3510,12 +3659,44 @@ p.warning { margin: 0; font-size: 12.5px; }
 .reg-hit:hover { border-color: var(--border-strong); }
 .reg-hit.open { border-color: var(--accent-dim); background: var(--bg-raised); }
 
+/* A grid, for the same reason the catalogue rows are one: the figures being
+   compared across fifty results only read as columns if they land on the same
+   x position in every row. */
+.reg-cols,
 .reg-hit-head {
-  width: 100%; display: flex; align-items: center; gap: 10px;
+  display: grid; align-items: center; gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 116px 66px 74px 66px 58px;
+  width: 100%;
   font: inherit; text-align: left; padding: 9px 12px;
   background: none; border: 0; color: var(--text); cursor: pointer;
 }
-.reg-hit-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+
+.reg-cols {
+  padding: 0 12px 5px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 5px;
+}
+.reg-cols .num { text-align: right; }
+.reg-hit-id { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+
+/* Matches `.lem-model-src` on the catalogue rows: quiet, monospace, aligned.
+   A registry Karen does not use by default takes the warm colour so it breaks
+   the column visibly. */
+.reg-hit-src {
+  font-size: 10.5px; font-family: var(--mono); color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reg-hit-src.modelscope { color: var(--amber); font-weight: 600; }
+
+.reg-hit-head .lem-chip { width: 100%; justify-content: center; }
+
+@media (max-width: 820px) {
+  .reg-cols, .reg-hit-head { grid-template-columns: minmax(0, 1fr) 66px 62px 58px; }
+  .reg-cols span:nth-child(2), .reg-cols span:nth-child(5),
+  .reg-hit-src, .reg-hit-head .reg-hit-figure:last-of-type { display: none; }
+}
 .reg-hit-name {
   font-family: var(--mono); font-size: 12px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -3525,10 +3706,10 @@ p.warning { margin: 0; font-size: 12.5px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .reg-hit-figure {
-  flex: none; width: 62px; text-align: right;
+  text-align: right;
   font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
-.reg-hit-open { flex: none; font-size: 11.5px; color: var(--text-dim); min-width: 56px; text-align: right; }
+.reg-hit-open { font-size: 11.5px; color: var(--text-dim); text-align: right; }
 .reg-hit:hover .reg-hit-open { color: var(--accent-soft); }
 
 /* ---------- variants ---------- */
@@ -3622,3 +3803,15 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .mopt-note { margin: 0; font-size: 12px; color: var(--accent-soft); }
 .mopt-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* The line between what this machine can run and what it cannot. Stated, not
+   implied: a dimmed row on its own reads as a rendering fault. */
+.lem-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 6px; padding: 0 2px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.lem-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
