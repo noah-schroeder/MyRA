@@ -14,7 +14,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { researchRoot } from "./config.ts";
 import type { SourceRecord } from "./sources.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../paths.ts";
@@ -651,7 +651,12 @@ export interface RunFootprint {
 function runDir(id: string, root: string): string {
   const dir = resolve(join(root, assertRunId(id)));
   const rel = relative(resolve(root), dir);
-  if (rel === "" || rel.startsWith("..") || rel.includes("/")) {
+  /* `sep`, not "/": on Windows the separator is a backslash, and a check
+     spelled with a forward slash there would pass a nested path straight
+     through to the `rm` below. `isAbsolute` covers the case where `relative`
+     gives up entirely -- a different drive letter -- and returns a path that
+     starts with neither. */
+  if (rel === "" || rel === ".." || rel.startsWith(".." + sep) || rel.includes(sep) || isAbsolute(rel)) {
     throw new Error(`no research run named ${JSON.stringify(id)}`);
   }
   return dir;
