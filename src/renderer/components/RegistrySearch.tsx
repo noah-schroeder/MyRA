@@ -27,6 +27,9 @@ import { useCallback, useMemo, useState } from "react";
 
 import { fitModel, quantRank, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
+  buildShelf, compact, countFiltered, describeDownloads, PUBLISHERS, SHELVES, type Shelf,
+} from "../../core/runtime/discover.ts";
+import {
   checkpointFor,
   describeSearch,
   explainRegistryError,
@@ -91,6 +94,10 @@ export function RegistrySearch({
   const [variants, setVariants] = useState<Record<string, VariantState>>({});
   const [pulling, setPulling] = useState<string | undefined>();
   const [pullError, setPullError] = useState<string | undefined>();
+  /* The shelf being shown, if the results came from one rather than from the
+     box. Kept so the list can say what it is a list OF -- "24 results" over a
+     set of models nobody searched for is a non sequitur. */
+  const [shelf, setShelf] = useState<{ shelf: Shelf; filtered: number } | undefined>();
 
   const chosen = useMemo(() => ENABLED_SOURCES.filter((s) => sources.has(s)), [sources]);
   const busy = Object.values(status).some((s) => s?.searching) || pulling !== undefined;
@@ -111,6 +118,7 @@ export function RegistrySearch({
     const text = query.trim();
     if (!text || !chosen.length) return;
     setRan(text);
+    setShelf(undefined);
     setOpen(undefined);
     setVariants({});
     setPullError(undefined);
@@ -139,6 +147,51 @@ export function RegistrySearch({
     setStatus(next);
     setHits(mergeHits(found));
   }, [query, chosen]);
+
+  /**
+   * Run a shelf: several canned queries, merged into one ranked list.
+   *
+   * Deliberately built on the same IPC call the box uses. A shelf is not a
+   * privileged path to the registry -- it is a set of queries Karen knows how
+   * to spell, and it goes out exactly the way a typed one does.
+   */
+  const runShelf = useCallback(
+    async (which: Shelf): Promise<void> => {
+      const source = chosen[0];
+      if (!source) return;
+      setRan(which.title);
+      setShelf(undefined);
+      setOpen(undefined);
+      setVariants({});
+      setPullError(undefined);
+      setQuery("");
+      setStatus({ [source]: { searching: true } });
+
+      const responses = await Promise.all(
+        which.queries.map((q) => window.karen.registrySearch(q, source)),
+      );
+
+      const failed = responses.find((r) => !r.ok);
+      if (failed && !responses.some((r) => r.ok)) {
+        setStatus({ [source]: { searching: false, error: explainRegistryError(failed.error ?? "", source) } });
+        setHits([]);
+        return;
+      }
+
+      const lists = responses.flatMap((r) => (r.ok && r.result ? [r.result.hits] : []));
+      const rows = buildShelf(lists, which);
+      setHits(rows);
+      setShelf({ shelf: which, filtered: countFiltered(lists) });
+      setStatus({
+        [source]: {
+          searching: false,
+          shown: rows.length,
+          fetched: rows.length,
+        },
+      });
+    },
+    [chosen],
+  );
 
   const openRepo = useCallback(
     async (hit: RegistryHit): Promise<void> => {
@@ -262,8 +315,92 @@ export function RegistrySearch({
         </p>
       </div>
 
+      {/* ---------------- shelves ---------------- */}
+      {/*
+        * The way in for someone who does not know what to type.
+        *
+        * The search box assumes a vocabulary -- that "qwen" is a family and
+        * "unsloth" is a publisher -- which is exactly what Karen's users do
+        * not have. These are the same queries, spelled by Karen, behind names
+        * that describe what a person wants rather than what a model is called.
+        *
+        * Inert until pressed, like the box above them and for the same
+        * reason: a shelf that loaded itself on open would send queries to a
+        * remote registry the moment this tab was clicked, and the sentence
+        * above promises it does not.
+        */}
+      <div className="reg-shelves">
+        <p className="reg-shelves-lead">
+          Or start from one of these. Each one runs a search Karen already knows how to spell —
+          nothing is sent until you press one.
+        </p>
+        <div className="reg-chips">
+          {SHELVES.map((sh) => (
+            <button
+              key={sh.id}
+              type="button"
+              className={shelf?.shelf.id === sh.id ? "reg-chip on" : "reg-chip"}
+              disabled={busy || !chosen.length}
+              title={`Searches ${REGISTRY_LABEL[chosen[0] ?? "huggingface"]} for ${sh.queries.map((q) => `“${q}”`).join(", ")}`}
+              onClick={() => void runShelf(sh)}
+            >
+              {sh.title}
+            </button>
+          ))}
+        </div>
+
+        <div className="reg-chips">
+          <span className="reg-chips-key">By publisher</span>
+          {PUBLISHERS.map((p) => (
+            <button
+              key={p.query}
+              type="button"
+              className="reg-chip small"
+              disabled={busy || !chosen.length}
+              title={`Searches ${REGISTRY_LABEL[chosen[0] ?? "huggingface"]} for “${p.query}”`}
+              onClick={() => {
+                setQuery(p.query);
+                void runShelf({
+                  id: `pub-${p.query}`,
+                  title: p.label,
+                  hint: `Models from the ${p.label} family, most downloaded first.`,
+                  queries: [p.query],
+                });
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ---------------- what each registry said ---------------- */}
-      {ran ? (
+      {shelf ? (
+        <div className="reg-report">
+          <p className="reg-line">
+            <span className={`reg-tag ${chosen[0] ?? "huggingface"}`}>
+              {REGISTRY_LABEL[chosen[0] ?? "huggingface"]}
+            </span>
+            {status[chosen[0] ?? "huggingface"]?.searching ? (
+              <>searching…</>
+            ) : (
+              <>
+                {shelf.shelf.hint}
+                {/* Said rather than done quietly: a shelf that drops a fifth
+                    of what it fetched is making an editorial choice on
+                    somebody's behalf, and they are entitled to know. */}
+                {shelf.filtered ? (
+                  <>
+                    {" "}
+                    {shelf.filtered} result{shelf.filtered === 1 ? " was" : "s were"} left out for
+                    being safety-stripped community edits; search for one by name to see it.
+                  </>
+                ) : null}
+              </>
+            )}
+          </p>
+        </div>
+      ) : ran ? (
         <div className="reg-report">
           {chosen.map((source) => {
             const st = status[source];
@@ -300,7 +437,7 @@ export function RegistrySearch({
           <span>Repository</span>
           <span>Registry</span>
           <span>Format</span>
-          <span className="num">Downloads</span>
+          <span className="num">Pulls · 30d</span>
           <span className="num">Likes</span>
           <span />
         </div>
@@ -347,11 +484,17 @@ export function RegistrySearch({
                       no GGUF
                     </span>
                   )}
-                  <span className="reg-hit-figure" title="Downloads">
-                    ↓ {formatCount(hit.downloads)}
+                  {/* The window is the part that makes the number mean
+                      anything: a bare "13M" reads as "thirteen million people
+                      use this", when it is thirty days of traffic. */}
+                  <span
+                    className="reg-hit-figure"
+                    title={`${describeDownloads(hit.downloads)} — the registry counts every pull, automated ones included`}
+                  >
+                    {hit.downloads === undefined ? "—" : compact(hit.downloads)}
                   </span>
-                  <span className="reg-hit-figure" title="Likes">
-                    ♥ {formatCount(hit.likes)}
+                  <span className="reg-hit-figure" title="People who have starred this repository">
+                    {formatCount(hit.likes)}
                   </span>
                   <span className="reg-hit-open">{isOpen ? "Hide" : "Versions"}</span>
                 </button>

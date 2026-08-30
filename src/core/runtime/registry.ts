@@ -99,6 +99,17 @@ export interface RegistryHit {
   hasGguf: boolean;
   description?: string | undefined;
   tags: string[];
+  /**
+   * What the registry says the model is for -- Hugging Face's `pipeline_tag`,
+   * passed through by Lemonade as `task`.
+   *
+   * `text-generation`, `automatic-speech-recognition`, `image-text-to-text`,
+   * `feature-extraction`, `sentence-similarity`. Frequently absent: a
+   * repository whose owner never set it reports nothing, and roughly a third
+   * of GGUF repositories are in that state. So it is useful for ruling a
+   * result OUT of a category and never for ruling one in.
+   */
+  task?: string | undefined;
 }
 
 export interface SearchResult {
@@ -139,6 +150,7 @@ export function parseSearch(raw: unknown, fallback: RegistrySource): SearchResul
       ...(num(r["downloads"]) !== undefined ? { downloads: num(r["downloads"]) } : {}),
       ...(num(r["likes"]) !== undefined ? { likes: num(r["likes"]) } : {}),
       ...(str(r["description"]) ? { description: str(r["description"]) } : {}),
+      ...(str(r["task"]) ? { task: str(r["task"]) } : {}),
     });
   }
   return { source, fetched: num(body["total"]) ?? hits.length, hits };
