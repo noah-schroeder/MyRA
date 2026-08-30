@@ -7,6 +7,10 @@ export type { ApiState };
 import type { RequestRecord } from "../core/api/log.ts";
 import type { ForeignModel } from "../core/runtime/foreign.ts";
 import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
+import type { LoadedModel } from "../core/runtime/lemonade.ts";
+export type { RunFootprint } from "../core/research/run.ts";
+import type { RunFootprint } from "../core/research/run.ts";
+import type { RegistrySource, RepoVariants, SearchResult } from "../core/runtime/registry.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 /**
  * What the renderer renders.
@@ -336,6 +340,15 @@ export interface KarenApi {
   researchRun(id: string): Promise<RunDetail>;
   researchSource(id: string, n: number): Promise<RunSource | undefined>;
   researchReveal(id: string): Promise<void>;
+  researchFootprint(
+    id: string,
+  ): Promise<{ ok: boolean; error?: string; footprint?: RunFootprint }>;
+  researchDelete(id: string): Promise<{
+    ok: boolean;
+    error?: string;
+    deleted?: { id: string; files: number; bytes: number };
+    runs?: RunSummary[];
+  }>;
   onResearchProgress(cb: (note: string) => void): () => void;
   answerPrompt(id: string, answer: string | undefined): Promise<void>;
   onPrompt(cb: (request: PromptRequest) => void): () => void;
@@ -371,6 +384,20 @@ export interface KarenApi {
   lemonadePull(
     name: string,
     checkpoint?: string,
+  ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
+  registrySearch(
+    query: string,
+    source: RegistrySource,
+  ): Promise<{ ok: boolean; error?: string; result?: SearchResult; source?: RegistrySource }>;
+  registryVariants(
+    checkpoint: string,
+    source: RegistrySource,
+  ): Promise<{ ok: boolean; error?: string; variants?: RepoVariants }>;
+  registryPull(
+    name: string,
+    checkpoint: string,
+    source: RegistrySource,
+    recipe?: string,
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
   /** Whether this desktop shows tray icons at all. */
   trayAvailable(): Promise<boolean>;
@@ -559,6 +586,10 @@ export interface RuntimeState {
     state: string;
     error?: string;
     loaded?: string;
+    /** The model currently being loaded, while `load` has not yet returned. */
+    loading?: string;
+    /** Context size and device for the loaded model, straight from the daemon. */
+    active?: LoadedModel;
     log: string[];
   };
 }

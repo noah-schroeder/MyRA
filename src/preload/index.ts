@@ -147,6 +147,12 @@ const api = {
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>
     ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
+  registrySearch: (query: string, source: string) =>
+    ipcRenderer.invoke("karen:registry-search", query, source),
+  registryVariants: (checkpoint: string, source: string) =>
+    ipcRenderer.invoke("karen:registry-variants", checkpoint, source),
+  registryPull: (name: string, checkpoint: string, source: string, recipe?: string) =>
+    ipcRenderer.invoke("karen:registry-pull", name, checkpoint, source, recipe),
   onRuntime: (cb: (state: unknown) => void) => on("karen:runtime", cb),
   onRuntimeDownload: (cb: (p: unknown) => void) => on("karen:runtime-download", cb),
 
@@ -162,6 +168,8 @@ const api = {
   researchRun: (id: string) => ipcRenderer.invoke("karen:research-run", id),
   researchSource: (id: string, n: number) => ipcRenderer.invoke("karen:research-source", id, n),
   researchReveal: (id: string) => ipcRenderer.invoke("karen:research-reveal", id),
+  researchFootprint: (id: string) => ipcRenderer.invoke("karen:research-footprint", id),
+  researchDelete: (id: string) => ipcRenderer.invoke("karen:research-delete", id),
   onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>

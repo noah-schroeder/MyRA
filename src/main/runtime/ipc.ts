@@ -15,6 +15,12 @@
 import type { BrowserWindow } from "electron";
 import { ipcMain } from "electron";
 
+import {
+  isEnabled,
+  readSource,
+  REGISTRY_LABEL,
+  type RegistrySource,
+} from "../../core/runtime/registry.ts";
 import type { RuntimeManager } from "./manager.ts";
 
 export function installRuntimeIpc(
@@ -29,6 +35,10 @@ export function installRuntimeIpc(
       state: runtime.lemonade.status.state,
       error: runtime.lemonade.status.error,
       loaded: runtime.lemonade.status.health?.modelLoaded,
+      /* What the bar needs to say something true while a load is in flight,
+         and to prove afterwards that it really loaded. */
+      loading: runtime.loadingModel,
+      active: runtime.lemonade.status.health?.active,
       log: runtime.lemonade.status.log.slice(-40),
     },
   });
@@ -154,6 +164,80 @@ export function installRuntimeIpc(
       return { ok: false, error: (err as Error).message };
     }
   });
+
+  /**
+   * Search one registry.
+   *
+   * One call per registry rather than one call that searches both: a combined
+   * call would have to decide what to do when one registry answers and the
+   * other does not, and the honest answer -- show what came back and say which
+   * one failed -- is only possible if the caller can see the two separately.
+   */
+  /**
+   * The one place a disabled registry is actually stopped.
+   *
+   * Checked here rather than only in the pane because the renderer is not the
+   * security boundary: a stale window, a restored state, or a future caller
+   * would otherwise reach ModelScope, and "Karen never contacts it" has to be
+   * true of the process that holds the socket, not of one screen.
+   */
+  const refuse = (source: RegistrySource): { ok: false; error: string } => ({
+    ok: false,
+    error: `${REGISTRY_LABEL[source]} is turned off in this build of Karen.`,
+  });
+
+  ipcMain.handle(
+    "karen:registry-search",
+    async (_e, query: string, source: RegistrySource) => {
+      if (!isEnabled(readSource(source))) return refuse(readSource(source));
+      try {
+        await runtime.ensureLemonade();
+        return { ok: true, result: await runtime.api.searchRegistry(String(query), readSource(source)) };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message, source: readSource(source) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "karen:registry-variants",
+    async (_e, checkpoint: string, source: RegistrySource) => {
+      if (!isEnabled(readSource(source))) return refuse(readSource(source));
+      try {
+        await runtime.ensureLemonade();
+        return { ok: true, variants: await runtime.api.repoVariants(String(checkpoint), readSource(source)) };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  /**
+   * Download a specific quantisation from a specific registry.
+   *
+   * Separate from `lemonade-pull`, which pulls a catalogue entry by name. This
+   * one carries a checkpoint and a source chosen in the search UI, and both
+   * have to survive the trip: the source decides which country the bytes come
+   * from.
+   */
+  ipcMain.handle(
+    "karen:registry-pull",
+    async (_e, name: string, checkpoint: string, source: RegistrySource, recipe?: string) => {
+      if (!isEnabled(readSource(source))) return refuse(readSource(source));
+      try {
+        await runtime.ensureLemonade();
+        await runtime.api.pullModel(
+          String(name),
+          String(checkpoint),
+          recipe ? String(recipe) : "llamacpp",
+          readSource(source),
+        );
+        return { ok: true, models: await runtime.api.listModels() };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
 
   ipcMain.handle("karen:lemonade-stop", async () => {
     await runtime.stop();

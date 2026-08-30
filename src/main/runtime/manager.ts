@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import {
   CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE,
 } from "../../core/paths.ts";
-import { parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
 import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
@@ -254,7 +254,7 @@ export class RuntimeManager {
     if (!binary) return [];
     try {
       const path = join(dirname(binary), "resources", "server_models.json");
-      return parseCatalog(JSON.parse(await readFile(path, "utf8")));
+      return enabledOnly(parseCatalog(JSON.parse(await readFile(path, "utf8"))));
     } catch {
       // A catalogue we cannot read is an empty one; the daemon still works and
       // anything already installed still lists through /models.
@@ -262,9 +262,33 @@ export class RuntimeManager {
     }
   }
 
+  /**
+   * Which model is being loaded right now, if any.
+   *
+   * Loading an 8B model off a cold page cache is tens of seconds during which
+   * `/load` has not returned and health still reports nothing -- measured, the
+   * daemon publishes no intermediate state at all. So the only way the window
+   * can say anything truthful while it happens is for this process to say it
+   * is happening.
+   */
+  #loading: string | undefined;
+
+  get loadingModel(): string | undefined {
+    return this.#loading;
+  }
+
   async loadModel(name: string): Promise<void> {
     await this.ensureLemonade();
-    await this.#api.loadModel(name);
+    this.#loading = name;
+    this.#emit();
+    try {
+      await this.#api.loadModel(name);
+    } finally {
+      /* Cleared before the health refresh so a failed load does not leave the
+         bar spinning over a model that is not coming. */
+      this.#loading = undefined;
+      this.#emit();
+    }
     await this.#lemonade.refreshHealth();
     await this.update({ activeModel: name });
   }
@@ -285,11 +309,34 @@ export class RuntimeManager {
    * Lemonade comes up in a second and holds nothing, so "it is up" says
    * nothing about whether a request would be answered.
    */
-  chatEndpoint(): { baseUrl: string; apiKey: string } | undefined {
+  chatEndpoint():
+    | { baseUrl: string; apiKey: string; model: string; contextTokens?: number }
+    | undefined {
     if (!this.#config.useForChat) return undefined;
     const status = this.#lemonade.status;
     if (status.state !== "ready" || !status.baseUrl || !status.health?.modelLoaded) return undefined;
-    return { baseUrl: status.baseUrl, apiKey: this.#lemonade.apiKey };
+    /*
+     * The model name travels with the address, and must.
+     *
+     * Lemonade rejects a chat request that does not name a model -- "Invalid
+     * request: No model specified in request" -- and the name in `settings.llm`
+     * is whoever the user typed for their own endpoint, which for someone
+     * running locally is usually nothing at all. So the caller cannot build a
+     * working request out of the base URL alone, and handing over the address
+     * without the name invited exactly that. This is the id the daemon knows
+     * it by, which is not always what the UI shows a person.
+     */
+    return {
+      baseUrl: status.baseUrl,
+      apiKey: this.#lemonade.apiKey,
+      model: status.health.modelLoaded,
+      /* The denominator for the token meter and the trigger for compaction.
+         Only present when it was actually established -- a guessed window is
+         worse than none, because compaction would fire at the wrong point. */
+      ...(status.health.active?.contextTokens
+        ? { contextTokens: status.health.active.contextTokens }
+        : {}),
+    };
   }
 
   /**

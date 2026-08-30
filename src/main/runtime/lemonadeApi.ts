@@ -11,6 +11,13 @@
  */
 
 import { parseDownloads, parseSystemInfo, type DownloadJob, type MachineInfo } from "../../core/runtime/systemInfo.ts";
+import {
+  parseSearch,
+  parseVariants,
+  type RegistrySource,
+  type RepoVariants,
+  type SearchResult,
+} from "../../core/runtime/registry.ts";
 
 export class LemonadeApiError extends Error {}
 
@@ -102,11 +109,50 @@ export class LemonadeApi {
     await this.#post("/models/register", { model_name: modelName, checkpoint, recipe });
   }
 
+  /**
+   * Search a registry for repositories.
+   *
+   * `limit` is what lemonade asks the registry for, capped at 50 by the
+   * daemon; what comes back is fewer, sometimes far fewer, because repository
+   * types it cannot run are dropped after the fetch. Asking for the maximum is
+   * therefore the right default rather than greedy.
+   *
+   * Given a shorter deadline than the default: ModelScope answers in about a
+   * second from a European connection and Hugging Face in a fifth of that, so
+   * thirty seconds of a person watching a spinner buys nothing.
+   */
+  async searchRegistry(query: string, source: RegistrySource, limit = 50): Promise<SearchResult> {
+    const params = new URLSearchParams({ query, source, limit: String(limit) });
+    return parseSearch(await this.#call<unknown>(`/registry/search?${params.toString()}`, {}, 20_000), source);
+  }
+
+  /**
+   * The quantisations a repository offers, with exact sizes.
+   *
+   * `source` must be passed even though the endpoint has a default, or a
+   * ModelScope result silently resolves against Hugging Face -- measured: the
+   * same `org/repo` id frequently exists on both, so the wrong one answers
+   * with a plausible list rather than an error.
+   */
+  async repoVariants(checkpoint: string, source: RegistrySource): Promise<RepoVariants> {
+    const params = new URLSearchParams({ checkpoint, source });
+    return parseVariants(await this.#call<unknown>(`/pull/variants?${params.toString()}`, {}, 60_000), source);
+  }
+
   /** Download a model; `checkpoint` is only needed for one not already known. */
-  async pullModel(modelName: string, checkpoint?: string, recipe = "llamacpp"): Promise<void> {
+  async pullModel(
+    modelName: string,
+    checkpoint?: string,
+    recipe = "llamacpp",
+    source?: RegistrySource,
+  ): Promise<void> {
     await this.#post("/pull", {
       model_name: modelName,
       ...(checkpoint ? { checkpoint, recipe } : {}),
+      /* Named explicitly for the same reason as `repoVariants`: without it a
+         download chosen from the ModelScope list can arrive from Hugging Face,
+         which is the one outcome this whole feature exists to prevent. */
+      ...(source ? { source } : {}),
     }, 24 * 60 * 60_000);
   }
 

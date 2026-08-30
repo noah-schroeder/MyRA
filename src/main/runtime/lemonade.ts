@@ -20,7 +20,8 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 
 import {
-  apiBase, CONFIG_FILE, lemondArgs, mergeConfig, openAiBase, parseHealth, pinnedConfig,
+  apiBase, CONFIG_FILE, lemondArgs, mergeConfig, openAiBase, parseHealth, parseProps,
+  pinnedConfig, propsUrl,
   type LemonadeHealth,
 } from "../../core/runtime/lemonade.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
@@ -292,10 +293,38 @@ export class LemonadeServer {
         headers: this.authHeaders(),
         signal: AbortSignal.timeout(5_000),
       });
-      if (res.ok) this.#set({ health: parseHealth(await res.json().catch(() => ({}))) });
+      if (res.ok) {
+        const health = parseHealth(await res.json().catch(() => ({})));
+        this.#set({ health: await this.#withRealContext(health) });
+      }
     } catch {
       // Leave the last known answer; the supervisor's own state says whether
       // the daemon is up, and that has not changed here.
+    }
+  }
+
+  /**
+   * Replace the daemon's stated context with the server's measured one.
+   *
+   * One extra loopback request per load, not per message: health is refreshed
+   * on load and unload, which is exactly when this can change. If llama-server
+   * does not answer, the daemon's figure stands and says so -- a slightly less
+   * authoritative number is still far better than none, because with none the
+   * token meter and compaction both switch off.
+   */
+  async #withRealContext(health: LemonadeHealth): Promise<LemonadeHealth> {
+    const active = health.active;
+    if (!active?.backendUrl) return health;
+    const url = propsUrl(active.backendUrl);
+    if (!url) return health;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+      if (!res.ok) return health;
+      const measured = parseProps(await res.json().catch(() => ({})));
+      if (measured === undefined) return health;
+      return { ...health, active: { ...active, contextTokens: measured, contextFrom: "server" } };
+    } catch {
+      return health;
     }
   }
 

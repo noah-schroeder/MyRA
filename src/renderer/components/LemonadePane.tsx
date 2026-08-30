@@ -29,8 +29,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { RegistrySearch } from "./RegistrySearch.tsx";
+
 import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
 import { SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
+import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
 import { fitModel, type Verdict } from "../../core/runtime/fit.ts";
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
 
@@ -166,6 +169,10 @@ export function LemonadePane({
   const [query, setQuery] = useState("");
   const [onlyMine, setOnlyMine] = useState(false);
   const [showAllEngines, setShowAllEngines] = useState(false);
+  /* The curated catalogue or the registries. Two different acts -- "show me
+     what Karen suggests" and "go and look this up" -- and mixing them would
+     put a box that reaches the internet next to one that does not. */
+  const [mode, setMode] = useState<"catalog" | "search">("catalog");
   const starting = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -442,7 +449,11 @@ export function LemonadePane({
           <section className="lem-section">
             <header className="lem-head">
               <h3>Models</h3>
-              <p>Grouped by what they do. Sizes are the download; the fit allows for working memory too.</p>
+              <p>
+                Grouped by what they do. Sizes are the download; the fit allows for working memory
+                too. Every row names the registry it would be fetched from — some institutions
+                restrict which of those staff may use.
+              </p>
             </header>
 
             {/* One line rather than the machine strip, which belongs on the
@@ -471,6 +482,36 @@ export function LemonadePane({
               </div>
             ) : null}
 
+            <div className="lem-modes" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "catalog"}
+                className={mode === "catalog" ? "lem-mode on" : "lem-mode"}
+                onClick={() => setMode("catalog")}
+              >
+                Recommended
+                <span className="lem-mode-sub">Karen’s curated list — offline</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "search"}
+                className={mode === "search" ? "lem-mode on" : "lem-mode"}
+                onClick={() => setMode("search")}
+              >
+                Search registries
+                {/* Listed from the enabled set rather than written out, so a
+                    registry can never be advertised here that Karen refuses
+                    to contact. */}
+                <span className="lem-mode-sub">
+                  {ENABLED_SOURCES.map((s) => REGISTRY_LABEL[s]).join(" · ")}
+                </span>
+              </button>
+            </div>
+
+            {mode === "catalog" ? (
+              <>
             {/* Sticky as one piece: the chat group is 178 rows, and a search
                 box that scrolls off the top is a search box you cannot use
                 while looking at what it filtered. */}
@@ -528,6 +569,20 @@ export function LemonadePane({
                       <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
                         <div className="lem-model-id">
                           <span className="lem-model-name">{m.id}</span>
+                          {/* On every row, including Hugging Face ones. A badge shown only on
+                              the exceptions makes an unlabelled row ambiguous -- it could mean
+                              "the usual registry" or "nobody checked" -- and someone verifying
+                              against an institutional policy cannot tell those apart. */}
+                          <span
+                            className={
+                              m.source === "huggingface"
+                                ? "lem-chip lem-src"
+                                : "lem-chip lem-src foreign"
+                            }
+                            title={REGISTRY_HOST[m.source]}
+                          >
+                            {REGISTRY_LABEL[m.source]}
+                          </span>
                           {m.suggested ? (
                             <span className="lem-chip accent" title="Recommended by Lemonade">
                               Suggested
@@ -636,6 +691,16 @@ export function LemonadePane({
             >
               {rescanning ? "Looking again…" : "Look again for LM Studio and Ollama models"}
             </button>
+              </>
+            ) : (
+              <RegistrySearch
+                machine={machine}
+                have={have}
+                onDownloaded={async () => {
+                  await refresh();
+                }}
+              />
+            )}
           </section>
         </>
       ) : null}

@@ -13,8 +13,8 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 import { researchRoot } from "./config.ts";
 import type { SourceRecord } from "./sources.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../paths.ts";
@@ -613,4 +613,95 @@ export async function listRuns(root = researchRoot()): Promise<
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------- deleting -- */
+
+/**
+ * How recently a run must have been written to for deletion to be refused.
+ *
+ * There is no lock file: a run is a directory that stages append to, and the
+ * pipeline holds no handle that would survive a crash. So "is this running?"
+ * is answered by looking at when it was last written to, which is a heuristic
+ * and is treated as one -- it refuses, it does not silently wait.
+ *
+ * Ninety seconds because the long stages are long: screening a hundred
+ * abstracts writes one line per decision, and fetching a PDF can be quiet for
+ * a while. A window shorter than the gaps between writes would call a live run
+ * idle, which is the failure that actually costs something.
+ */
+export const RUN_ACTIVE_WITHIN_MS = 90_000;
+
+export interface RunFootprint {
+  id: string;
+  /** Files on disk, so a confirmation can say what is about to go. */
+  files: number;
+  bytes: number;
+  /** Most recent write anywhere in the run, as epoch milliseconds. */
+  lastWriteMs: number;
+}
+
+/**
+ * Resolve a run directory, refusing anything that escapes the research root.
+ *
+ * `assertRunId` already rejects separators, so this is the second of two
+ * checks rather than the only one -- but this function is about to hand a path
+ * to `rm -r`, and defence in depth is cheap next to deleting the wrong tree.
+ */
+function runDir(id: string, root: string): string {
+  const dir = resolve(join(root, assertRunId(id)));
+  const rel = relative(resolve(root), dir);
+  if (rel === "" || rel.startsWith("..") || rel.includes("/")) {
+    throw new Error(`no research run named ${JSON.stringify(id)}`);
+  }
+  return dir;
+}
+
+/** What a run occupies, and when it was last touched. */
+export async function runFootprint(id: string, root = researchRoot()): Promise<RunFootprint> {
+  const dir = runDir(id, root);
+  if (!existsSync(dir)) throw new Error(`no research run named "${id}"`);
+  let files = 0;
+  let bytes = 0;
+  let lastWriteMs = 0;
+  const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    try {
+      const info = await stat(join(entry.parentPath, entry.name));
+      files += 1;
+      bytes += info.size;
+      lastWriteMs = Math.max(lastWriteMs, info.mtimeMs);
+    } catch {
+      // A file that vanished mid-walk is one fewer file, not a failure.
+    }
+  }
+  return { id, files, bytes, lastWriteMs };
+}
+
+/**
+ * Delete a run and everything it gathered.
+ *
+ * Irreversible, and it takes the sources with it: the stored copies of every
+ * paper the run downloaded live inside the directory, which is the whole point
+ * of the audit trail. That is why the caller is expected to have shown the
+ * footprint first, and why a run that was written to moments ago is refused
+ * rather than removed from under a pipeline that is still appending to it.
+ */
+export async function deleteRun(
+  id: string,
+  root = researchRoot(),
+  now = Date.now(),
+): Promise<{ id: string; files: number; bytes: number }> {
+  const footprint = await runFootprint(id, root);
+  const since = now - footprint.lastWriteMs;
+  if (footprint.lastWriteMs > 0 && since < RUN_ACTIVE_WITHIN_MS) {
+    const seconds = Math.max(1, Math.round(since / 1000));
+    throw new Error(
+      `This run was still being written to ${seconds} ${seconds === 1 ? "second" : "seconds"} ago, ` +
+        `so it looks like it is still going. Pause it and try again.`,
+    );
+  }
+  await rm(runDir(id, root), { recursive: true, force: true });
+  return { id, files: footprint.files, bytes: footprint.bytes };
 }

@@ -447,7 +447,10 @@ function Appearance({
         {trayOk === false ? (
           <p className="hint note">
             Your desktop is not showing tray icons, so this has no effect and closing the window
-            quits Karen. On GNOME this needs the AppIndicator extension.
+            quits Karen — it will not vanish into a tray that is not there. GNOME, Pop!_OS
+            included, needs an extension for this:{" "}
+            <code>sudo apt install gnome-shell-extension-appindicator</code>, then log out and
+            back in. Karen checks again each time it starts.
           </p>
         ) : null}
       </fieldset>
