@@ -26,6 +26,8 @@
 
 import { app, Menu, nativeImage, Tray, type BrowserWindow } from "electron";
 
+import { statusAreaAvailable } from "../core/runtime/statusArea.ts";
+
 import { TRAY_ICON_PNG } from "./trayIcon.ts";
 
 export interface TrayState {
@@ -38,6 +40,8 @@ export interface TrayState {
 export interface TrayDeps {
   show: () => void;
   quit: () => void;
+  /** Drop the loaded model, freeing its memory without stopping Karen. */
+  eject: () => void;
   state: () => TrayState;
 }
 
@@ -46,8 +50,14 @@ export interface TrayDeps {
  *
  * The tray is the only surface left once the window is hidden, so it carries
  * the two facts that answer "why is this using memory": which model is loaded,
- * and whether anything is being served. Both are disabled rows -- information,
- * not controls -- because acting on them belongs in the window.
+ * and whether anything is being served. Those two are disabled rows --
+ * information, not controls.
+ *
+ * "Eject model" is the one exception, and it earns it: the model is the
+ * expensive thing, several gigabytes of VRAM held by a window that is no longer
+ * on screen. Making someone reopen the window to free it would defeat the point
+ * of the tray. It greys out when nothing is loaded, so the row still reads as a
+ * true statement about the machine either way.
  */
 function buildMenu(deps: TrayDeps): Menu {
   const { model, apiUrl } = deps.state();
@@ -57,6 +67,14 @@ function buildMenu(deps: TrayDeps): Menu {
     {
       label: model ? `Model: ${model}` : "No model loaded",
       enabled: false,
+    },
+    {
+      /* Not "Unload": the memory, not the file, is what a person is trying to
+         get back, and the model comes back on the next request when
+         load-on-demand is on. */
+      label: "Eject model",
+      enabled: model !== undefined,
+      click: () => deps.eject(),
     },
     {
       label: apiUrl ? `Serving on ${apiUrl}` : "Not serving",
@@ -90,6 +108,10 @@ export class KarenTray {
    */
   start(): boolean {
     if (this.#tray) return true;
+    /* Asked before constructing rather than after: a Tray that is never shown
+       still reports itself as created, and that is precisely the state this
+       must not treat as success. */
+    if (!statusAreaAvailable()) return false;
     try {
       const image = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_PNG, "base64"));
       if (image.isEmpty()) return false;

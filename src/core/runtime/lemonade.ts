@@ -117,9 +117,50 @@ export function openAiBase(port: number): string {
 }
 
 /** What `/api/v1/health` answers with once the daemon is serving. */
+/**
+ * What the daemon reports about the model it is holding.
+ *
+ * The context size is the part worth having: llama.cpp is launched with
+ * `--ctx-size 4096` whatever the model's own ceiling is -- measured, a model
+ * whose `max_context_window` is 131,072 still gets 4,096 -- so "how much room
+ * do I have" has an answer that is neither the model's spec sheet nor
+ * guessable. Showing both numbers is what makes that visible.
+ */
+export interface LoadedModel {
+  id: string;
+  /**
+   * Tokens this conversation actually has, and nothing softer than that.
+   *
+   * Two numbers claim to be this and only one of them is true. Lemonade's
+   * `recipe_options.ctx_size` is what it *asked* for; llama-server's own
+   * `/props` reports what it *got*, per slot, after llama.cpp has clamped to
+   * the model's trained length and divided by `--parallel`. They agree today
+   * because Lemonade launches with `--parallel 1`, and they would silently
+   * stop agreeing the moment it did not.
+   *
+   * So this field holds the server's answer when it can be had, and
+   * `contextFrom` says which it is. It also feeds compaction, which makes an
+   * over-estimate here worse than no estimate: it would summarise too late and
+   * overflow the window anyway.
+   */
+  contextTokens?: number | undefined;
+  /** Whether the figure was measured from llama-server or taken from Lemonade. */
+  contextFrom?: "server" | "daemon" | undefined;
+  /** The model's own ceiling, which is usually much larger. */
+  maxContextTokens?: number | undefined;
+  /** `gpu` or `cpu`, which answers "did the card get used". */
+  device?: string | undefined;
+  recipe?: string | undefined;
+  /** The llama-server behind this model, which can be asked what it really did. */
+  backendUrl?: string | undefined;
+  ready: boolean;
+}
+
 export interface LemonadeHealth {
   modelLoaded?: string | undefined;
   loaded: string[];
+  /** Detail for `modelLoaded`, when the daemon reports it. */
+  active?: LoadedModel | undefined;
 }
 
 /**
@@ -131,11 +172,43 @@ export interface LemonadeHealth {
  */
 export function parseHealth(body: unknown): LemonadeHealth {
   const obj = (body ?? {}) as Record<string, unknown>;
-  const all = obj["all_models_loaded"];
+  /* `all_models_loaded` holds objects, not strings -- it did not always, and
+     reading it as strings left the list silently empty. Both shapes are
+     accepted rather than swapping one assumption for another. */
+  const rows = Array.isArray(obj["all_models_loaded"]) ? obj["all_models_loaded"] : [];
+  const models: LoadedModel[] = [];
+  for (const row of rows) {
+    if (typeof row === "string" && row) {
+      models.push({ id: row, ready: true });
+      continue;
+    }
+    if (!row || typeof row !== "object") continue;
+    const m = row as Record<string, unknown>;
+    const id = typeof m["model_name"] === "string" ? m["model_name"] : undefined;
+    if (!id) continue;
+    const options = (m["recipe_options"] ?? {}) as Record<string, unknown>;
+    const int = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
+    models.push({
+      id,
+      ready: m["status"] === "ready" || m["loaded"] === true,
+      ...(int(options["ctx_size"]) !== undefined ? { contextTokens: int(options["ctx_size"]) } : {}),
+      ...(int(m["max_context_window"]) !== undefined
+        ? { maxContextTokens: int(m["max_context_window"]) }
+        : {}),
+      ...(int(options["ctx_size"]) !== undefined ? { contextFrom: "daemon" as const } : {}),
+      ...(typeof m["device"] === "string" ? { device: m["device"] } : {}),
+      ...(typeof m["recipe"] === "string" ? { recipe: m["recipe"] } : {}),
+      ...(typeof m["backend_url"] === "string" ? { backendUrl: m["backend_url"] } : {}),
+    });
+  }
   const one = obj["model_loaded"];
+  const modelLoaded = typeof one === "string" && one ? one : undefined;
+  const active = models.find((m) => m.id === modelLoaded) ?? (modelLoaded ? undefined : models[0]);
   return {
-    loaded: Array.isArray(all) ? all.filter((m): m is string => typeof m === "string") : [],
-    ...(typeof one === "string" && one ? { modelLoaded: one } : {}),
+    loaded: models.map((m) => m.id),
+    ...(modelLoaded ? { modelLoaded } : {}),
+    ...(active ? { active } : {}),
   };
 }
 
@@ -203,3 +276,33 @@ export function mergeConfig(
 
 /** Lemonade keeps its persistent settings here, inside the config directory. */
 export const CONFIG_FILE = "config.json";
+
+/**
+ * The context a conversation really gets, read from llama-server itself.
+ *
+ * `default_generation_settings.n_ctx` is the per-slot figure -- what one
+ * conversation can hold -- while the top-level `n_ctx` is the total across
+ * slots. With one slot they are equal; with more they are not, and the
+ * per-slot number is the one a token meter must count against.
+ *
+ * Unauthenticated on purpose: this is the backend llama-server that Lemonade
+ * started on loopback, and it is launched without a key. Failure is silent and
+ * the caller keeps the daemon's own figure.
+ */
+export function parseProps(body: unknown): number | undefined {
+  const obj = (body ?? {}) as Record<string, unknown>;
+  const perSlot = (obj["default_generation_settings"] ?? {}) as Record<string, unknown>;
+  for (const value of [perSlot["n_ctx"], obj["n_ctx"]]) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  }
+  return undefined;
+}
+
+/** `http://127.0.0.1:8002/v1` → `http://127.0.0.1:8002/props`. */
+export function propsUrl(backendUrl: string): string | undefined {
+  try {
+    return new URL("/props", backendUrl).toString();
+  } catch {
+    return undefined;
+  }
+}

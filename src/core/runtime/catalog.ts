@@ -18,6 +18,27 @@
  * grouped and filtered rather than listed.
  */
 
+/* The registry a model comes from is defined once, in `registry.ts`, because
+   the search UI and the catalogue must never disagree about what to call
+   ModelScope in front of someone checking an institutional policy. */
+import { isEnabled, readSource, type RegistrySource } from "./registry.ts";
+
+export { REGISTRY_HOST, REGISTRY_LABEL, REGISTRY_NAME, readSource, type RegistrySource } from "./registry.ts";
+
+/**
+ * Drop catalogue entries from registries Karen does not use.
+ *
+ * Upstream's catalogue is not all Hugging Face: ten of its 228 entries -- the
+ * whole MiniCPM family, all of them marked `suggested` and so sorted to the
+ * top of the default list -- are fetched from ModelScope. Leaving them in
+ * would put a Download button for a disabled registry on the first screen of
+ * the Models page, which is precisely the accident `ENABLED_SOURCES` exists to
+ * prevent. Applied in the main process, so the renderer never receives them.
+ */
+export function enabledOnly(entries: CatalogEntry[]): CatalogEntry[] {
+  return entries.filter((entry) => isEnabled(entry.source));
+}
+
 /** One model as the catalogue describes it. */
 export interface CatalogEntry {
   id: string;
@@ -29,6 +50,8 @@ export interface CatalogEntry {
   sizeBytes?: number | undefined;
   /** Upstream's own shortlist, which is a better default than alphabetical. */
   suggested: boolean;
+  /** The registry it is fetched from; absent in the catalogue means Hugging Face. */
+  source: RegistrySource;
 }
 
 type Obj = Record<string, unknown>;
@@ -65,6 +88,7 @@ export function parseCatalog(raw: unknown): CatalogEntry[] {
       recipe,
       labels,
       suggested: entry["suggested"] === true,
+      source: readSource(entry["source"]),
       ...(typeof size === "number" && size > 0
         ? { sizeBytes: Math.round(size * 1024 ** 3) }
         : {}),

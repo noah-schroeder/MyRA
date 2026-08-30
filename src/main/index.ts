@@ -37,9 +37,10 @@ import { installRuntimeIpc } from "./runtime/ipc.ts";
 import { ApiManager } from "./api/manager.ts";
 import { installApiIpc } from "./api/ipc.ts";
 import { KarenTray, claimSingleInstance, reveal } from "./tray.ts";
+import { displayModelName } from "../core/runtime/foreign.ts";
 import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
-import { ResearchRun, listRuns, readRun, readRunSource } from "../core/research/run.ts";
+import { ResearchRun, deleteRun, listRuns, readRun, readRunSource, runFootprint } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import { readResearchConfig, researchConfigPath, researchRoot } from "../core/research/config.ts";
 import { writeFile } from "node:fs/promises";
@@ -397,17 +398,25 @@ async function handleSend(text: string): Promise<void> {
      */
     const managed = runtime.chatEndpoint();
     const apiKey = managed ? managed.apiKey : await vault.get("llmKey");
-    const endpoint = managed ? { ...settings.llm, baseUrl: managed.baseUrl } : settings.llm;
+    /* `model` as well as `baseUrl`: the configured model name belongs to the
+       user's own endpoint and means nothing to the daemon Karen started. */
+    const endpoint = managed
+      ? { ...settings.llm, baseUrl: managed.baseUrl, model: managed.model }
+      : settings.llm;
     /*
-     * Only a model Karen started can say how big its window is -- it is read
-     * from that server's own /props. For an endpoint someone else runs there is
-     * no honest number, so the meter and the compaction both stand down rather
-     * than act on a guess.
+     * How big the window actually is, when that is knowable.
+     *
+     * Read from llama-server's own `/props` by way of the daemon's health, so
+     * it is what the server did rather than what anything intended. For an
+     * endpoint someone else runs there is still no honest number, and the
+     * meter and compaction both stand down rather than act on a guess -- an
+     * invented limit would summarise at the wrong moment and overflow anyway.
+     *
+     * This stood at `undefined` for both cases on the belief that Lemonade
+     * reported no per-conversation window. It does; the figure was simply not
+     * being read.
      */
-    /* Lemonade does not report a per-conversation context window, so there is
-       no honest denominator for the meter here either -- the same stand-down
-       that already applies to an endpoint someone else runs. */
-    const limit = undefined;
+    const limit = managed?.contextTokens;
 
     const result = await runTurn({
       registry,
@@ -431,10 +440,12 @@ async function handleSend(text: string): Promise<void> {
         const { text } = await runSubagent({
           endpoint,
           ...(apiKey ? { apiKey } : {}),
-          // Whatever the endpoint is already serving. The bundled runtime
-          // serves exactly one model and ignores this; a remote endpoint that
-          // needs a name has it in settings.
-          model: settings.llm.model ?? "",
+          /* `endpoint.model`, not `settings.llm.model`: for a model Karen is
+             serving, the configured name is empty and the daemon rejects a
+             request that does not name one. Compaction would therefore have
+             failed the first time it fired -- the same fault the chat turn
+             itself had, one call further down. */
+          model: endpoint.model ?? "",
           system: SUMMARY_SYSTEM,
           prompt: summaryPrompt(messages),
           signal: inFlight!.signal,
@@ -732,6 +743,30 @@ function installIpc(): void {
     await shell.openPath(run.dir);
   });
 
+  /**
+   * What deleting a run would cost, asked before the confirmation is shown.
+   *
+   * A run holds the stored copy of every paper it read, so "delete" is not the
+   * small act it looks like next to deleting a chat. The number of files and
+   * the size on disk are the two facts that make that concrete.
+   */
+  ipcMain.handle("karen:research-footprint", async (_e, id: string) => {
+    try {
+      return { ok: true, footprint: await runFootprint(String(id)) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("karen:research-delete", async (_e, id: string) => {
+    try {
+      const gone = await deleteRun(String(id));
+      return { ok: true, deleted: gone, runs: await listRuns() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle("karen:get-research", () => readResearchConfig());
   ipcMain.handle("karen:set-research", async (_e, next: unknown) => {
     const cfg = next as { mode?: string; category?: string; timeRange?: string };
@@ -846,7 +881,7 @@ async function main(): Promise<void> {
     const managed = runtime.chatEndpoint();
     if (managed) {
       return {
-        endpoint: { ...config.current.llm, baseUrl: managed.baseUrl },
+        endpoint: { ...config.current.llm, baseUrl: managed.baseUrl, model: managed.model },
         apiKey: managed.apiKey,
         // The file name, not the port. A meeting note recording
         // "http://127.0.0.1:37617/v1" as the model that wrote it says nothing
@@ -1006,9 +1041,19 @@ if (soleInstance) app.whenReady().then(() => {
       quitting = true;
       app.quit();
     },
+    /* Failure is worth a line in the log but not a dialog: a tray click is a
+       casual action, and the menu redraws from the real state either way, so a
+       model that did not unload still says it is loaded. */
+    eject: () => {
+      void runtime.unloadModel().catch((err: unknown) => {
+        console.error("Ejecting the model from the tray failed:", err);
+      });
+    },
     state: () => ({
+      /* The name a person recognises, not the index id: a tray menu reading
+         "Model: lmstudio__LFM2.5-8B-A1B" is bookkeeping on display. */
       ...(runtime.lemonade.status.health?.modelLoaded
-        ? { model: runtime.lemonade.status.health.modelLoaded }
+        ? { model: displayModelName(runtime.lemonade.status.health.modelLoaded) }
         : {}),
       ...(api.state.status.url ? { apiUrl: api.state.status.url } : {}),
     }),

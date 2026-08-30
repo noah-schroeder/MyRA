@@ -1265,6 +1265,39 @@ kbd {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .modelbar-where { color: var(--text-faint); font-size: 11.5px; flex: none; }
+
+/* The context readout. A figure, so it is tabular and quiet -- it is proof
+   that the load worked and a reminder of the room available, not a control. */
+.modelbar-ctx {
+  flex: none; font-size: 11px; font-family: var(--mono);
+  color: var(--text-dim); font-variant-numeric: tabular-nums;
+  padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-inset);
+}
+.modelbar:hover .modelbar-ctx { color: var(--text); border-color: var(--border-strong); }
+
+/* Indeterminate: a band that sweeps rather than fills, because there is no
+   number behind it. Sits under the bar so it cannot change the bar's height
+   and shift the whole header while a model loads. */
+.modelbar-progress {
+  position: absolute; top: calc(100% + 3px); left: 0; right: 0; height: 2px;
+  border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.modelbar-progress-run {
+  display: block; height: 100%; width: 40%;
+  border-radius: 999px; background: var(--accent);
+  animation: modelbar-sweep 1.15s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+@keyframes modelbar-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still says "working", without the movement. */
+  .modelbar-progress-run { width: 100%; animation: modelbar-pulse 1.6s ease-in-out infinite; }
+  @keyframes modelbar-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+}
 .modelbar.tone-none .modelbar-name { color: var(--accent-soft); }
 .dot-idle { background: var(--text-faint); }
 
@@ -1733,6 +1766,48 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .runs-pane { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 26px 32px; }
 .runs-empty { margin: 12px 0; font-size: 13px; color: var(--text-faint); }
+
+/* ---------- deleting a run ---------- */
+
+/* Red only on hover and on the confirming button. A destructive action that is
+   red at rest turns the whole toolbar into a warning, and this one sits beside
+   "Open folder" -- something people press often and casually. */
+.runs-actions .runs-delete:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+
+.runs-confirm {
+  flex: none;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+  margin: 0; padding: 14px 22px;
+  border-bottom: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+}
+.runs-confirm-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.runs-confirm-title { margin: 0; font-size: 13px; font-weight: 620; color: var(--text); }
+.runs-confirm-body { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-dim); max-width: 62ch; }
+.runs-confirm-acts { display: flex; align-items: center; gap: 8px; flex: none; }
+.runs-confirm-acts button {
+  font: inherit; font-size: 12px;
+  padding: 6px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-float); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.runs-confirm-acts button:hover:not(:disabled) { color: var(--text); border-color: var(--border-hover); }
+.runs-confirm-acts .runs-delete.danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
+}
+.runs-confirm-acts .runs-delete.danger:hover:not(:disabled) {
+  color: var(--red); border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+.runs-confirm-acts button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.runs-note { margin: 0 0 14px; font-size: 12.5px; color: var(--accent-soft); }
 .run-error { margin: 0 0 12px; font-size: 12.5px; color: var(--red); }
 
 .run-section { display: flex; flex-direction: column; gap: 10px; }
@@ -3064,6 +3139,22 @@ p.warning { margin: 0; font-size: 12.5px; }
 /* Fixed width so the verdicts stack into a column the eye can run down. */
 .lem-model .lem-chip { width: 88px; justify-content: center; }
 
+/* The registry a row downloads from, which some institutions restrict.
+   Sized to its text rather than to the verdict column: it sits beside the name
+   as part of the model's identity, not in the column of judgements Karen makes
+   about it. The non-default registry is given the warmer colour so a list can
+   be scanned for it, without the red that would read as "broken". */
+.lem-model .lem-chip.lem-src {
+  width: auto;
+  color: var(--text-faint);
+  border-color: var(--border);
+}
+.lem-model .lem-chip.lem-src.foreign {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 42%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+
 .lem-act {
   flex: none; min-width: 84px;
   font: inherit; font-size: 11.5px;
@@ -3281,3 +3372,198 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .api-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 .api-danger:hover:not(:disabled) { color: var(--red); border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+
+/* ==========================================================================
+   Registry search — Hugging Face [US]
+   ==========================================================================
+   The `.modelscope` rules below are unused while `ENABLED_SOURCES` holds only
+   Hugging Face. They are kept deliberately: re-enabling a registry should be a
+   one-line change there, not a hunt for the styles that went with it.
+   The country code is load-bearing here, so the two registries are given
+   distinct, consistent identities: Hugging Face blue, ModelScope amber, used
+   for the toggle, the result badge and the inline mention in prose alike. The
+   colour is the fast signal; the bracketed country is the one that is actually
+   readable, and it never appears without it.                                */
+
+.lem-modes { display: flex; gap: 8px; margin: 4px 0 14px; }
+.lem-mode {
+  flex: 0 1 260px; display: flex; flex-direction: column; gap: 3px;
+  font: inherit; font-size: 12.5px; text-align: left;
+  padding: 9px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-inset);
+  color: var(--text-dim); cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.lem-mode:hover { color: var(--text); border-color: var(--border-hover); }
+.lem-mode.on {
+  color: var(--text); border-color: var(--accent-dim);
+  background: var(--accent-wash); box-shadow: var(--lift);
+}
+.lem-mode-sub { font-size: 10.5px; color: var(--text-faint); }
+.lem-mode.on .lem-mode-sub { color: var(--text-dim); }
+
+.reg { display: flex; flex-direction: column; gap: 14px; }
+
+/* ---------- the controls ---------- */
+
+.reg-bar {
+  display: flex; flex-direction: column; gap: 11px;
+  padding: 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-inset);
+}
+
+.reg-sources { display: flex; flex-wrap: wrap; gap: 9px; }
+/* A tick box that reads as a switch: which registries are on is the first
+   thing to establish, before anything has been typed. */
+.reg-source {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 8px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg);
+  font-size: 12.5px; color: var(--text-faint); cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.reg-source:hover { border-color: var(--border-hover); }
+.reg-source input { accent-color: var(--accent); cursor: pointer; }
+.reg-source-name { font-weight: 600; letter-spacing: 0.01em; }
+.reg-source-host { font-size: 10.5px; color: var(--text-faint); }
+.reg-source.on { color: var(--text); }
+.reg-source.on.huggingface {
+  border-color: color-mix(in srgb, var(--blue) 50%, transparent);
+  background: color-mix(in srgb, var(--blue) 9%, transparent);
+}
+.reg-source.on.huggingface .reg-source-name { color: var(--blue); }
+.reg-source.on.modelscope {
+  border-color: color-mix(in srgb, var(--amber) 50%, transparent);
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+}
+.reg-source.on.modelscope .reg-source-name { color: var(--amber); }
+.reg-source.on .reg-source-host { color: var(--text-dim); }
+/* The single-registry form: same badge, no affordance. Not a disabled
+   control -- a disabled tick box invites someone to look for the way to
+   enable it -- but a plain statement of what is being searched. */
+.reg-source.fixed { cursor: default; }
+.reg-source.fixed:hover { border-color: color-mix(in srgb, var(--blue) 50%, transparent); }
+
+.reg-query { display: flex; gap: 8px; }
+.reg-input {
+  flex: 1 1 auto; min-width: 0;
+  font: inherit; font-size: 13px;
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--bg);
+  color: var(--text);
+}
+.reg-input::placeholder { color: var(--text-faint); }
+.reg-input:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 3px var(--accent-glow); }
+.reg-go {
+  flex: none; font: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 0 18px; border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-dim); background: var(--accent); color: var(--on-accent);
+  cursor: pointer; transition: opacity var(--t-fast);
+}
+.reg-go:hover:not(:disabled) { opacity: 0.88; }
+.reg-go:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* The sentence that says where the words are about to go. Deliberately plain
+   and deliberately above the fold: it describes an action not yet taken. */
+.reg-egress { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--text-dim); }
+.reg-inline { font-weight: 600; }
+.reg-inline.huggingface { color: var(--blue); }
+.reg-inline.modelscope  { color: var(--amber); }
+
+/* ---------- per-registry report ---------- */
+
+.reg-report { display: flex; flex-direction: column; gap: 5px; }
+.reg-line {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0; font-size: 11.5px; color: var(--text-dim);
+}
+.reg-line.bad { color: var(--red); }
+.reg-dim { color: var(--text-faint); }
+
+/* The badge. Same shape in the toggle, the report line and every result row,
+   so it reads as one fact repeated rather than three different labels. */
+.reg-tag {
+  flex: none; display: inline-flex; align-items: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.reg-tag.huggingface {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 8%, transparent);
+}
+.reg-tag.modelscope {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 42%, transparent);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+
+/* ---------- results ---------- */
+
+.reg-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.reg-hit {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset); overflow: hidden;
+  transition: border-color var(--t-fast);
+}
+.reg-hit:hover { border-color: var(--border-strong); }
+.reg-hit.open { border-color: var(--accent-dim); background: var(--bg-raised); }
+
+.reg-hit-head {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  font: inherit; text-align: left; padding: 9px 12px;
+  background: none; border: 0; color: var(--text); cursor: pointer;
+}
+.reg-hit-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.reg-hit-name {
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reg-hit-alt {
+  font-size: 10.5px; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reg-hit-figure {
+  flex: none; width: 62px; text-align: right;
+  font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+.reg-hit-open { flex: none; font-size: 11.5px; color: var(--text-dim); min-width: 56px; text-align: right; }
+.reg-hit:hover .reg-hit-open { color: var(--accent-soft); }
+
+/* ---------- variants ---------- */
+
+.reg-variants {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+.reg-variants-note { margin: 9px 0 0; font-size: 11.5px; color: var(--text-dim); }
+.reg-vlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.reg-variant {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  background: var(--bg-inset); border: 1px solid transparent;
+}
+.reg-variant:hover { border-color: var(--border-strong); }
+.reg-variant-name {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--mono); font-size: 11.5px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reg-variant-size {
+  flex: none; width: 72px; text-align: right;
+  font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+/* Holds the column when a row has no Recommended chip and no shard count, so
+   the sizes and verdicts stay in a line the eye can run down. */
+.reg-variant-pad { flex: none; width: 88px; }
+.reg-variant .lem-chip { width: 88px; justify-content: center; }
+
+.reg-empty { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+
+@media (max-width: 900px) {
+  .lem-modes { flex-direction: column; }
+  .reg-hit-figure { display: none; }
+  .reg-variant-pad { display: none; }
+}

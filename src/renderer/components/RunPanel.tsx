@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RunDetail, RunSource, RunSummary } from "../types.ts";
+import type { RunDetail, RunFootprint, RunSource, RunSummary } from "../types.ts";
 import { Markdown } from "./Markdown.tsx";
 
 /**
@@ -30,6 +30,13 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "report", label: "Report" },
 ];
 
+/** Bytes as a figure someone can weigh a decision against. */
+function size(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} kB`;
+}
+
 function when(iso: string | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -42,6 +49,13 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
   const [detail, setDetail] = useState<RunDetail | undefined>();
   const [tab, setTab] = useState<Tab>("funnel");
   const [error, setError] = useState<string | undefined>();
+  /* The run being confirmed for deletion, with what it costs. Held rather than
+     asked at the moment of the click: the size is the argument for pausing,
+     and it has to be on screen before the destructive button is. */
+  const [confirming, setConfirming] = useState<RunFootprint | undefined>();
+  const [confirmError, setConfirmError] = useState<string | undefined>();
+  const [deleting, setDeleting] = useState(false);
+  const [note, setNote] = useState<string | undefined>();
 
   useEffect(() => {
     void window.karen
@@ -109,6 +123,22 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
                   Open folder
                 </button>
               ) : null}
+              {selected ? (
+                <button
+                  type="button"
+                  className="runs-delete"
+                  onClick={() => {
+                    setNote(undefined);
+                    setConfirmError(undefined);
+                    void window.karen.researchFootprint(selected).then((r) => {
+                      if (r.ok && r.footprint) setConfirming(r.footprint);
+                      else setConfirmError(r.error ?? "That run could not be read.");
+                    });
+                  }}
+                >
+                  Delete run
+                </button>
+              ) : null}
               {/* "Back to the conversation" rather than a dismissive ×: this is
                   a place you navigated to, not a dialog you interrupted. */}
               <button type="button" onClick={onClose}>
@@ -117,10 +147,67 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
+          {/* Not a modal. A run takes an hour to produce and cannot be
+              recovered, so the confirmation states what is about to be lost --
+              and stays beside the run it refers to rather than covering it. */}
+          {confirming ? (
+            <div className="runs-confirm">
+              <div className="runs-confirm-text">
+                <p className="runs-confirm-title">
+                  Delete “{runs.find((r) => r.id === confirming.id)?.question ?? confirming.id}”?
+                </p>
+                <p className="runs-confirm-body">
+                  {confirming.files} files, {size(confirming.bytes)} — including the stored copy of
+                  every paper this run read, its screening decisions and its report. This cannot be
+                  undone.
+                </p>
+                {confirmError ? <p className="run-error">{confirmError}</p> : null}
+              </div>
+              <div className="runs-confirm-acts">
+                <button type="button" onClick={() => { setConfirming(undefined); setConfirmError(undefined); }}>
+                  Keep it
+                </button>
+                <button
+                  type="button"
+                  className="runs-delete danger"
+                  disabled={deleting}
+                  onClick={() => {
+                    setDeleting(true);
+                    setConfirmError(undefined);
+                    void window.karen.researchDelete(confirming.id).then((r) => {
+                      setDeleting(false);
+                      if (!r.ok || !r.runs) {
+                        setConfirmError(r.error ?? "That run could not be deleted.");
+                        return;
+                      }
+                      setConfirming(undefined);
+                      setRuns(r.runs);
+                      /* Move to whatever is left rather than leaving the pane
+                         showing a run that no longer exists. */
+                      setSelected(r.runs[0]?.id);
+                      setDetail(undefined);
+                      setTab("funnel");
+                      setNote(
+                        r.deleted
+                          ? `Deleted — ${size(r.deleted.bytes)} freed.`
+                          : "Deleted.",
+                      );
+                    });
+                  }}
+                >
+                  {deleting ? "Deleting…" : "Delete permanently"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="runs-pane">
+            {note ? <p className="runs-note">{note}</p> : null}
             {error ? <p className="run-error">{error}</p> : null}
             {!detail ? (
-              <p className="runs-empty">{selected ? "Reading the run…" : "Select a run."}</p>
+              <p className="runs-empty">
+                {selected ? "Reading the run…" : runs.length ? "Select a run." : "No runs left."}
+              </p>
             ) : (
               <RunTab tab={tab} detail={detail} />
             )}

@@ -163,6 +163,35 @@ export function readIndexId(id: string): { source: ForeignSource; label: string 
   return undefined;
 }
 
+/**
+ * What to show a person for a model id.
+ *
+ * Models found in LM Studio or Ollama are registered under `lmstudio__NAME`,
+ * because the index directory name *is* the id Lemonade reports and two tools
+ * can hold a model of the same name. That prefix is bookkeeping, and it should
+ * never have been on screen: what someone downloaded in LM Studio is called
+ * `LFM2.5-8B-A1B`, and that is what they are looking for.
+ *
+ * The id itself is untouched -- it is what `load` and every chat request name,
+ * and renaming it would orphan the index. Only the label changes.
+ */
+export function displayModelName(id: string): string {
+  const known = readIndexId(id);
+  if (known) return known.label;
+  /* Anything else registered from a directory carries a flattened repository
+     path -- `bartowski__SmolLM2-135M-Instruct-GGUF` is `bartowski/SmolLM2-…`.
+     The publisher is as much noise here as the tool name: nobody looking for
+     the model they downloaded searches for who packaged it. */
+  const cut = id.lastIndexOf("__");
+  const tail = cut === -1 ? "" : id.slice(cut + 2);
+  return tail || id;
+}
+
+/** Which tool a model was found in, when it was found rather than downloaded. */
+export function sourceOfModel(id: string): ForeignSource | undefined {
+  return readIndexId(id)?.source;
+}
+
 export function isGguf(name: string): boolean {
   return name.toLowerCase().endsWith(".gguf");
 }

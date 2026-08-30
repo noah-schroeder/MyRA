@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RuntimeState, Usage } from "../types.ts";
+import { formatTokens } from "../../core/tokens.ts";
 
 /**
  * How much of the model's memory this conversation is using.
@@ -24,11 +25,9 @@ import type { RuntimeState, Usage } from "../types.ts";
  * dividing by 1000 produces a number nobody recognises: a model everyone calls
  * 128k would read as "131.1k".
  */
-function short(n: number): string {
-  if (n < 1024) return String(n);
-  const k = n / 1024;
-  return `${k >= 10 || Number.isInteger(k) ? Math.round(k) : k.toFixed(1)}k`;
-}
+/* Shared with the model bar, and exact by construction: it rounded before,
+   which printed a 32,000-token window as "31k". */
+const short = formatTokens;
 
 export function ContextMeter({ usage }: { usage: Usage | undefined }) {
   const [runtime, setRuntime] = useState<RuntimeState | undefined>();
@@ -48,13 +47,15 @@ export function ContextMeter({ usage }: { usage: Usage | undefined }) {
 
   const loaded = runtime?.config.useForChat && runtime.lemonade.state === "ready";
   /*
-   * Only what the last reply reported. The old llama-server was asked directly
-   * via /props; Lemonade does not expose a per-conversation window, so there is
-   * no better figure available and a guess would be worse than the honest one
-   * that arrives with each response.
+   * The runtime's figure first, the last reply's second.
+   *
+   * The runtime one is measured from llama-server's `/props` the moment a
+   * model loads, so the gauge can be right before a single message is sent --
+   * which is what this component wanted all along and could not have while
+   * nothing read the window. The reply's own figure remains the fallback for
+   * an endpoint Karen does not run, where there is nothing to measure.
    */
-  const limit = usage?.contextLimit;
-  void loaded;
+  const limit = (loaded ? runtime?.lemonade.active?.contextTokens : undefined) ?? usage?.contextLimit;
   const used = usage?.contextTokens ?? 0;
 
   if (!usage && !limit) return null;
