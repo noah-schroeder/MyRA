@@ -43,8 +43,8 @@ import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, deleteRun, listRuns, readRun, readRunSource, runFootprint } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import { readResearchConfig, researchConfigPath, researchRoot } from "../core/research/config.ts";
-import { writeFile } from "node:fs/promises";
-import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
+import { access, writeFile } from "node:fs/promises";
+import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE, tightenTree } from "../core/paths.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -280,6 +280,34 @@ function createWindow(): void {
   window_.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  /*
+   * And the same rule for navigating the window itself, not just opening a new
+   * one.
+   *
+   * `setWindowOpenHandler` covers `target="_blank"` and `window.open`. It does
+   * not cover a plain link, a `location.assign`, or a form post, any of which
+   * would replace Karen's own page with the destination -- which then runs
+   * inside the window that has Karen's preload bridge attached to it. The
+   * renderer's request filter matches http and https URLs and so stops the
+   * fetch, but it does not match `file://`, and a navigation to a local HTML
+   * file is exactly the shape a malicious document would take.
+   *
+   * So: the page Karen loaded is the only page this window ever shows.
+   * Anything else is cancelled, and an http(s) address is handed to the
+   * browser instead, which is where a person clicking a citation link expects
+   * it to open anyway.
+   */
+  const rendererOrigin = process.env["ELECTRON_RENDERER_URL"];
+  const contents = window_.webContents;
+  contents.on("will-navigate", (event, url) => {
+    if (url === contents.getURL()) return;
+    // electron-vite's full reload after a main-process edit is a real
+    // navigation, and blocking it would break the dev loop for no gain.
+    if (rendererOrigin && url.startsWith(rendererOrigin)) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
 
   if (process.env["ELECTRON_RENDERER_URL"]) {
@@ -790,6 +818,53 @@ function installIpc(): void {
   });
 }
 
+/**
+ * One-time sweep over content an older Karen already wrote.
+ *
+ * Narrowing the roots protects everything written from now on, and nothing
+ * that is already there. The runs, meetings and drafts on disk were created
+ * before any of this existed -- a finished research run holds the question
+ * asked, the papers fetched and the report written, at 0775/0644, and nothing
+ * will ever rewrite it. Only a deliberate pass reaches those.
+ *
+ * Run once and recorded, because it is a walk of the user's document tree and
+ * doing it on every launch would be a real cost for no further benefit: after
+ * the first pass everything loose has already been narrowed, and everything
+ * written since was private from birth.
+ *
+ * Only Karen's own default locations. A root the user pointed somewhere of
+ * their own is theirs -- see makePrivateDir -- and the Obsidian vault
+ * especially so.
+ */
+async function tightenExistingContent(): Promise<void> {
+  const stamp = join(CONFIG_DIR, "permissions-tightened");
+  try {
+    await access(stamp);
+    return;
+  } catch {
+    /* Not done yet. */
+  }
+
+  const roots: string[] = [];
+  for (const [current, fallback] of [
+    [config.current.workspaceRoot, DEFAULT_SETTINGS.workspaceRoot],
+    [config.current.meetingsRoot, DEFAULT_SETTINGS.meetingsRoot],
+  ] as const) {
+    if (current === fallback) roots.push(current);
+  }
+  if (!process.env["KAREN_RESEARCH_ROOT"]) roots.push(researchRoot());
+  roots.push(CONFIG_DIR);
+
+  for (const root of roots) await tightenTree(root).catch(() => 0);
+
+  /* Written even if a sweep partly failed. A tree Karen cannot chmod is one it
+     will not manage to chmod on the next launch either, and retrying the whole
+     walk forever is worse than leaving it. */
+  await writeFile(stamp, new Date().toISOString() + "\n", { mode: OWNER_ONLY_FILE }).catch(
+    () => undefined,
+  );
+}
+
 /* ----------------------------------------------------------------- boot --- */
 
 async function main(): Promise<void> {
@@ -839,6 +914,8 @@ async function main(): Promise<void> {
   if (!process.env["KAREN_RESEARCH_ROOT"]) {
     await makeOwnDir(researchRoot()).catch(() => undefined);
   }
+
+  await tightenExistingContent();
 
   for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS]) registry.register(def);
 
@@ -1105,4 +1182,34 @@ app.on("before-quit", () => {
 });
 process.on("exit", () => {
   runtime.killNow();
+});
+
+/*
+ * A stray rejection must not take lemond down with it.
+ *
+ * Node's default for an unhandled rejection is to terminate the process, and
+ * an Electron main process is a big surface for one: every IPC handler, every
+ * `void`-ed promise, every timer. When it fires the app dies without running
+ * `before-quit`, and the model server -- which is a child of a process that is
+ * already gone -- is orphaned holding several gigabytes of memory. The user
+ * sees Karen vanish and their RAM stay spent, which is the exact failure the
+ * shutdown path above exists to prevent.
+ *
+ * So both handlers do the same two things: say what happened somewhere a
+ * person can find it, and take the daemon down first. Neither swallows the
+ * fault silently, and `uncaughtException` still exits -- carrying on after one
+ * means running with state that has already been left half-written.
+ */
+process.on("unhandledRejection", (reason) => {
+  console.error("[karen] unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[karen] uncaught exception:", err);
+  quitting = true;
+  try {
+    runtime.killNow();
+  } catch {
+    /* Already gone, which is the outcome this wanted anyway. */
+  }
+  process.exit(1);
 });

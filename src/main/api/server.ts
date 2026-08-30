@@ -49,10 +49,27 @@ export interface GatewayStatus {
   error?: string | undefined;
 }
 
-/* A generation can legitimately run for a long time on a slow machine with a
-   large model, so the socket must not be closed under it. Node's default of
-   two minutes is far too short for a 32k-token prompt on CPU. */
+/*
+ * Three different clocks, and only one of them may be switched off.
+ *
+ * A generation can legitimately run for a long time -- a 32k-token prompt on
+ * CPU outlives Node's two-minute default easily -- so the socket must not be
+ * closed under an answer in progress. That is `server.timeout`, and it is the
+ * one that has to go.
+ *
+ * The other two bound RECEIVING a request, not sending the response, so they
+ * cost a long generation nothing and were disabled for no reason. Leaving them
+ * at zero means a client can open a connection, send one byte of a header, and
+ * hold a socket open forever; a few hundred of those and the gateway accepts
+ * nothing further. On loopback that needs a hostile local process, but the LAN
+ * switch puts this on the office wi-fi, which is exactly where an idle-socket
+ * exhaustion is worth the two lines it takes to prevent.
+ */
 const SOCKET_TIMEOUT_MS = 0;
+/** Time to finish sending the headers. Generous; a slowloris never gets there. */
+const HEADERS_TIMEOUT_MS = 60_000;
+/** Time to finish sending the whole request, body included. Uploads are audio. */
+const REQUEST_TIMEOUT_MS = 5 * 60_000;
 
 export class ApiGateway {
   #server: Server | undefined;
@@ -112,13 +129,27 @@ export class ApiGateway {
     const host = config.lan ? "0.0.0.0" : "127.0.0.1";
     const server = createServer((req, res) => {
       void this.#handle(req, res).catch((err: unknown) => {
-        if (!res.headersSent) sendJson(res, 500, { error: { message: String(err) } });
-        else res.end();
+        /*
+         * The client is told that it failed, and nothing else.
+         *
+         * `String(err)` here was handing whoever called the gateway the raw
+         * message of whatever threw -- which for anything filesystem-shaped is
+         * a path under the user's home directory, complete with their account
+         * name. That is a disclosure to an API client, over the LAN when the
+         * LAN switch is on. The detail belongs in Karen's own log, where the
+         * person who can act on it is looking.
+         */
+        console.error("[api] request failed:", err);
+        if (!res.headersSent) {
+          sendJson(res, 500, {
+            error: { message: "Karen could not complete this request.", type: "internal_error" },
+          });
+        } else res.end();
       });
     });
     server.timeout = SOCKET_TIMEOUT_MS;
-    server.headersTimeout = 0;
-    server.requestTimeout = 0;
+    server.headersTimeout = HEADERS_TIMEOUT_MS;
+    server.requestTimeout = REQUEST_TIMEOUT_MS;
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -300,7 +331,16 @@ export class ApiGateway {
   ): Promise<void> {
     /* Read the body before resolving the upstream: with load-on-demand the
        model named in it decides which model the upstream will be serving. */
-    const body = route.binary ? req : await readBody(req);
+    let body: IncomingMessage | string;
+    try {
+      body = route.binary ? req : await readBody(req);
+    } catch (err) {
+      if (err instanceof BodyTooLarge) {
+        sendJson(res, 413, { error: { message: err.message, type: "invalid_request_error" } });
+        return;
+      }
+      throw err;
+    }
     const bodyText = typeof body === "string" ? body : undefined;
     const wanted = modelFrom(bodyText);
 
@@ -466,9 +506,15 @@ function setCors(res: ServerResponse): void {
  * upstream's `set-cookie`, or a CORS header of its own, has no business
  * reaching a client through Karen.
  */
-function passThroughHeaders(upstream: Response): Record<string, string> {
+export function passThroughHeaders(upstream: Response): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const name of ["content-type", "cache-control", "transfer-encoding"]) {
+  /* `transfer-encoding` is deliberately not among them. It is hop-by-hop: it
+     describes how the body was framed on the connection from Lemonade, which
+     is a different connection from the one to the client. Copying it across
+     tells the client's parser to expect chunk framing that Node has already
+     stripped, and Node then adds its own -- the two disagree, and a strict
+     client sees a malformed body. */
+  for (const name of ["content-type", "cache-control"]) {
     const value = upstream.headers.get(name);
     if (value) out[name] = value;
   }
@@ -478,13 +524,21 @@ function passThroughHeaders(upstream: Response): Record<string, string> {
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 
+/** Thrown by `readBody` so the handler can answer 413 rather than a blank 500. */
+class BodyTooLarge extends Error {
+  constructor() {
+    super(`Request body is larger than the ${MAX_BODY_BYTES / (1024 * 1024)} MB limit.`);
+    this.name = "BodyTooLarge";
+  }
+}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
     // A prompt is text; 64 MB of it is not a prompt, it is a mistake.
-    if (size > MAX_BODY_BYTES) throw new Error("Request body too large");
+    if (size > MAX_BODY_BYTES) throw new BodyTooLarge();
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString("utf8");

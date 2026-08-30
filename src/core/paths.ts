@@ -7,7 +7,7 @@
  * quietly making the app's configuration untestable.
  */
 
-import { chmod, mkdir, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -79,4 +79,68 @@ export async function makeOwnDir(path: string): Promise<void> {
  */
 export function toolsDir(): string {
   return process.env["KAREN_TOOLS_DIR"] ?? join(CONFIG_DIR, "tools");
+}
+
+/**
+ * Tighten a tree Karen already wrote, once.
+ *
+ * `makeOwnDir` fixes the root of an old install, and every writer since passes
+ * an explicit mode -- but neither reaches what is already on disk one level
+ * down. An install that predates those fixes still has
+ * `research/2026-08-19-do-pedagogical-agents-improve-recall/` at 0775 with its
+ * `report.md` at 0644, and no amount of care in new code will ever touch them
+ * again: they are finished runs that nothing will rewrite.
+ *
+ * So this walks a root Karen owns and narrows what is loose. Two limits keep it
+ * honest rather than enthusiastic:
+ *
+ *   - **Only what is actually loose.** A path with no group or other bits set
+ *     is left entirely alone, so a deliberate `chmod` inside a run survives and
+ *     the second launch does no work at all.
+ *   - **Never across a symlink.** `lstat`, not `stat`, and links are skipped
+ *     rather than followed -- a link pointing at a shared folder would
+ *     otherwise make this reach outside the tree it was given, which is the one
+ *     thing a permission sweep must not do.
+ *
+ * Errors are swallowed per entry. A single unreadable directory on a mounted
+ * disk should narrow everything else and not abort the sweep.
+ */
+export async function tightenTree(root: string, budget = 20_000): Promise<number> {
+  let changed = 0;
+  let seen = 0;
+
+  const walk = async (path: string): Promise<void> => {
+    if (seen >= budget) return;
+    let entries;
+    try {
+      entries = await readdir(path, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (seen >= budget) return;
+      seen += 1;
+      const child = join(path, entry.name);
+      try {
+        const info = await lstat(child);
+        if (info.isSymbolicLink()) continue;
+        if ((info.mode & 0o077) !== 0) {
+          /* Strip the group and other bits and keep the owner's exactly as
+             they are. Not a flat 0700/0600: `tools/` holds downloaded
+             binaries at 0755, and forcing them to 0600 would take the execute
+             bit off pandoc and break the export that needs it. What is being
+             fixed here is who else can read, which is only ever the low six
+             bits. */
+          await chmod(child, info.mode & ~0o077 & 0o7777);
+          changed += 1;
+        }
+        if (info.isDirectory()) await walk(child);
+      } catch {
+        /* Vanished mid-walk, or a filesystem with no modes. Skip it. */
+      }
+    }
+  };
+
+  await walk(root);
+  return changed;
 }
