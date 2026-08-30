@@ -3815,3 +3815,39 @@ p.warning { margin: 0; font-size: 12.5px; }
 .lem-divider::after {
   content: ""; flex: 1; height: 1px; background: var(--border);
 }
+
+/*
+ * Shelves: the way into the registry for someone with no vocabulary for it.
+ *
+ * Sits between the search box and the results, and reads as an offer rather
+ * than a control panel -- these are suggestions, and a grid of heavy buttons
+ * would give them more authority than a guess deserves.
+ */
+.reg-shelves { display: flex; flex-direction: column; gap: 9px; margin-top: 2px; }
+.reg-shelves-lead { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-dim); max-width: 72ch; }
+
+.reg-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reg-chips-key {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint); margin-right: 2px;
+}
+
+.reg-chip {
+  font: inherit; font-size: 12px;
+  padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--bg-inset);
+  color: var(--text-dim); cursor: pointer; white-space: nowrap;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.reg-chip:hover:not(:disabled) {
+  color: var(--accent-soft); border-color: var(--accent-dim); background: var(--accent-wash);
+}
+.reg-chip.on {
+  color: var(--text); border-color: var(--accent-dim);
+  background: var(--accent-wash); box-shadow: var(--lift);
+}
+/* The publisher row is a second rank of the same idea, so it is the same
+   shape one size down rather than a different control. */
+.reg-chip.small { font-size: 11.5px; padding: 4px 10px; color: var(--text-faint); }
+.reg-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+.reg-chip:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
