@@ -168,8 +168,11 @@ export function ModelBar({
                   (active.contextFrom === "server"
                     ? "measured from the running server."
                     : "as reported by Lemonade."),
+                /* States the ceiling without claiming how the current size was
+                   arrived at: it may be Lemonade's auto-tune or a size set by
+                   hand under Models → Tune, and this cannot tell which. */
                 active.maxContextTokens && active.maxContextTokens > active.contextTokens
-                  ? `This model supports up to ${active.maxContextTokens.toLocaleString("en-GB")}; Lemonade auto-tuned it down.`
+                  ? `This model supports up to ${active.maxContextTokens.toLocaleString("en-GB")}.`
                   : "",
                 active.device ? `Running on the ${active.device === "gpu" ? "GPU" : "processor"}.` : "",
               ]

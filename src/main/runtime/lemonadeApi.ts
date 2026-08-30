@@ -11,6 +11,7 @@
  */
 
 import { parseDownloads, parseSystemInfo, type DownloadJob, type MachineInfo } from "../../core/runtime/systemInfo.ts";
+import { parseModelOptions, type ModelOptions } from "../../core/runtime/modelOptions.ts";
 import {
   parseSearch,
   parseVariants,
@@ -154,6 +155,39 @@ export class LemonadeApi {
          which is the one outcome this whole feature exists to prevent. */
       ...(source ? { source } : {}),
     }, 24 * 60 * 60_000);
+  }
+
+  /* ------------------------------------------------- per-model options -- */
+
+  /**
+   * The load settings for one model: defaults, overrides, and the merge.
+   *
+   * The daemon owns this store -- it is what launches llama-server, so a
+   * setting Karen kept on its own would be a preference the launch never read.
+   */
+  async modelOptions(modelName: string): Promise<ModelOptions> {
+    const path = `/models/${encodeURIComponent(modelName)}/options`;
+    return parseModelOptions(await this.#call<unknown>(path, {}, 15_000), modelName);
+  }
+
+  /**
+   * Save overrides, and return the daemon's own view of the result.
+   *
+   * A patch, not the whole object: posting every field would turn each default
+   * into an override that survives the daemon changing its own defaults. The
+   * response is parsed and returned rather than discarded, because it carries
+   * the re-resolved `resolved_ctx_size` -- what auto-tune now works out -- and
+   * that is the thing a person just changed and wants to see.
+   */
+  async setModelOptions(modelName: string, patch: Record<string, unknown>): Promise<ModelOptions> {
+    const path = `/models/${encodeURIComponent(modelName)}/options`;
+    return parseModelOptions(await this.#post<unknown>(path, patch, 15_000), modelName);
+  }
+
+  /** Drop every override for a model, back to the daemon's defaults. */
+  async resetModelOptions(modelName: string): Promise<ModelOptions> {
+    const path = `/models/${encodeURIComponent(modelName)}/options`;
+    return parseModelOptions(await this.#call<unknown>(path, { method: "DELETE" }, 15_000), modelName);
   }
 
   async loadModel(modelName: string): Promise<void> {

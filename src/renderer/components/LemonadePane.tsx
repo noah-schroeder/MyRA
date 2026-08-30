@@ -30,9 +30,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegistrySearch } from "./RegistrySearch.tsx";
+import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 
 import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
-import { SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
+import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
 import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
 import { fitModel, type Verdict } from "../../core/runtime/fit.ts";
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
@@ -173,6 +174,10 @@ export function LemonadePane({
      what Karen suggests" and "go and look this up" -- and mixing them would
      put a box that reaches the internet next to one that does not. */
   const [mode, setMode] = useState<"catalog" | "search">("catalog");
+  /* The model whose load settings are open, if any. One at a time: these are
+     per-model settings and two panels open at once invites editing one and
+     saving the other. */
+  const [tuning, setTuning] = useState<string | undefined>();
   const starting = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -598,6 +603,18 @@ export function LemonadePane({
                         ) : (
                           <span className="lem-chip dim">—</span>
                         )}
+                        {/* Only for models that are here: there is nothing to
+                            tune about a model that has not been downloaded. */}
+                        {here ? (
+                          <button
+                            type="button"
+                            className="lem-act"
+                            onClick={() => setTuning(tuning === m.id ? undefined : m.id)}
+                            title="How this model loads: context size, backend, arguments"
+                          >
+                            Tune
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className={here ? "lem-act" : "lem-act get"}
@@ -638,7 +655,10 @@ export function LemonadePane({
                     /* The label from the manifest, not the directory name: the
                        index has to flatten `llama3.2:3b` to build a path, and
                        the colon is how anyone using Ollama refers to it. */
-                    const name = from?.label ?? m.id;
+                    /* The manifest label when there is one, otherwise the id
+                       with its index prefix stripped -- these rows were the
+                       ones showing `lmstudio__` and `LiquidAI__` at people. */
+                    const name = from?.label ?? displayModelName(m.id);
                     const fit = m.sizeBytes && machine.ramBytes
                       ? fitModel(m.sizeBytes, machine)
                       : undefined;
@@ -661,6 +681,14 @@ export function LemonadePane({
                         <button
                           type="button"
                           className="lem-act"
+                          onClick={() => setTuning(tuning === m.id ? undefined : m.id)}
+                          title="How this model loads: context size, backend, arguments"
+                        >
+                          Tune
+                        </button>
+                        <button
+                          type="button"
+                          className="lem-act"
                           disabled={busy}
                           onClick={() => loadOrUnload(m.id)}
                         >
@@ -671,6 +699,24 @@ export function LemonadePane({
                   })}
                 </ul>
               </>
+            ) : null}
+
+            {/* Below the lists rather than inside a row: the panel is taller
+                than a row and pushing one open would move everything under it
+                out from under the pointer. */}
+            {tuning ? (
+              <ModelOptionsEditor
+                model={tuning}
+                machine={machine}
+                loaded={tuning === loaded}
+                onReload={() =>
+                  void run(`Reloading ${tuning}`, async () => {
+                    await window.karen.lemonadeUnload();
+                    return window.karen.lemonadeLoad(tuning);
+                  })
+                }
+                onClose={() => setTuning(undefined)}
+              />
             ) : null}
 
             {/* The daemon reads the model folders once, when it starts. Someone
