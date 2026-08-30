@@ -153,6 +153,10 @@ const api = {
     ipcRenderer.invoke("karen:registry-variants", checkpoint, source),
   registryPull: (name: string, checkpoint: string, source: string, recipe?: string) =>
     ipcRenderer.invoke("karen:registry-pull", name, checkpoint, source, recipe),
+  modelOptions: (name: string) => ipcRenderer.invoke("karen:model-options", name),
+  modelOptionsSet: (name: string, patch: Record<string, unknown>) =>
+    ipcRenderer.invoke("karen:model-options-set", name, patch),
+  modelOptionsReset: (name: string) => ipcRenderer.invoke("karen:model-options-reset", name),
   onRuntime: (cb: (state: unknown) => void) => on("karen:runtime", cb),
   onRuntimeDownload: (cb: (p: unknown) => void) => on("karen:runtime-download", cb),
 

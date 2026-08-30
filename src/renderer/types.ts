@@ -8,6 +8,7 @@ import type { RequestRecord } from "../core/api/log.ts";
 import type { ForeignModel } from "../core/runtime/foreign.ts";
 import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
 import type { LoadedModel } from "../core/runtime/lemonade.ts";
+import type { ModelOptions } from "../core/runtime/modelOptions.ts";
 export type { RunFootprint } from "../core/research/run.ts";
 import type { RunFootprint } from "../core/research/run.ts";
 import type { RegistrySource, RepoVariants, SearchResult } from "../core/runtime/registry.ts";
@@ -399,6 +400,12 @@ export interface KarenApi {
     source: RegistrySource,
     recipe?: string,
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
+  modelOptions(name: string): Promise<{ ok: boolean; error?: string; options?: ModelOptions }>;
+  modelOptionsSet(
+    name: string,
+    patch: Record<string, unknown>,
+  ): Promise<{ ok: boolean; error?: string; options?: ModelOptions }>;
+  modelOptionsReset(name: string): Promise<{ ok: boolean; error?: string; options?: ModelOptions }>;
   /** Whether this desktop shows tray icons at all. */
   trayAvailable(): Promise<boolean>;
   apiState(): Promise<ApiState>;

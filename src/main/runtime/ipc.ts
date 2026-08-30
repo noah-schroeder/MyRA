@@ -23,6 +23,19 @@ import {
 } from "../../core/runtime/registry.ts";
 import type { RuntimeManager } from "./manager.ts";
 
+/**
+ * The daemon's own words, without the plumbing around them.
+ *
+ * The client wraps a failure as `/models/x/options failed (400): {"error":"…"}`,
+ * which is right for a log and useless in a form field beside the control that
+ * caused it.
+ */
+function reasonFrom(err: unknown): string {
+  const message = (err as Error).message ?? "";
+  const inner = /\{"error"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(message);
+  return (inner?.[1] ?? message.replace(/^\/\S+\s+failed\s+\(\d+\):\s*/, "")).trim() || message;
+}
+
 export function installRuntimeIpc(
   runtime: RuntimeManager,
   send: (channel: string, payload?: unknown) => void,
@@ -238,6 +251,49 @@ export function installRuntimeIpc(
       }
     },
   );
+
+  /* ---------------------------------------------- per-model load options -- */
+
+  /**
+   * Read, write and reset one model's load settings.
+   *
+   * The daemon's own validation is the only validation: it answers
+   * `'ctx_size' must be a positive whole number, or -1 to size it
+   * automatically` and `Unknown option 'x' for recipe 'llamacpp'`, and those
+   * sentences are better than anything Karen would compose, as well as being
+   * guaranteed to match what actually gets rejected. So errors are passed
+   * through rather than replaced.
+   */
+  ipcMain.handle("karen:model-options", async (_e, name: string) => {
+    try {
+      await runtime.ensureLemonade();
+      return { ok: true, options: await runtime.api.modelOptions(String(name)) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle(
+    "karen:model-options-set",
+    async (_e, name: string, patch: Record<string, unknown>) => {
+      try {
+        await runtime.ensureLemonade();
+        const options = await runtime.api.setModelOptions(String(name), patch ?? {});
+        return { ok: true, options };
+      } catch (err) {
+        return { ok: false, error: reasonFrom(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("karen:model-options-reset", async (_e, name: string) => {
+    try {
+      await runtime.ensureLemonade();
+      return { ok: true, options: await runtime.api.resetModelOptions(String(name)) };
+    } catch (err) {
+      return { ok: false, error: reasonFrom(err) };
+    }
+  });
 
   ipcMain.handle("karen:lemonade-stop", async () => {
     await runtime.stop();
