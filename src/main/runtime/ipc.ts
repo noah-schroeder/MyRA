@@ -22,6 +22,8 @@ import {
   type RegistrySource,
 } from "../../core/runtime/registry.ts";
 import type { RuntimeManager } from "./manager.ts";
+import { browseHuggingFace } from "./hfClient.ts";
+import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
 
 /**
  * The daemon's own words, without the plumbing around them.
@@ -199,18 +201,36 @@ export function installRuntimeIpc(
     error: `${REGISTRY_LABEL[source]} is turned off in this build of Karen.`,
   });
 
-  ipcMain.handle(
-    "karen:registry-search",
-    async (_e, query: string, source: RegistrySource) => {
-      if (!isEnabled(readSource(source))) return refuse(readSource(source));
-      try {
-        await runtime.ensureLemonade();
-        return { ok: true, result: await runtime.api.searchRegistry(String(query), readSource(source)) };
-      } catch (err) {
-        return { ok: false, error: (err as Error).message, source: readSource(source) };
-      }
-    },
-  );
+  /**
+   * Browse the registry itself, rather than through Lemonade's one-knob search.
+   *
+   * The fields are picked out and retyped rather than forwarded: this handler
+   * is the boundary between a renderer and a host on the internet, and the
+   * only thing that should cross it is a small set of values whose shape is
+   * known here. `browseParams` decides what the query string says, so no input
+   * from the window can reach the URL except as a value in a named field.
+   */
+  ipcMain.handle("karen:hf-browse", async (_e, q: unknown) => {
+    const raw = (q ?? {}) as Record<string, unknown>;
+    const pick = (k: string): string | undefined => {
+      const v = raw[k];
+      return typeof v === "string" && v ? v.slice(0, 200) : undefined;
+    };
+    try {
+      return {
+        ok: true,
+        result: await browseHuggingFace({
+          ...(pick("query") ? { query: pick("query") } : {}),
+          ...(pick("author") ? { author: pick("author") } : {}),
+          ...(pick("kind") ? { kind: pick("kind") } : {}),
+          ...(pick("sort") ? { sort: pick("sort") as BrowseSort } : {}),
+          ggufOnly: raw["ggufOnly"] === true,
+        }),
+      };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 
   ipcMain.handle(
     "karen:registry-variants",

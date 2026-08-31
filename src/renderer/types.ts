@@ -11,7 +11,8 @@ import type { LoadedModel } from "../core/runtime/lemonade.ts";
 import type { ModelOptions } from "../core/runtime/modelOptions.ts";
 export type { RunFootprint } from "../core/research/run.ts";
 import type { RunFootprint } from "../core/research/run.ts";
-import type { RegistrySource, RepoVariants, SearchResult } from "../core/runtime/registry.ts";
+import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
+import type { BrowseSort, HfModel } from "../core/runtime/hfBrowse.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 /**
  * What the renderer renders.
@@ -386,10 +387,14 @@ export interface KarenApi {
     name: string,
     checkpoint?: string,
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
-  registrySearch(
-    query: string,
-    source: RegistrySource,
-  ): Promise<{ ok: boolean; error?: string; result?: SearchResult; source?: RegistrySource }>;
+  /** Browse Hugging Face directly: publisher, model kind, sort, full pages. */
+  hfBrowse(q: {
+    query?: string;
+    author?: string;
+    kind?: string;
+    sort?: BrowseSort;
+    ggufOnly?: boolean;
+  }): Promise<{ ok: boolean; error?: string; result?: { models: HfModel[]; url: string } }>;
   registryVariants(
     checkpoint: string,
     source: RegistrySource,

@@ -147,8 +147,13 @@ const api = {
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>
     ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
-  registrySearch: (query: string, source: string) =>
-    ipcRenderer.invoke("karen:registry-search", query, source),
+  hfBrowse: (q: {
+    query?: string;
+    author?: string;
+    kind?: string;
+    sort?: string;
+    ggufOnly?: boolean;
+  }) => ipcRenderer.invoke("karen:hf-browse", q),
   registryVariants: (checkpoint: string, source: string) =>
     ipcRenderer.invoke("karen:registry-variants", checkpoint, source),
   registryPull: (name: string, checkpoint: string, source: string, recipe?: string) =>

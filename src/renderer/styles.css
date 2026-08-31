@@ -3823,8 +3823,19 @@ p.warning { margin: 0; font-size: 12.5px; }
  * than a control panel -- these are suggestions, and a grid of heavy buttons
  * would give them more authority than a guess deserves.
  */
-.reg-shelves { display: flex; flex-direction: column; gap: 9px; margin-top: 2px; }
-.reg-shelves-lead { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-dim); max-width: 72ch; }
+.reg-browse { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.reg-kinds { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); }
+
+/* Sort and the runnable switch: secondary to the tabs above them, so they sit
+   on one quiet line rather than becoming a second row of buttons. */
+.reg-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.reg-control { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-dim); }
+.reg-control select {
+  font: inherit; font-size: 12px;
+  padding: 4px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--bg-inset); color: var(--text);
+}
+.reg-control select:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
 
 .reg-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .reg-chips-key {

@@ -1,10 +1,15 @@
 /**
- * Searching the model registry, and being unambiguous about which one.
+ * Which registry a model comes from, and what to call it in front of a person.
  *
  * Lemonade can reach two registries. Karen uses one: Hugging Face. ModelScope
  * is disabled -- see `ENABLED_SOURCES` for why, and for how to put it back.
  *
- * What survives that decision, and is the point of this module:
+ * Browsing itself now happens in `hfBrowse.ts`, which talks to the registry's
+ * own API because Lemonade's search offers a single `search=` parameter and
+ * cannot express a publisher or a kind of model. What stays here is everything
+ * about *identity and provenance* -- naming, labelling, and turning a
+ * repository into something downloadable -- because those are shared by both
+ * paths and must never disagree.
  *
  *   - **The country is part of the name.** Not a tooltip, not an icon, not a
  *     colour: the label a non-technical person reads is `Hugging Face [US]`,
@@ -14,14 +19,9 @@
  *     badge shown only on exceptions makes an unlabelled row ambiguous -- "the
  *     usual one" or "nobody checked" are indistinguishable -- and the whole
  *     point is that nobody has to guess.
- *   - **Searching is itself egress.** The query text goes to the registry
- *     before anything is downloaded, which is why it is sent on an explicit
- *     press rather than on every keystroke.
- *
- * Measured against lemonade 11.8.0, which does the fetching:
- *
- *   GET /api/v1/registry/search?query=&source=&limit=1..50
- *   GET /api/v1/pull/variants?checkpoint=&source=
+ *   - **Downloading still goes through Lemonade.** `parseVariants`,
+ *     `checkpointFor` and `modelNameFor` describe the daemon's own pull API,
+ *     which remains the only thing that fetches a file.
  */
 
 /** The two registries lemonade can reach. */
@@ -84,107 +84,11 @@ export function readSource(value: unknown): RegistrySource {
   return value === "modelscope" ? "modelscope" : "huggingface";
 }
 
-/* ------------------------------------------------------------- searching -- */
-
-/** One repository, as a registry search returns it. */
-export interface RegistryHit {
-  /** `org/name`, which is what identifies it to a download. */
-  id: string;
-  /** The registry's own display name; on ModelScope often Chinese. */
-  name: string;
-  source: RegistrySource;
-  downloads?: number | undefined;
-  likes?: number | undefined;
-  /** Whether the repository holds GGUF files, which is what llama.cpp runs. */
-  hasGguf: boolean;
-  description?: string | undefined;
-  tags: string[];
-  /**
-   * What the registry says the model is for -- Hugging Face's `pipeline_tag`,
-   * passed through by Lemonade as `task`.
-   *
-   * `text-generation`, `automatic-speech-recognition`, `image-text-to-text`,
-   * `feature-extraction`, `sentence-similarity`. Frequently absent: a
-   * repository whose owner never set it reports nothing, and roughly a third
-   * of GGUF repositories are in that state. So it is useful for ruling a
-   * result OUT of a category and never for ruling one in.
-   */
-  task?: string | undefined;
-}
-
-export interface SearchResult {
-  source: RegistrySource;
-  /**
-   * How many rows lemonade asked the registry for -- **not** how many came
-   * back. The two differ a lot: "whisper" fetches 50 and yields 5, because
-   * unsupported repository types are dropped after the fetch. Printing this as
-   * a result count would be a lie, so it is named for what it is.
-   */
-  fetched: number;
-  hits: RegistryHit[];
-}
-
+/* Narrowing helpers for the daemon's JSON, which is `unknown` at the boundary
+   and must not be trusted to have the shapes its docs promise. */
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const num = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) ? v : undefined;
-
-export function parseSearch(raw: unknown, fallback: RegistrySource): SearchResult {
-  const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const source = body["source"] === undefined ? fallback : readSource(body["source"]);
-  const rows = Array.isArray(body["results"]) ? body["results"] : [];
-  const hits: RegistryHit[] = [];
-  for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
-    const r = row as Record<string, unknown>;
-    const id = str(r["repository_id"]);
-    if (!id) continue;
-    hits.push({
-      id,
-      name: str(r["display_name"]) ?? id,
-      /* Per row rather than per response: a combined search merges two
-         responses into one list, and a row that has lost track of where it
-         came from cannot be labelled. */
-      source: r["source"] === undefined ? source : readSource(r["source"]),
-      hasGguf: r["has_gguf"] === true,
-      tags: Array.isArray(r["tags"]) ? r["tags"].filter((t): t is string => typeof t === "string") : [],
-      ...(num(r["downloads"]) !== undefined ? { downloads: num(r["downloads"]) } : {}),
-      ...(num(r["likes"]) !== undefined ? { likes: num(r["likes"]) } : {}),
-      ...(str(r["description"]) ? { description: str(r["description"]) } : {}),
-      ...(str(r["task"]) ? { task: str(r["task"]) } : {}),
-    });
-  }
-  return { source, fetched: num(body["total"]) ?? hits.length, hits };
-}
-
-/**
- * Merge results from several registries into one list.
- *
- * **Runnable first, then popular.** Measured on a plain search for "qwen": the
- * five most-downloaded repositories are all safetensors, which Karen cannot
- * run, so ordering by downloads alone buries the first usable result below a
- * screen of dead ends. GGUF is what llama.cpp loads, so `has_gguf` is the
- * closest thing the registries give to "you could actually use this".
- *
- * Within each half, downloads -- the only comparable figure both registries
- * report. Deduplicated on source+id rather than id alone: the same
- * `unsloth/Qwen3-30B-A3B-GGUF` exists on both, and collapsing them would hide
- * from a user that one of their two copies is the one they may not use.
- */
-export function mergeHits(results: SearchResult[]): RegistryHit[] {
-  const seen = new Set<string>();
-  const all: RegistryHit[] = [];
-  for (const result of results) {
-    for (const hit of result.hits) {
-      const key = `${hit.source}/${hit.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      all.push(hit);
-    }
-  }
-  return all.sort(
-    (a, b) => Number(b.hasGguf) - Number(a.hasGguf) || (b.downloads ?? 0) - (a.downloads ?? 0),
-  );
-}
 
 /**
  * Turn a failed call into a sentence a person can act on.
@@ -307,42 +211,4 @@ export function recommendVariant(
     if (byRank !== 0) return byRank;
     return (a.sizeBytes ?? Infinity) - (b.sizeBytes ?? Infinity);
   })[0];
-}
-
-/** `12078219` → `12.1M`, because nine digits in a table is not a figure. */
-export function formatCount(n: number | undefined): string {
-  if (n === undefined) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
-
-/** The most rows lemonade will fetch from a registry in one search. */
-export const SEARCH_LIMIT = 50;
-
-/**
- * Say what a search found, without claiming more than was measured.
- *
- * The two registries mean different things by `total`, which is a trap:
- *
- *   - Hugging Face returns exactly what was asked for -- ask 50, `total` is
- *     50 -- so anything missing from the results was fetched and then dropped
- *     for being a format Karen cannot run.
- *   - ModelScope returns the size of the whole match set: 24,742 for "qwen".
- *     Those were never fetched, so saying they are "in formats Karen cannot
- *     run" asserts something about 24,692 repositories nobody looked at.
- *
- * Both facts are useful and they are different sentences, so which one is
- * printed follows from whether the registry reported more than was requested.
- */
-export function describeSearch(shown: number, fetched: number, asked = SEARCH_LIMIT): string {
-  const results = `${shown} ${shown === 1 ? "result" : "results"}`;
-  if (fetched > asked) {
-    return `${results} — ${fetched.toLocaleString("en-GB")} models match; these are the first Karen can run.`;
-  }
-  if (shown < fetched) {
-    const dropped = fetched - shown;
-    return `${results} — ${dropped} more matched but ${dropped === 1 ? "is" : "are"} in formats Karen cannot run.`;
-  }
-  return results;
 }
