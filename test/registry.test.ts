@@ -16,15 +16,11 @@ import { enabledOnly, parseCatalog } from "../src/core/runtime/catalog.ts";
 import { displayModelName, sourceOfModel } from "../src/core/runtime/foreign.ts";
 import {
   checkpointFor,
-  describeSearch,
   ENABLED_SOURCES,
   isEnabled,
   KNOWN_SOURCES,
   explainRegistryError,
-  formatCount,
-  mergeHits,
   modelNameFor,
-  parseSearch,
   parseVariants,
   recommendVariant,
   readSource,
@@ -81,45 +77,6 @@ test("an absent source means Hugging Face, never unknown", () => {
   assert.equal(readSource(""), "huggingface");
   assert.equal(readSource("modelscope"), "modelscope");
   assert.equal(readSource("MODELSCOPE"), "huggingface");
-});
-
-test("parseSearch keeps fetched and returned apart", () => {
-  const result = parseSearch(HF_SEARCH, "huggingface");
-  assert.equal(result.source, "huggingface");
-  // 50 asked for, one usable: printing `fetched` as a result count would lie.
-  assert.equal(result.fetched, 50);
-  assert.equal(result.hits.length, 1);
-  const [hit] = result.hits;
-  assert.equal(hit?.id, "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF");
-  assert.equal(hit?.hasGguf, true);
-  assert.equal(hit?.downloads, 12078219);
-});
-
-test("parseSearch drops rows with no repository id", () => {
-  const result = parseSearch({ results: [{ display_name: "nameless" }, ...HF_SEARCH.results] }, "huggingface");
-  assert.equal(result.hits.length, 1);
-});
-
-test("every hit carries its own registry, so a merged list stays labelled", () => {
-  const merged = mergeHits([parseSearch(HF_SEARCH, "huggingface"), parseSearch(MS_SEARCH, "modelscope")]);
-  assert.equal(merged.length, 2);
-  assert.deepEqual(
-    merged.map((h) => h.source),
-    ["huggingface", "modelscope"],
-  );
-  // Ordered by downloads, the one figure both registries report.
-  assert.equal(merged[0]?.downloads, 12078219);
-});
-
-test("the same repository on both registries is kept twice, not collapsed", () => {
-  // Deduplicating on id alone would hide from a user that one of the two
-  // copies is the one their institution does not allow.
-  const same = { ...HF_SEARCH.results[0] };
-  const merged = mergeHits([
-    parseSearch({ results: [same], source: "huggingface" }, "huggingface"),
-    parseSearch({ results: [{ ...same, source: "modelscope" }], source: "modelscope" }, "modelscope"),
-  ]);
-  assert.equal(merged.length, 2);
 });
 
 const VARIANTS = {
@@ -183,21 +140,6 @@ test("two quantisations of one repository get different model names", () => {
   assert.equal(names[1], "Qwen3-Coder-30B-A3B-Instruct-GGUF-Q4_K_M");
 });
 
-test("malformed payloads produce empty results rather than throwing", () => {
-  for (const junk of [undefined, null, 42, "text", {}, { results: "no" }, { variants: 7 }]) {
-    assert.equal(parseSearch(junk, "huggingface").hits.length, 0);
-    assert.equal(parseVariants(junk, "huggingface").variants.length, 0);
-  }
-});
-
-test("download counts are readable at a glance", () => {
-  assert.equal(formatCount(12078219), "12M");
-  assert.equal(formatCount(1399783), "1.4M");
-  assert.equal(formatCount(12078), "12k");
-  assert.equal(formatCount(929), "929");
-  assert.equal(formatCount(undefined), "—");
-});
-
 test("registry failures are explained rather than pasted", () => {
   const raw =
     '/pull/variants?checkpoint=Qwen%2FQwen2.5-0.5B-Instruct&source=modelscope failed (500): ' +
@@ -216,42 +158,6 @@ test("an error with no known shape is passed through, not swallowed", () => {
     "could not reach Lemonade: fetch failed",
   );
   assert.match(explainRegistryError("", "huggingface"), /Hugging Face could not be read/);
-});
-
-test("runnable repositories are ranked above more popular unusable ones", () => {
-  // Measured: a plain "qwen" search returns five safetensors repositories with
-  // more downloads than the first GGUF one.
-  const hits = mergeHits([
-    parseSearch(
-      {
-        source: "huggingface",
-        results: [
-          { repository_id: "Qwen/Qwen3-0.6B", has_gguf: false, downloads: 22_000_000 },
-          { repository_id: "unsloth/Qwen3-GGUF", has_gguf: true, downloads: 12_000_000 },
-        ],
-      },
-      "huggingface",
-    ),
-  ]);
-  assert.equal(hits[0]?.id, "unsloth/Qwen3-GGUF");
-});
-
-test("a search says what it found without overclaiming", () => {
-  // Hugging Face: asked 50, fetched 50, 48 usable — the other two were fetched
-  // and dropped, so it is fair to say why they are missing.
-  assert.equal(
-    describeSearch(48, 50),
-    "48 results — 2 more matched but are in formats Karen cannot run.",
-  );
-  // ModelScope: 24,742 matched in total, of which 50 were fetched and all 50
-  // were usable. Claiming the other 24,692 are unrunnable would be a fiction.
-  assert.equal(
-    describeSearch(50, 24742),
-    "50 results — 24,742 models match; these are the first Karen can run.",
-  );
-  assert.equal(describeSearch(12, 12), "12 results");
-  assert.equal(describeSearch(1, 1), "1 result");
-  assert.equal(describeSearch(4, 5), "4 results — 1 more matched but is in formats Karen cannot run.");
 });
 
 test("ModelScope is disabled, and disabling is what the main process checks", () => {

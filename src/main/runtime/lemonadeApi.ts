@@ -13,11 +13,9 @@
 import { parseDownloads, parseSystemInfo, type DownloadJob, type MachineInfo } from "../../core/runtime/systemInfo.ts";
 import { parseModelOptions, type ModelOptions } from "../../core/runtime/modelOptions.ts";
 import {
-  parseSearch,
   parseVariants,
   type RegistrySource,
   type RepoVariants,
-  type SearchResult,
 } from "../../core/runtime/registry.ts";
 
 export class LemonadeApiError extends Error {}
@@ -122,11 +120,6 @@ export class LemonadeApi {
    * second from a European connection and Hugging Face in a fifth of that, so
    * thirty seconds of a person watching a spinner buys nothing.
    */
-  async searchRegistry(query: string, source: RegistrySource, limit = 50): Promise<SearchResult> {
-    const params = new URLSearchParams({ query, source, limit: String(limit) });
-    return parseSearch(await this.#call<unknown>(`/registry/search?${params.toString()}`, {}, 20_000), source);
-  }
-
   /**
    * The quantisations a repository offers, with exact sizes.
    *

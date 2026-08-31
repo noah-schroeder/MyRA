@@ -27,21 +27,18 @@ import { useCallback, useMemo, useState } from "react";
 
 import { fitModel, quantRank, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
-  buildShelf, compact, countFiltered, describeDownloads, PUBLISHERS, SHELVES, type Shelf,
-} from "../../core/runtime/discover.ts";
+  age, compact, describeDownloads, KINDS, kindById, loadable, LOADABLE_WORDS,
+  PUBLISHERS, publisherNote, SORTS, type BrowseSort, type HfModel,
+} from "../../core/runtime/hfBrowse.ts";
 import {
   checkpointFor,
-  describeSearch,
   explainRegistryError,
-  formatCount,
-  mergeHits,
   modelNameFor,
   recommendVariant,
   REGISTRY_HOST,
   REGISTRY_LABEL,
   ENABLED_SOURCES,
   REGISTRY_NAME,
-  type RegistryHit,
   type RegistrySource,
   type RepoVariants,
 } from "../../core/runtime/registry.ts";
@@ -57,13 +54,16 @@ function gb(bytes?: number): string {
   return bytes ? `${(bytes / 1024 ** 3).toFixed(bytes < 1024 ** 3 ? 2 : 1)} GB` : "—";
 }
 
-/** What one registry did on the last search, so a failure names itself. */
-interface SourceState {
-  searching: boolean;
-  error?: string;
-  /** Asked for, versus what survived lemonade's filtering. */
-  fetched?: number;
-  shown?: number;
+/**
+ * All that a download needs to identify a repository.
+ *
+ * Narrower than the full result on purpose: a row now comes from the
+ * registry's own API and a variant list only ever needed these two fields, so
+ * requiring the whole shape would mean inventing values to satisfy a type.
+ */
+interface RepoRef {
+  id: string;
+  source: RegistrySource;
 }
 
 interface VariantState {
@@ -87,20 +87,24 @@ export function RegistrySearch({
      registries Karen will contact is a property of the build, not something a
      window can widen. */
   const [sources, setSources] = useState<Set<RegistrySource>>(new Set(ENABLED_SOURCES));
-  const [status, setStatus] = useState<Partial<Record<RegistrySource, SourceState>>>({});
-  const [hits, setHits] = useState<RegistryHit[]>([]);
-  const [ran, setRan] = useState<string | undefined>();
   const [open, setOpen] = useState<string | undefined>();
   const [variants, setVariants] = useState<Record<string, VariantState>>({});
   const [pulling, setPulling] = useState<string | undefined>();
   const [pullError, setPullError] = useState<string | undefined>();
-  /* The shelf being shown, if the results came from one rather than from the
-     box. Kept so the list can say what it is a list OF -- "24 results" over a
-     set of models nobody searched for is a non sequitur. */
-  const [shelf, setShelf] = useState<{ shelf: Shelf; filtered: number } | undefined>();
+  /* Browsing state. `author` is a publisher asked for exactly; `kind` is a
+     pipeline tag; both go to the registry rather than being applied here, so
+     what the tab says and what the page holds cannot drift apart. */
+  const [kind, setKind] = useState("all");
+  const [author, setAuthor] = useState<string | undefined>();
+  const [sort, setSort] = useState<BrowseSort>("downloads");
+  const [ggufOnly, setGgufOnly] = useState(true);
+  const [models, setModels] = useState<HfModel[]>([]);
+  const [browsing, setBrowsing] = useState(false);
+  const [browseError, setBrowseError] = useState<string | undefined>();
+  const [ranBrowse, setRanBrowse] = useState<string | undefined>();
 
   const chosen = useMemo(() => ENABLED_SOURCES.filter((s) => sources.has(s)), [sources]);
-  const busy = Object.values(status).some((s) => s?.searching) || pulling !== undefined;
+  const busy = browsing || pulling !== undefined;
 
   /* Unused while one registry is enabled, and kept for when that changes:
      re-enabling is meant to be a one-line edit to ENABLED_SOURCES, not a
@@ -114,87 +118,65 @@ export function RegistrySearch({
     });
   };
 
-  const search = useCallback(async (): Promise<void> => {
-    const text = query.trim();
-    if (!text || !chosen.length) return;
-    setRan(text);
-    setShelf(undefined);
-    setOpen(undefined);
-    setVariants({});
-    setPullError(undefined);
-    setStatus(Object.fromEntries(chosen.map((s) => [s, { searching: true }])));
-
-    /* Both registries at once, and settled rather than raced: one being down
-       must not discard the other's results, and the pane has to be able to say
-       which one failed. */
-    const results = await Promise.all(
-      chosen.map(async (source) => ({ source, res: await window.karen.registrySearch(text, source) })),
-    );
-
-    const next: Partial<Record<RegistrySource, SourceState>> = {};
-    const found = [];
-    for (const { source, res } of results) {
-      if (res.ok && res.result) {
-        next[source] = { searching: false, fetched: res.result.fetched, shown: res.result.hits.length };
-        found.push(res.result);
-      } else {
-        next[source] = {
-          searching: false,
-          error: explainRegistryError(res.error ?? "", source),
-        };
-      }
-    }
-    setStatus(next);
-    setHits(mergeHits(found));
-  }, [query, chosen]);
-
   /**
-   * Run a shelf: several canned queries, merged into one ranked list.
+   * Ask the registry for a page.
    *
-   * Deliberately built on the same IPC call the box uses. A shelf is not a
-   * privileged path to the registry -- it is a set of queries Karen knows how
-   * to spell, and it goes out exactly the way a typed one does.
+   * One call, with whatever the controls currently say. The filters are
+   * parameters on the request rather than a pass over the results, so the tab
+   * count and the rows cannot disagree -- which is what happened when a
+   * "chat" tab filtered a page that had already been truncated at fifty.
    */
-  const runShelf = useCallback(
-    async (which: Shelf): Promise<void> => {
-      const source = chosen[0];
-      if (!source) return;
-      setRan(which.title);
-      setShelf(undefined);
+  const browse = useCallback(
+    async (patch: {
+      kind?: string;
+      author?: string | undefined;
+      sort?: BrowseSort;
+      ggufOnly?: boolean;
+      query?: string;
+    } = {}): Promise<void> => {
+      const next = {
+        kind: patch.kind ?? kind,
+        author: "author" in patch ? patch.author : author,
+        sort: patch.sort ?? sort,
+        ggufOnly: patch.ggufOnly ?? ggufOnly,
+        query: patch.query ?? query,
+      };
+      setBrowsing(true);
+      setBrowseError(undefined);
       setOpen(undefined);
       setVariants({});
       setPullError(undefined);
-      setQuery("");
-      setStatus({ [source]: { searching: true } });
 
-      const responses = await Promise.all(
-        which.queries.map((q) => window.karen.registrySearch(q, source)),
-      );
+      const res = await window.karen.hfBrowse({
+        ...(next.query.trim() ? { query: next.query.trim() } : {}),
+        ...(next.author ? { author: next.author } : {}),
+        kind: next.kind,
+        sort: next.sort,
+        ggufOnly: next.ggufOnly,
+      });
 
-      const failed = responses.find((r) => !r.ok);
-      if (failed && !responses.some((r) => r.ok)) {
-        setStatus({ [source]: { searching: false, error: explainRegistryError(failed.error ?? "", source) } });
-        setHits([]);
+      setBrowsing(false);
+      if (!res.ok || !res.result) {
+        setBrowseError(res.error ?? "The registry could not be reached.");
+        setModels([]);
         return;
       }
-
-      const lists = responses.flatMap((r) => (r.ok && r.result ? [r.result.hits] : []));
-      const rows = buildShelf(lists, which);
-      setHits(rows);
-      setShelf({ shelf: which, filtered: countFiltered(lists) });
-      setStatus({
-        [source]: {
-          searching: false,
-          shown: rows.length,
-          fetched: rows.length,
-        },
-      });
+      setModels(res.result.models);
+      /* Describes the whole selection, not just the last thing pressed.
+         Choosing a publisher and then a kind left the line reading "Everything
+         published by ibm-granite" over an empty image-model list. */
+      const parts = [
+        next.kind === "all" ? "Models" : `${kindById(next.kind).title} models`,
+        next.author ? `from ${next.author}` : undefined,
+        next.query.trim() ? `matching “${next.query.trim()}”` : undefined,
+      ].filter(Boolean);
+      setRanBrowse(parts.join(" "));
     },
-    [chosen],
+    [kind, author, sort, ggufOnly, query],
   );
 
   const openRepo = useCallback(
-    async (hit: RegistryHit): Promise<void> => {
+    async (hit: { id: string; source: RegistrySource }): Promise<void> => {
       const key = `${hit.source}/${hit.id}`;
       if (open === key) {
         setOpen(undefined);
@@ -214,7 +196,7 @@ export function RegistrySearch({
     [open, variants],
   );
 
-  const download = async (hit: RegistryHit, data: RepoVariants, name: string): Promise<void> => {
+  const download = async (hit: RepoRef, data: RepoVariants, name: string): Promise<void> => {
     const variant = data.variants.find((v) => v.name === name);
     if (!variant) return;
     const modelName = modelNameFor(hit.id, variant);
@@ -276,15 +258,19 @@ export function RegistrySearch({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void search();
+              /* The box is one more filter on the same request, not a
+                 separate mechanism -- so a search inside a publisher stays
+                 inside that publisher, which is what a person expects after
+                 clicking one. */
+              if (e.key === "Enter") void browse({ query });
             }}
             aria-label="Search the model registries"
           />
           <button
             type="button"
             className="reg-go"
-            disabled={busy || !query.trim() || !chosen.length}
-            onClick={() => void search()}
+            disabled={browsing || !chosen.length}
+            onClick={() => void browse({ query })}
           >
             Search
           </button>
@@ -315,57 +301,121 @@ export function RegistrySearch({
         </p>
       </div>
 
-      {/* ---------------- shelves ---------------- */}
+      {/* ---------------- browse ---------------- */}
       {/*
-        * The way in for someone who does not know what to type.
+        * The registry's own filters, as controls.
         *
-        * The search box assumes a vocabulary -- that "qwen" is a family and
-        * "unsloth" is a publisher -- which is exactly what Karen's users do
-        * not have. These are the same queries, spelled by Karen, behind names
-        * that describe what a person wants rather than what a model is called.
-        *
-        * Inert until pressed, like the box above them and for the same
-        * reason: a shelf that loaded itself on open would send queries to a
-        * remote registry the moment this tab was clicked, and the sentence
-        * above promises it does not.
+        * Every one of these is a parameter on the request rather than a pass
+        * over the results, which is the whole point: the old search could only
+        * say `search=<text>` capped at fifty, so "everything IBM publishes"
+        * could not be expressed and a publisher with 36 repositories showed
+        * five. Kind, publisher and sort are questions the registry answers.
         */}
-      <div className="reg-shelves">
-        <p className="reg-shelves-lead">
-          Or start from one of these. Each one runs a search Karen already knows how to spell —
-          nothing is sent until you press one.
-        </p>
-        <div className="reg-chips">
-          {SHELVES.map((sh) => (
+      <div className="reg-browse">
+        <div className="reg-kinds" role="tablist" aria-label="Kind of model">
+          {KINDS.map((k) => (
             <button
-              key={sh.id}
+              key={k.id}
               type="button"
-              className={shelf?.shelf.id === sh.id ? "reg-chip on" : "reg-chip"}
-              disabled={busy || !chosen.length}
-              title={`Searches ${REGISTRY_LABEL[chosen[0] ?? "huggingface"]} for ${sh.queries.map((q) => `“${q}”`).join(", ")}`}
-              onClick={() => void runShelf(sh)}
+              role="tab"
+              aria-selected={k.id === kind}
+              className={k.id === kind ? "lem-tab on" : "lem-tab"}
+              disabled={browsing}
+              onClick={() => {
+                setKind(k.id);
+                void browse({ kind: k.id });
+              }}
             >
-              {sh.title}
+              {k.title}
             </button>
           ))}
         </div>
 
-        <div className="reg-chips">
-          <span className="reg-chips-key">By publisher</span>
-          {PUBLISHERS.map((p) => (
+        <div className="reg-controls">
+          <label className="reg-control">
+            <span>Sort</span>
+            <select
+              value={sort}
+              disabled={browsing}
+              onChange={(e) => {
+                const next = e.target.value as BrowseSort;
+                setSort(next);
+                void browse({ sort: next });
+              }}
+            >
+              {SORTS.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* A visible switch rather than a silent rule. Off, this shows what
+              the registry holds -- original weights included -- which is what
+              a publisher's own page shows. */}
+          <label className="lem-toggle">
+            <input
+              type="checkbox"
+              checked={ggufOnly}
+              disabled={browsing}
+              onChange={(e) => {
+                setGgufOnly(e.target.checked);
+                void browse({ ggufOnly: e.target.checked });
+              }}
+            />
+            Only models Karen can run
+          </label>
+
+          {author ? (
             <button
-              key={p.query}
               type="button"
-              className="reg-chip small"
-              disabled={busy || !chosen.length}
-              title={`Searches ${REGISTRY_LABEL[chosen[0] ?? "huggingface"]} for “${p.query}”`}
+              className="reg-chip on"
+              disabled={browsing}
               onClick={() => {
-                setQuery(p.query);
-                void runShelf({
-                  id: `pub-${p.query}`,
-                  title: p.label,
-                  hint: `Models from the ${p.label} family, most downloaded first.`,
-                  queries: [p.query],
-                });
+                setAuthor(undefined);
+                void browse({ author: undefined });
+              }}
+            >
+              {author} ✕
+            </button>
+          ) : null}
+        </div>
+
+        <div className="reg-chips">
+          <span className="reg-chips-key">Model makers</span>
+          {PUBLISHERS.filter((p) => !p.builder).map((p) => (
+            <button
+              key={p.author}
+              type="button"
+              className={author === p.author ? "reg-chip small on" : "reg-chip small"}
+              disabled={browsing}
+              title={`Everything published by ${p.author}`}
+              onClick={() => {
+                setAuthor(p.author);
+                setQuery("");
+                void browse({ author: p.author, query: "" });
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Kept apart, because they publish different things and mixing them
+            is how a browse ends up empty: Meta publishes no GGUF at all, and
+            the Llama builds people actually run come from these four. */}
+        <div className="reg-chips">
+          <span className="reg-chips-key">GGUF builders</span>
+          {PUBLISHERS.filter((p) => p.builder).map((p) => (
+            <button
+              key={p.author}
+              type="button"
+              className={author === p.author ? "reg-chip small on" : "reg-chip small"}
+              disabled={browsing}
+              title={`Everything published by ${p.author}`}
+              onClick={() => {
+                setAuthor(p.author);
+                setQuery("");
+                void browse({ author: p.author, query: "" });
               }}
             >
               {p.label}
@@ -374,127 +424,118 @@ export function RegistrySearch({
         </div>
       </div>
 
-      {/* ---------------- what each registry said ---------------- */}
-      {shelf ? (
-        <div className="reg-report">
-          <p className="reg-line">
-            <span className={`reg-tag ${chosen[0] ?? "huggingface"}`}>
-              {REGISTRY_LABEL[chosen[0] ?? "huggingface"]}
-            </span>
-            {status[chosen[0] ?? "huggingface"]?.searching ? (
-              <>searching…</>
-            ) : (
-              <>
-                {shelf.shelf.hint}
-                {/* Said rather than done quietly: a shelf that drops a fifth
-                    of what it fetched is making an editorial choice on
-                    somebody's behalf, and they are entitled to know. */}
-                {shelf.filtered ? (
-                  <>
-                    {" "}
-                    {shelf.filtered} result{shelf.filtered === 1 ? " was" : "s were"} left out for
-                    being safety-stripped community edits; search for one by name to see it.
-                  </>
-                ) : null}
-              </>
-            )}
-          </p>
-        </div>
-      ) : ran ? (
-        <div className="reg-report">
-          {chosen.map((source) => {
-            const st = status[source];
-            if (!st) return null;
-            return (
-              <p key={source} className={st.error ? "reg-line bad" : "reg-line"}>
-                <span className={`reg-tag ${source}`}>{REGISTRY_LABEL[source]}</span>
-                {st.searching ? (
-                  <>searching…</>
-                ) : st.error ? (
-                  <>{st.error}</>
-                ) : (
-                  /* Written by `describeSearch` rather than assembled here,
-                     because the two registries mean different things by their
-                     count and only one of them supports "the rest are formats
-                     Karen cannot run". */
-                  <>{describeSearch(st.shown ?? 0, st.fetched ?? st.shown ?? 0)}</>
-                )}
-              </p>
-            );
-          })}
-        </div>
+      {browseError ? <p className="reg-line bad">{browseError}</p> : null}
+      {browsing ? (
+        <p className="reg-line">
+          <span className="lem-spinner" aria-hidden="true" />
+          Asking {REGISTRY_LABEL[chosen[0] ?? "huggingface"]}…
+        </p>
+      ) : ranBrowse ? (
+        <p className="reg-line">
+          <span className={`reg-tag ${chosen[0] ?? "huggingface"}`}>
+            {REGISTRY_LABEL[chosen[0] ?? "huggingface"]}
+          </span>
+          {ranBrowse} — {models.length} shown
+          {models.length === 100 ? " (the first page)" : ""}
+          {/* What was actually asked, rather than a fixed sentence: the kind's
+              own description said "unfiltered" while the GGUF switch was on,
+              which is the kind of small contradiction that makes a person stop
+              believing the rest of the line. */}
+          {ggufOnly ? ", limited to repositories Karen can run" : ", including ones Karen cannot run"}.
+          {kind === "all" ? null : <> {kindById(kind).hint}</>}
+        </p>
       ) : null}
 
       {pullError ? <p className="reg-line bad">{pullError}</p> : null}
 
       {/* ---------------- results ---------------- */}
-      {hits.length ? (
+      {!browsing && ranBrowse && !models.length && !browseError ? (
+        <div className="lem-callout">
+          <p className="lem-callout-title">Nothing here.</p>
+          <p className="lem-callout-body">
+            {publisherNote(author) ??
+              (author && kind !== "all"
+                ? `${author} publishes no ${kindById(kind).title.toLowerCase()} models. Clear the publisher, or choose another kind.`
+                : ggufOnly
+                  ? "Nothing in this selection is published as GGUF. Turn off “Only models Karen can run” to see what else is there."
+                  : "The registry returned no repositories for this selection.")}
+          </p>
+        </div>
+      ) : null}
+
+      {models.length ? (
         <>
-        {/* Headings, because "↓ 13M" and "♥ 933" are two glyphs a person has
+        {/* Headings, because the figures are otherwise two glyphs a person has
             to guess at, and one of them is the closest thing a registry gives
             to a quality signal. */}
         <div className="reg-cols" aria-hidden="true">
           <span>Repository</span>
           <span>Registry</span>
-          <span>Format</span>
+          <span>Runs here</span>
           <span className="num">Pulls · 30d</span>
           <span className="num">Likes</span>
           <span />
         </div>
         <ul className="reg-hits">
-          {hits.map((hit) => {
-            const key = `${hit.source}/${hit.id}`;
+          {models.map((model) => {
+            const source: RegistrySource = chosen[0] ?? "huggingface";
+            const key = `${source}/${model.id}`;
             const state = variants[key];
             const isOpen = open === key;
+            const can = loadable(model, kindById(kind));
+            const words = LOADABLE_WORDS[can];
+            const created = age(model.createdAt);
             return (
               <li key={key} className={isOpen ? "reg-hit open" : "reg-hit"}>
                 <button
                   type="button"
                   className="reg-hit-head"
-                  onClick={() => void openRepo(hit)}
+                  onClick={() => void openRepo({ id: model.id, source })}
                   aria-expanded={isOpen}
                 >
                   <span className="reg-hit-id">
-                    <span className="reg-hit-name">{hit.id}</span>
-                    {/* A registry's own display name can differ from the
-                        repository path, and can be in another language;
-                        showing both is how someone recognises the model they
-                        already know. */}
-                    {hit.name && hit.name !== hit.id.split("/").pop() ? (
-                      <span className="reg-hit-alt">{hit.name}</span>
-                    ) : null}
+                    <span className="reg-hit-name">{model.id}</span>
+                    <span className="reg-hit-alt">
+                      {/* What differs between rows: what it is for, how old it
+                          is, and whether the licence has to be accepted first.
+                          Not repeated boilerplate. */}
+                      {[
+                        model.task,
+                        created ? `added ${created}` : undefined,
+                        model.gated ? "licence must be accepted" : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
                   </span>
                   {/*
-                    * The registry, moved out of the leading badge and into a
-                    * column of its own.
+                    * The registry, in a column of its own.
                     *
                     * It has to be on every row -- an unlabelled row is
                     * ambiguous to someone checking an institutional policy,
                     * which is the whole reason this is shown. But as a bright
-                    * pill at the start of forty-eight rows it was the loudest
-                    * thing on the page while being the same on all of them.
-                    * In a column, forty-eight identical values read instantly
-                    * as "all from one place", which is the actual question.
+                    * pill at the start of every row it was the loudest thing
+                    * on the page while being the same on all of them. In a
+                    * column, identical values read instantly as "all from one
+                    * place", which is the actual question.
                     */}
-                  <span className={`reg-hit-src ${hit.source}`} title={REGISTRY_NAME[hit.source]}>
-                    {REGISTRY_LABEL[hit.source]}
+                  <span className={`reg-hit-src ${source}`} title={REGISTRY_NAME[source]}>
+                    {REGISTRY_LABEL[source]}
                   </span>
-                  {hit.hasGguf ? <span className="lem-chip good">GGUF</span> : (
-                    <span className="lem-chip dim" title="No GGUF files; Karen may not be able to run this">
-                      no GGUF
-                    </span>
-                  )}
-                  {/* The window is the part that makes the number mean
-                      anything: a bare "13M" reads as "thirteen million people
-                      use this", when it is thirty days of traffic. */}
+                  {/* Whether Karen can load it, rather than whether it is
+                      GGUF -- a GGUF diffusion model is not runnable here, and
+                      the format alone does not say so. */}
+                  <span className={`lem-chip ${words.tone}`} title={words.why}>
+                    {words.short}
+                  </span>
                   <span
                     className="reg-hit-figure"
-                    title={`${describeDownloads(hit.downloads)} — the registry counts every pull, automated ones included`}
+                    title={`${describeDownloads(model.downloads)} — the registry counts every pull, automated ones included`}
                   >
-                    {hit.downloads === undefined ? "—" : compact(hit.downloads)}
+                    {compact(model.downloads)}
                   </span>
                   <span className="reg-hit-figure" title="People who have starred this repository">
-                    {formatCount(hit.likes)}
+                    {compact(model.likes)}
                   </span>
                   <span className="reg-hit-open">{isOpen ? "Hide" : "Versions"}</span>
                 </button>
@@ -504,26 +545,26 @@ export function RegistrySearch({
                     {state?.loading ? (
                       <p className="reg-line">
                         <span className="lem-spinner" aria-hidden="true" />
-                        Reading {REGISTRY_NAME[hit.source]}…
+                        Reading {REGISTRY_NAME[source]}…
                       </p>
                     ) : null}
 
                     {state?.error ? (
                       <div className="lem-callout">
                         <p className="lem-callout-title">
-                          {REGISTRY_LABEL[hit.source]} did not return this repository’s files.
+                          {REGISTRY_LABEL[source]} did not return this repository’s files.
                         </p>
                         <p className="lem-callout-body">{state.error}</p>
                       </div>
                     ) : null}
 
                     {state?.data ? <VariantList
-                      hit={hit}
+                      hit={{ id: model.id, source }}
                       data={state.data}
                       machine={machine}
                       have={have}
                       pulling={pulling}
-                      onDownload={(name) => void download(hit, state.data!, name)}
+                      onDownload={(name) => void download({ id: model.id, source }, state.data!, name)}
                     /> : null}
                   </div>
                 ) : null}
@@ -534,12 +575,6 @@ export function RegistrySearch({
         </>
       ) : null}
 
-      {ran && !hits.length && !busy && !Object.values(status).some((s) => s?.error) ? (
-        <p className="reg-empty">
-          Nothing usable for “{ran}”. Registry search matches repository names rather than
-          descriptions, so a single word — a family or an organisation — finds more than a phrase.
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -559,7 +594,7 @@ function VariantList({
   pulling,
   onDownload,
 }: {
-  hit: RegistryHit;
+  hit: RepoRef;
   data: RepoVariants;
   machine: Machine;
   have: Set<string>;
