@@ -187,6 +187,46 @@ export function displayModelName(id: string): string {
   return tail || id;
 }
 
+/**
+ * The shortest name that still identifies a model on screen.
+ *
+ * Repository paths, index prefixes and quantisation suffixes are most of the
+ * length and least of the meaning: `lmstudio__LFM2.5-8B-A1B` is "LFM2.5-8B-A1B",
+ * and `unsloth/Qwen3-Coder-30B-…-GGUF` is "Qwen3-Coder-30B".
+ */
+export function shortModelName(id: string): string {
+  const named = displayModelName(id);
+  const base = named.slice(named.lastIndexOf("/") + 1).replace(/\.gguf$/i, "");
+  return base.replace(/-(GGUF|(?:IQ|TQ|Q)\d+[\w.]*|BF16|F16|F32)$/i, "");
+}
+
+/**
+ * Narrow a model list by what someone typed.
+ *
+ * Here rather than in the menu that uses it because the menu is a .tsx, which
+ * the test runner cannot load -- Node's type stripping does not do JSX. The
+ * search box also only appears once there are more than six models, so it is
+ * invisible on every machine this was developed on. Untested filtering over a
+ * list nobody here can see is the shape of thing that ships broken.
+ *
+ * Matches the shortened text AND the full id. A row for
+ * `unsloth__Qwen3-Coder-30B-…` reads as "Qwen3-Coder-30B", so matching only
+ * what is on screen would make "unsloth" find nothing -- while being exactly
+ * how someone with sixty models narrows to one publisher's.
+ */
+export function filterModels<T extends { path: string; name: string }>(
+  models: T[],
+  query: string,
+): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return models;
+  return models.filter(
+    (m) =>
+      shortModelName(m.name).toLowerCase().includes(needle) ||
+      m.path.toLowerCase().includes(needle),
+  );
+}
+
 /** Which tool a model was found in, when it was found rather than downloaded. */
 export function sourceOfModel(id: string): ForeignSource | undefined {
   return readIndexId(id)?.source;

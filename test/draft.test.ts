@@ -427,10 +427,16 @@ test("the planning stage streams, so a slow model does not look like a hung one"
   const h = harness((p) => p);
   await runDraft(h.opts);
   assert.ok(
-    h.notes.some((n) => n.startsWith("planning: …")),
+    h.notes.some((n) => /^planning… \d/.test(n)),
     `expected a streamed planning note, got: ${h.notes.join(" | ")}`,
   );
-  assert.ok(h.notes.some((n) => n.startsWith("Introduction: …")), "sections stream too");
+  assert.ok(h.notes.some((n) => /^Introduction… \d/.test(n)), "sections stream too");
+  /* Never the model's own text. The line sits above the composer all run, and
+     a JSON stage's tail put its monologue about JSON formatting there. */
+  assert.ok(
+    !h.notes.some((n) => n.includes("Working memory") || n.includes("{")),
+    `progress must not echo model output: ${h.notes.join(" | ")}`,
+  );
 });
 
 test("progress names the section being written, not just a count", async () => {

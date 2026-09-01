@@ -43,6 +43,19 @@ export interface RuntimeConfig {
   /** The model to load, by the name Lemonade knows it as. */
   activeModel?: string;
   /**
+   * The model to load at startup, chosen deliberately.
+   *
+   * Separate from `activeModel`, which is simply the last one loaded and
+   * therefore changes every time you try something. That made the startup model
+   * whatever you happened to open last -- fine when you have three models, and
+   * not what anyone means by a default when they have sixty. Unset falls back
+   * to `activeModel`, which is the behaviour every existing install already has.
+   */
+  /* `| undefined` explicitly, so clearing it is expressible: with
+     exactOptionalPropertyTypes a bare optional cannot be set back to nothing,
+     and un-choosing a default is a thing people need to do. */
+  defaultModel?: string | undefined;
+  /**
    * Send chat and research to the model Karen is serving.
    *
    * Separate from the endpoint settings rather than overwriting them: someone
@@ -367,9 +380,10 @@ export class RuntimeManager {
 
   /** Start the backend and load the remembered model, for `startOnLaunch`. */
   async startOnLaunch(): Promise<void> {
-    if (!this.#config.startOnLaunch || !this.#config.activeModel) return;
+    const wanted = this.#config.defaultModel ?? this.#config.activeModel;
+    if (!this.#config.startOnLaunch || !wanted) return;
     await this.ensureLemonade();
-    await this.#api.loadModel(this.#config.activeModel);
+    await this.#api.loadModel(wanted);
     await this.#lemonade.refreshHealth();
     this.#emit();
   }

@@ -54,3 +54,66 @@ export function statusAreaAvailable(
   }
   return false;
 }
+
+/**
+ * Did an icon we published actually reach the status area?
+ *
+ * `statusAreaAvailable` answers whether the DESKTOP can host an icon.
+ * Measured on Ubuntu GNOME 
+ * -- watcher registered, AppIndicator extension installed,
+ * libayatana-appindicator3 present -- that question answers yes while Electron
+ * publishes nothing at all: `new Tray(image)` returns a live object, reports no
+ * error, and no item appears on the bus. Reproduced with a bare Electron script
+ * and a plainly opaque 22x22 icon, so it is not this app's icon or this app's
+ * code.
+ *
+ * That combination is the exact failure tray.ts exists to prevent: the window
+ * hides into a tray that is not there. So the question asked before hiding is
+ * not "could an icon show" but "is OURS showing", which is answerable -- the
+ * watcher lists what is registered, and each entry's bus name resolves to the
+ * process that owns it.
+ *
+ * **Unknown counts as no,** for the same reason as above: guessing yes hides
+ * the app where nobody can reach it, and guessing no means closing the window
+ * quits, which is merely the older behaviour.
+ */
+export function statusItemRegistered(
+  pid: number = process.pid,
+  platform: NodeJS.Platform = process.platform,
+  run: (file: string, args: string[]) => string = (file, args) =>
+    execFileSync(file, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }),
+): boolean {
+  if (platform !== "linux") return true;
+
+  let listing: string;
+  try {
+    listing = run("gdbus", [
+      "call", "--session", "--dest", "org.kde.StatusNotifierWatcher",
+      "--object-path", "/StatusNotifierWatcher", "--method",
+      "org.freedesktop.DBus.Properties.Get",
+      "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems",
+    ]);
+  } catch {
+    return false;
+  }
+
+  /* Entries look like ":1.50@/org/ayatana/NotificationItem/foo", or sometimes
+     a well-known name. Only the unique ":1.NN" part identifies an owner, and
+     an entry without one cannot be attributed to us. */
+  const owners = new Set((listing.match(/:\d+\.\d+/g) ?? []));
+  for (const owner of owners) {
+    try {
+      const reply = run("gdbus", [
+        "call", "--session", "--dest", "org.freedesktop.DBus",
+        "--object-path", "/org/freedesktop/DBus", "--method",
+        "org.freedesktop.DBus.GetConnectionUnixProcessID", owner,
+      ]);
+      // "(uint32 4321,)"
+      const found = /(\d+)/.exec(reply.replace(/uint32/g, ""));
+      if (found && Number(found[1]) === pid) return true;
+    } catch {
+      // That name went away between the two calls. Not ours to worry about.
+    }
+  }
+  return false;
+}

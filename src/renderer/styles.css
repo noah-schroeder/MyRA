@@ -1002,6 +1002,93 @@ kbd {
   height: 100%;
 }
 
+/* The document panel takes a column of its own rather than overlaying the
+   thread: a draft is read AGAINST the conversation that produced it, and
+   something covering that conversation makes the two impossible to hold at
+   once. minmax on the middle column, so the thread shrinks and the panel keeps
+   a readable measure rather than the reverse. */
+.app.with-artifact { grid-template-columns: 248px minmax(0, 1fr) 400px; }
+
+/* ---------- the document panel ---------- */
+
+.artifact {
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-float);
+}
+
+.artifact-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 10px 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.artifact-title {
+  font-size: 12.5px; font-weight: 560; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-x {
+  font: inherit; font-size: 16px; line-height: 1;
+  margin-left: auto; padding: 2px 6px;
+  background: none; border: 0; border-radius: 5px;
+  color: var(--text-faint); cursor: pointer;
+}
+.artifact-x:hover { color: var(--text); background: var(--bg-inset); }
+
+.artifact-tabs {
+  display: flex; gap: 4px; overflow-x: auto;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.artifact-tab {
+  font: inherit; font-size: 11.5px;
+  padding: 3px 9px; border-radius: 999px;
+  max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--bg-inset); border: 1px solid transparent;
+  color: var(--text-faint); cursor: pointer; flex: none;
+}
+.artifact-tab.on { color: var(--text); border-color: var(--border); }
+
+/* The scroll container, so following the writing moves this and not the page. */
+.artifact-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 18px 20px 24px;
+  font-size: 13.5px; line-height: 1.62;
+}
+/* A document is prose to read, not a chat turn: a narrower measure and a little
+   more air between paragraphs than the thread uses. */
+.artifact-body > :first-child { margin-top: 0; }
+.artifact-body h1 { font-size: 17px; }
+.artifact-body h2 { font-size: 14.5px; margin-top: 1.6em; }
+.artifact-body h3 { font-size: 13px; }
+
+.artifact-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px 9px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--text-faint);
+}
+.artifact-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-open {
+  font: inherit; font-size: 11.5px;
+  margin-left: auto; padding: 4px 10px;
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; flex: none;
+}
+.artifact-open:hover { color: var(--text); background: var(--bg-inset); }
+
+.artifact-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Below this the three columns stop fitting: the thread is squeezed to nothing
+   long before the panel is. The rail is the one that gives way, since it holds
+   navigation you can reach again and the panel holds what you are reading. */
+@media (max-width: 1180px) {
+  .app.with-artifact { grid-template-columns: 248px minmax(0, 1fr) 340px; }
+}
+@media (max-width: 1000px) {
+  .app.with-artifact { grid-template-columns: minmax(0, 1fr) 320px; }
+  .app.with-artifact .rail { display: none; }
+}
+
 /*
  * The control voice, applied by element rather than by class.
  *
@@ -1545,6 +1632,14 @@ kbd {
 .dialog { width: min(560px, 100%); max-height: 100%; padding: 20px; gap: 14px; overflow-y: auto; }
 /* The plan editor needs room: it is a document, not a prompt. */
 .dialog-wide { width: min(880px, 100%); }
+
+/* The tuning panel brings its own header, padding and background, so it needs
+   the dialog's size and shadow rather than its chrome. */
+.mopt-modal {
+  width: min(620px, 100%); max-height: 100%; overflow-y: auto;
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-strong); background: var(--bg-raised);
+}
 
 .dialog-title { margin: 0; font-size: 15px; font-weight: 600; }
 .dialog-message { margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.55; }
@@ -2445,6 +2540,35 @@ p.warning { margin: 0; font-size: 12.5px; }
   color: var(--text-dim); cursor: pointer;
 }
 .modelmenu-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); }
+
+/* The row holds two controls now: pick this model, and make it the startup one.
+   The star sits outside the main button because nesting one button in another
+   is invalid, and because clicking it must not also load several gigabytes. */
+.modelmenu-row { display: flex; align-items: stretch; gap: 2px; }
+.modelmenu-row .modelmenu-item { flex: 1; min-width: 0; }
+.modelmenu-default {
+  flex: none; font: inherit; font-size: 13px; line-height: 1;
+  padding: 0 8px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--text-faint); cursor: pointer;
+  /* Present but quiet until wanted: a column of bright stars beside every row
+     would read as a rating, not a setting. */
+  opacity: 0.35; transition: opacity var(--t-fast), color var(--t-fast);
+}
+.modelmenu-row:hover .modelmenu-default, .modelmenu-default:focus-visible { opacity: 1; }
+.modelmenu-default.on { opacity: 1; color: var(--accent); }
+
+.modelmenu-search {
+  display: block; width: calc(100% - 18px); margin: 0 9px 6px;
+  font: inherit; font-size: 12.5px; padding: 5px 8px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+}
+.modelmenu-search::placeholder { color: var(--text-faint); }
+
+.modelmenu-note {
+  margin: 6px 9px 0; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: 11px; line-height: 1.5; color: var(--text-faint);
+}
 .modelmenu-item.active { background: var(--accent-wash); color: var(--text); }
 .modelmenu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modelmenu-meta {

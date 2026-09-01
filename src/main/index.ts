@@ -21,8 +21,12 @@ import { ToolRegistry } from "../core/agent/registry.ts";
 import { runTurn, type AgentEvent } from "../core/agent/loop.ts";
 import { decide } from "../core/policy.ts";
 import { RESEARCH_TOOL_DEFS, setResearchHost } from "../core/agent/tools/research.ts";
-import { DOCUMENT_TOOL_DEFS, setDraftHost } from "../core/agent/tools/documents.ts";
-import { setPdfRenderer, engines } from "../core/documents/office.ts";
+import {
+  DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
+} from "../core/agent/tools/documents.ts";
+import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
+import { searchZotero } from "./runtime/zoteroClient.ts";
+import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
 import {
@@ -835,6 +839,19 @@ function installIpc(): void {
     }
   });
 
+  /*
+   * Open the folder a written document is in.
+   *
+   * Through resolveInJail rather than on the path as given: this arrives from
+   * the renderer, and the renderer got it from an event, but a path that opens
+   * a file manager somewhere is worth checking against the same jail the
+   * writing side enforces rather than trusting the round trip.
+   */
+  ipcMain.handle("karen:document-reveal", async (_e, path: unknown) => {
+    const abs = await resolveInJail(documentsDir(), String(path ?? ""));
+    await shell.openPath(dirname(abs));
+  });
+
   ipcMain.handle("karen:get-research", () => readResearchConfig());
   ipcMain.handle("karen:set-research", async (_e, next: unknown) => {
     await makeOwnDir(dirname(researchConfigPath()));
@@ -948,7 +965,13 @@ async function main(): Promise<void> {
 
   await tightenExistingContent();
 
-  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS]) registry.register(def);
+  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS]) {
+    registry.register(def);
+  }
+
+  /* Loopback, no key, nothing cached. The client is in the main process for the
+     same reason every other one is: the renderer never makes a request. */
+  setLibraryHost({ search: (opts) => searchZotero(opts) });
 
   setResearchHost({
     fallbackModel: config.current.llm.model ?? "",
@@ -977,6 +1000,11 @@ async function main(): Promise<void> {
     ui: { editor: (title, prefill) => ask("editor", title, prefill) },
     onProgress: (note) => send("karen:research-progress", note),
   });
+
+  /* Every document the model writes, as it is written. The draft flow saves
+     after each section, so this fires repeatedly for one file with `final`
+     false until the last one. */
+  setDocumentWatcher((doc) => send("karen:document", doc));
 
   await runtime.load();
   installRuntimeIpc(runtime, send, () => vault.get("hfToken"), () => window_);
@@ -1184,16 +1212,27 @@ if (soleInstance) app.whenReady().then(() => {
       ...(api.state.status.url ? { apiUrl: api.state.status.url } : {}),
     }),
   });
-  const trayOk = tray.start();
-  /* Printed because it decides whether closing the window quits Karen, and
-     because on Linux the answer depends on the desktop rather than on
-     anything Karen controls: GNOME shows no status area without an
-     AppIndicator extension installed. */
-  console.log(
-    trayOk
-      ? "Tray icon created; closing the window will keep Karen running."
-      : "No tray icon could be created on this desktop; closing the window will quit Karen.",
-  );
+  tray.start();
+  /*
+   * Printed after a moment, and reporting the icon rather than the object.
+   *
+   * It decides whether closing the window quits Karen, and on Linux the answer
+   * depends on the desktop rather than on anything Karen controls. It used to
+   * print the result of `start()`, which is only whether a Tray was
+   * constructed -- and this machine constructs one happily while publishing no
+   * icon at all, so the line said the window would stay running and be
+   * reachable from a tray that did not exist.
+   *
+   * Delayed because registration is asynchronous: asked immediately the answer
+   * is "not yet" on a desktop where it is about to be yes.
+   */
+  setTimeout(() => {
+    console.log(
+      tray?.available
+        ? "Tray icon is showing; closing the window will keep Karen running."
+        : "No tray icon appeared on this desktop; closing the window will quit Karen.",
+    );
+  }, 2000).unref?.();
   runtime.onChange(() => tray?.refresh());
   api.onChange(() => tray?.refresh());
 

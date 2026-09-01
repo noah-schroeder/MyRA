@@ -54,6 +54,11 @@ const api = {
     ipcRenderer.invoke("karen:test-endpoint", which),
   chooseDirectory: (opts: { title?: string; current?: string }) =>
     ipcRenderer.invoke("karen:choose-directory", opts),
+  /* Every save of a written document, including the draft flow's per-section
+     ones. Carries the text, so the panel showing it never races the writer. */
+  onDocument: (cb: (doc: unknown) => void) => on("karen:document", cb),
+  revealDocument: (path: string) => ipcRenderer.invoke("karen:document-reveal", path),
+
   setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
   getResearch: () => ipcRenderer.invoke("karen:get-research"),
   engines: () => ipcRenderer.invoke("karen:engines"),

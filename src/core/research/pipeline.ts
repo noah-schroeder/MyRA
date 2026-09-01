@@ -96,16 +96,29 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
    * from a hang, and was reported as one. Throttled and tailed: the point is a
    * visible pulse of work, not a transcript.
    */
+  /*
+   * Alive, and never the model's own words.
+   *
+   * This line sits above the composer in the main window for the whole run, so
+   * whatever it holds is the app's most prominent text. Showing the tail of the
+   * stream put raw model output there, and a stage whose output is JSON put its
+   * monologue about JSON formatting there -- "I must not include any text
+   * outside the JSON. Let's finalize the JSON content. subQuestions: [" --
+   * which reads as a malfunction rather than as progress. Reported as one.
+   *
+   * A climbing word count answers the only question a status line is for:
+   * whether anything is still happening. It cannot leak reasoning, cannot leak
+   * a half-formed structure, and cannot suddenly become five lines tall.
+   */
   const stream = (label: string) => {
-    let buffer = "";
+    let words = 0;
     let last = 0;
-    return (delta: string, kind: "text" | "thinking") => {
-      buffer += delta;
+    return (delta: string, kind: "text" | "thinking"): void => {
+      words += (delta.match(/\S+/g) ?? []).length;
       const now = Date.now();
       if (now - last < 500) return;
       last = now;
-      const tail = buffer.replace(/\s+/g, " ").trim().slice(-220);
-      say(`${label}${kind === "thinking" ? " (thinking)" : ""}: …${tail}`);
+      say(`${label}${kind === "thinking" ? " (thinking)" : ""}… ${words.toLocaleString()} words`);
     };
   };
   const cwd = run.path();

@@ -83,6 +83,44 @@ export async function resolveInJail(root: string, name: string): Promise<string>
   }
 }
 
+/**
+ * A document as it stands, for anything that wants to show it.
+ *
+ * Pushed rather than polled, and carrying the text rather than only the path,
+ * because the reason this exists is the draft flow: it saves after every
+ * section, and a panel that had to re-read the file would be racing the writer
+ * for it. `final` is false for those intermediate saves.
+ */
+export interface DocumentUpdate {
+  /** Absolute path of the file that was written. */
+  path: string;
+  /** Its name relative to the documents folder, which is what a person calls it. */
+  name: string;
+  /** The Markdown source. For a converted format this is what it was made from. */
+  markdown: string;
+  final: boolean;
+}
+
+let watcher: ((doc: DocumentUpdate) => void) | undefined;
+
+/**
+ * Left uninstalled, writing a document simply tells nobody -- which is exactly
+ * what happened before this existed, and is a fine state for a headless test.
+ */
+export function setDocumentWatcher(fn: ((doc: DocumentUpdate) => void) | undefined): void {
+  watcher = fn;
+}
+
+function announce(path: string, markdown: string, final: boolean): void {
+  const dir = documentsDir();
+  watcher?.({
+    path,
+    name: path.startsWith(dir + sep) ? path.slice(dir.length + 1) : path,
+    markdown,
+    final,
+  });
+}
+
 export const writeDocumentTool: ToolDef = {
   name: "write_document",
   description:
@@ -116,6 +154,7 @@ export const writeDocumentTool: ToolDef = {
 
     if (format.ext === "md") {
       const bytes = await writeText(abs, content);
+      announce(abs, content, true);
       return { content: `Wrote ${name} (${bytes} bytes).`, detail: { path: abs, bytes } };
     }
 
@@ -124,6 +163,9 @@ export const writeDocumentTool: ToolDef = {
     const source = `${abs.replace(/\.[^./]*$/, "")}.md`;
     await writeText(source, content);
     const produced = await convert(source, format, dirname(abs));
+    // The produced file is what the user has; the Markdown is what can be
+    // shown. A .docx is not readable text, so the panel gets its source.
+    announce(produced, content, true);
     return {
       content: `Wrote ${produced.slice(documentsDir().length + 1)} as ${format.label}.`,
       detail: { path: produced, source },
@@ -235,8 +277,13 @@ async function saveDraft(
   const source = `${abs.replace(/\.[^./]*$/, "")}.md`;
 
   await writeText(source, markdown);
-  if (!final || format.ext === "md") return source;
-  return await convert(source, format, dirname(abs));
+  if (!final || format.ext === "md") {
+    announce(source, markdown, final);
+    return source;
+  }
+  const produced = await convert(source, format, dirname(abs));
+  announce(produced, markdown, true);
+  return produced;
 }
 
 export const draftDocumentTool: ToolDef = {

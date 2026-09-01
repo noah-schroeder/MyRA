@@ -344,27 +344,31 @@ export async function runDraft(opts: DraftOptions): Promise<DraftResult> {
   };
 
   /*
-   * Show the tail of what the model is producing, throttled.
+   * Alive, and never the model's own words.
    *
-   * Not decoration. Without an onDelta the request is not streamed at all, so
-   * the whole stage is one silent wait -- measured at over three minutes on a
-   * 2.6B before the outline dialog appeared, with nothing on screen but
-   * "planning the document…" and no way to tell a slow model from a hung one.
-   * Streaming also makes the idle timeout mean what it says: silence, rather
-   * than total duration.
+   * Passing an onDelta at all is what makes the request stream: without one the
+   * stage is a single silent wait -- measured at over three minutes on a 2.6B
+   * before the outline dialog appeared -- and streaming is also what makes the
+   * idle timeout mean silence rather than total duration.
    *
-   * The same helper as the research pipeline's, for the same reason and with
-   * the same 500ms floor.
+   * What it reports is a word count, not a preview. This line sits above the
+   * composer for the whole run, and the tail of a stage whose output is JSON
+   * put the model's monologue about JSON formatting in the app's most
+   * prominent text, where it reads as a malfunction. A climbing count answers
+   * the one question a status line is for. The document itself is visible in
+   * the panel beside the conversation, which is where prose belongs.
+   *
+   * The same helper as the research pipeline's, for the same reason.
    */
   const stream = (label: string) => {
-    let buffer = "";
+    let words = 0;
     let last = 0;
     return (delta: string, kind: "text" | "thinking"): void => {
-      buffer += delta;
+      words += (delta.match(/\S+/g) ?? []).length;
       const now = Date.now();
       if (now - last < 500) return;
       last = now;
-      say(`${label}${kind === "thinking" ? " (thinking)" : ""}: …${buffer.replace(/\s+/g, " ").trim().slice(-220)}`);
+      say(`${label}${kind === "thinking" ? " (thinking)" : ""}… ${words.toLocaleString()} words`);
     };
   };
 

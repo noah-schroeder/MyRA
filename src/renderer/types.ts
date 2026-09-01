@@ -264,6 +264,21 @@ export interface AgentEvent {
   result?: string;
 }
 
+/**
+ * A document the model wrote, as it stood at that moment.
+ *
+ * Mirrors DocumentUpdate in core/agent/tools/documents.ts by hand, because the
+ * renderer does not import from core. The draft flow emits one of these after
+ * every section, so a file arrives here many times with `final` false before
+ * the last one.
+ */
+export interface DocumentUpdate {
+  path: string;
+  name: string;
+  markdown: string;
+  final: boolean;
+}
+
 /** State of an in-flight dictation. */
 export interface DictationState {
   phase: "idle" | "recording" | "transcribing";
@@ -298,6 +313,8 @@ export interface KarenApi {
   send(text: string): Promise<void>;
   abort(): Promise<void>;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
+  onDocument(cb: (doc: DocumentUpdate) => void): () => void;
+  revealDocument(path: string): Promise<void>;
 
   newSession(): Promise<string>;
   listSessions(): Promise<SessionSummary[]>;
@@ -574,6 +591,11 @@ export interface RuntimeConfig {
   modelsDir: string;
   startOnLaunch: boolean;
   activeModel?: string;
+  /** Chosen deliberately, unlike activeModel which is just the last one loaded. */
+  /* `| undefined` explicitly, so clearing it is expressible: with
+     exactOptionalPropertyTypes a bare optional cannot be set back to nothing,
+     and un-choosing a default is a thing people need to do. */
+  defaultModel?: string | undefined;
   useForChat: boolean;
   /** Offer models already downloaded by LM Studio and Ollama. */
   importForeignModels: boolean;
