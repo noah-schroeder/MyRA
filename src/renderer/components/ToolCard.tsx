@@ -22,7 +22,13 @@ export function ToolCard({ item }: { item: ToolItem }) {
         <span className="tool-name">{item.name}</span>
         <span className="tool-arg">{summarizeArgs(item.name, item.args)}</span>
         <span className="tool-status">
-          {item.status === "running" ? "running" : item.status === "error" ? "failed" : "done"}
+          {item.status === "running"
+            ? "running"
+            : item.status === "error"
+              ? "failed"
+              : item.status === "stopped"
+                ? "stopped"
+                : "done"}
         </span>
         <span className="tool-status">{open ? "▾" : "▸"}</span>
       </div>

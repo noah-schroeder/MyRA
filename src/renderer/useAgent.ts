@@ -14,6 +14,21 @@ import { harvestSources } from "./restore.ts";
 let seq = 0;
 const nextId = (): string => `i${++seq}`;
 
+/**
+ * A tool card cannot still be running once the turn has ended.
+ *
+ * It could, on screen: nothing settled these, so a call interrupted mid-flight
+ * -- the user pressing stop, or the turn erroring out under it -- kept its
+ * spinner and the word "running" indefinitely. Seen in practice on a cancelled
+ * draft_document, which sat there claiming to be writing a document that no
+ * longer had a process behind it.
+ */
+function settle(item: Item): Item {
+  return item.kind === "tool" && item.status === "running"
+    ? { ...item, status: "stopped" as const, output: item.output || "stopped before it finished" }
+    : item;
+}
+
 export function useAgent() {
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
@@ -132,7 +147,11 @@ export function useAgent() {
           setBusy(false);
           open.current = undefined;
           setItems((prev) =>
-            prev.map((i) => (i.kind === "assistant" ? { ...i, streaming: false } : i)),
+            prev.map((i) =>
+              i.kind === "assistant"
+                ? { ...i, streaming: false }
+                : settle(i),
+            ),
           );
           try {
             if (event.result) setUsage(JSON.parse(event.result) as Usage);
@@ -145,6 +164,7 @@ export function useAgent() {
         case "error":
           setBusy(false);
           open.current = undefined;
+          setItems((prev) => prev.map(settle));
           setError(event.text ?? "Something went wrong.");
           break;
       }

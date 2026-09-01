@@ -46,7 +46,13 @@ export interface ToolItem {
   /** The latest progress line, replaced as it arrives rather than appended. */
   update?: string;
   output: string;
-  status: "running" | "ok" | "error";
+  /**
+   * "stopped" is not a kind of failure: it is a call that was still in flight
+   * when the turn ended, because the user cancelled or the turn errored out.
+   * Without it such a card spins for ever, claiming work is happening after
+   * everything has stopped.
+   */
+  status: "running" | "ok" | "error" | "stopped";
 }
 
 /**
