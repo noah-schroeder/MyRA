@@ -70,8 +70,34 @@ export function researchConfigPath(): string {
  * and the ranking stage silently never ran. Endpoints belong in Settings with
  * every other endpoint; this file is only the search controls.
  */
+export type ResearchMode = "off" | "assistant" | "web" | "deep";
+
+/**
+ * One ladder, not two controls: how far Karen may reach on its own.
+ *
+ * Each rung is a superset of the one below, which is what lets a single control
+ * express the whole question. "off" is the only rung that means literally
+ * nothing -- no tool of any kind is sent in the schema, so the answer is the
+ * model's own. "assistant" adds the local document tools and stops there; it
+ * cannot reach the network. "web" and "deep" add searching, and differ only in
+ * how hard they look.
+ */
+export const RESEARCH_MODES: readonly ResearchMode[] = ["off", "assistant", "web", "deep"];
+
+/**
+ * Whether this mode may reach the network at all.
+ *
+ * Written as a function and not as `mode !== "off"` because that comparison was
+ * true for exactly one mode when it was written and would have silently become
+ * true for "assistant" the moment that rung was added -- handing the web to the
+ * one mode that must not have it. Every network gate asks HERE.
+ */
+export function searches(mode: ResearchMode): boolean {
+  return mode === "web" || mode === "deep";
+}
+
 export interface ResearchConfig {
-  mode: "off" | "web" | "deep";
+  mode: ResearchMode;
   /** Where to search: "science" for the literature, "general" for the web. */
   category: string;
   timeRange?: string;
@@ -89,16 +115,50 @@ export interface ResearchConfig {
 const SUPPORTED_CATEGORIES = new Set(["science"]);
 const FALLBACK_CATEGORY = "science";
 
-export const DEFAULT_RESEARCH: ResearchConfig = { mode: "off", category: FALLBACK_CATEGORY };
+/**
+ * The shape version of research.json.
+ *
+ * Bumped when "off" changed meaning. It used to mean "do not search", and the
+ * three document tools stayed in the schema regardless; it now means no tools
+ * at all. Every install on disk has `mode: "off"` written into it -- that was
+ * the default -- so reading those literally would take document writing away
+ * from everyone who had never touched the control. A file with no version is
+ * therefore read under the OLD meaning, and only a file this Karen wrote can
+ * say "off" and be taken at its word.
+ */
+const CONFIG_VERSION = 2;
+
+/**
+ * Starts one rung up from nothing.
+ *
+ * "off" is not the safe default it looks like. The document tools are local and
+ * jailed, so nothing egresses at "assistant" that would not egress at "off" --
+ * the privacy question is entirely about "web" and "deep", and those stay off
+ * either way. What "off" costs instead is Karen's other half: asked to write
+ * something up, it would have to say it cannot.
+ */
+export const DEFAULT_RESEARCH: ResearchConfig = { mode: "assistant", category: FALLBACK_CATEGORY };
+
+/**
+ * Read one stored mode, under the meaning the file was written with.
+ *
+ * `versioned` is the whole point: an unversioned "off" was a request not to
+ * search, not a request to have no tools, and is honoured as the former.
+ */
+function storedMode(value: unknown, versioned: boolean): ResearchMode {
+  if (value === "off") return versioned ? "off" : "assistant";
+  if (value === "assistant" || value === "web" || value === "deep") return value;
+  return DEFAULT_RESEARCH.mode;
+}
 
 export function readResearchConfig(path = researchConfigPath()): ResearchConfig {
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ResearchConfig>;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ResearchConfig> & { v?: unknown };
     // Rebuilt field by field rather than spread, so a malformed file cannot
     // inject anything -- which means every field must be listed HERE or it is
     // silently dropped.
     return {
-      mode: parsed.mode === "web" || parsed.mode === "deep" ? parsed.mode : "off",
+      mode: storedMode(parsed.mode, parsed.v === CONFIG_VERSION),
       // Coerced, not just defaulted: "general" was the default for a while, so
       // existing installs have it written to disk and would keep it forever.
       category:
@@ -115,6 +175,32 @@ export function readResearchConfig(path = researchConfigPath()): ResearchConfig 
 }
 
 /**
+ * Build the object that gets written to research.json.
+ *
+ * Lives beside the reader deliberately. These two used to sit in different
+ * files -- the reader here, the writer in the IPC handler -- each with a
+ * comment telling the next person to keep them in step, which is the kind of
+ * instruction that holds right up until someone adds a field. Now a field that
+ * survives a round trip is one function away from a field that does not.
+ *
+ * Always stamped with the current version, so a mode this Karen wrote is read
+ * back at face value: only a file from before the rungs existed gets its "off"
+ * reinterpreted.
+ */
+export function serializeResearchConfig(next: unknown): Record<string, unknown> {
+  const cfg = (next ?? {}) as Partial<ResearchConfig>;
+  return {
+    v: CONFIG_VERSION,
+    mode: storedMode(cfg.mode, true),
+    category:
+      typeof cfg.category === "string" && SUPPORTED_CATEGORIES.has(cfg.category)
+        ? cfg.category
+        : FALLBACK_CATEGORY,
+    ...(typeof cfg.timeRange === "string" ? { timeRange: cfg.timeRange } : {}),
+  };
+}
+
+/**
  * The category a search should actually use.
  *
  * The GUI selection WINS over whatever the model passed. The control exists so
@@ -123,7 +209,7 @@ export function readResearchConfig(path = researchConfigPath()): ResearchConfig 
  */
 export function effectiveCategory(modelChoice: string | undefined, fallback: string): string {
   const cfg = readResearchConfig();
-  if (cfg.mode !== "off" && cfg.category) return cfg.category;
+  if (searches(cfg.mode) && cfg.category) return cfg.category;
   return modelChoice ?? fallback;
 }
 
@@ -143,7 +229,7 @@ export function effectiveCategory(modelChoice: string | undefined, fallback: str
  */
 export function effectiveTimeRange(modelChoice: string | undefined): string {
   const cfg = readResearchConfig();
-  if (cfg.mode !== "off") return cfg.timeRange ?? "";
+  if (searches(cfg.mode)) return cfg.timeRange ?? "";
   return modelChoice ?? "";
 }
 
