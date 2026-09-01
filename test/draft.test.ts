@@ -20,8 +20,8 @@ import {
   MAX_SECTION_WORDS, OutlineError, parseOutline, renderOutline, totalWords, type Outline,
 } from "../src/core/documents/outline.ts";
 import {
-  assemble, buildSectionPrompt, cleanSection, DraftCancelled, FELL_BACK_NOTICE, outlineFromReply,
-  runDraft,
+  assemble, buildSectionPrompt, citationsIn, cleanSection, DraftCancelled, FELL_BACK_NOTICE,
+  outlineFromReply, runDraft,
 } from "../src/core/documents/draft.ts";
 import { setEndpointResolver } from "../src/core/llm/chat.ts";
 
@@ -163,6 +163,56 @@ test("a section prompt says which section it is, and what came before", () => {
   // conclude the document; their bodies are not, so this stays bounded.
   assert.match(p, /Introduction/);
   assert.match(p, /Conclusion/);
+});
+
+test("citation shapes a model actually invents are caught", () => {
+  // The first two are verbatim what LFM2.5-2.6B produced on the first real run
+  // of this flow, before anything told it not to.
+  assert.deepEqual(citationsIn("meta-analyses by Melby-Lervaag and colleagues (2016) report"),
+    ["Melby-Lervaag and colleagues (2016)"]);
+  assert.deepEqual(citationsIn("and by Jaeggi et al. (2010) found"), ["Jaeggi et al. (2010)"]);
+  assert.deepEqual(citationsIn("as shown elsewhere (Smith, 2020)"), ["(Smith, 2020)"]);
+  assert.deepEqual(citationsIn("two groups (Smith & Jones, 2019) agreed"), ["(Smith & Jones, 2019)"]);
+  assert.deepEqual(citationsIn("supported by evidence [3]"), ["[3]"]);
+  assert.deepEqual(citationsIn("several sources [1, 2] agree"), ["[1, 2]"]);
+  assert.deepEqual(citationsIn("see doi:10.1234/abc.5678 for more"), ["doi:10.1234/abc.5678"]);
+});
+
+test("ordinary prose is not flagged as a citation", () => {
+  /* A warning that fires on dates trains the user to ignore it, which is worse
+     than no warning: the one real fabrication then scrolls past unread. */
+  for (const clean of [
+    "the trials ran until 2019 and were not replicated",
+    "recruitment closed in March (2019) after a year",
+    "working memory (WM) training is widely sold",
+    "the effect was small (see the discussion above)",
+    "a 2016 review and a 2010 trial disagreed",
+  ]) {
+    assert.deepEqual(citationsIn(clean), [], `must not flag: ${clean}`);
+  }
+});
+
+test("an invented citation is reported rather than quietly stripped", async () => {
+  /* Not repaired, deliberately. The document is on disk before this is known --
+     it is written a section at a time on purpose -- and removing a marker would
+     leave its sentence reading as the writer's own established fact, which is
+     the more dangerous of the two states. */
+  replies = [PROPOSAL, "As Jaeggi et al. (2010) showed, the effect is small.", "Clean prose here."];
+  const h = harness((p) => p);
+  const result = await runDraft(h.opts);
+
+  assert.equal(result.invented.length, 1);
+  assert.equal(result.invented[0]!.heading, "Introduction");
+  assert.deepEqual(result.invented[0]!.found, ["Jaeggi et al. (2010)"]);
+  // Still in the document: the user is told, not silently edited.
+  assert.match(result.markdown, /Jaeggi et al\. \(2010\)/);
+  assert.ok(h.notes.some((n) => /invented 1 citation/.test(n)), h.notes.join(" | "));
+});
+
+test("a clean draft reports nothing to worry about", async () => {
+  replies = [PROPOSAL, "Plain prose.", "More plain prose."];
+  const h = harness((p) => p);
+  assert.deepEqual((await runDraft(h.opts)).invented, []);
 });
 
 test("every section is told it has no sources, because nothing here has any", () => {

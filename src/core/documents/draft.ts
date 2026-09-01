@@ -56,6 +56,16 @@ export interface DraftResult {
   outline: Outline;
   markdown: string;
   words: number;
+  /**
+   * Citation-shaped text the model produced anyway, by section heading.
+   *
+   * Reported rather than repaired. The document is already on disk by the time
+   * this is known -- it is written a section at a time on purpose -- and
+   * silently stripping a marker would leave the sentence it supported reading
+   * as though it were the writer's own established fact, which is the more
+   * dangerous of the two states. Empty on a clean draft.
+   */
+  invented: { heading: string; found: string[] }[];
 }
 
 export class DraftCancelled extends Error {
@@ -273,6 +283,38 @@ export function cleanSection(text: string, heading: string): string {
   return out.trim();
 }
 
+/**
+ * Citation-shaped text, which in this flow is always fabricated.
+ *
+ * Checked, not merely forbidden. The prompt tells the section writer it has no
+ * sources; that is an instruction a small model may ignore, and instructing
+ * where you can enforce is the mistake the research pipeline already learned
+ * not to make -- synthesize.ts refuses outright to return a draft citing a
+ * source that does not exist. The same reasoning applies here and is simpler,
+ * because there is no source list to check against: nothing in this flow
+ * searches, so EVERY citation is dangling.
+ *
+ * Deliberately conservative. A bare year in parentheses is a date, not a
+ * citation, and flagging "the trials ran until (2019)" would train the user to
+ * ignore the warning. These four shapes are what a model actually produces when
+ * it invents an authority -- including the two it produced on the first real
+ * run of this flow.
+ */
+const CITATION_SHAPES: RegExp[] = [
+  /\[\d+(?:\s*[,;–-]\s*\d+)*\]/g,
+  /\b[A-Z][A-Za-z'’\u00C0-\u024F-]+\s+(?:et al\.|and colleagues)\s*\(?\s*\d{4}[a-z]?\s*\)?/g,
+  /\([A-Z][A-Za-z'’\u00C0-\u024F-]+(?:\s+(?:et al\.|&\s+[A-Z][A-Za-z'’\u00C0-\u024F-]+))?,?\s+\d{4}[a-z]?\)/g,
+  /\bdoi:\s*10\.\S+/gi,
+];
+
+export function citationsIn(text: string): string[] {
+  const found = new Set<string>();
+  for (const shape of CITATION_SHAPES) {
+    for (const m of text.matchAll(shape)) found.add(m[0].trim());
+  }
+  return [...found];
+}
+
 export function assemble(outline: Outline, bodies: string[]): string {
   return [
     `# ${outline.title}`,
@@ -353,6 +395,7 @@ export async function runDraft(opts: DraftOptions): Promise<DraftResult> {
   const outline = parseOutline(edited, proposed);
 
   const bodies: string[] = [];
+  const invented: { heading: string; found: string[] }[] = [];
   for (const [i, section] of outline.sections.entries()) {
     stop();
     say(`writing ${i + 1} of ${outline.sections.length}: ${section.heading}…`);
@@ -363,7 +406,17 @@ export async function runDraft(opts: DraftOptions): Promise<DraftResult> {
       onDelta: stream(`${section.heading}`),
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
-    bodies.push(cleanSection(result.text, section.heading));
+    const body = cleanSection(result.text, section.heading);
+    bodies.push(body);
+
+    /* Said the moment it happens, not only in the summary. A citation invented
+       in section two is easiest to deal with while the user is still watching
+       the thing run. */
+    const cited = citationsIn(body);
+    if (cited.length) {
+      invented.push({ heading: section.heading, found: cited });
+      say(`${section.heading}: invented ${cited.length} citation(s) — ${cited.slice(0, 3).join(", ")}`);
+    }
 
     /* Saved every time, not only at the end. A local model writing twelve
        sections is several minutes of work, and the failure modes -- an
@@ -377,9 +430,12 @@ export async function runDraft(opts: DraftOptions): Promise<DraftResult> {
   const markdown = assemble(outline, bodies);
   const path = await opts.save(markdown, { final: true, outline });
   const words = countWords(markdown);
-  say(`wrote ${outline.sections.length} sections, ${words.toLocaleString()} words`);
+  say(
+    `wrote ${outline.sections.length} sections, ${words.toLocaleString()} words` +
+      (invented.length ? ` — ${invented.length} section(s) contain invented citations` : ""),
+  );
 
-  return { path, outline, markdown, words };
+  return { path, outline, markdown, words, invented };
 }
 
 export { totalWords };
