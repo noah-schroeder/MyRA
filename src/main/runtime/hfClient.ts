@@ -16,7 +16,8 @@
  */
 
 import {
-  browseParams, parseModels, type BrowseQuery, type HfModel, type RepoFile,
+  browseParams, mergeSorted, parseModels,
+  type BrowseQuery, type HfModel, type RepoFile,
 } from "../../core/runtime/hfBrowse.ts";
 
 /** Fixed. Not configurable, and not taken from anything a caller supplies. */
@@ -33,9 +34,30 @@ export interface BrowseResult {
 }
 
 export async function browseHuggingFace(query: BrowseQuery): Promise<BrowseResult> {
-  const params = browseParams(query);
-  const url = `${HOST}${PATH}?${params.toString()}`;
+  /*
+   * One request per publisher, because the registry takes one `author` and
+   * answers `author=a&author=b` with nothing at all. Run together rather than
+   * in turn: four publishers in sequence is four round trips of latency for a
+   * list that arrives all at once anyway.
+   */
+  const authors = query.authors?.length ? query.authors : [undefined];
+  const pages = await Promise.all(
+    authors.map(async (author) => {
+      const params = browseParams({ ...query, ...(author ? { author } : {}) });
+      return { url: `${HOST}${PATH}?${params.toString()}`, models: await getModels(`${HOST}${PATH}?${params.toString()}`) };
+    }),
+  );
 
+  return {
+    models:
+      pages.length === 1
+        ? (pages[0]?.models ?? [])
+        : mergeSorted(pages.map((p) => p.models), query.sort ?? "downloads"),
+    url: pages.map((p) => p.url).join(" + "),
+  };
+}
+
+async function getModels(url: string): Promise<HfModel[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -58,7 +80,7 @@ export async function browseHuggingFace(query: BrowseQuery): Promise<BrowseResul
           : `Hugging Face returned ${String(res.status)}.`,
       );
     }
-    return { models: parseModels(await res.json()), url };
+    return parseModels(await res.json());
   } catch (err) {
     if ((err as Error).name === "AbortError") {
       throw new Error("Hugging Face did not answer within 20 seconds.");
@@ -68,7 +90,6 @@ export async function browseHuggingFace(query: BrowseQuery): Promise<BrowseResul
     clearTimeout(timer);
   }
 }
-
 
 /**
  * The files inside one repository, with their sizes.

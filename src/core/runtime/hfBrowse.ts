@@ -48,6 +48,8 @@ export interface HfModel {
   hasGguf: boolean;
   /** ISO date the repository was created, when the API supplied it. */
   createdAt?: string | undefined;
+  /** ISO date it was last touched, needed to merge several `lastModified` pages. */
+  lastModified?: string | undefined;
   gated: boolean;
 }
 
@@ -174,7 +176,16 @@ export const KIND_RECIPE: Record<string, string> = {
 export interface BrowseQuery {
   /** Free text, matched against repository names. */
   query?: string | undefined;
-  /** A publisher, exactly — `ibm-granite`, `unsloth`. */
+  /**
+   * Publishers, exactly — `ibm-granite`, `unsloth`.
+   *
+   * A list, because the registry's API takes only one: `author=a&author=b`
+   * and `author=a,b` both return zero results, measured. Several publishers
+   * therefore mean several requests, merged and re-sorted here -- which is why
+   * `browseParams` still builds the query for exactly one.
+   */
+  authors?: string[] | undefined;
+  /** One publisher, which is what a single request can carry. */
   author?: string | undefined;
   kind?: string | undefined;
   /** Only repositories llama.cpp could read. */
@@ -222,7 +233,9 @@ export function browseParams(q: BrowseQuery): URLSearchParams {
   params.set("limit", String(q.limit ?? PAGE));
   /* Asked for explicitly, because the default response omits them and the
      download figure is the one number on the row a person can act on. */
-  for (const field of ["downloads", "likes", "createdAt", "pipeline_tag", "tags", "gated"]) {
+  for (const field of [
+    "downloads", "likes", "createdAt", "lastModified", "pipeline_tag", "tags", "gated",
+  ]) {
     params.append("expand[]", field);
   }
   return params;
@@ -267,7 +280,8 @@ export function parseModels(raw: unknown): HfModel[] {
       ...(num(r["downloads"]) !== undefined ? { downloads: num(r["downloads"]) } : {}),
       ...(num(r["likes"]) !== undefined ? { likes: num(r["likes"]) } : {}),
       ...(str(r["pipeline_tag"]) ? { task: str(r["pipeline_tag"]) } : {}),
-      ...(str(r["createdAt"]) ? { createdAt: str(r["createdAt"]) } : {}),
+          ...(str(r["createdAt"]) ? { createdAt: str(r["createdAt"]) } : {}),
+      ...(str(r["lastModified"]) ? { lastModified: str(r["lastModified"]) } : {}),
     });
   }
   return out;
@@ -517,4 +531,40 @@ export function loadableFiles(files: RepoFile[], recipe: string): RepoFile[] {
 function isFirstShard(path: string): boolean {
   const m = /-(\d+)-of-(\d+)\.[A-Za-z0-9]+$/.exec(path);
   return m === null || Number(m[1]) === 1;
+}
+
+
+/* ------------------------------------------------------------- merging -- */
+
+/**
+ * Merge several publishers' pages into one ordered list.
+ *
+ * Needed because the registry answers about one `author` at a time, so
+ * "Unsloth and IBM together" is two requests. Re-sorting is not optional: each
+ * page is ordered within itself, and concatenating them would put every
+ * Unsloth model above every IBM one regardless of the figure being sorted on.
+ */
+export function mergeSorted(pages: HfModel[][], sort: BrowseSort): HfModel[] {
+  const seen = new Map<string, HfModel>();
+  for (const page of pages) {
+    for (const model of page) if (!seen.has(model.id)) seen.set(model.id, model);
+  }
+  return [...seen.values()].sort((a, b) => sortKey(b, sort) - sortKey(a, sort));
+}
+
+function sortKey(m: HfModel, sort: BrowseSort): number {
+  switch (sort) {
+    case "likes":
+      return m.likes ?? 0;
+    case "lastModified":
+      return Date.parse(m.lastModified ?? "") || 0;
+    case "trendingScore":
+      /* The API does not return a trending score, only order by it. Across
+         merged pages that order is lost, so downloads stands in -- the two
+         agree closely enough for a list, and inventing a score would be worse
+         than using a real number that is nearly right. */
+      return m.downloads ?? 0;
+    default:
+      return m.downloads ?? 0;
+  }
 }

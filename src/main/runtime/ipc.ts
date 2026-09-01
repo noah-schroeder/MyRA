@@ -230,7 +230,17 @@ export function installRuntimeIpc(
         ok: true,
         result: await browseHuggingFace({
           ...(pick("query") ? { query: pick("query") } : {}),
-          ...(pick("author") ? { author: pick("author") } : {}),
+          /* A list, capped: several publishers mean several requests to
+             somebody's registry, and an unbounded array from a window would be
+             an unbounded fan-out. */
+          ...(Array.isArray(raw["authors"])
+            ? {
+                authors: (raw["authors"] as unknown[])
+                  .filter((a): a is string => typeof a === "string" && a.length > 0)
+                  .slice(0, 8)
+                  .map((a) => a.slice(0, 200)),
+              }
+            : {}),
           ...(pick("kind") ? { kind: pick("kind") } : {}),
           ...(pick("sort") ? { sort: pick("sort") as BrowseSort } : {}),
           ggufOnly: raw["ggufOnly"] === true,
@@ -273,6 +283,10 @@ export function installRuntimeIpc(
           String(checkpoint),
           recipe ? String(recipe) : "llamacpp",
           readSource(source),
+          /* Pushed rather than returned: the promise resolves when the
+             transfer finishes, which is exactly when progress stops being
+             useful. */
+          (p) => send("karen:pull-progress", { name: String(name), ...p }),
         );
         return { ok: true, models: await runtime.api.listModels() };
       } catch (err) {

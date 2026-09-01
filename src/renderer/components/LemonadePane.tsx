@@ -35,7 +35,7 @@ import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
 import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
-import { fitModel, type Verdict } from "../../core/runtime/fit.ts";
+import { fitModel, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
   engineStates, partitionByRunnable, runnable, type Runnable,
 } from "../../core/runtime/runnable.ts";
@@ -215,7 +215,7 @@ export function LemonadePane({
   /* The curated catalogue or the registries. Two different acts -- "show me
      what Karen suggests" and "go and look this up" -- and mixing them would
      put a box that reaches the internet next to one that does not. */
-  const [mode, setMode] = useState<"catalog" | "search">("catalog");
+  const [mode, setMode] = useState<"mine" | "catalog" | "search">("mine");
   /* The model whose load settings are open, if any. One at a time: these are
      per-model settings and two panels open at once invites editing one and
      saving the other. */
@@ -590,6 +590,21 @@ export function LemonadePane({
             ) : null}
 
             <div className="lem-modes" role="tablist">
+              {/* First, and the default: what is already on this machine is
+                  what a person comes back to. The other two are for adding
+                  something, which is the rarer act. */}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "mine"}
+                className={mode === "mine" ? "lem-mode on" : "lem-mode"}
+                onClick={() => setMode("mine")}
+              >
+                My models
+                <span className="lem-mode-sub">
+                  {installed.length} downloaded · load settings
+                </span>
+              </button>
               <button
                 type="button"
                 role="tab"
@@ -617,7 +632,36 @@ export function LemonadePane({
               </button>
             </div>
 
-            {mode === "catalog" ? (
+            {mode === "mine" ? (
+              <MyModels
+                installed={installed}
+                foreign={foreign}
+                catalog={catalog}
+                loaded={loaded}
+                loading={undefined}
+                machine={machine}
+                busy={busy}
+                tuning={tuning}
+                onTune={(id) => setTuning(tuning === id ? undefined : id)}
+                onLoadOrUnload={loadOrUnload}
+                onReload={(id) =>
+                  void run(`Reloading ${displayModelName(id)}`, async () => {
+                    await window.karen.lemonadeUnload();
+                    return window.karen.lemonadeLoad(id);
+                  })
+                }
+                onRescan={() => {
+                  setRescanning(true);
+                  void window.karen.lemonadeRescan().then(async (r) => {
+                    setRescanning(false);
+                    if (!r.ok) setError(r.error);
+                    else await refresh();
+                  });
+                }}
+                rescanning={rescanning}
+                onBrowse={() => setMode("search")}
+              />
+            ) : mode === "catalog" ? (
               <>
             {/* Sticky as one piece: the chat group is 178 rows, and a search
                 box that scrolls off the top is a search box you cannot use
@@ -971,5 +1015,171 @@ export function LemonadePane({
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The models already on this machine, and how each one loads.
+ *
+ * Its own tab because it answers a different question from the other two. The
+ * catalogue and the registry are for *finding* a model; this is for the ones
+ * already here, which is what somebody who has finished choosing comes back
+ * to. It was previously a section at the bottom of the catalogue tab, below
+ * seventy rows of models the person had not downloaded — the wrong way round
+ * for the thing they own.
+ *
+ * Every row opens the same per-model settings the Tune button always offered,
+ * so context size, backend and extra arguments are edited where the model is,
+ * rather than being hunted for under a list of things to install.
+ */
+function MyModels({
+  installed,
+  foreign,
+  catalog,
+  loaded,
+  machine,
+  busy,
+  tuning,
+  onTune,
+  onLoadOrUnload,
+  onReload,
+  onRescan,
+  rescanning,
+  onBrowse,
+}: {
+  installed: { id: string; downloaded?: boolean; sizeBytes?: number }[];
+  foreign: Map<string, ForeignModel>;
+  catalog: CatalogEntry[];
+  loaded: string | undefined;
+  loading: string | undefined;
+  machine: Machine;
+  busy: boolean;
+  tuning: string | undefined;
+  onTune: (id: string) => void;
+  onLoadOrUnload: (id: string) => void;
+  onReload: (id: string) => void;
+  onRescan: () => void;
+  rescanning: boolean;
+  onBrowse: () => void;
+}) {
+  /* Loaded first, then the rest by size. The loaded model is the one every
+     other row is compared against, and it is the one whose settings someone
+     has come here to change. */
+  const rows = useMemo(
+    () =>
+      [...installed].sort(
+        (a, b) =>
+          Number(b.id === loaded) - Number(a.id === loaded) ||
+          (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0),
+      ),
+    [installed, loaded],
+  );
+
+  if (!rows.length) {
+    return (
+      <div className="lem-callout">
+        <p className="lem-callout-title">No models on this machine yet.</p>
+        <p className="lem-callout-body">
+          Karen also reads anything LM Studio or Ollama has already downloaded, where it
+          lies — nothing is copied or re-downloaded. If you have some, look again; otherwise
+          browse a registry and download one.
+        </p>
+        <div className="lem-model-acts">
+          <button type="button" className="lem-act" disabled={rescanning} onClick={onRescan}>
+            {rescanning ? "Looking again…" : "Look again"}
+          </button>
+          <button type="button" className="lem-act get" onClick={onBrowse}>
+            Browse registries
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <p className="lem-group-hint">
+        Everything downloaded, plus anything LM Studio or Ollama already had. Tune opens the
+        settings that model loads with — context window, backend, extra arguments.
+      </p>
+
+      <div className="lem-cols" aria-hidden="true">
+        <span>Model</span>
+        <span>Where from</span>
+        <span className="num">Size</span>
+        <span>Fits</span>
+        <span />
+      </div>
+
+      <ul className="lem-models">
+        {rows.map((m) => {
+          const from = foreign.get(m.id);
+          const known = catalog.find((c) => c.id === m.id);
+          const name = from?.label ?? displayModelName(m.id);
+          const fit = m.sizeBytes && machine.ramBytes ? fitModel(m.sizeBytes, machine) : undefined;
+          const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
+          return (
+            <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
+              <div className="lem-model-id">
+                <span className="lem-model-name" title={from?.path ?? m.id}>{name}</span>
+                <div className="lem-model-meta">
+                  {m.id === loaded ? <span className="lem-tag accent">Loaded</span> : null}
+                  {known?.labels
+                    .filter((l) => l !== "chat")
+                    .slice(0, 2)
+                    .map((l) => <span key={l} className="lem-tag">{l}</span>)}
+                </div>
+              </div>
+              {/* Where the file came from, which for these is a folder on this
+                  machine rather than a registry Karen would fetch from. */}
+              <span className="lem-model-src">
+                {from ? SOURCE_LABELS[from.source] : known ? REGISTRY_LABEL[known.source] : "This machine"}
+              </span>
+              <span className="lem-model-size">{gb(m.sizeBytes)}</span>
+              {chip ? (
+                <span className={`lem-chip ${chip.tone}`} title={fit?.label}>{chip.short}</span>
+              ) : (
+                <span className="lem-chip dim">On disk</span>
+              )}
+              <div className="lem-model-acts">
+                <button
+                  type="button"
+                  className={tuning === m.id ? "lem-act get" : "lem-act"}
+                  onClick={() => onTune(m.id)}
+                  title="How this model loads: context size, backend, arguments"
+                >
+                  {tuning === m.id ? "Close" : "Tune"}
+                </button>
+                <button
+                  type="button"
+                  className="lem-act"
+                  disabled={busy}
+                  onClick={() => onLoadOrUnload(m.id)}
+                >
+                  {m.id === loaded ? "Unload" : "Load"}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      {/* Below the list rather than inside a row: the panel is taller than a
+          row, and pushing one open would move everything under it out from
+          under the pointer. */}
+      {tuning ? (
+        <ModelOptionsEditor
+          model={tuning}
+          machine={machine}
+          loaded={tuning === loaded}
+          onReload={() => onReload(tuning)}
+          onClose={() => onTune(tuning)}
+        />
+      ) : null}
+
+      <button type="button" className="lem-more" disabled={busy || rescanning} onClick={onRescan}>
+        {rescanning ? "Looking again…" : "Look again for LM Studio and Ollama models"}
+      </button>
+    </>
   );
 }

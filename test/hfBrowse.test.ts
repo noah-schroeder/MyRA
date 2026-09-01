@@ -20,6 +20,7 @@ import {
   kindById,
   loadable,
   loadableFiles,
+  mergeSorted,
   parseModels,
   pullCheckpoint,
   pullName,
@@ -218,4 +219,49 @@ test("every kind maps to a recipe the daemon actually has", () => {
     const recipe = recipeFor(model({ task: undefined }), kind);
     assert.ok(REAL.has(recipe), `${kind.id} -> ${recipe}`);
   }
+});
+
+/* ------------------------------------------------------------ merging -- */
+
+test("several publishers are merged and re-sorted, not concatenated", () => {
+  /* The registry answers about one `author` at a time -- `author=a&author=b`
+     and `author=a,b` both return zero rows, measured -- so two publishers are
+     two requests. Concatenating them would put every Unsloth model above every
+     IBM one whatever the figure being sorted on. */
+  const unsloth = [
+    model({ id: "unsloth/a", downloads: 500 }),
+    model({ id: "unsloth/b", downloads: 100 }),
+  ];
+  const ibm = [
+    model({ id: "ibm-granite/c", downloads: 900 }),
+    model({ id: "ibm-granite/d", downloads: 300 }),
+  ];
+  assert.deepEqual(
+    mergeSorted([unsloth, ibm], "downloads").map((m) => m.id),
+    ["ibm-granite/c", "unsloth/a", "ibm-granite/d", "unsloth/b"],
+  );
+});
+
+test("merging sorts by whichever figure was chosen", () => {
+  const pages = [[model({ id: "a/x", downloads: 900, likes: 1 })], [model({ id: "b/y", downloads: 1, likes: 900 })]];
+  assert.deepEqual(mergeSorted(pages, "likes").map((m) => m.id), ["b/y", "a/x"]);
+  assert.deepEqual(mergeSorted(pages, "downloads").map((m) => m.id), ["a/x", "b/y"]);
+});
+
+test("a repository published under two selected owners appears once", () => {
+  const same = model({ id: "unsloth/a", downloads: 5 });
+  assert.equal(mergeSorted([[same], [same]], "downloads").length, 1);
+});
+
+test("recently updated merges on the date, not on the page it came from", () => {
+  const old_ = model({ id: "a/old", lastModified: "2024-01-01T00:00:00.000Z" });
+  const recent = model({ id: "b/new", lastModified: "2026-08-30T00:00:00.000Z" });
+  assert.deepEqual(
+    mergeSorted([[old_], [recent]], "lastModified").map((m) => m.id),
+    ["b/new", "a/old"],
+  );
+});
+
+test("lastModified is requested, or a merged date sort would have nothing to sort on", () => {
+  assert.ok(browseParams({}).getAll("expand[]").includes("lastModified"));
 });

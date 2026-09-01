@@ -11,6 +11,7 @@
  */
 
 import { parseDownloads, parseSystemInfo, type DownloadJob, type MachineInfo } from "../../core/runtime/systemInfo.ts";
+import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import { parseModelOptions, type ModelOptions } from "../../core/runtime/modelOptions.ts";
 import {
   parseVariants,
@@ -134,20 +135,65 @@ export class LemonadeApi {
   }
 
   /** Download a model; `checkpoint` is only needed for one not already known. */
+  /**
+   * Download a model, reporting progress as it goes.
+   *
+   * `stream: true` is the whole point. Without it `/pull` returns one line of
+   * JSON when the transfer finishes, and a multi-gigabyte download is a button
+   * that says nothing for twenty minutes. With it the daemon answers
+   * `text/event-stream` and emits a `progress` event carrying
+   * `bytes_downloaded`, `bytes_total`, `percent`, `file` and `file_index` --
+   * everything a person needs to tell a slow connection from a stuck one.
+   *
+   * `/api/v1/downloads` is not the answer and was tried first: it returns an
+   * empty array throughout a pull started this way, because it reports the
+   * daemon's own background jobs rather than a transfer a caller is awaiting.
+   */
   async pullModel(
     modelName: string,
     checkpoint?: string,
     recipe = "llamacpp",
     source?: RegistrySource,
+    onProgress?: (p: PullProgress) => void,
   ): Promise<void> {
-    await this.#post("/pull", {
+    const target = this.#target();
+    if (!target) throw new LemonadeApiError("Lemonade is not running.");
+
+    const body = {
       model_name: modelName,
       ...(checkpoint ? { checkpoint, recipe } : {}),
       /* Named explicitly for the same reason as `repoVariants`: without it a
          download chosen from the ModelScope list can arrive from Hugging Face,
          which is the one outcome this whole feature exists to prevent. */
       ...(source ? { source } : {}),
-    }, 24 * 60 * 60_000);
+      stream: Boolean(onProgress),
+    };
+
+    let res: Response;
+    try {
+      res = await fetch(`${target.base}/pull`, {
+        method: "POST",
+        headers: { ...target.headers, "content-type": "application/json" },
+        body: JSON.stringify(body),
+        /* No overall timeout: a 30 GB model on a hotel connection is a
+           legitimate several hours, and the stream itself is the liveness
+           signal -- if it stops arriving, the fetch fails on its own. */
+      });
+    } catch (err) {
+      throw new LemonadeApiError(`could not reach Lemonade: ${(err as Error).message}`);
+    }
+
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).trim().slice(0, 300);
+      throw new LemonadeApiError(`/pull failed (${res.status})${detail ? `: ${detail}` : ""}`);
+    }
+
+    if (!onProgress || !res.body) {
+      await res.text().catch(() => "");
+      return;
+    }
+
+    await readProgressStream(res.body, onProgress);
   }
 
   /* ------------------------------------------------- per-model options -- */
@@ -212,5 +258,59 @@ export class LemonadeApi {
           : {}),
         ...(m.source ? { source: m.source } : {}),
       }));
+  }
+}
+
+
+
+/**
+ * Read the daemon's `text/event-stream` and call back on each `progress` event.
+ *
+ * Server-sent events are `event:` and `data:` lines separated by blank lines,
+ * and a chunk boundary can fall anywhere -- including mid-number -- so the
+ * buffer is carried between reads rather than each chunk being parsed alone.
+ *
+ * A malformed frame is skipped rather than thrown: this drives a progress bar,
+ * and failing a download because one tick was unparseable would be absurd.
+ */
+export async function readProgressStream(
+  body: ReadableStream<Uint8Array>,
+  onProgress: (p: PullProgress) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Complete frames only; whatever follows the last blank line waits.
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      const line = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      try {
+        const d = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
+        const n = (k: string): number => (typeof d[k] === "number" ? (d[k] as number) : 0);
+        /* `bytes_total` arrives as 0 on most ticks and only the first frame
+           carries the real size, so the whole-transfer figure is preferred --
+           it is the one that stays put. */
+        const total = n("total_download_size") || n("bytes_total");
+        onProgress({
+          file: typeof d["file"] === "string" ? d["file"] : "",
+          fileIndex: n("file_index"),
+          totalFiles: n("total_files"),
+          bytesDone: n("bytes_downloaded") + n("bytes_previously_downloaded"),
+          bytesTotal: total,
+          percent: n("percent"),
+        });
+      } catch {
+        /* A frame that is not JSON is not worth failing a download over. */
+      }
+    }
   }
 }

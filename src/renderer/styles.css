@@ -3862,3 +3862,38 @@ p.warning { margin: 0; font-size: 12.5px; }
 .reg-chip.small { font-size: 11.5px; padding: 4px 10px; color: var(--text-faint); }
 .reg-chip:disabled { opacity: 0.4; cursor: not-allowed; }
 .reg-chip:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
+
+/*
+ * A download in progress, on the search page.
+ *
+ * The daemon owns the transfer, so this is the only window onto it. Without
+ * it a multi-gigabyte pull was a button reading "Downloading…" for twenty
+ * minutes, with no way to tell a slow connection from a stuck one.
+ */
+.reg-progress {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 11px 13px;
+  border: 1px solid var(--accent-dim); border-radius: var(--radius);
+  background: var(--accent-wash); box-shadow: var(--lift);
+}
+.reg-progress-head { display: flex; align-items: baseline; gap: 12px; font-size: 11.5px; }
+.reg-progress-name {
+  font-family: var(--mono); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reg-progress-figure {
+  margin-left: auto; color: var(--text-dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* Before the daemon reports a total there is no percentage to show, and a bar
+   pinned at zero reads as "stuck" -- which is the wrong thing to say while a
+   connection is still being opened. */
+.lem-bar-fill.waiting {
+  width: 35%;
+  animation: reg-waiting 1.5s ease-in-out infinite;
+}
+@keyframes reg-waiting {
+  0%   { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}

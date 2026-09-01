@@ -252,6 +252,24 @@ export function explainNoAccelerator(raw: unknown): string | undefined {
   return blocked.length ? `${head} (${blocked.join("; ")})` : head;
 }
 
+/**
+ * One progress tick from a pull the caller is awaiting.
+ *
+ * Distinct from `DownloadJob`, which is what `/api/v1/downloads` reports about
+ * the daemon's own background work. That endpoint stays empty throughout a
+ * `/pull`, so a caller who wants to show progress has to read the event stream
+ * the pull itself returns -- see `pullModel`.
+ */
+export interface PullProgress {
+  /** The file being fetched right now, of `totalFiles`. */
+  file: string;
+  fileIndex: number;
+  totalFiles: number;
+  bytesDone: number;
+  bytesTotal: number;
+  percent: number;
+}
+
 /** One transfer the daemon is running on our behalf. */
 export interface DownloadJob {
   id: string;
