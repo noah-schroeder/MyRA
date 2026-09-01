@@ -21,7 +21,7 @@ import { ToolRegistry } from "../core/agent/registry.ts";
 import { runTurn, type AgentEvent } from "../core/agent/loop.ts";
 import { decide } from "../core/policy.ts";
 import { RESEARCH_TOOL_DEFS, setResearchHost } from "../core/agent/tools/research.ts";
-import { DOCUMENT_TOOL_DEFS } from "../core/agent/tools/documents.ts";
+import { DOCUMENT_TOOL_DEFS, setDraftHost } from "../core/agent/tools/documents.ts";
 import { setPdfRenderer, engines } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
@@ -957,6 +957,24 @@ async function main(): Promise<void> {
       editor: (title, prefill) => ask("editor", title, prefill),
       notify: (message) => send("karen:research-progress", message),
     },
+    onProgress: (note) => send("karen:research-progress", note),
+  });
+
+  /*
+   * Drafting shares the research pipeline's dialog and its progress channel.
+   *
+   * Deliberately the same two: from where the user sits, "Karen is working on
+   * something long and will ask me to approve a plan" is one experience, and
+   * giving it a second dialog style and a second status line would make it look
+   * like two features that happen to resemble each other.
+   *
+   * The model is a function, not a captured string. `fallbackModel` above is
+   * read once at startup, which is already wrong when the user loads a
+   * different model -- a bug worth not copying into new code.
+   */
+  setDraftHost({
+    model: () => basename(runtime.config.activeModel ?? "") || config.current.llm.model || "",
+    ui: { editor: (title, prefill) => ask("editor", title, prefill) },
     onProgress: (note) => send("karen:research-progress", note),
   });
 
