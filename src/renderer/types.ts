@@ -12,7 +12,7 @@ import type { ModelOptions } from "../core/runtime/modelOptions.ts";
 export type { RunFootprint } from "../core/research/run.ts";
 import type { RunFootprint } from "../core/research/run.ts";
 import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
-import type { BrowseSort, HfModel } from "../core/runtime/hfBrowse.ts";
+import type { BrowseSort, HfModel, RepoFile } from "../core/runtime/hfBrowse.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 /**
  * What the renderer renders.
@@ -387,6 +387,8 @@ export interface KarenApi {
     name: string,
     checkpoint?: string,
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
+  /** The files in one repository, with sizes. */
+  hfFiles(repo: string): Promise<{ ok: boolean; error?: string; files?: RepoFile[] }>;
   /** Browse Hugging Face directly: publisher, model kind, sort, full pages. */
   hfBrowse(q: {
     query?: string;

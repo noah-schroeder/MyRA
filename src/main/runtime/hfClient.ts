@@ -15,7 +15,9 @@
  * fetch.
  */
 
-import { browseParams, parseModels, type BrowseQuery, type HfModel } from "../../core/runtime/hfBrowse.ts";
+import {
+  browseParams, parseModels, type BrowseQuery, type HfModel, type RepoFile,
+} from "../../core/runtime/hfBrowse.ts";
 
 /** Fixed. Not configurable, and not taken from anything a caller supplies. */
 const HOST = "https://huggingface.co";
@@ -57,6 +59,64 @@ export async function browseHuggingFace(query: BrowseQuery): Promise<BrowseResul
       );
     }
     return { models: parseModels(await res.json()), url };
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error("Hugging Face did not answer within 20 seconds.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+/**
+ * The files inside one repository, with their sizes.
+ *
+ * Lemonade's `/pull/variants` cannot answer this for anything but GGUF, ONNX
+ * RyzenAI and its own Omni collections -- asked about `stabilityai/sd-turbo`
+ * it returns a 500 naming those three. Image, speech and voice models
+ * therefore have no file list at all unless it comes from the registry, which
+ * is what this is for.
+ *
+ * `blobs=true` is what makes the sizes appear; without it the sibling list is
+ * filenames only, and a download with no size next to it is a download nobody
+ * should be asked to agree to.
+ */
+export async function repoFiles(repo: string): Promise<RepoFile[]> {
+  /* The repository id goes into a path, so it is checked rather than trusted:
+     `org/name` and nothing else, which also rules out `..` and any absolute
+     or scheme-bearing string. */
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+    throw new Error(`Not a repository id: ${repo}`);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${HOST}${PATH}/${repo}?blobs=true`, {
+      signal: controller.signal,
+      headers: { "user-agent": "Karen (local research assistant)", accept: "application/json" },
+    });
+    if (!res.ok) {
+      throw new Error(
+        res.status === 404
+          ? `Hugging Face has no repository called ${repo}.`
+          : `Hugging Face returned ${String(res.status)} for ${repo}.`,
+      );
+    }
+    const body = (await res.json()) as { siblings?: unknown };
+    const rows = Array.isArray(body.siblings) ? body.siblings : [];
+    const out: RepoFile[] = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      const path = typeof r["rfilename"] === "string" ? r["rfilename"] : undefined;
+      if (!path) continue;
+      const size = typeof r["size"] === "number" ? r["size"] : undefined;
+      out.push({ path, ...(size !== undefined ? { sizeBytes: size } : {}) });
+    }
+    return out;
   } catch (err) {
     if ((err as Error).name === "AbortError") {
       throw new Error("Hugging Face did not answer within 20 seconds.");

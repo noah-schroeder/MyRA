@@ -22,7 +22,7 @@ import {
   type RegistrySource,
 } from "../../core/runtime/registry.ts";
 import type { RuntimeManager } from "./manager.ts";
-import { browseHuggingFace } from "./hfClient.ts";
+import { browseHuggingFace, repoFiles } from "./hfClient.ts";
 import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
 
 /**
@@ -210,6 +210,15 @@ export function installRuntimeIpc(
    * known here. `browseParams` decides what the query string says, so no input
    * from the window can reach the URL except as a value in a named field.
    */
+  /** The files in one repository, for the kinds `/pull/variants` cannot describe. */
+  ipcMain.handle("karen:hf-files", async (_e, repo: unknown) => {
+    try {
+      return { ok: true, files: await repoFiles(String(repo ?? "")) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle("karen:hf-browse", async (_e, q: unknown) => {
     const raw = (q ?? {}) as Record<string, unknown>;
     const pick = (k: string): string | undefined => {

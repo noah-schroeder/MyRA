@@ -147,6 +147,7 @@ const api = {
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>
     ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
+  hfFiles: (repo: string) => ipcRenderer.invoke("karen:hf-files", repo),
   hfBrowse: (q: {
     query?: string;
     author?: string;
