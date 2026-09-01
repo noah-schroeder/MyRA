@@ -26,7 +26,7 @@
 
 import { app, Menu, nativeImage, Tray, type BrowserWindow } from "electron";
 
-import { statusAreaAvailable } from "../core/runtime/statusArea.ts";
+import { statusAreaAvailable, statusItemRegistered } from "../core/runtime/statusArea.ts";
 
 import { TRAY_ICON_PNG } from "./trayIcon.ts";
 
@@ -95,9 +95,41 @@ export class KarenTray {
     this.#deps = deps;
   }
 
-  /** True when an icon was created and hiding the window is therefore safe. */
+  /**
+   * True when an icon is actually in the status area, so hiding is safe.
+   *
+   * Not "a Tray object exists". That was the old test and it is the one thing
+   * that cannot be trusted here: on Ubuntu GNOME with the watcher running, the
+   * AppIndicator extension enabled and libayatana-appindicator3 installed,
+   * `new Tray(image)` succeeds and publishes nothing -- reproduced with a bare
+   * Electron script and an opaque icon, so it is neither this app's icon nor
+   * its code. Believing construction meant an icon is what left Karen running
+   * with its window hidden and no way to reach it.
+   *
+   * Asked lazily and cached. Registration is asynchronous, so asking during
+   * `start()` would race it; by the time anyone closes a window the answer has
+   * long since settled, and that is the only moment it decides anything.
+   */
   get available(): boolean {
-    return this.#tray !== undefined;
+    if (!this.#tray) return false;
+    if (this.#registered === undefined) this.#registered = this.#verify();
+    return this.#registered;
+  }
+
+  /** Re-ask on the next `available`. For a desktop that gains a status area. */
+  recheck(): void {
+    this.#registered = undefined;
+  }
+
+  /** undefined until asked; then whether an item of ours is on the bus. */
+  #registered: boolean | undefined;
+
+  #verify(): boolean {
+    try {
+      return statusItemRegistered();
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -108,6 +140,7 @@ export class KarenTray {
    */
   start(): boolean {
     if (this.#tray) return true;
+    this.#registered = undefined;
     /* Asked before constructing rather than after: a Tray that is never shown
        still reports itself as created, and that is precisely the state this
        must not treat as success. */

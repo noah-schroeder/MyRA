@@ -220,6 +220,17 @@ export function LemonadePane({
      per-model settings and two panels open at once invites editing one and
      saving the other. */
   const [tuning, setTuning] = useState<string | undefined>();
+
+  /* Escape closes it, like every other dialog in the app. A panel that can only
+     be dismissed by finding its own close button is one people leave open. */
+  useEffect(() => {
+    if (!tuning) return undefined;
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setTuning(undefined);
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [tuning]);
   const starting = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -964,22 +975,43 @@ export function LemonadePane({
               </>
             ) : null}
 
-            {/* Below the lists rather than inside a row: the panel is taller
-                than a row and pushing one open would move everything under it
-                out from under the pointer. */}
+            {/*
+              * Over the page, not under it.
+              *
+              * It sat below the lists, on the reasoning that expanding a row
+              * would shove everything beneath it out from under the pointer.
+              * True, and it traded that for something worse: with sixty models
+              * on the page, pressing Tune scrolled a panel into existence
+              * somewhere off the bottom of the screen, so the button appeared
+              * to do nothing at all.
+              */}
             {tuning ? (
-              <ModelOptionsEditor
-                model={tuning}
-                machine={machine}
-                loaded={tuning === loaded}
-                onReload={() =>
-                  void run(`Reloading ${tuning}`, async () => {
-                    await window.karen.lemonadeUnload();
-                    return window.karen.lemonadeLoad(tuning);
-                  })
-                }
-                onClose={() => setTuning(undefined)}
-              />
+              <div
+                className="dialog-backdrop"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Load settings for ${tuning}`}
+                onMouseDown={(e) => {
+                  // Only the backdrop itself. A drag that starts inside the
+                  // panel and ends on the backdrop must not close it.
+                  if (e.target === e.currentTarget) setTuning(undefined);
+                }}
+              >
+                <div className="mopt-modal">
+                  <ModelOptionsEditor
+                    model={tuning}
+                    machine={machine}
+                    loaded={tuning === loaded}
+                    onReload={() =>
+                      void run(`Reloading ${tuning}`, async () => {
+                        await window.karen.lemonadeUnload();
+                        return window.karen.lemonadeLoad(tuning);
+                      })
+                    }
+                    onClose={() => setTuning(undefined)}
+                  />
+                </div>
+              </div>
             ) : null}
 
             {/* The daemon reads the model folders once, when it starts. Someone
@@ -1164,17 +1196,35 @@ function MyModels({
         })}
       </ul>
 
-      {/* Below the list rather than inside a row: the panel is taller than a
-          row, and pushing one open would move everything under it out from
-          under the pointer. */}
+      {/*
+        * Over the page, not under it. See the note on the other one of these.
+        *
+        * This is the copy that mattered: "My models" is the tab someone opens
+        * to tune something, and with a screen of models on it, Tune scrolled a
+        * panel into existence below the fold, where it read as a button that
+        * did nothing.
+        */}
       {tuning ? (
-        <ModelOptionsEditor
-          model={tuning}
-          machine={machine}
-          loaded={tuning === loaded}
-          onReload={() => onReload(tuning)}
-          onClose={() => onTune(tuning)}
-        />
+        <div
+          className="dialog-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Load settings for ${tuning}`}
+          onMouseDown={(e) => {
+            // Only the backdrop. A drag begun inside the panel must not close it.
+            if (e.target === e.currentTarget) onTune(tuning);
+          }}
+        >
+          <div className="mopt-modal">
+            <ModelOptionsEditor
+              model={tuning}
+              machine={machine}
+              loaded={tuning === loaded}
+              onReload={() => onReload(tuning)}
+              onClose={() => onTune(tuning)}
+            />
+          </div>
+        </div>
       ) : null}
 
       <button type="button" className="lem-more" disabled={busy || rescanning} onClick={onRescan}>

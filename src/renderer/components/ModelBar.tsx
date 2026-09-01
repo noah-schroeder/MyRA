@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { LocalModel, RuntimeState, Settings } from "../types.ts";
-import { displayModelName, SOURCE_LABELS, sourceOfModel } from "../../core/runtime/foreign.ts";
+import {
+  displayModelName, filterModels, shortModelName as shorten, SOURCE_LABELS, sourceOfModel,
+} from "../../core/runtime/foreign.ts";
 import { formatTokens } from "../../core/tokens.ts";
 
 /**
@@ -18,15 +20,6 @@ import { formatTokens } from "../../core/tokens.ts";
  * resident memory, and someone who has stopped chatting should be able to have
  * that back without quitting the app.
  */
-
-function shorten(model: string): string {
-  // Repository paths, index prefixes and quantisation suffixes are most of the
-  // length and least of the meaning: `lmstudio__LFM2.5-8B-A1B` is "LFM2.5-8B-A1B",
-  // and unsloth/Qwen3-Coder-30B-…-GGUF is "Qwen3-Coder-30B".
-  const named = displayModelName(model);
-  const base = named.slice(named.lastIndexOf("/") + 1).replace(/\.gguf$/i, "");
-  return base.replace(/-(GGUF|(?:IQ|TQ|Q)\d+[\w.]*|BF16|F16|F32)$/i, "");
-}
 
 function gb(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -46,6 +39,9 @@ export function ModelBar({
   const [models, setModels] = useState<LocalModel[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  /* Cleared every time the menu opens. A filter left over from last time would
+     hide most of the list with no obvious reason why. */
+  const [query, setQuery] = useState("");
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,6 +51,10 @@ export function ModelBar({
 
   // Only when the menu opens. Lemonade answers from what it has registered,
   // which is cheap, but there is no reason to ask on every render of the bar.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
   useEffect(() => {
     if (open) {
       void window.karen.lemonadeModels().then((r) =>
@@ -133,6 +133,24 @@ export function ModelBar({
     if (!result.ok && result.error) setError(result.error);
   };
 
+  const defaultModel = runtime?.config.defaultModel;
+
+  /**
+   * Set or clear the model that loads at startup.
+   *
+   * A toggle rather than a one-way choice: someone who set a default six months
+   * ago and has since deleted that model needs a way out that is not editing
+   * runtime.json.
+   */
+  const makeDefault = async (path: string): Promise<void> => {
+    const next = defaultModel === path ? undefined : path;
+    setRuntime(await window.karen.runtimeConfig({ defaultModel: next }).then(
+      (config) => (runtime ? { ...runtime, config } : runtime),
+    ));
+  };
+
+  const shown = filterModels(models, query);
+
   return (
     <div className="modelbar-wrap" ref={wrap}>
       <button
@@ -206,18 +224,42 @@ export function ModelBar({
         <div className="modelmenu" role="menu">
           <p className="modelmenu-head">On this machine</p>
 
+          {/* Shown once there are enough models that scrolling is the slow way
+              to find one. Below that it is a box to ignore. */}
+          {models.length > 6 ? (
+            <input
+              className="modelmenu-search"
+              type="search"
+              value={query}
+              autoFocus
+              placeholder="Filter by name or publisher"
+              aria-label="Filter models"
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter loads the only thing left, which is what filtering down
+                // to one thing is for.
+                if (e.key === "Enter" && shown[0]) void load(shown[0].path);
+              }}
+            />
+          ) : null}
+
           {models.length === 0 ? (
             <p className="modelmenu-empty">
               {runtime?.lemonade.state === "ready"
                 ? "No models downloaded yet."
                 : "The local engine is not running yet, so nothing can run here."}
             </p>
+          ) : shown.length === 0 ? (
+            <p className="modelmenu-empty">
+              Nothing here matches “{query.trim()}”. {models.length} models downloaded.
+            </p>
           ) : (
             <ul className="modelmenu-list">
-              {models.map((m) => {
+              {shown.map((m) => {
                 const isActive = m.path === activePath;
+                const isDefault = m.path === defaultModel;
                 return (
-                  <li key={m.path}>
+                  <li key={m.path} className="modelmenu-row">
                     <button
                       type="button"
                       role="menuitem"
@@ -235,11 +277,36 @@ export function ModelBar({
                         {isActive && loading ? <span className="pill warn">loading</span> : null}
                       </span>
                     </button>
+                    {/* A sibling, not a child: a button inside a button is
+                        invalid, and clicking "make this the default" must not
+                        also load several gigabytes. */}
+                    <button
+                      type="button"
+                      className={isDefault ? "modelmenu-default on" : "modelmenu-default"}
+                      aria-pressed={isDefault}
+                      title={
+                        isDefault
+                          ? "Loads when Karen starts. Click to stop."
+                          : "Load this one when Karen starts"
+                      }
+                      onClick={() => void makeDefault(m.path)}
+                    >
+                      {isDefault ? "★" : "☆"}
+                    </button>
                   </li>
                 );
               })}
             </ul>
           )}
+
+          {/* Said once, under the list, rather than repeated on every starred
+              row -- and only when it would otherwise be a lie. */}
+          {defaultModel && !runtime?.config.startOnLaunch ? (
+            <p className="modelmenu-note">
+              A starred model loads at startup only while “Start the local engine when Karen
+              opens” is on, under Endpoints and runtime.
+            </p>
+          ) : null}
 
           <div className="modelmenu-foot">
             {local || loading ? (

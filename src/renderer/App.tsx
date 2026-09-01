@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgent } from "./useAgent.ts";
 import { Markdown } from "./components/Markdown.tsx";
+import { ArtifactPanel, useDocuments } from "./components/ArtifactPanel.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
 import { Reasoning } from "./components/Reasoning.tsx";
 import { ApiPage } from "./components/ApiPage.tsx";
@@ -43,6 +44,9 @@ export function App() {
    * was a "Back to chat" button on the far side of the screen.
    */
   const [page, setPage] = useState<Page>("chat");
+  /* The documents this conversation has written. Session-scoped on purpose:
+     these are what Karen made while you watched, not a file browser. */
+  const documents = useDocuments();
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
   /*
@@ -84,6 +88,10 @@ export function App() {
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   useEffect(() => window.karen.onResearchProgress(setProgress), []);
+  /* And again when the turn ends, so nothing is left in state to resurface. */
+  useEffect(() => {
+    if (!busy) setProgress(undefined);
+  }, [busy]);
 
   // Read through a ref because transcription lands long after the callback was
   // made, and it has to reach whichever box is in front of you then.
@@ -124,6 +132,16 @@ export function App() {
     }
     if (busy) return;
     setDraft("");
+    /*
+     * Cleared here, or the previous run's last words reappear over this one.
+     *
+     * The line is gated on `busy`, which reads like it is scoped to the turn
+     * and is not: the string itself survives, so the moment a new turn goes
+     * busy the old one is on screen again -- a deep run's scoping note showing
+     * over a quick search that has not said anything yet, and describing work
+     * that finished minutes ago.
+     */
+    setProgress(undefined);
     void send(text);
   }, [typed, busy, send, lookup, search]);
 
@@ -138,11 +156,15 @@ export function App() {
     // markers in the restored prose still resolve.
     const { items: restored, sources: restoredSources } = restoreThread(messages);
     reset(restored, restoredSources);
+    /* The panel showed what THIS conversation wrote. Carrying it into another
+       one would attribute a document to a thread that never produced it. */
+    documents.reset();
   };
 
   const newSession = async (): Promise<void> => {
     setSessionId(await window.karen.newSession());
     reset();
+    documents.reset();
     startFresh();
   };
 
@@ -172,7 +194,7 @@ export function App() {
   };
 
   return (
-    <div className="app">
+    <div className={documents.open && page === "chat" && !lookup ? "app with-artifact" : "app"}>
       <aside className="rail">
         <div className="rail-brand">
           <span className="rail-mark" aria-hidden="true" />
@@ -239,6 +261,20 @@ export function App() {
             onOpenSettings={() => setShowSettings(true)}
             onOpenHub={() => setPage("models")}
           />
+          {/* The way back. Closing the panel must not be the same as losing the
+              document -- it is still on disk and still in this conversation,
+              and without this the only route back to it is the file manager. */}
+          {documents.docs.length && !documents.open && page === "chat" && !lookup ? (
+            <button
+              type="button"
+              className="chip artifact-chip"
+              onClick={() => documents.setOpen(true)}
+            >
+              {documents.docs.length === 1
+                ? documents.docs[0]!.name
+                : `${documents.docs.length} documents`}
+            </button>
+          ) : null}
         </header>
 
         {/*
@@ -429,6 +465,18 @@ export function App() {
           <ContextMeter usage={usage} />
         </div>
       </main>
+
+      {/* Beside the conversation, and only on the conversation: a document
+          written here has nothing to say about the meetings page or the model
+          hub, and would just be taking a third of those. */}
+      {documents.open && page === "chat" && !lookup ? (
+        <ArtifactPanel
+          docs={documents.docs}
+          active={documents.active}
+          onSelect={documents.setActive}
+          onClose={() => documents.setOpen(false)}
+        />
+      ) : null}
 
       <DictationHud
         state={dictation.state}
