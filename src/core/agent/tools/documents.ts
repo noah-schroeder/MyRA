@@ -19,6 +19,24 @@ import {
 } from "../../documents/office.ts";
 import type { ToolDef } from "../registry.ts";
 import { asUntrusted } from "../../research/html.ts";
+import { readResearchConfig } from "../../research/config.ts";
+
+/**
+ * Whether the document tools go out in the schema at all.
+ *
+ * These were the last three tools left standing at "off", on the reasoning that
+ * they are local and jailed so nothing could leak through them. What leaked was
+ * attention, not data: a 2.6B model greeted with "hi" has three things it is
+ * able to call, and calls them. Instructing it not to is a request that a small
+ * model is free to ignore; leaving the tools out of the request is a guarantee,
+ * because the wire format omits `tools` entirely when the list is empty and
+ * there is then nothing for the model to name.
+ *
+ * That is why this is a gate and not another paragraph in the system prompt.
+ */
+function available(): boolean {
+  return readResearchConfig().mode !== "off";
+}
 
 /**
  * Resolve a model-supplied name inside the jail.
@@ -69,6 +87,7 @@ export const writeDocumentTool: ToolDef = {
     "Write a document into the user's documents folder. Content is Markdown; give a format to " +
     "convert it. Returns the path written. Cannot write anywhere else.",
   risk: "write",
+  enabled: available,
   parameters: {
     type: "object",
     properties: {
@@ -116,6 +135,7 @@ export const readDocumentTool: ToolDef = {
     "Read a document from the user's documents folder as text. Handles PDF, Word, " +
     "OpenDocument, HTML and Markdown. Cannot read anywhere else, and cannot open a URL.",
   risk: "safe",
+  enabled: available,
   parameters: {
     type: "object",
     properties: {
@@ -143,6 +163,7 @@ export const convertDocumentTool: ToolDef = {
     "Convert a document already in the documents folder into another format. " +
     "Writes a new file beside it and never replaces the original.",
   risk: "write",
+  enabled: available,
   parameters: {
     type: "object",
     properties: {

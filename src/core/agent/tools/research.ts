@@ -19,11 +19,12 @@ import { fetchPage } from "../../research/fetch.ts";
 import { isScholarlyCategory, providersFor, search, supportsTimeRange } from "../../research/providers.ts";
 import { formatHits } from "../../research/types.ts";
 import { asUntrusted } from "../../research/html.ts";
-import { DEFAULT_PAGE_CHARS } from "../../research/config.ts";
+import { DEFAULT_PAGE_CHARS, searches } from "../../research/config.ts";
+import type { ResearchMode } from "../../research/config.ts";
 import type { ToolDef } from "../registry.ts";
 
 /**
- * The research mode control in the GUI.
+ * The reach control in the GUI.
  *
  * Off means off. Every tool below disappears from the schema, so the answer you
  * get is the model's own -- which is the only reading of "off" that a user can
@@ -32,11 +33,15 @@ import type { ToolDef } from "../registry.ts";
  * off, it spent two failed web searches and then started a multi-minute
  * literature review.
  *
- * The other two modes narrow the agent to the one tool that matches, so it
+ * "assistant" is not a searching mode. It is below "web" on the ladder and has
+ * no tool in this file, which is why the gates here ask `searches()` rather
+ * than comparing against "off".
+ *
+ * The two searching modes narrow the agent to the one tool that matches, so it
  * cannot quietly do a shallow lookup when the user asked for a report, or spend
  * ten minutes on a report when the user wanted a lookup.
  */
-function mode(): "off" | "web" | "deep" {
+function mode(): ResearchMode {
   return readResearchConfig().mode;
 }
 
@@ -112,7 +117,7 @@ export const fetchPageTool: ToolDef = {
   // Reading a page is reaching the web, so it goes when search does. Paste a
   // URL with search off and the model will say it cannot open it, which is
   // true, rather than opening it anyway.
-  enabled: () => mode() !== "off",
+  enabled: () => searches(mode()),
   parameters: {
     type: "object",
     properties: {

@@ -1450,8 +1450,9 @@ kbd {
    model can reach at all, so it is stated, not merely highlighted. */
 .mode.active { background: var(--accent); color: var(--on-accent); font-weight: 560; }
 
-/* Set apart because it is a different kind of answer: the other three change
-   how hard the model looks, this one takes the model out of the loop. */
+/* Set apart because it is a different kind of answer: the other four are one
+   ladder of how far the model may reach, this one takes the model out of the
+   loop entirely. */
 .mode.lookup { border-left: 1px solid var(--border); border-radius: 0 999px 999px 0; margin-left: 2px; }
 .mode.lookup.active { background: var(--text-dim); color: var(--bg); }
 

@@ -42,7 +42,9 @@ import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, deleteRun, listRuns, readRun, readRunSource, runFootprint } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
-import { readResearchConfig, researchConfigPath, researchRoot } from "../core/research/config.ts";
+import {
+  readResearchConfig, researchConfigPath, researchRoot, searches, serializeResearchConfig,
+} from "../core/research/config.ts";
 import { access, writeFile } from "node:fs/promises";
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE, tightenTree } from "../core/paths.ts";
 
@@ -334,24 +336,33 @@ function currentSession(): Session {
   return session_;
 }
 
-const SYSTEM_PROMPT: string[] = [
+const IDENTITY: string[] = [
   "You are Karen, an assistant for academic work: meeting notes, research synthesis,",
   "and document drafting. You run entirely on the user's own machine.",
-  "",
-  /*
-   * First, because a small model weights the opening of the prompt most, and
-   * because this is the failure people actually hit: "hi" on a 2.6B model with
-   * three document tools in the schema produced a run of tool calls and no
-   * greeting. The research tools are gated off by mode, but the document tools
-   * are always present -- they have to be, they are half of what Karen does --
-   * so the instruction has to do the work the schema cannot.
-   */
+];
+
+/**
+ * How to hold a tool, for a model that has one.
+ *
+ * Goes first, because a small model weights the opening of the prompt most and
+ * because this is the failure people actually hit: "hi" on a 2.6B model with
+ * three document tools in the schema produced a run of tool calls and no
+ * greeting.
+ *
+ * Conditional, because at "off" there is no tool to hold. Telling a model with
+ * an empty schema how to decide between calling a tool and answering in words
+ * describes a choice it does not have, and the surest way to make a small model
+ * start hunting for a tool is to spend the first paragraph discussing them.
+ */
+const TOOL_DISCIPLINE: string[] = [
   "Most messages need no tools at all. A greeting, a question you can answer from what",
   "you know, a follow-up about something already on screen — reply in words. Reach for a",
   "tool only when the user has asked for something it is the only way to do: writing a",
   "file, reading a named document, converting one. Never call a tool to find out whether",
   "it would be useful, and never call one twice with the same arguments.",
-  "",
+];
+
+const SYSTEM_PROMPT: string[] = [
   "Cite your sources. Every factual claim that came from a search result or a fetched",
   "page carries an IEEE-style marker — [1], or [2], [5] for several — at the end of the",
   "sentence it supports. Use the numbers exactly as the tool printed them; never",
@@ -373,22 +384,37 @@ const SYSTEM_PROMPT: string[] = [
 /*
  * Told, not just prevented.
  *
- * With searching off the research tools are gone from the schema, which stops
- * the model reaching the web but does not stop it trying: a small model asked a
- * factual question spent its whole turn hunting for a search tool, then for a
- * local document with the question as its filename. Saying the capability is
- * absent costs one line and gets an answer instead.
+ * A gated tool is gone from the schema, which stops the model using it but does
+ * not stop it trying: a small model asked a factual question spent its whole
+ * turn hunting for a search tool, then for a local document with the question
+ * as its filename. Saying which capabilities are absent costs a few lines and
+ * gets an answer instead.
+ *
+ * One branch per rung, because the two facts are independent. At "assistant"
+ * the model can write a file but not open a URL, and a prompt that says only
+ * "searching is off" leaves it guessing about the half that still works.
  */
 function systemPrompt(): string {
-  if (readResearchConfig().mode !== "off") return SYSTEM_PROMPT.join("\n");
-  return [
-    ...SYSTEM_PROMPT,
-    "",
-    "Searching is switched off for this conversation and you have no tool that can reach",
-    "the web, so answer from what you already know. Say plainly where you are unsure, or",
-    "where a claim would need a source you cannot fetch. Do not go looking for a local",
-    "document unless the user named one.",
-  ].join("\n");
+  const mode = readResearchConfig().mode;
+  const tools = mode === "off" ? [] : ["", ...TOOL_DISCIPLINE];
+  const closing =
+    mode === "off"
+      ? [
+          "You have no tools at all in this conversation: you cannot search, open a URL, or",
+          "read or write a file. Answer from what you already know, and say plainly where you",
+          "are unsure or where a claim would need a source you cannot fetch. Do not offer to",
+          "look something up or to save a file — say what you can tell the user instead.",
+        ]
+      : searches(mode)
+        ? []
+        : [
+            "Searching is switched off for this conversation and you have no tool that can reach",
+            "the web, so answer from what you already know. Say plainly where you are unsure, or",
+            "where a claim would need a source you cannot fetch. You can still read and write",
+            "files in the documents folder. Do not go looking for a local document unless the",
+            "user named one.",
+          ];
+  return [...IDENTITY, ...tools, "", ...SYSTEM_PROMPT, ...(closing.length ? ["", ...closing] : [])].join("\n");
 }
 
 
@@ -811,22 +837,13 @@ function installIpc(): void {
 
   ipcMain.handle("karen:get-research", () => readResearchConfig());
   ipcMain.handle("karen:set-research", async (_e, next: unknown) => {
-    const cfg = next as { mode?: string; category?: string; timeRange?: string };
     await makeOwnDir(dirname(researchConfigPath()));
-    // Rebuilt field by field rather than spread: the reader does the same, so
-    // anything not listed in both places is silently dropped, and a silently
-    // dropped setting is worse than one that was never offered.
+    // Built by the same module that reads it back, so a field cannot survive
+    // one side and be dropped by the other -- which is what the two hand-kept
+    // copies of this object were one edit away from at all times.
     await writeFile(
       researchConfigPath(),
-      JSON.stringify(
-        {
-          mode: cfg?.mode === "web" || cfg?.mode === "deep" ? cfg.mode : "off",
-          category: typeof cfg?.category === "string" && cfg.category ? cfg.category : "science",
-          ...(typeof cfg?.timeRange === "string" ? { timeRange: cfg.timeRange } : {}),
-        },
-        null,
-        2,
-      ) + "\n",
+      JSON.stringify(serializeResearchConfig(next), null, 2) + "\n",
       { mode: OWNER_ONLY_FILE },
     );
   });

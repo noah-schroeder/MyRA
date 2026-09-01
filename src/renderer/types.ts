@@ -129,7 +129,14 @@ export interface SessionSummary {
   messages: number;
 }
 
-export type ResearchMode = "off" | "web" | "deep";
+/**
+ * How far Karen may reach on its own, as one ladder.
+ *
+ * Kept in step with the same type in core/research/config.ts by hand, because
+ * the renderer does not import from core. Adding a rung here without adding it
+ * there makes a control that writes a value the reader coerces away.
+ */
+export type ResearchMode = "off" | "assistant" | "web" | "deep";
 
 export interface ResearchConfig {
   mode: ResearchMode;

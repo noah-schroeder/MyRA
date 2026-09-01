@@ -163,7 +163,7 @@ test("arXiv still returns a parseable Atom feed", { skip: !live }, async () => {
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readResearchConfig } from "../src/core/research/config.ts";
+import { readResearchConfig, searches, serializeResearchConfig } from "../src/core/research/config.ts";
 
 
 /**
@@ -185,13 +185,56 @@ function configFile(contents: unknown): string {
   return path;
 }
 
-test("readResearchConfig defaults to off when there is no file", () => {
+test("readResearchConfig defaults to the document rung when there is no file", () => {
   assert.deepEqual(readResearchConfig(join(tmpdir(), "definitely-not-here.json")), {
-    mode: "off",
+    // Not "off". Nothing egresses at this rung that would not egress at "off" --
+    // the document tools are local and jailed -- so defaulting a rung down buys
+    // no privacy and costs the user half of what Karen is for.
+    mode: "assistant",
     // Not "general": that category has no provider in this build, and storing
     // it means a run asks for a backend nobody serves.
     category: "science",
   });
+});
+
+test("an unversioned \"off\" is read under the meaning it was written with", () => {
+  // Every install predating the rungs has mode "off" on disk -- it was the
+  // default -- and it meant "do not search", not "no tools at all". Reading it
+  // literally would take document writing away from people who never touched
+  // the control.
+  const cfg = readResearchConfig(configFile({ mode: "off", category: "science" }));
+  assert.equal(cfg.mode, "assistant");
+});
+
+test("a versioned \"off\" is taken at its word", () => {
+  const cfg = readResearchConfig(configFile({ v: 2, mode: "off", category: "science" }));
+  assert.equal(cfg.mode, "off");
+});
+
+test("serializeResearchConfig stamps the version, so a chosen off survives", () => {
+  const written = serializeResearchConfig({ mode: "off", category: "science" });
+  assert.equal(written["mode"], "off");
+  const cfg = readResearchConfig(configFile(written));
+  assert.equal(cfg.mode, "off", "a round trip must not reinterpret what the user just chose");
+});
+
+test("serializeResearchConfig keeps every field the reader looks for", () => {
+  // The two halves used to live in different files. A field that survives one
+  // and not the other is dropped in silence, which is worse than never offering
+  // the setting at all.
+  const cfg = readResearchConfig(
+    configFile(serializeResearchConfig({ mode: "deep", category: "science", timeRange: "year" })),
+  );
+  assert.deepEqual(cfg, { mode: "deep", category: "science", timeRange: "year" });
+});
+
+test("searches() is false for every mode that has no network tool", () => {
+  assert.equal(searches("off"), false);
+  // The one that matters: `mode !== "off"` was true here, which would have
+  // handed fetch_page to the rung that must not reach the web.
+  assert.equal(searches("assistant"), false);
+  assert.equal(searches("web"), true);
+  assert.equal(searches("deep"), true);
 });
 
 test("a stored category with no backend is corrected on read", () => {
@@ -208,11 +251,14 @@ test("readResearchConfig reads a GUI selection", () => {
 });
 
 test("readResearchConfig refuses to trust a malformed file", () => {
-  // A corrupt or hand-edited file must degrade to "off", never to a random
-  // mode that silently changes which tools the model can reach.
+  // A corrupt or hand-edited file must degrade to the default, never to a
+  // random mode that silently changes which tools the model can reach. What it
+  // must never degrade to is a searching mode: that would put a machine on the
+  // network because a file was truncated.
   for (const bad of ["not json at all", { mode: "wat", category: 42 }, { mode: null }]) {
     const cfg = readResearchConfig(configFile(bad));
-    assert.equal(cfg.mode, "off", `mode should be off for ${JSON.stringify(bad)}`);
+    assert.equal(cfg.mode, "assistant", `mode should be the default for ${JSON.stringify(bad)}`);
+    assert.equal(searches(cfg.mode), false, "a malformed file must never enable searching");
     assert.equal(typeof cfg.category, "string");
   }
 });
@@ -272,28 +318,60 @@ test("the mode button really removes the other research tool", async () => {
  * setting called off that leaves the capability in place is not a setting, it
  * is a hint -- so the tools leave the schema entirely and the reply is the
  * model's own.
+ *
+ * Versioned, because an unversioned "off" is deliberately read as "assistant":
+ * without the stamp this test would be checking the rung above the one it
+ * names, and would keep passing if "off" stopped gating anything.
  */
-test("off removes every way onto the network", async () => {
+async function registryFor(cfg: Record<string, unknown>) {
   const { ToolRegistry } = await import("../src/core/agent/registry.ts");
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
-  process.env["KAREN_RESEARCH_CONFIG"] = configFile({ mode: "off", category: "general" });
+  const { DOCUMENT_TOOL_DEFS } = await import("../src/core/agent/tools/documents.ts");
+  process.env["KAREN_RESEARCH_CONFIG"] = configFile(cfg);
   const registry = new ToolRegistry();
-  for (const def of RESEARCH_TOOL_DEFS) registry.register(def);
+  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS]) registry.register(def);
+  return registry;
+}
 
-  const readDocument = {
-    name: "read_document", description: "", risk: "safe" as const,
-    parameters: { type: "object" as const, properties: {} },
-    handler: async () => ({ content: "" }),
-  };
-  registry.register(readDocument);
+const NETWORK_TOOLS = ["web_search", "academic_research", "deep_research", "fetch_page"];
+const DOCUMENT_TOOLS = ["write_document", "read_document", "convert_document"];
 
+test("off leaves the model with no tool of any kind", async () => {
+  const registry = await registryFor({ v: 2, mode: "off", category: "science" });
+
+  // The whole point. An empty list is not "the model probably will not call
+  // anything" -- chat() omits `tools` from the request body entirely when the
+  // list is empty, so there is no name for the model to emit. That is the
+  // difference between an instruction a 2.6B model may ignore and a guarantee.
+  assert.deepEqual(registry.activeNames(), [], "off must send an empty schema");
+  assert.deepEqual(registry.schemas(), []);
+
+  for (const t of [...NETWORK_TOOLS, ...DOCUMENT_TOOLS]) {
+    await assert.rejects(() => registry.dispatch(t, {}), /not enabled/, `${t} must be refused at off`);
+  }
+  restoreResearchConfig();
+});
+
+test("the document rung gets the documents and nothing that reaches the network", async () => {
+  const registry = await registryFor({ v: 2, mode: "assistant", category: "science" });
   const active = registry.activeNames();
-  for (const t of ["web_search", "academic_research", "deep_research", "fetch_page"]) {
-    assert.ok(!active.includes(t), `${t} must NOT be reachable with search off`);
+
+  for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} should be active`);
+  for (const t of NETWORK_TOOLS) {
+    // fetch_page is the one that nearly slipped through: it was gated on
+    // `mode !== "off"`, which was true for exactly one mode when it was written
+    // and became true for this one the moment the rung was added.
+    assert.ok(!active.includes(t), `${t} must NOT be reachable without searching on`);
     await assert.rejects(() => registry.dispatch(t, {}), /not enabled/);
   }
-  // Off gates the network, not the app: local work is untouched.
-  assert.ok(active.includes("read_document"));
+  restoreResearchConfig();
+});
+
+test("searching keeps the document tools, because they are unrelated to it", async () => {
+  const registry = await registryFor({ v: 2, mode: "web", category: "science" });
+  const active = registry.activeNames();
+  for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} must survive a searching mode`);
+  assert.ok(active.includes("web_search") && active.includes("fetch_page"));
   restoreResearchConfig();
 });
 
