@@ -148,9 +148,14 @@ const api = {
   lemonadePull: (name: string, checkpoint?: string) =>
     ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
   hfFiles: (repo: string) => ipcRenderer.invoke("karen:hf-files", repo),
+  onPullProgress: (fn: (p: unknown) => void) => {
+    const handler = (_e: unknown, p: unknown): void => fn(p);
+    ipcRenderer.on("karen:pull-progress", handler);
+    return () => ipcRenderer.removeListener("karen:pull-progress", handler);
+  },
   hfBrowse: (q: {
     query?: string;
-    author?: string;
+    authors?: string[];
     kind?: string;
     sort?: string;
     ggufOnly?: boolean;

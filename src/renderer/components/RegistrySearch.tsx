@@ -23,13 +23,14 @@
  * and it should not have to be rebuilt if a second is ever enabled.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fitModel, quantRank, type Machine, type Verdict } from "../../core/runtime/fit.ts";
+import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import {
   age, compact, describeDownloads, KINDS, kindById, loadable, loadableFiles, LOADABLE_WORDS,
   ggufIsMeaningful, PUBLISHERS, publisherNote, pullCheckpoint, pullName, recipeFor, SORTS,
-  type BrowseSort, type HfModel, type RepoFile,
+  type BrowseSort, type HfModel, type Publisher, type RepoFile,
 } from "../../core/runtime/hfBrowse.ts";
 import {
   checkpointFor,
@@ -50,6 +51,22 @@ const FIT_CHIP: Record<Verdict, { short: string; tone: string }> = {
   cpu: { short: "Processor", tone: "dim" },
   "too-large": { short: "Too large", tone: "bad" },
 };
+
+/**
+ * A size in the unit that shows movement.
+ *
+ * `gb` renders everything in gigabytes, which is right in a column of model
+ * sizes and useless on a progress line: a 310 MB download spends its whole
+ * life reading "0.00 GB of 0.31 GB". Below a gigabyte this switches to
+ * megabytes, and below a megabyte to kilobytes, so the number always changes
+ * while bytes are actually arriving.
+ */
+function size(bytes: number | undefined): string {
+  if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.round(bytes / 1024)} kB`;
+}
 
 /** `sd_turbo.safetensors` from `unet/sd_turbo.safetensors`, for a model name. */
 function leafOf(path: string): string {
@@ -108,15 +125,39 @@ export function RegistrySearch({
      pipeline tag; both go to the registry rather than being applied here, so
      what the tab says and what the page holds cannot drift apart. */
   const [kind, setKind] = useState("all");
-  const [author, setAuthor] = useState<string | undefined>();
+  /* A set, not one value: makers and GGUF builders publish different things
+     and the useful browse is often both at once -- "Meta and Unsloth" is how
+     you see a Llama release and the builds of it side by side. */
+  const [authors, setAuthors] = useState<string[]>([]);
   const [sort, setSort] = useState<BrowseSort>("downloads");
   const [ggufOnly, setGgufOnly] = useState(true);
   const [models, setModels] = useState<HfModel[]>([]);
   const [browsing, setBrowsing] = useState(false);
   const [browseError, setBrowseError] = useState<string | undefined>();
   const [ranBrowse, setRanBrowse] = useState<string | undefined>();
+  /** Live progress for the download in flight, pushed from the daemon. */
+  const [job, setJob] = useState<PullProgress | undefined>();
 
   const chosen = useMemo(() => ENABLED_SOURCES.filter((s) => sources.has(s)), [sources]);
+
+  /*
+   * Progress for the download in flight.
+   *
+   * Subscribed once and pushed, not polled. `/api/v1/downloads` was the
+   * obvious source and is the wrong one: it stays empty for the whole of a
+   * `/pull`, because it reports the daemon's own background jobs rather than a
+   * transfer somebody is waiting on. The pull itself streams the figures when
+   * asked, which is what this receives.
+   */
+  useEffect(() => window.karen.onPullProgress((p) => setJob(p)), []);
+
+  /** Add or remove one publisher, keeping the rest, and re-run the browse. */
+  const toggleAuthor = (who: string): void => {
+    const next = authors.includes(who) ? authors.filter((a) => a !== who) : [...authors, who];
+    setAuthors(next);
+    setQuery("");
+    void browse({ authors: next, query: "" });
+  };
   const busy = browsing || pulling !== undefined;
 
   /* Unused while one registry is enabled, and kept for when that changes:
@@ -142,14 +183,14 @@ export function RegistrySearch({
   const browse = useCallback(
     async (patch: {
       kind?: string;
-      author?: string | undefined;
+      authors?: string[];
       sort?: BrowseSort;
       ggufOnly?: boolean;
       query?: string;
     } = {}): Promise<void> => {
       const next = {
         kind: patch.kind ?? kind,
-        author: "author" in patch ? patch.author : author,
+        authors: patch.authors ?? authors,
         sort: patch.sort ?? sort,
         ggufOnly: patch.ggufOnly ?? ggufOnly,
         query: patch.query ?? query,
@@ -162,7 +203,7 @@ export function RegistrySearch({
 
       const res = await window.karen.hfBrowse({
         ...(next.query.trim() ? { query: next.query.trim() } : {}),
-        ...(next.author ? { author: next.author } : {}),
+        ...(next.authors.length ? { authors: next.authors } : {}),
         kind: next.kind,
         sort: next.sort,
         ggufOnly: next.ggufOnly,
@@ -180,12 +221,12 @@ export function RegistrySearch({
          published by ibm-granite" over an empty image-model list. */
       const parts = [
         next.kind === "all" ? "Models" : `${kindById(next.kind).title} models`,
-        next.author ? `from ${next.author}` : undefined,
+        next.authors.length ? `from ${next.authors.join(", ")}` : undefined,
         next.query.trim() ? `matching “${next.query.trim()}”` : undefined,
       ].filter(Boolean);
       setRanBrowse(parts.join(" "));
     },
-    [kind, author, sort, ggufOnly, query],
+    [kind, authors, sort, ggufOnly, query],
   );
 
   /**
@@ -378,8 +419,15 @@ export function RegistrySearch({
               className={k.id === kind ? "lem-tab on" : "lem-tab"}
               disabled={browsing}
               onClick={() => {
+                /* The text box is cleared, because a tab press means "show me
+                   these" and a stale query silently narrows it to nothing.
+                   Searching "granite" and then pressing Transcription gave
+                   eighteen rows of Granite speech models and looked broken;
+                   pressing it now gives every transcription model there is,
+                   which is what the tab says it does. */
                 setKind(k.id);
-                void browse({ kind: k.id });
+                setQuery("");
+                void browse({ kind: k.id, query: "" });
               }}
             >
               {k.title}
@@ -426,17 +474,17 @@ export function RegistrySearch({
             </label>
           ) : null}
 
-          {author ? (
+          {authors.length ? (
             <button
               type="button"
               className="reg-chip on"
               disabled={browsing}
               onClick={() => {
-                setAuthor(undefined);
-                void browse({ author: undefined });
+                setAuthors([]);
+                void browse({ authors: [] });
               }}
             >
-              {author} ✕
+              Clear {authors.length} publisher{authors.length === 1 ? "" : "s"} ✕
             </button>
           ) : null}
         </div>
@@ -444,20 +492,7 @@ export function RegistrySearch({
         <div className="reg-chips">
           <span className="reg-chips-key">Model makers</span>
           {PUBLISHERS.filter((p) => !p.builder).map((p) => (
-            <button
-              key={p.author}
-              type="button"
-              className={author === p.author ? "reg-chip small on" : "reg-chip small"}
-              disabled={browsing}
-              title={`Everything published by ${p.author}`}
-              onClick={() => {
-                setAuthor(p.author);
-                setQuery("");
-                void browse({ author: p.author, query: "" });
-              }}
-            >
-              {p.label}
-            </button>
+            <PublisherChip key={p.author} p={p} on={authors.includes(p.author)} busy={browsing} onPick={toggleAuthor} />
           ))}
         </div>
 
@@ -467,23 +502,12 @@ export function RegistrySearch({
         <div className="reg-chips">
           <span className="reg-chips-key">GGUF builders</span>
           {PUBLISHERS.filter((p) => p.builder).map((p) => (
-            <button
-              key={p.author}
-              type="button"
-              className={author === p.author ? "reg-chip small on" : "reg-chip small"}
-              disabled={browsing}
-              title={`Everything published by ${p.author}`}
-              onClick={() => {
-                setAuthor(p.author);
-                setQuery("");
-                void browse({ author: p.author, query: "" });
-              }}
-            >
-              {p.label}
-            </button>
+            <PublisherChip key={p.author} p={p} on={authors.includes(p.author)} busy={browsing} onPick={toggleAuthor} />
           ))}
         </div>
       </div>
+
+      {pulling ? <DownloadProgress name={pulling} job={job} /> : null}
 
       {browseError ? <p className="reg-line bad">{browseError}</p> : null}
       {browsing ? (
@@ -502,7 +526,13 @@ export function RegistrySearch({
               own description said "unfiltered" while the GGUF switch was on,
               which is the kind of small contradiction that makes a person stop
               believing the rest of the line. */}
-          {ggufOnly && ggufIsMeaningful(kindById(kind)) ? ", GGUF builds only" : ""}.
+          {ggufOnly && ggufIsMeaningful(kindById(kind)) ? ", GGUF builds only" : ""}
+          {/* Stated, so the order can be checked rather than taken on trust.
+              A list whose ordering is invisible is one people assume is
+              broken the moment two rows look out of sequence -- and with four
+              sorts and a figure column that only matches one of them, that
+              happens often. */}
+          , sorted by {(SORTS.find((o) => o.id === sort)?.label ?? "").toLowerCase()}.
           {kind === "all" ? null : <> {kindById(kind).hint}</>}
         </p>
       ) : null}
@@ -514,9 +544,9 @@ export function RegistrySearch({
         <div className="lem-callout">
           <p className="lem-callout-title">Nothing here.</p>
           <p className="lem-callout-body">
-            {publisherNote(author) ??
-              (author && kind !== "all"
-                ? `${author} publishes no ${kindById(kind).title.toLowerCase()} models. Clear the publisher, or choose another kind.`
+            {(authors.length === 1 ? publisherNote(authors[0]) : undefined) ??
+              (authors.length && kind !== "all"
+                ? `${authors.join(", ")} publish${authors.length === 1 ? "es" : ""} no ${kindById(kind).title.toLowerCase()} models. Clear the publishers, or choose another kind.`
                 : ggufOnly
                   ? "Nothing in this selection is published as GGUF. Turn off “Only models Karen can run” to see what else is there."
                   : "The registry returned no repositories for this selection.")}
@@ -761,4 +791,117 @@ function VariantList({
       </ul>
     </>
   );
+}
+
+/**
+ * One publisher, as a toggle.
+ *
+ * A toggle rather than a radio because the useful browse is often two at once:
+ * Meta publishes the Llama weights and Unsloth publishes the GGUF builds of
+ * them, and seeing those together is the thing neither list gives on its own.
+ */
+function PublisherChip({
+  p,
+  on,
+  busy,
+  onPick,
+}: {
+  p: Publisher;
+  on: boolean;
+  busy: boolean;
+  onPick: (author: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={on ? "reg-chip small on" : "reg-chip small"}
+      disabled={busy}
+      aria-pressed={on}
+      title={`Everything published by ${p.author}`}
+      onClick={() => onPick(p.author)}
+    >
+      {p.label}
+    </button>
+  );
+}
+
+/**
+ * What a download is doing, while it does it.
+ *
+ * Three facts, because each answers a different question a person actually
+ * has: how far through (the bar), how big this is (the figures), and whether
+ * it is worth waiting for (the rate and the estimate). The estimate is the
+ * one most likely to be wrong, so it is derived from the rate the daemon
+ * reports right now rather than from an average since the start -- a
+ * connection that has just slowed down should say so, not average the slowdown
+ * away over twenty minutes.
+ */
+function DownloadProgress({ name, job }: { name: string; job?: PullProgress | undefined }) {
+  const percent = job?.percent ?? 0;
+  const done = job?.bytesDone;
+  const total = job?.bytesTotal || undefined;
+
+  /* Measured here rather than taken from the daemon, which reports totals but
+     not a rate. Two samples a second apart are enough for a figure that is
+     about waiting, and the ref keeps the previous one across renders. */
+  const last = useRef<{ at: number; bytes: number } | undefined>(undefined);
+  const [rate, setRate] = useState<number | undefined>();
+  useEffect(() => {
+    if (done === undefined) return;
+    const now = Date.now();
+    const prev = last.current;
+    last.current = { at: now, bytes: done };
+    if (!prev || now === prev.at) return;
+    const perSecond = ((done - prev.bytes) * 1000) / (now - prev.at);
+    // Smoothed, or the number flickers unreadably between polls.
+    setRate((r) => (r === undefined ? perSecond : r * 0.6 + perSecond * 0.4));
+  }, [done]);
+
+  const remaining =
+    total !== undefined && done !== undefined && rate !== undefined && rate > 1024
+      ? (total - done) / rate
+      : undefined;
+
+  return (
+    <div className="reg-progress" role="status" aria-live="polite">
+      <div className="reg-progress-head">
+        {/* The daemon's own name for the file, which is what is actually
+            moving; the `user.` prefix Karen has to register under is an
+            implementation detail nobody typed and nobody should read. */}
+        <span className="reg-progress-name">
+          {job?.file || name.replace(/^user\./, "")}
+          {job && job.totalFiles > 1 ? ` (${job.fileIndex} of ${job.totalFiles})` : ""}
+        </span>
+        <span className="reg-progress-figure">
+          {total !== undefined ? (
+            <>
+              {size(done ?? 0)} of {size(total)}
+            </>
+          ) : (
+            "starting…"
+          )}
+          {rate !== undefined && rate > 1024 ? <> · {size(rate)}/s</> : null}
+          {remaining !== undefined ? <> · {duration(remaining)} left</> : null}
+        </span>
+      </div>
+      <div className="lem-bar">
+        {/* Indeterminate until the daemon reports a total: a bar pinned at 0%
+            reads as "stuck", which is exactly the wrong thing to say while a
+            connection is being opened. */}
+        <div
+          className={total === undefined ? "lem-bar-fill waiting" : "lem-bar-fill"}
+          style={total === undefined ? undefined : { width: `${String(percent)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** "3 min 20 s", for a wait rather than a timestamp. */
+function duration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
 }
