@@ -58,14 +58,18 @@ export interface HfModel {
  * API accepts -- a tab that filtered client-side would show "12 results" over
  * a page that fetched 100 and would page inconsistently.
  *
- * `runnable` records whether Karen can actually load this kind today. It is
- * false for image, video and speech synthesis, and that is not pessimism:
- * Lemonade's pull path reports `recipe: llamacpp` for ANY repository
- * containing `.gguf` files -- measured, on `Kijai/WanVideo_comfy_GGUF` and
- * `SporkySporkness/FLUX.1-Canny-dev-GGUF`, both of which are diffusion models
- * that llama.cpp cannot execute. Those kinds are still listed, because the
- * request was to see what the registry holds; they are marked so that nobody
- * spends twelve gigabytes discovering it.
+ * Each kind names the Lemonade engine that runs it. That mapping used to be
+ * missing, which is why image and speech models were shown as unloadable:
+ * Lemonade's own `/pull/variants` reports `recipe: llamacpp` for ANY
+ * repository containing `.gguf` files -- measured, on
+ * `Kijai/WanVideo_comfy_GGUF` and `SporkySporkness/FLUX.1-Canny-dev-GGUF` --
+ * so trusting it installed a diffusion model as a language model. Naming the
+ * recipe from the model's PURPOSE instead makes all of these work: a pull
+ * declaring `sd-cpp` fetches `stabilityai/sd-turbo:sd_turbo.safetensors`
+ * happily, and one declaring `whispercpp` fetches `ggml-tiny.bin`.
+ *
+ * What is still required is that the engine be installed, which is a separate
+ * question from whether the download is possible -- see `loadable`.
  */
 export interface ModelKind {
   id: string;
@@ -103,22 +107,22 @@ export const KINDS: ModelKind[] = [
     id: "speech",
     title: "Transcription",
     tasks: ["automatic-speech-recognition"],
-    hint: "Audio into text. Whisper builds are ggml rather than GGUF, so most will not load in Karen yet.",
-    runnable: false,
+    hint: "Audio into text — what Meetings uses. Whisper builds are ggml rather than GGUF, which is why they need their own engine.",
+    runnable: true,
   },
   {
     id: "voice",
     title: "Speech synthesis",
     tasks: ["text-to-speech"],
-    hint: "Reading text aloud. Lemonade runs these through Kokoro, not llama.cpp.",
-    runnable: false,
+    hint: "Reading text aloud. Lemonade runs these through Kokoro rather than llama.cpp.",
+    runnable: true,
   },
   {
     id: "image",
     title: "Image generation",
     tasks: ["text-to-image", "image-to-image"],
-    hint: "Diffusion models. Lemonade runs these through Stable Diffusion, not llama.cpp.",
-    runnable: false,
+    hint: "Diffusion models. Lemonade runs these through Stable Diffusion rather than llama.cpp.",
+    runnable: true,
   },
   {
     id: "embedding",
@@ -142,6 +146,30 @@ export const SORTS: { id: BrowseSort; label: string }[] = [
   { id: "likes", label: "Most liked" },
   { id: "lastModified", label: "Recently updated" },
 ];
+
+/**
+ * Which Lemonade recipe loads a given kind of model.
+ *
+ * This mapping is the fix for a whole class of broken download. Lemonade's
+ * `/pull/variants` reports `recipe: llamacpp` for ANY repository containing
+ * `.gguf` files, diffusion and audio models included -- so a FLUX or Wan Video
+ * repository came back labelled as a language model, and a pull that trusted
+ * that label produced a file llama.cpp could never load.
+ *
+ * `/pull` does honour an explicit recipe: measured, a pull naming `sd-cpp`
+ * fetches `stabilityai/sd-turbo:sd_turbo.safetensors` happily, and a pull
+ * naming a recipe that does not exist is refused with `Recipe 'x' not found`.
+ * So Karen decides the recipe from what the registry says the model is FOR,
+ * rather than from what file extensions happen to be in the repository.
+ */
+export const KIND_RECIPE: Record<string, string> = {
+  chat: "llamacpp",
+  vision: "llamacpp",
+  embedding: "llamacpp",
+  speech: "whispercpp",
+  voice: "kokoro",
+  image: "sd-cpp",
+};
 
 export interface BrowseQuery {
   /** Free text, matched against repository names. */
@@ -175,7 +203,19 @@ export function browseParams(q: BrowseQuery): URLSearchParams {
      returns nothing rather than the union. Where a kind names several, the
      first is the one asked for and the rest are kept for labelling. */
   if (kind.tasks[0]) params.set("pipeline_tag", kind.tasks[0]);
-  if (q.ggufOnly) params.set("filter", "gguf");
+  /*
+   * The GGUF filter is a llama.cpp filter, and applying it elsewhere hides the
+   * models that work.
+   *
+   * `filter=gguf` selects repositories tagged `gguf`. That is exactly right
+   * for chat, vision and embeddings, which llama.cpp loads. It is wrong for
+   * every other kind: sd-cpp reads `.safetensors`, whisper.cpp reads ggml
+   * `.bin`, kokoro reads `.onnx` -- so a "only what Karen can run" switch that
+   * meant `gguf` would exclude `stabilityai/sd-turbo`, which Karen can run
+   * perfectly well. On those tabs the switch has nothing to filter on and is
+   * left off.
+   */
+  if (q.ggufOnly && ggufIsMeaningful(kind)) params.set("filter", "gguf");
 
   params.set("sort", q.sort ?? "downloads");
   params.set("direction", "-1");
@@ -186,6 +226,17 @@ export function browseParams(q: BrowseQuery): URLSearchParams {
     params.append("expand[]", field);
   }
   return params;
+}
+
+/**
+ * Whether "GGUF only" says anything on this tab.
+ *
+ * True for the llama.cpp kinds, and for "Everything" -- where the filter is
+ * the one blunt way to ask for things that will load, since a mixed list has
+ * no single engine to reason about.
+ */
+export function ggufIsMeaningful(kind: ModelKind): boolean {
+  return kind.id === "all" || KIND_RECIPE[kind.id] === "llamacpp";
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
@@ -225,14 +276,24 @@ export function parseModels(raw: unknown): HfModel[] {
 /**
  * What Karen can do with a repository, said plainly on the row.
  *
- * Three states rather than two, because "cannot run" covers two very different
- * situations and only one of them is the user's problem to solve.
+ * Three states, and the middle one is the useful addition. A diffusion model
+ * is not unloadable -- it needs `sd-cpp`, which this machine can install in a
+ * click. Saying "cannot run" about something one button away from running is
+ * the kind of inaccuracy that makes people give up on a feature that works.
  */
-export type Loadable = "ready" | "wrong-format" | "other-runtime";
+export type Loadable = "ready" | "needs-engine" | "wrong-format";
 
-export function loadable(model: HfModel, kind: ModelKind): Loadable {
-  if (!model.hasGguf) return "wrong-format";
-  if (!kind.runnable) return "other-runtime";
+export function loadable(
+  model: HfModel,
+  recipe: string,
+  /** Which engines have a backend installed. Absent means "not known yet". */
+  engines?: ReadonlySet<string>,
+): Loadable {
+  /* Format first: llama.cpp reads GGUF and the original weights beside it are
+     not a build it can load, whatever engine is present. The other engines
+     read their own formats, so this test only applies to llamacpp. */
+  if (recipe === "llamacpp" && !model.hasGguf) return "wrong-format";
+  if (engines && !engines.has(recipe)) return "needs-engine";
   return "ready";
 }
 
@@ -240,23 +301,22 @@ export const LOADABLE_WORDS: Record<Loadable, { short: string; tone: string; why
   ready: {
     short: "Ready",
     tone: "good",
-    why: "GGUF, which is what Karen's llama.cpp engine reads.",
+    why: "The engine this needs is installed, so it will load once downloaded.",
+  },
+  "needs-engine": {
+    short: "Needs engine",
+    tone: "warn",
+    why:
+      "Karen can download this, but the engine that runs it is not installed yet. " +
+      "Install it under Settings → Runtime and it will load.",
   },
   "wrong-format": {
     short: "Not GGUF",
     tone: "dim",
     why:
       "This repository holds the original weights rather than a quantised GGUF build. " +
-      "Karen cannot load it; look for a GGUF version of the same model, often published by " +
-      "unsloth or bartowski.",
-  },
-  "other-runtime": {
-    short: "Other engine",
-    tone: "warn",
-    why:
-      "Lemonade reports every repository containing .gguf files as a llama.cpp model, " +
-      "including diffusion and speech models it cannot actually run that way. " +
-      "Downloading this may produce a model that will not load.",
+      "llama.cpp cannot load it; look for a GGUF version of the same model, often published " +
+      "by unsloth or bartowski.",
   },
 };
 
@@ -348,4 +408,113 @@ export const PUBLISHERS: Publisher[] = [
 /** The note for a publisher, when one applies. */
 export function publisherNote(author: string | undefined): string | undefined {
   return author ? PUBLISHERS.find((p) => p.author === author)?.note : undefined;
+}
+
+/* ------------------------------------------------------------- pulling -- */
+
+
+/**
+ * The recipe for a repository, from the kind being browsed and the model's own
+ * task.
+ *
+ * The model's task wins when it has one, because a browse of "Everything" has
+ * no kind to go on and a repository's `pipeline_tag` is the registry's own
+ * statement of purpose. `llamacpp` is the fallback: it is what the vast
+ * majority of GGUF repositories are, and it is what Lemonade would have
+ * guessed anyway.
+ */
+export function recipeFor(model: HfModel, kind: ModelKind): string {
+  const byTask = TASK_RECIPE[model.task ?? ""];
+  if (byTask) return byTask;
+  return KIND_RECIPE[kind.id] ?? "llamacpp";
+}
+
+const TASK_RECIPE: Record<string, string> = {
+  "text-generation": "llamacpp",
+  "image-text-to-text": "llamacpp",
+  "feature-extraction": "llamacpp",
+  "sentence-similarity": "llamacpp",
+  "automatic-speech-recognition": "whispercpp",
+  "text-to-speech": "kokoro",
+  "text-to-image": "sd-cpp",
+  "image-to-image": "sd-cpp",
+};
+
+/**
+ * The name a downloaded model is registered under.
+ *
+ * **The `user.` prefix is required, not decorative.** Lemonade refuses any
+ * pull that supplies its own checkpoint unless the name is in the `user.`
+ * namespace: `Registered model definitions must use a non-empty 'user.*'
+ * name`. Karen was sending `Qwen3-0.6B-GGUF-Q4_K_M` and getting a 400 every
+ * time, which means the Download button on the search page had never once
+ * worked. The namespace is the daemon's way of keeping models a person added
+ * apart from the ones its own catalogue defines, so this belongs on the name
+ * rather than being worked around.
+ */
+export function pullName(repo: string, variant?: string): string {
+  const leaf = repo.split("/").pop() ?? repo;
+  const base = variant ? `${leaf}-${variant}` : leaf;
+  /* The daemon accepts a `user.` name and little else about it, so anything
+     that could confuse a path or a URL is flattened rather than trusted. */
+  const safe = base
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    // Collapse runs, or "name!-Q4" becomes "name--Q4".
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return `user.${safe || "model"}`;
+}
+
+/** The checkpoint string a pull wants: `org/repo:path/to/file`. */
+export function pullCheckpoint(repo: string, file?: string): string {
+  return file ? `${repo}:${file}` : repo;
+}
+
+/**
+ * A file inside a repository, as something a person could choose to download.
+ *
+ * Needed because `/pull/variants` only understands GGUF, ONNX RyzenAI and
+ * Lemonade's own Omni collections -- asked about `stabilityai/sd-turbo` it
+ * answers with a 500 and a list of what it does support. Every other kind of
+ * model therefore has to have its files listed from the registry directly.
+ */
+export interface RepoFile {
+  path: string;
+  sizeBytes?: number | undefined;
+}
+
+/** Extensions worth offering, by recipe. Anything else is not a model file. */
+const LOADABLE_EXT: Record<string, RegExp> = {
+  llamacpp: /\.gguf$/i,
+  "sd-cpp": /\.(safetensors|gguf|ckpt)$/i,
+  whispercpp: /\.(bin|gguf)$/i,
+  kokoro: /\.(onnx|pth|safetensors)$/i,
+};
+
+/**
+ * The files in a repository a given recipe could actually load.
+ *
+ * Sharded parts are dropped rather than offered: llama.cpp and friends are
+ * given the first shard and find the rest themselves, so listing
+ * `…-00002-of-00003.gguf` as a choice offers a download that cannot work.
+ */
+export function loadableFiles(files: RepoFile[], recipe: string): RepoFile[] {
+  const wanted = LOADABLE_EXT[recipe] ?? /\.(gguf|safetensors|bin|onnx)$/i;
+  return files
+    .filter((f) => wanted.test(f.path))
+    .filter((f) => isFirstShard(f.path))
+    .sort((a, b) => (a.sizeBytes ?? 0) - (b.sizeBytes ?? 0));
+}
+
+/**
+ * Whether a path is a whole file or the first part of a split one.
+ *
+ * Read as a number rather than matched with a lookahead: `-0*(?!1\b)\d+-of-`
+ * looks like it excludes part one and does not, because the `0*` backtracks
+ * until the lookahead passes and `-00001-of-00002` matches after all. Parsing
+ * the index cannot go wrong that way.
+ */
+function isFirstShard(path: string): boolean {
+  const m = /-(\d+)-of-(\d+)\.[A-Za-z0-9]+$/.exec(path);
+  return m === null || Number(m[1]) === 1;
 }

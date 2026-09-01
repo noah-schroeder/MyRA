@@ -318,6 +318,10 @@ export function LemonadePane({
     () => [...states].filter(([, v]) => v === "ready").map(([id]) => id),
     [states],
   );
+  /* The same set, for the registry rows: a downloaded diffusion model needs
+     sd-cpp present before it will load, and that is worth saying before the
+     download rather than after. */
+  const installedEngines = useMemo(() => new Set(readyEngines), [readyEngines]);
 
   const active = groups.find((g) => g.id === group) ?? groups[0];
   const { rows, blockedCount } = useMemo(() => {
@@ -957,6 +961,7 @@ export function LemonadePane({
               <RegistrySearch
                 machine={machine}
                 have={have}
+                installedEngines={installedEngines}
                 onDownloaded={async () => {
                   await refresh();
                 }}

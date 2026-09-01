@@ -27,8 +27,9 @@ import { useCallback, useMemo, useState } from "react";
 
 import { fitModel, quantRank, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
-  age, compact, describeDownloads, KINDS, kindById, loadable, LOADABLE_WORDS,
-  PUBLISHERS, publisherNote, SORTS, type BrowseSort, type HfModel,
+  age, compact, describeDownloads, KINDS, kindById, loadable, loadableFiles, LOADABLE_WORDS,
+  ggufIsMeaningful, PUBLISHERS, publisherNote, pullCheckpoint, pullName, recipeFor, SORTS,
+  type BrowseSort, type HfModel, type RepoFile,
 } from "../../core/runtime/hfBrowse.ts";
 import {
   checkpointFor,
@@ -50,6 +51,12 @@ const FIT_CHIP: Record<Verdict, { short: string; tone: string }> = {
   "too-large": { short: "Too large", tone: "bad" },
 };
 
+/** `sd_turbo.safetensors` from `unet/sd_turbo.safetensors`, for a model name. */
+function leafOf(path: string): string {
+  const leaf = path.split("/").pop() ?? path;
+  return leaf.replace(/\.[A-Za-z0-9]+$/, "");
+}
+
 function gb(bytes?: number): string {
   return bytes ? `${(bytes / 1024 ** 3).toFixed(bytes < 1024 ** 3 ? 2 : 1)} GB` : "—";
 }
@@ -69,15 +76,21 @@ interface RepoRef {
 interface VariantState {
   loading: boolean;
   error?: string;
+  /** Lemonade's grouped quantisations, for GGUF repositories. */
   data?: RepoVariants;
+  /** The registry's own file list, for everything else. */
+  files?: RepoFile[];
 }
 
 export function RegistrySearch({
   machine,
   have,
+  installedEngines,
   onDownloaded,
 }: {
   machine: Machine;
+  /** Engines with a backend installed, so a row can say what it still needs. */
+  installedEngines?: ReadonlySet<string>;
   /** Model ids already installed, so a row can say so rather than offer a repeat. */
   have: Set<string>;
   onDownloaded: () => void | Promise<void>;
@@ -175,41 +188,84 @@ export function RegistrySearch({
     [kind, author, sort, ggufOnly, query],
   );
 
+  /**
+   * Expand a row into the files it offers.
+   *
+   * Two sources, because neither covers everything. Lemonade's
+   * `/pull/variants` groups a GGUF repository's quantisations and stitches its
+   * shards together, which is genuinely useful and worth keeping -- but asked
+   * about anything that is not GGUF, ONNX RyzenAI or one of its own Omni
+   * collections it answers with a 500. `stabilityai/sd-turbo` is the case that
+   * proved it. So a repository whose recipe is not llama.cpp has its files
+   * listed from the registry instead.
+   */
   const openRepo = useCallback(
-    async (hit: { id: string; source: RegistrySource }): Promise<void> => {
-      const key = `${hit.source}/${hit.id}`;
+    async (model: HfModel, recipe: string): Promise<void> => {
+      const source: RegistrySource = ENABLED_SOURCES[0] ?? "huggingface";
+      const key = `${source}/${model.id}`;
       if (open === key) {
         setOpen(undefined);
         return;
       }
       setOpen(key);
-      if (variants[key]?.data || variants[key]?.loading) return;
+      if (variants[key]?.data || variants[key]?.files || variants[key]?.loading) return;
       setVariants((v) => ({ ...v, [key]: { loading: true } }));
-      const res = await window.karen.registryVariants(hit.id, hit.source);
+
+      if (recipe === "llamacpp") {
+        const res = await window.karen.registryVariants(model.id, source);
+        setVariants((v) => ({
+          ...v,
+          [key]: res.ok && res.variants
+            ? { loading: false, data: res.variants }
+            : { loading: false, error: explainRegistryError(res.error ?? "", source) },
+        }));
+        return;
+      }
+
+      const res = await window.karen.hfFiles(model.id);
       setVariants((v) => ({
         ...v,
-        [key]: res.ok && res.variants
-          ? { loading: false, data: res.variants }
-          : { loading: false, error: explainRegistryError(res.error ?? "", hit.source) },
+        [key]: res.ok && res.files
+          ? { loading: false, files: loadableFiles(res.files, recipe) }
+          : { loading: false, error: res.error ?? "The file list could not be read." },
       }));
     },
     [open, variants],
   );
 
-  const download = async (hit: RepoRef, data: RepoVariants, name: string): Promise<void> => {
-    const variant = data.variants.find((v) => v.name === name);
-    if (!variant) return;
-    const modelName = modelNameFor(hit.id, variant);
-    setPulling(modelName);
+  /**
+   * Download one file from a repository.
+   *
+   * Two things here were wrong and are the reason the button never worked.
+   *
+   * The name had no `user.` prefix, and Lemonade refuses any pull that
+   * supplies its own checkpoint without one -- `Registered model definitions
+   * must use a non-empty 'user.*' name`. Every download from this page
+   * returned a 400.
+   *
+   * And the recipe came from `/pull/variants`, which reports `llamacpp` for
+   * any repository containing `.gguf` files -- diffusion and audio models
+   * included. It now comes from what the registry says the model is FOR, which
+   * is the only thing that knows the difference.
+   */
+  const download = async (
+    model: HfModel,
+    recipe: string,
+    file: string | undefined,
+    label: string,
+  ): Promise<void> => {
+    const source: RegistrySource = ENABLED_SOURCES[0] ?? "huggingface";
+    const name = pullName(model.id, label);
+    setPulling(name);
     setPullError(undefined);
     const res = await window.karen.registryPull(
-      modelName,
-      checkpointFor(hit.id, variant),
-      hit.source,
-      data.recipe,
+      name,
+      pullCheckpoint(model.id, file),
+      source,
+      recipe,
     );
     setPulling(undefined);
-    if (!res.ok) setPullError(explainRegistryError(res.error ?? "", hit.source));
+    if (!res.ok) setPullError(explainRegistryError(res.error ?? "", source));
     else await onDownloaded();
   };
 
@@ -352,18 +408,23 @@ export function RegistrySearch({
           {/* A visible switch rather than a silent rule. Off, this shows what
               the registry holds -- original weights included -- which is what
               a publisher's own page shows. */}
-          <label className="lem-toggle">
-            <input
-              type="checkbox"
-              checked={ggufOnly}
-              disabled={browsing}
-              onChange={(e) => {
-                setGgufOnly(e.target.checked);
-                void browse({ ggufOnly: e.target.checked });
-              }}
-            />
-            Only models Karen can run
-          </label>
+          {/* Only offered where it means something: `filter=gguf` is a
+              llama.cpp filter, and on the image, speech and voice tabs it
+              would hide the safetensors and ggml files those engines read. */}
+          {ggufIsMeaningful(kindById(kind)) ? (
+            <label className="lem-toggle">
+              <input
+                type="checkbox"
+                checked={ggufOnly}
+                disabled={browsing}
+                onChange={(e) => {
+                  setGgufOnly(e.target.checked);
+                  void browse({ ggufOnly: e.target.checked });
+                }}
+              />
+              Only GGUF builds
+            </label>
+          ) : null}
 
           {author ? (
             <button
@@ -441,7 +502,7 @@ export function RegistrySearch({
               own description said "unfiltered" while the GGUF switch was on,
               which is the kind of small contradiction that makes a person stop
               believing the rest of the line. */}
-          {ggufOnly ? ", limited to repositories Karen can run" : ", including ones Karen cannot run"}.
+          {ggufOnly && ggufIsMeaningful(kindById(kind)) ? ", GGUF builds only" : ""}.
           {kind === "all" ? null : <> {kindById(kind).hint}</>}
         </p>
       ) : null}
@@ -482,7 +543,12 @@ export function RegistrySearch({
             const key = `${source}/${model.id}`;
             const state = variants[key];
             const isOpen = open === key;
-            const can = loadable(model, kindById(kind));
+            /* Decided once per row and used for three things: which list of
+               files to fetch, which engine the download registers under, and
+               whether that engine is present. They must agree, or a repository
+               is described by one engine and installed for another. */
+            const recipe = recipeFor(model, kindById(kind));
+            const can = loadable(model, recipe, installedEngines);
             const words = LOADABLE_WORDS[can];
             const created = age(model.createdAt);
             return (
@@ -490,7 +556,7 @@ export function RegistrySearch({
                 <button
                   type="button"
                   className="reg-hit-head"
-                  onClick={() => void openRepo({ id: model.id, source })}
+                  onClick={() => void openRepo(model, recipe)}
                   aria-expanded={isOpen}
                 >
                   <span className="reg-hit-id">
@@ -564,8 +630,42 @@ export function RegistrySearch({
                       machine={machine}
                       have={have}
                       pulling={pulling}
-                      onDownload={(name) => void download({ id: model.id, source }, state.data!, name)}
+                      onDownload={(name) => {
+                        const v = state.data!.variants.find((x) => x.name === name);
+                        void download(model, recipe, v?.primaryFile, name);
+                      }}
                     /> : null}
+
+                    {/* The registry's own file list, for the kinds Lemonade
+                        cannot describe. Plainer than the quantisation list
+                        above because there is nothing to group: these are
+                        files, and the useful facts are the name and the size. */}
+                    {state?.files ? (
+                      state.files.length ? (
+                        <ul className="reg-vlist">
+                          {state.files.map((f) => (
+                            <li key={f.path} className="reg-variant">
+                              <span className="reg-variant-name">{f.path}</span>
+                              <span className="reg-variant-size">{gb(f.sizeBytes)}</span>
+                              <button
+                                type="button"
+                                className="lem-act get"
+                                disabled={pulling !== undefined}
+                                onClick={() =>
+                                  void download(model, recipe, f.path, leafOf(f.path))
+                                }
+                              >
+                                {pulling ? "Downloading…" : "Download"}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="reg-line">
+                          Nothing in this repository is a file the {recipe} engine can load.
+                        </p>
+                      )
+                    ) : null}
                   </div>
                 ) : null}
               </li>
