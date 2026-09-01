@@ -295,11 +295,38 @@ export const draftDocumentTool: ToolDef = {
     });
 
     const rel = result.path.slice(documentsDir().length + 1);
+    /*
+     * The warning leads, because the model decides what the user hears.
+     *
+     * Put after "wrote 3 sections, 542 words" it reads as a footnote to a
+     * success and gets summarised away as "done!". Nothing in this flow
+     * searched, so a citation in the text is invented -- and a fabricated
+     * reference in an academic document is the one failure the user cannot be
+     * left to discover on their own, weeks later, in a draft they have since
+     * sent to someone.
+     */
+    const warning = result.invented.length
+      ? `WARNING — this document contains invented citations and they must be reported to the ` +
+        `user before anything else. Nothing here searched any literature, so every reference ` +
+        `below was made up by the model and none of them are real: ` +
+        result.invented
+          .map((s) => `under "${s.heading}": ${s.found.join(", ")}`)
+          .join("; ") +
+        `. Tell the user which sections are affected and that they must remove or replace ` +
+        `these before using the document. `
+      : "";
+
     return {
       content:
+        warning +
         `Wrote ${rel}: ${result.outline.sections.length} sections, ` +
         `${result.words.toLocaleString()} words. Tell the user it is saved and where.`,
-      detail: { path: result.path, sections: result.outline.sections.length, words: result.words },
+      detail: {
+        path: result.path,
+        sections: result.outline.sections.length,
+        words: result.words,
+        ...(result.invented.length ? { invented: result.invented } : {}),
+      },
     };
   },
 };
