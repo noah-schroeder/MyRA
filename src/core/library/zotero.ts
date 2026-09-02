@@ -350,7 +350,27 @@ const ABSTRACT_CHARS = 700;
  * the model would have no way to tell "no abstract stored" from "abstract not
  * shown", and would fill the gap.
  */
-export function formatItems(items: LibraryItem[], query: string, scope = ""): string {
+/**
+ * A link a citation can actually resolve to, or nothing.
+ *
+ * The DOI first: it is the identifier a reader of the finished document needs,
+ * and it is the one field in a Zotero record most likely to have been checked
+ * by a person. `zotero://select/...` would open the item in Zotero and is
+ * deliberately NOT used — Karen only ever opens http(s), and a marker that
+ * links to a scheme the app refuses to follow is a dead link with a hover card.
+ */
+export function linkFor(item: LibraryItem): string {
+  if (item.doi) return `https://doi.org/${item.doi.replace(/^https?:\/\/doi\.org\//i, "")}`;
+  return /^https?:\/\//i.test(item.url) ? item.url : "";
+}
+
+export function formatItems(
+  items: LibraryItem[],
+  query: string,
+  scope = "",
+  /** Citation numbers, in order, for the items that have a link. */
+  numbers: number[] = [],
+): string {
   /* Where the search looked, said in both branches. A scoped search that finds
      nothing and an unscoped one that finds nothing are different facts, and the
      model cannot tell them apart unless the empty answer says which it was. */
@@ -364,40 +384,59 @@ export function formatItems(items: LibraryItem[], query: string, scope = ""): st
         : "")
     );
   }
-  const lines = items.map((item, i) => {
+  /* The same shape web_search prints, because that shape is what the app reads
+     back to turn [n] in the model's prose into a link: a bracketed number, the
+     title, then the URL on its own indented line. A library result that printed
+     "1. Title" instead was information the citation machinery could not see, so
+     a perfectly good Zotero record could never be cited. */
+  let cited = 0;
+  const lines = items.map((item) => {
+    const link = linkFor(item);
+    const marker = link ? `[${numbers[cited++] ?? "?"}] ` : "— ";
     const head = [
-      `${i + 1}. ${item.title || "(untitled)"}`,
+      `${marker}${item.title || "(untitled)"}`,
       [item.creators, item.year].filter(Boolean).join(" · "),
       item.publication,
       item.itemType,
     ]
       .filter(Boolean)
       .join(" — ");
-    const ids = [
-      item.doi ? `DOI ${item.doi}` : "",
-      item.url,
-      `Zotero key ${item.key}`,
-    ]
-      .filter(Boolean)
-      .join(" · ");
     const abstract = item.abstract
       ? item.abstract.length > ABSTRACT_CHARS
         ? `${item.abstract.slice(0, ABSTRACT_CHARS).trimEnd()}…`
         : item.abstract
       : "(no abstract stored in Zotero for this item)";
-    return [head, ids, abstract, item.tags.length ? `Tags: ${item.tags.join(", ")}` : ""]
+    return [
+      head,
+      /* Indented under the title, which is the form the reader looks for. An
+         item with neither DOI nor URL gets no line here and no number: it can
+         still be discussed and cited by author and year, but there is nothing
+         for a marker to resolve to and a marker that resolves to nothing is
+         the one thing this app must never render. */
+      link ? `    ${link}` : "",
+      `    Zotero key ${item.key}${item.doi ? ` · DOI ${item.doi}` : ""}`,
+      `    ${abstract}`,
+      item.tags.length ? `    Tags: ${item.tags.join(", ")}` : "",
+    ]
       .filter(Boolean)
       .join("\n");
   });
 
   const withAbstract = items.filter((i) => i.abstract).length;
+  const unlinked = items.length - cited;
   return [
     `${items.length} item(s) from ${scope ? where : "the user's own Zotero library"}, ` +
       `${withAbstract} with an abstract stored.` +
       (scope ? " No other collection was searched." : ""),
     "",
     lines.join("\n\n"),
-  ].join("\n");
+    unlinked
+      ? `\n${unlinked} of these has no DOI or URL stored in Zotero and so carries no ` +
+        "citation number. Refer to those by author and year; do not give them a number."
+      : "",
+  ]
+    .filter((part, i) => part !== "" || i < 2)
+    .join("\n");
 }
 
 export class ZoteroError extends Error {

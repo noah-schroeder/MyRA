@@ -15,9 +15,10 @@
 
 import { readResearchConfig, readsLibrary } from "../../research/config.ts";
 import {
-  descendantKeys, formatItems, MAX_FANOUT,
+  descendantKeys, formatItems, linkFor, MAX_FANOUT,
   type LibraryItem, type SearchMode, type ZoteroCollection,
 } from "../../library/zotero.ts";
+import { cite } from "../../research/ledger.ts";
 import type { ToolDef } from "../registry.ts";
 
 /**
@@ -141,7 +142,13 @@ export const searchLibraryTool: ToolDef = {
       ...(Number.isFinite(rawLimit) && rawLimit >= 1 ? { limit: rawLimit } : {}),
     });
 
-    const content = formatItems(items, query, scope);
+    /* Numbered from the same ledger web_search draws on, because at the Quick
+       and Deep rungs both tools are in the schema at once and two independent
+       numberings would put two different papers behind one marker. Keyed by
+       link, so a paper the user has in Zotero AND that a web search returns
+       keeps one number across both. */
+    const links = items.map(linkFor).filter(Boolean);
+    const content = formatItems(items, query, scope, cite(links));
     return {
       content: truncated
         ? `${content}\n\nOnly the first ${MAX_FANOUT} collections of that subtree were ` +
