@@ -71,3 +71,17 @@ test("a reply with no tags at all passes straight through", () => {
   assert.equal(out.thinking, "");
   assert.equal(out.events, 2, "no frame should be buffered when no tag is possible");
 });
+
+test("the longer spelling is recognised character by character", () => {
+  // The hazard is that `<think` is a prefix of both spellings: releasing it as
+  // soon as `<think>` fails to match would print half a tag into the answer.
+  const out = run([..."<thinking>hm</thinking>done"]);
+  assert.equal(out.thinking, "hm");
+  assert.equal(out.text, "done");
+});
+
+test("a block is closed by its own tag, not the other one", () => {
+  const out = run(["<think>hm</thinking>still thinking</think>done"]);
+  assert.equal(out.thinking, "hm</thinking>still thinking");
+  assert.equal(out.text, "done");
+});
