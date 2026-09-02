@@ -15,6 +15,7 @@ import {
   isUsable, orphanedSecrets, parseModelRef, parseProviders, providerFor, providerSecret,
   qualify, urlIsLocal,
   type Provider,
+  standsDownForLocal,
 } from "../src/core/providers.ts";
 
 const provider = (over: Partial<Provider> = {}): Provider => ({
@@ -242,4 +243,20 @@ test("the privacy report gives the same answer as the rest of the app", async ()
       ["Models — Mislabelled", false],
     ],
   );
+});
+
+/* ------------------------------------------ loading a local model wins --- */
+
+test("loading a local model stands down a hosted choice, and nothing else", () => {
+  // The precedence runs the other way round -- a hosted choice beats whatever
+  // is resident -- which is right until the user goes and loads a local model,
+  // at which point the old rule kept answering from the hosted one with the bar
+  // still naming it and nothing saying why.
+  assert.equal(standsDownForLocal("p_ab12cd34::gpt-4o"), true);
+  // A bare name is the managed runtime's or the user's own endpoint. Clearing
+  // it would discard a setting the load had nothing to do with.
+  assert.equal(standsDownForLocal("Qwen3-4B-GGUF"), false);
+  assert.equal(standsDownForLocal(""), false);
+  // A model id with one colon in it is a name, not a qualified reference.
+  assert.equal(standsDownForLocal("library/model:7b"), false);
 });

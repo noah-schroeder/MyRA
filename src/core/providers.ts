@@ -24,6 +24,8 @@ import { isLocalHost } from "./destinations.ts";
 
 export type ProviderKind = "local" | "external";
 
+import { parsePrices, type ModelPrice } from "./pricing.ts";
+
 export interface Provider {
   /** Stable across renames; what a chosen model is qualified by. */
   id: string;
@@ -42,6 +44,14 @@ export interface Provider {
    * that fails outright is much worse than a chat with no reasoning shown.
    */
   askReasoning?: boolean;
+  /**
+   * What each model costs, as this endpoint reported it when last asked.
+   *
+   * A cache of somebody else's numbers, not a price list of Karen's own: it is
+   * refreshed whenever the models are fetched, and a model that is not in here
+   * is shown with no price rather than with a guess.
+   */
+  prices?: Record<string, ModelPrice>;
 }
 
 /**
@@ -193,6 +203,7 @@ export function parseProvider(raw: unknown): Provider | undefined {
     enabled: row["enabled"] !== false,
     // Absent means off, and only an explicit true turns it on.
     ...(row["askReasoning"] === true ? { askReasoning: true } : {}),
+    ...(row["prices"] ? { prices: parsePrices(row["prices"]) } : {}),
   };
 }
 
@@ -208,6 +219,22 @@ export function parseProviders(raw: unknown): Provider[] {
     out.push(provider);
   }
   return out;
+}
+
+/**
+ * Whether loading a local model should stand down the stored choice.
+ *
+ * True only for a hosted choice. A bare model name is either the managed
+ * runtime's or someone's own endpoint, and clearing it would throw away a
+ * setting the load had nothing to do with.
+ *
+ * The rule exists because the precedence runs the other way: a hosted choice
+ * beats whatever is resident, which is right when the user picked the hosted
+ * model most recently and wrong the moment they go and load a local one. That
+ * act is the instruction, so it wins.
+ */
+export function standsDownForLocal(storedModel: string): boolean {
+  return Boolean(parseModelRef(storedModel).providerId);
 }
 
 /** Whether this provider can actually be sent a request. */

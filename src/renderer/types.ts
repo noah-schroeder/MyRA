@@ -1,5 +1,6 @@
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
 import type { Provider } from "../core/providers.ts";
+import type { ModelPrice } from "../core/pricing.ts";
 import type { ApiState } from "../main/api/manager.ts";
 
 /* Re-exported so the renderer imports it from one place, the way every
@@ -141,6 +142,7 @@ export interface Settings {
  * chances to disagree about the only thing this app promises.
  */
 export type { Provider, ProviderKind } from "../core/providers.ts";
+export type { ModelPrice } from "../core/pricing.ts";
 
 export interface SessionSummary {
   id: string;
@@ -363,11 +365,15 @@ export interface KarenApi {
   copy(text: string): Promise<void>;
   providerModels(opts: { baseUrl: string; id?: string; apiKey?: string }): Promise<{
     ok: boolean; models?: string[]; error?: string;
+    /** Per-model cost, when the endpoint's listing carried it. */
+    prices?: Record<string, ModelPrice>;
   }>;
   /** Ask a provider whether it sends reasoning. Field names back, never text. */
   providerReasoning(opts: { baseUrl: string; id?: string; model: string; apiKey?: string }): Promise<{
     ok: boolean; message?: string; error?: string; asking?: boolean;
   }>;
+  /** Settings changed by the main process itself. Returns an unsubscribe. */
+  onSettings(cb: (settings: Settings) => void): () => void;
   setProviderKey(id: string, value: string): Promise<unknown>;
   /** Which providers have a key stored. Never the keys themselves. */
   providerKeysPresent(): Promise<Record<string, boolean>>;

@@ -43,6 +43,14 @@ export function installRuntimeIpc(
   send: (channel: string, payload?: unknown) => void,
   _hfToken: () => Promise<string | undefined>,
   _window: () => BrowserWindow | undefined,
+  /**
+   * Called when a local model has been loaded on purpose.
+   *
+   * The runtime knows nothing about which model the conversation is set to, and
+   * should not: that lives in settings, and this file is a pass-through to
+   * Lemonade. So it says what happened and lets the caller decide what it means.
+   */
+  onModelLoaded: () => Promise<void> = async () => {},
 ): void {
   const state = (): unknown => ({
     config: runtime.config,
@@ -155,6 +163,7 @@ export function installRuntimeIpc(
   ipcMain.handle("karen:lemonade-load", async (_e, name: string) => {
     try {
       await runtime.loadModel(String(name));
+      await onModelLoaded();
       return { ok: true, loaded: runtime.lemonade.status.health?.modelLoaded };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
