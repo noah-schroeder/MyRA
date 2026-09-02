@@ -83,9 +83,14 @@ export function App() {
 
   useEffect(() => {
     void window.karen.getSettings().then(setSettings);
+    /* And whenever the main process changes them itself. Loading a local model
+       stands down a hosted choice, and without this the bar goes on naming a
+       model the next message will not be sent to. */
+    const stop = window.karen.onSettings(setSettings);
     // Enumerating once at startup is what gives the main process a device list
     // to validate meeting tracks against; only the renderer can produce one.
     void enumerate().catch(() => undefined);
+    return stop;
   }, []);
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);

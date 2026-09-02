@@ -45,6 +45,9 @@ const api = {
 
   /* ---- settings ---- */
   getSettings: () => ipcRenderer.invoke("karen:get-settings"),
+  /* Settings the main process changed on its own account -- loading a local
+     model stands down a hosted choice, and the bar has to hear about it. */
+  onSettings: (cb: (settings: unknown) => void) => on("karen:settings", cb),
   updateSettings: (patch: unknown) => ipcRenderer.invoke("karen:update-settings", patch),
   setSecret: (name: string, value: string) => ipcRenderer.invoke("karen:set-secret", name, value),
   secretsBackend: () => ipcRenderer.invoke("karen:secrets-backend"),

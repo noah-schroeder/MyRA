@@ -31,8 +31,10 @@ import { collectionTree } from "../core/library/zotero.ts";
 import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
 import {
   isExternal, isUsable, orphanedSecrets, parseModelRef, providerFor, providerSecret,
+  standsDownForLocal,
 } from "../core/providers.ts";
 import { samplingForRequest } from "../core/llm/sampling.ts";
+import { pricesFrom } from "../core/pricing.ts";
 import { ASK_FOR_REASONING, describeProbe, probeReasoning } from "../core/llm/reasoningProbe.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
@@ -785,7 +787,14 @@ function installIpc(): void {
         }
         const body = (await res.json()) as { data?: { id?: string }[] };
         const models = (body.data ?? []).map((m) => m.id).filter(Boolean) as string[];
-        return { ok: true, models: [...new Set(models)].sort((a, b) => a.localeCompare(b)) };
+        return {
+          ok: true,
+          models: [...new Set(models)].sort((a, b) => a.localeCompare(b)),
+          /* Whatever the listing said about cost, which for most endpoints is
+             nothing. Read here rather than remembered anywhere, so a price can
+             only ever be this provider's own current answer. */
+          prices: pricesFrom(body.data),
+        };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
@@ -1292,7 +1301,25 @@ async function main(): Promise<void> {
   setDocumentWatcher((doc) => send("karen:document", doc));
 
   await runtime.load();
-  installRuntimeIpc(runtime, send, () => vault.get("hfToken"), () => window_);
+  /*
+   * Loading a local model is a decision about where the conversation goes.
+   *
+   * A provider-qualified choice beats the loaded local model in resolveLlm, and
+   * has to: picking a hosted model must not be quietly overridden by whatever
+   * happens to be resident. But that rule read the other direction too --
+   * someone who had used a hosted model, then went to Models and loaded a local
+   * one, kept talking to the hosted one, with the bar still saying so and
+   * nothing explaining why. Loading a model IS the instruction to use it, so
+   * the hosted choice is stood down at that moment rather than silently
+   * outranking a thing the user just did.
+   */
+  installRuntimeIpc(runtime, send, () => vault.get("hfToken"), () => window_, async () => {
+    if (!standsDownForLocal(config.current.llm.model ?? "")) return;
+    await config.update({ llm: { ...config.current.llm, model: "" } });
+    // The bar reads this from settings; without the nudge it keeps the old name
+    // until something else happens to refresh it.
+    send("karen:settings", config.current);
+  });
 
   await api.load();
   installApiIpc(api, send);
@@ -1419,7 +1446,7 @@ async function main(): Promise<void> {
     if (!llm.baseUrl.trim()) {
       throw new Error(
         "No model is loaded. Open Models and load one, or set your own endpoint in " +
-          "Settings → Endpoints.",
+          "Settings → Providers.",
       );
     }
     const key = await vault.get("llmKey");
