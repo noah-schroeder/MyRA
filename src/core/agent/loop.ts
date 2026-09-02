@@ -30,7 +30,7 @@ import {
 export const DEFAULT_MAX_STEPS = 12;
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "compacted";
+  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "compacted" | "notice";
   /** For text: the delta. For tool events: a human-readable note. */
   text?: string;
   /**
@@ -164,6 +164,9 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
       : [...opts.messages];
   let contextTokens = opts.contextUsed ?? 0;
   let compacted: { replaced: number; summary: string } | undefined;
+  /* Said once a turn, not once a step: a model that calls three tools would
+     otherwise repeat the same explanation three times over. */
+  let saidHidden = false;
   /* Constant for the turn, and re-serialising 3 kB of schemas on every step of
      every loop would be for nothing. */
   const fixedTokens = estimateFixedTokens(opts.registry.schemas());
@@ -246,6 +249,27 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
         ? { onDelta: (d: string, kind: DeltaKind) => opts.onEvent!({ type: "text", text: d, kind }) }
         : {}),
     });
+
+    /*
+     * A reasoning model whose reasoning never appears.
+     *
+     * Some hosted providers reason and then withhold the chain, reporting only
+     * the token count. On screen that is indistinguishable from Karen having
+     * dropped it -- and the first thing anyone concludes is that the app is
+     * broken. So the count is reported as what it is: work that happened
+     * somewhere else and was not sent here.
+     */
+    if (reply.hiddenReasoning && !saidHidden) {
+      saidHidden = true;
+      const n = reply.hiddenReasoning;
+      opts.onEvent?.({
+        type: "notice",
+        text:
+          `The model spent ${n.toLocaleString()} token${n === 1 ? "" : "s"} reasoning, and this ` +
+          `provider does not send the reasoning itself — so there is nothing for Karen to show. ` +
+          `That is the provider's choice, not a setting here.`,
+      });
+    }
 
     usage.input += reply.usage.input;
     usage.output += reply.usage.output;

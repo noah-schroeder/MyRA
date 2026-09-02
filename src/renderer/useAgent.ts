@@ -135,7 +135,13 @@ export function useAgent() {
 
         /* Older messages were summarised to make room. Said out loud, because
            a model that silently forgot the first half of a conversation is
-           indistinguishable from one that is broken. */
+           indistinguishable from one that is broken.
+
+           "notice" is the same idea for anything else the app needs to say in
+           the transcript rather than about it -- a provider that withholds its
+           reasoning, for one. Same shape, same place, so it reads as part of
+           the conversation and not as an error. */
+        case "notice":
         case "compacted":
           setItems((prev) => [
             ...prev,

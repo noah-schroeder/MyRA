@@ -162,6 +162,16 @@ export interface ChatResult {
    */
   reasoning?: string;
   usage: ChatUsage;
+  /**
+   * Reasoning tokens the server charged for but never sent the text of.
+   *
+   * Several hosted APIs reason and then withhold the chain, reporting only a
+   * count in `completion_tokens_details.reasoning_tokens`. That is the whole
+   * explanation for a reasoning model whose reasoning never appears, and it is
+   * worth saying out loud: the alternative is a user who cannot tell a provider
+   * that hides its thinking from an app that has dropped it.
+   */
+  hiddenReasoning?: number;
   /** Tools the model asked for. Empty unless tools were offered. */
   toolCalls: ToolCall[];
   /** Why the model stopped, when the server says. */
@@ -169,6 +179,21 @@ export interface ChatResult {
 }
 
 const EMPTY_USAGE: ChatUsage = { input: 0, output: 0, total: 0 };
+
+/**
+ * Reasoning tokens, when the server itemises them.
+ *
+ * OpenAI's field, and copied by most gateways that follow its shape. It is
+ * counted inside `completion_tokens` already, so it is read separately rather
+ * than added to anything -- the meter must keep reporting what the window
+ * holds.
+ */
+function reasoningTokens(raw: unknown): number {
+  const details = (raw as { completion_tokens_details?: { reasoning_tokens?: unknown } } | undefined)
+    ?.completion_tokens_details;
+  const n = details?.reasoning_tokens;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 function usageFrom(raw: unknown): ChatUsage {
   const u = raw as
@@ -358,20 +383,71 @@ async function readWhole(res: Response): Promise<ChatResult> {
   split.push(raw);
   split.flush();
 
-  const stated = str(choice?.message?.reasoning_content) || str(choice?.message?.reasoning);
+  const stated = statedReasoning(choice?.message);
   const reasoning = stated || inline;
+  const hidden = reasoning ? 0 : reasoningTokens(body?.usage);
   return {
     text,
     ...(reasoning ? { reasoning } : {}),
+    ...(hidden ? { hiddenReasoning: hidden } : {}),
     usage: usageFrom(body?.usage),
     toolCalls: choice?.message?.tool_calls ?? [],
     ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}),
   };
 }
 
-/** A field that should be a string, from a server that may send anything. */
-function str(v: unknown): string {
-  return typeof v === "string" ? v : "";
+/**
+ * The names a server may hang its reasoning on.
+ *
+ * `reasoning_content` is llama.cpp's and DeepSeek's; `reasoning` is
+ * OpenRouter's; `reasoning_details` is OpenRouter's newer structured form;
+ * `thinking` and `thinking_blocks` are what gateways emit when they are
+ * relaying an Anthropic-shaped reply through an OpenAI-shaped API.
+ *
+ * All five are read because which one arrives is a property of somebody else's
+ * server, not a choice Karen gets to make -- and reading one only meant that a
+ * provider using any of the others looked exactly like a provider that does no
+ * reasoning at all.
+ */
+const REASONING_FIELDS = [
+  "reasoning_content",
+  "reasoning",
+  "reasoning_details",
+  "thinking",
+  "thinking_blocks",
+] as const;
+
+/** Where the text sits inside one structured reasoning part. */
+const REASONING_PART_FIELDS = ["text", "thinking", "reasoning", "content", "summary"] as const;
+
+/**
+ * Pull the reasoning text out of a delta or a message, whatever shape it took.
+ *
+ * Strings are taken as they are; a part or a list of parts is walked one level
+ * for a string field, which is as deep as any of these formats nest. Nothing is
+ * invented: a shape with no string in it yields nothing, and the caller then
+ * has the honest answer that no reasoning arrived.
+ */
+export function statedReasoning(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const record = node as Record<string, unknown>;
+  for (const field of REASONING_FIELDS) {
+    const found = textOf(record[field]);
+    if (found) return found;
+  }
+  return "";
+}
+
+function textOf(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(textOf).join("");
+  if (value && typeof value === "object") {
+    const part = value as Record<string, unknown>;
+    for (const field of REASONING_PART_FIELDS) {
+      if (typeof part[field] === "string") return part[field];
+    }
+  }
+  return "";
 }
 
 /**
@@ -394,6 +470,7 @@ async function readStream(
   let text = "";
   let reasoning = "";
   let usage = EMPTY_USAGE;
+  let hidden = 0;
   /* Deltas go through the splitter rather than straight out, so a model that
      writes its thinking inline is treated the same as one that puts it in its
      own field -- and the tag never reaches the transcript. */
@@ -449,12 +526,15 @@ async function readStream(
           continue;
         }
         if (parsed.error?.message) throw new LlmError(parsed.error.message);
-        if (parsed.usage) usage = usageFrom(parsed.usage);
+        if (parsed.usage) {
+          usage = usageFrom(parsed.usage);
+          hidden = reasoningTokens(parsed.usage);
+        }
         const choice = parsed.choices?.[0];
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         // A server that states the reasoning separately needs no splitting:
         // it is already labelled, and it never appears in `content`.
-        const thought = str(choice?.delta?.reasoning_content) || str(choice?.delta?.reasoning);
+        const thought = statedReasoning(choice?.delta);
         if (thought) {
           reasoning += thought;
           onDelta(thought, "thinking");
@@ -485,6 +565,7 @@ async function readStream(
   return {
     text,
     ...(reasoning ? { reasoning } : {}),
+    ...(reasoning ? {} : hidden ? { hiddenReasoning: hidden } : {}),
     usage,
     toolCalls,
     ...(finishReason ? { finishReason } : {}),
