@@ -194,7 +194,8 @@ function CollectionPicker({
     loading: boolean;
     collections: CollectionNode[];
     error: string;
-  }>({ loading: true, collections: [], error: "" });
+    via: "api" | "database";
+  }>({ loading: true, collections: [], error: "", via: "api" });
 
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true }));
@@ -203,6 +204,7 @@ function CollectionPicker({
         loading: false,
         collections: res.collections ?? [],
         error: res.ok ? "" : (res.error ?? "Zotero could not be reached."),
+        via: res.via ?? "api",
       });
     });
   }, []);
@@ -270,6 +272,18 @@ function CollectionPicker({
           title="Zotero's own search does not look inside subcollections. Karen's does, or choosing a collection you file everything below would come back empty."
         >
           + {below} below it
+        </span>
+      ) : null}
+      {/* Said where the searching is chosen, because it changes what a search
+          can find. Not an error -- this is the library, working -- but the two
+          routes do not look in the same places, and only this one misses the
+          text inside PDFs. */}
+      {state.via === "database" ? (
+        <span
+          className="collection-note reading-file"
+          title="Zotero's local API did not answer — a Flatpak or Snap install keeps that port inside its own sandbox. Karen is reading a read-only copy of zotero.sqlite instead. Titles, abstracts, authors, tags and notes are searched; the text inside PDFs is not."
+        >
+          reading the library file
         </span>
       ) : null}
     </div>

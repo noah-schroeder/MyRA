@@ -364,10 +364,20 @@ export interface KarenApi {
   providerModels(opts: { baseUrl: string; id?: string; apiKey?: string }): Promise<{
     ok: boolean; models?: string[]; error?: string;
   }>;
+  /** Ask a provider whether it sends reasoning. Field names back, never text. */
+  providerReasoning(opts: { baseUrl: string; id?: string; model: string; apiKey?: string }): Promise<{
+    ok: boolean; message?: string; error?: string; asking?: boolean;
+  }>;
   setProviderKey(id: string, value: string): Promise<unknown>;
   /** Which providers have a key stored. Never the keys themselves. */
   providerKeysPresent(): Promise<Record<string, boolean>>;
-  zoteroCollections(): Promise<{ ok: boolean; collections?: CollectionNode[]; error?: string }>;
+  zoteroCollections(): Promise<{
+    ok: boolean;
+    collections?: CollectionNode[];
+    error?: string;
+    /** "database" means Zotero's API was unreachable and the file was read. */
+    via?: "api" | "database";
+  }>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
   engines(): Promise<{ pandoc: boolean; pandocPath?: string; pandocVersion?: string; pdftotext: boolean }>;
