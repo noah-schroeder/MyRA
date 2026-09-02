@@ -4132,7 +4132,25 @@ p.warning { margin: 0; font-size: 12.5px; }
 .provider.off { opacity: 0.62; }
 .provider-head { display: flex; align-items: center; gap: 10px; }
 .provider-label { flex: 1; font-weight: 560; }
-.provider-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); }
+
+/*
+ * Every checkbox and radio row in this card is a ROW.
+ *
+ * `.pane label` sets `flex-direction: column` for the stacked label-over-input
+ * fields that make up the rest of Settings, and it wins on later-in-file order
+ * against anything of equal specificity that only sets `display: flex`. So
+ * every tick here -- Enabled, local/external, and all hundred and seventy
+ * models -- rendered with its box centred ABOVE its own text. Stated once,
+ * here, rather than left for each new control to rediscover.
+ */
+.provider label.provider-toggle,
+.provider .provider-kind label,
+.provider .provider-models label,
+.provider .check {
+  flex-direction: row;
+  align-items: center;
+}
+.provider-toggle { display: flex; gap: 5px; font-size: 12px; color: var(--text-dim); }
 .btn-sm.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
 
 .provider-kind {
@@ -4141,7 +4159,7 @@ p.warning { margin: 0; font-size: 12.5px; }
   font-size: 12.5px; color: var(--text-dim);
 }
 .provider-kind legend { padding: 0 0 4px; color: var(--text-faint); font-size: 11.5px; }
-.provider-kind label { display: flex; align-items: center; gap: 5px; }
+.provider-kind label { display: flex; gap: 5px; }
 
 .provider-note { font-size: 11.5px; color: var(--text-faint); margin: 0; text-wrap: pretty; }
 .provider-note.local { color: var(--green); }
@@ -4153,17 +4171,42 @@ p.warning { margin: 0; font-size: 12.5px; }
   padding-left: 9px;
 }
 
-.provider-actions { display: flex; align-items: center; gap: 10px; }
+.provider-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .provider-count { font-size: 11.5px; color: var(--text-faint); }
+
+/* An endpoint's catalogue: a filter, a tally, bulk actions, then the list. */
+.models { display: flex; flex-direction: column; gap: 8px; }
+.models-head { display: flex; align-items: center; gap: 10px; }
+.models-filter { flex: 1; min-width: 0; }
+.models-tally {
+  font-size: 11.5px; color: var(--text-faint);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.models-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.models-bulk .btn-sm:disabled { opacity: 0.45; cursor: default; }
+.models-only { font-size: 11.5px; color: var(--text-faint); gap: 6px; }
+
 .provider-models {
-  list-style: none; margin: 0; padding: 8px 10px;
-  max-height: 220px; overflow-y: auto;
+  list-style: none; margin: 0; padding: 4px;
+  max-height: 268px; overflow-y: auto; overscroll-behavior: contain;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg-inset);
   font-size: 12.5px;
 }
-.provider-models label { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; }
-.provider-models .gone { color: var(--amber); font-style: normal; font-size: 11px; }
+.provider-models label {
+  display: flex; gap: 9px;
+  padding: 5px 8px; border-radius: var(--radius-sm);
+  color: var(--text-dim); cursor: pointer;
+}
+.provider-models label:hover { background: var(--bg-float); color: var(--text); }
+/* Ticked rows carry a wash rather than a tick alone, so what you have chosen
+   is visible while scrolling a list this long rather than only on the box. */
+.provider-models li.on > label { background: var(--accent-wash); color: var(--text); }
+.provider-models .model-id { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.provider-models .gone {
+  margin-left: auto; flex: none;
+  color: var(--amber); font-style: normal; font-size: 11px; white-space: nowrap;
+}
 
 /* ---------- local / external in the picker ---------- */
 
