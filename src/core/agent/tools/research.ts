@@ -19,7 +19,7 @@ import { fetchPage } from "../../research/fetch.ts";
 import { isScholarlyCategory, providersFor, search, supportsTimeRange } from "../../research/providers.ts";
 import { formatHits } from "../../research/types.ts";
 import { asUntrusted } from "../../research/html.ts";
-import { DEFAULT_PAGE_CHARS, searches } from "../../research/config.ts";
+import { DEFAULT_PAGE_CHARS, effectiveCategory, exactly, searches } from "../../research/config.ts";
 import type { ResearchMode } from "../../research/config.ts";
 import type { ToolDef } from "../registry.ts";
 
@@ -52,7 +52,10 @@ export const webSearchTool: ToolDef = {
     "Scholarly categories query OpenAlex and arXiv directly. " +
     "Returns snippets only — use fetch_page to read a result.",
   risk: "safe",
-  enabled: () => mode() === "web",
+  /* Exactly this rung, not this rung and up: "Deep" swaps this tool for the
+     pipeline rather than keeping both, so that asking for a report cannot be
+     answered with a single lookup. See `exactly` on why that is spelled out. */
+  enabled: () => exactly(mode(), "web"),
   parameters: {
     type: "object",
     properties: {
@@ -73,9 +76,16 @@ export const webSearchTool: ToolDef = {
   async handler(params, ctx) {
     const query = String(params["query"] ?? "");
     const cfg = readResearchConfig();
-    const category = cfg.mode !== "off" && cfg.category
-      ? cfg.category
-      : String(params["category"] ?? "general");
+    /* The GUI's choice wins over the model's, which is what effectiveCategory
+       is for. This used to be the same rule written out by hand as
+       `cfg.mode !== "off"` -- true at every rung above the bottom one, which
+       happened to be right only because this tool exists at exactly one rung.
+       That is the shape of the bug the ladder exists to prevent, and there is
+       no reason for a second copy of the rule to be sitting here at all. */
+    const category = effectiveCategory(
+      params["category"] === undefined ? undefined : String(params["category"]),
+      "general",
+    );
     // Sending a filter the backend cannot honour is how v1 produced eight
     // empty answers and no error. Drop it, and say that it was dropped.
     const wanted = String(params["time_range"] ?? cfg.timeRange ?? "");
@@ -223,7 +233,7 @@ export const deepResearchTool: ToolDef = {
     "general web sources. Takes minutes, not seconds. Use it when the user asked for a " +
     "report or a review, not for a single lookup.",
   risk: "safe",
-  enabled: () => mode() === "deep" && generalSweepPossible(),
+  enabled: () => exactly(mode(), "deep") && generalSweepPossible(),
   parameters: {
     type: "object",
     properties: {
@@ -244,7 +254,7 @@ export const academicResearchTool: ToolDef = {
     "Deep research over the scholarly literature: searches OpenAlex and arXiv, then " +
     "resolves citation counts, venues and open-access full text for what it finds. " +
     "Takes minutes, not seconds. This is the right tool for any academic question.",
-  enabled: () => mode() === "deep",
+  enabled: () => exactly(mode(), "deep"),
   async handler(params, ctx) {
     return await deepRun(String(params["question"] ?? ""), "science", ctx);
   },

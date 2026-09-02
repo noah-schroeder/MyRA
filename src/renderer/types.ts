@@ -144,6 +144,30 @@ export interface SessionSummary {
  */
 export type ResearchMode = "off" | "assistant" | "library" | "web" | "deep";
 
+/** IN ORDER, and for the same reason as in core: `reaches` indexes it. */
+export const RESEARCH_MODES: readonly ResearchMode[] = [
+  "off", "assistant", "library", "web", "deep",
+];
+
+export function reaches(mode: ResearchMode, atLeast: ResearchMode): boolean {
+  return RESEARCH_MODES.indexOf(mode) >= RESEARCH_MODES.indexOf(atLeast);
+}
+
+/**
+ * Whether the Zotero library is readable -- and so whether the collection scope
+ * is in force and has to be visible.
+ *
+ * A rank, not `mode === "library"`. The scope applies wherever search_library
+ * is in the schema, which is the library rung AND both searching ones; a picker
+ * that only appeared at "library" would leave someone who scoped to one
+ * collection and then switched to Quick with a live scope, no control, and no
+ * way to know. That is the same "reachable, and nothing on screen says so"
+ * failure the library rung was added to fix.
+ */
+export function readsLibrary(mode: ResearchMode): boolean {
+  return reaches(mode, "library");
+}
+
 export interface ResearchConfig {
   mode: ResearchMode;
   category: string;

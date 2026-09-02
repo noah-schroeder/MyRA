@@ -111,6 +111,25 @@ export function reaches(mode: ResearchMode, atLeast: ResearchMode): boolean {
 }
 
 /**
+ * Is this EXACTLY that rung -- deliberately, not by accident?
+ *
+ * Almost every gate wants `reaches`. Two do not: the searching rungs are
+ * exclusive rather than cumulative, because narrowing the agent to the one
+ * search tool that matches is the point of having two of them. "Quick" must not
+ * be able to start a ten-minute report, and "Deep" must not be able to quietly
+ * do a shallow lookup instead of the one that was asked for.
+ *
+ * That is a real requirement, and `===` expresses it correctly. It is also
+ * indistinguishable, at a glance, from the `===` somebody writes without having
+ * thought about rungs at all -- which is the bug this ladder exists to prevent.
+ * So the deliberate one says so, and a bare mode literal anywhere else in the
+ * codebase is now a thing to look at rather than a thing to read past.
+ */
+export function exactly(mode: ResearchMode, rung: ResearchMode): boolean {
+  return mode === rung;
+}
+
+/**
  * Whether this mode may reach the NETWORK.
  *
  * Deliberately not "may search anything": the library rung searches, and it
