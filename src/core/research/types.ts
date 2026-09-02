@@ -90,12 +90,16 @@ export function dedupe(hits: SearchHit[]): SearchHit[] {
   return out;
 }
 
-export function formatHits(hits: SearchHit[], offset = 0): string {
+export function formatHits(hits: SearchHit[], numbers?: number[]): string {
+  /* The numbers come from the ledger, not from this list's own order. They
+     used to be `i + 1`, which restarted at one on every search and made the
+     second search silently reassign the first one's markers. */
   return hits
     .map((h, i) => {
       const when = h.publishedDate ? ` (${String(h.publishedDate).slice(0, 10)})` : "";
       const via = h.engine ? ` [${h.engine}]` : "";
-      return `[${offset + i + 1}] ${h.title}${when}${via}\n    ${h.url}\n    ${(h.content ?? "").trim()}`;
+      const n = numbers?.[i] ?? i + 1;
+      return `[${n}] ${h.title}${when}${via}\n    ${h.url}\n    ${(h.content ?? "").trim()}`;
     })
     .join("\n\n");
 }

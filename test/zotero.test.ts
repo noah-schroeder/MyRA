@@ -16,10 +16,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { searchLibraryTool, setLibraryHost } from "../src/core/agent/tools/library.ts";
+import { harvestSources } from "../src/renderer/restore.ts";
 
 import {
-  collectionTree, descendantKeys, describeFailure, formatCreators, formatItems, MAX_FANOUT,
-  parseCollections, parseItems, searchPath, yearOf, ZOTERO_PORT,
+  collectionTree, descendantKeys, describeFailure, formatCreators, formatItems, linkFor,
+  MAX_FANOUT, parseCollections, parseItems, searchPath, yearOf, ZOTERO_PORT,
 } from "../src/core/library/zotero.ts";
 
 /* ------------------------------------------------------------ the query --- */
@@ -394,4 +395,55 @@ test("a collection Zotero no longer has is an error, not a silent whole-library 
   );
   assert.equal(asked, undefined, "nothing should have been searched");
   assert.match(String(error), /no longer in the library/);
+});
+
+/* --------------------------------------------------------- citability --- */
+
+test("a library result is read back by the same harvester as a web result", () => {
+  /* The whole point of item 1. Library results printed "1. Title", which the
+     app's citation machinery cannot see -- so a perfectly good Zotero record
+     with a DOI could never become a [1] the reader can click. This asserts
+     against the renderer's own harvester, not a copy of its regex. */
+  const items = parseItems([ITEM]);
+  const text = formatItems(items, "memory", "", [4]);
+  const found = harvestSources(text);
+  assert.equal(found.length, 1);
+  assert.equal(found[0]!.n, 4, "the ledger's number, not the position in the list");
+  assert.equal(found[0]!.url, "https://doi.org/10.1177/1745691616635612");
+  assert.match(found[0]!.title, /Working memory training/);
+});
+
+test("an item with no DOI and no URL gets no number rather than a dead marker", () => {
+  /* A marker that resolves to nothing is the one thing this app must never
+     render, so the item is still listed and still discussable -- by author and
+     year -- and the reply says so plainly instead of leaving it to be guessed. */
+  const bare = parseItems([
+    { ...ITEM, data: { ...ITEM.data, key: "NOLINK01", DOI: "", url: "", title: "A book with no identifiers" } },
+  ]);
+  const text = formatItems(bare, "memory", "", []);
+  assert.deepEqual(harvestSources(text), []);
+  assert.doesNotMatch(text, /\[\d+\]/);
+  assert.match(text, /no DOI or URL stored in Zotero/);
+  assert.match(text, /by author and year/);
+});
+
+test("a mixed page numbers only the items a marker could resolve", () => {
+  const items = parseItems([
+    { ...ITEM, data: { ...ITEM.data, key: "HASDOI01" } },
+    { ...ITEM, data: { ...ITEM.data, key: "NOLINK01", DOI: "", url: "", title: "Untraceable" } },
+    { ...ITEM, data: { ...ITEM.data, key: "HASURL01", DOI: "", url: "https://example.org/p", title: "By URL" } },
+  ]);
+  const text = formatItems(items, "memory", "", [7, 8]);
+  assert.deepEqual(harvestSources(text).map((s) => [s.n, s.url]), [
+    [7, "https://doi.org/10.1177/1745691616635612"],
+    [8, "https://example.org/p"],
+  ]);
+  assert.match(text, /1 of these has no DOI or URL/);
+});
+
+test("a DOI already written as a URL is not doubled up", () => {
+  const [item] = parseItems([
+    { ...ITEM, data: { ...ITEM.data, DOI: "https://doi.org/10.1234/abc" } },
+  ]);
+  assert.equal(linkFor(item!), "https://doi.org/10.1234/abc");
 });

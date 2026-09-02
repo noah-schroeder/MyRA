@@ -18,6 +18,7 @@ import { runPipeline, type PipelineUi } from "../../research/pipeline.ts";
 import { fetchPage } from "../../research/fetch.ts";
 import { isScholarlyCategory, providersFor, search, supportsTimeRange } from "../../research/providers.ts";
 import { formatHits } from "../../research/types.ts";
+import { cite, citedSoFar, reserve, shiftCitations } from "../../research/ledger.ts";
 import { asUntrusted } from "../../research/html.ts";
 import { DEFAULT_PAGE_CHARS, effectiveCategory, exactly, searches } from "../../research/config.ts";
 import type { ResearchMode } from "../../research/config.ts";
@@ -109,7 +110,7 @@ export const webSearchTool: ToolDef = {
     const note = notes.length ? `\n\n(${notes.join(" ")})` : "";
     return {
       content: hits.length
-        ? `${formatHits(hits)}${note}`
+        ? `${formatHits(hits, cite(hits.map((h) => h.url)))}${note}`
         : `No results for ${JSON.stringify(query)} in ${category}.${note}`,
       detail: { hits, category, timeRange, failures },
     };
@@ -205,8 +206,16 @@ async function deepRun(
         host?.onProgress?.(note);
       },
     });
+    /* A deep run numbers its report and bibliography together from [1]. Landing
+       that in a conversation that has already cited things would put every one
+       of its markers on somebody else's paper, so the whole document is moved
+       clear in one piece and those numbers are then spent. Shifting both halves
+       by the same amount is what keeps it internally consistent. */
+    const by = citedSoFar();
+    const sources = Array.isArray(result.sources) ? result.sources.length : 0;
+    reserve(sources);
     return {
-      content: `${result.report}\n\n${result.bibliography}`,
+      content: shiftCitations(`${result.report}\n\n${result.bibliography}`, by),
       detail: { runId: run.id, dir: run.dir, sources: result.sources, funnel: result.funnel },
     };
   }

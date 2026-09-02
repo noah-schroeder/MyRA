@@ -27,6 +27,7 @@ import {
 import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
 import { listZoteroCollections, searchZotero } from "./runtime/zoteroClient.ts";
 import { collectionTree } from "../core/library/zotero.ts";
+import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
@@ -426,9 +427,20 @@ function systemPrompt(): string {
               "You cannot reach the web in this conversation, but you CAN search the user's own",
               "Zotero library with search_library — their collected papers, on this machine. Use",
               "it whenever the question is about the literature: it is the only source you have.",
-              "Cite what it returns using the authors, year and DOI it gives you, and never a",
-              "reference it did not. If the library holds nothing on the question, say so rather",
-              "than answering from memory as though it did.",
+              "If the library holds nothing on the question, say so rather than answering from",
+              "memory as though it did.",
+              "",
+              /* The same rule the searching rungs get, said again here because
+                 the shape of a library result is different enough that a model
+                 will otherwise fall back to author-year prose for everything --
+                 including the items that DO carry a number and would have
+                 rendered as working links. */
+              "Library results are cited exactly like search results: each one that carries a",
+              "[n] gets that marker at the end of every sentence it supports, using the number",
+              "printed with it. Some items have no DOI or URL stored and so carry no number —",
+              "refer to those by author and year in the prose, and never assign them one. Do not",
+              "renumber anything, and never write a marker for a paper the library did not",
+              "return.",
             ]
           : [
               "Searching is switched off for this conversation and you have no tool that can reach",
@@ -606,6 +618,10 @@ function installIpc(): void {
   ipcMain.handle("karen:new-session", async () => {
     if (session_ && session_.messages_.length) await saveSession(session_).catch(() => {});
     session_ = undefined;
+    // A fresh conversation starts at [1] again. Nothing on screen refers to the
+    // old numbers any more, and carrying them over would start every thread at
+    // a different, arbitrary place.
+    resetCitations();
     return currentSession().id;
   });
   ipcMain.handle("karen:list-sessions", () => listSessions());
@@ -613,6 +629,14 @@ function installIpc(): void {
     if (session_ && session_.messages_.length) await saveSession(session_).catch(() => {});
     const loaded = await loadSession(String(id));
     if (loaded) session_ = loaded;
+    /* Above whatever this thread already printed, not from one: the renderer
+       rebuilds its source table from the stored tool output, so numbers on
+       screen are live again the moment it opens. */
+    resumeCitations(
+      (loaded?.messages_ ?? [])
+        .filter((m) => m.role === "tool")
+        .map((m) => String(m.content ?? "")),
+    );
     return loaded?.messages_ ?? [];
   });
   ipcMain.handle("karen:delete-session", async (_e, id: string) => {
