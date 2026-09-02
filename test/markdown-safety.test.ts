@@ -89,3 +89,57 @@ test("inline HTML stays a token to be printed, never an element to be run", () =
     assert.equal(hrefs(markdown).length, 0, `${markdown} must not yield a link token`);
   }
 });
+
+/*
+ * Mathematics is the one place this app lets HTML through.
+ *
+ * Every other node in a rendered answer is a React element built by
+ * Markdown.tsx, precisely so nothing the model wrote can become markup. A
+ * rendered equation is markup by nature -- hundreds of nested spans -- so the
+ * rule narrows rather than disappears: the HTML comes from KaTeX, from a string
+ * KaTeX itself parsed, with `trust` off. These tests are what "trust off"
+ * means in practice, run through the very options the component uses.
+ */
+
+import katex from "katex";
+import { KATEX_OPTIONS } from "../src/renderer/components/math.ts";
+
+const HOSTILE_TEX = [
+  String.raw`\href{javascript:alert(1)}{click}`,
+  String.raw`\url{javascript:alert(1)}`,
+  String.raw`\href{data:text/html,<script>alert(1)</script>}{x}`,
+  String.raw`\includegraphics{https://example.com/pixel.png}`,
+  String.raw`\htmlData{onclick=alert(1)}{x}`,
+  String.raw`\text{<script>alert(1)</script>}`,
+  String.raw`<img src=x onerror=alert(1)>`,
+];
+
+test("no hostile LaTeX produces a link, a script or a remote fetch", () => {
+  for (const tex of HOSTILE_TEX) {
+    let html = "";
+    try {
+      html = katex.renderToString(tex, KATEX_OPTIONS);
+    } catch {
+      // Refusing outright is a pass: nothing is rendered at all.
+      continue;
+    }
+    /* Checked on the TAGS, with the text between them removed first.
+       With `trust` off KaTeX renders a refused command as its own source, and
+       keeps a copy of the TeX in a MathML <annotation> -- so the hostile string
+       does appear in the output, as escaped characters that are drawn on the
+       screen. That is inert, and it is the honest thing to show. What must
+       never appear is the same string anywhere it could be acted on. */
+    const tags = html.replace(/>[^<]*</g, "><");
+    assert.ok(!/<script/i.test(tags), `script tag from ${tex}`);
+    assert.ok(!/\shref\s*=/i.test(tags), `href from ${tex}`);
+    assert.ok(!/\ssrc\s*=/i.test(tags), `remote fetch from ${tex}`);
+    assert.ok(!/\son[a-z]+\s*=/i.test(tags), `event handler from ${tex}`);
+    assert.ok(!/javascript:/i.test(tags), `javascript: in an attribute from ${tex}`);
+  }
+});
+
+test("ordinary maths still renders, so the guard is not just refusing everything", () => {
+  const html = katex.renderToString(String.raw`g^+ = 0.20`, KATEX_OPTIONS);
+  assert.match(html, /katex/);
+  assert.match(html, /0\.20/);
+});
