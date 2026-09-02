@@ -80,9 +80,26 @@ export function searches(mode: ResearchMode): boolean {
   return reaches(mode, "web");
 }
 
-/** Whether the user's own Zotero library is readable in this mode. */
+/**
+ * Whether the user's own Zotero library is readable in this mode.
+ *
+ * NOT a rank, and this is the second deliberate exception on the ladder rather
+ * than a lapse back into naming modes. "Quick" is a question about the
+ * literature — search OpenAlex, cite what came back, seconds — and the personal
+ * library is a different question with a different answer set. Offering both
+ * there made one feature out of two, which is what the user saw and said so.
+ *
+ * Deep keeps it for now because a deep run is the case where reading what you
+ * already have genuinely belongs, but it needs a control of its own — on or
+ * off, and which collections — and the PDFs behind those records need to be
+ * findable before that is worth building. See RESEARCH-REWORK.md, "The library
+ * in a deep run". Until then it is unscoped there, which the reply states.
+ *
+ * Written with `exactly` for the same reason web_search is: a bare `===` reads
+ * identically whether it was reasoned about or typed on autopilot.
+ */
 export function readsLibrary(mode: ResearchMode): boolean {
-  return reaches(mode, "library");
+  return exactly(mode, "library") || exactly(mode, "deep");
 }
 
 /** Whether the local document tools are in the schema. */

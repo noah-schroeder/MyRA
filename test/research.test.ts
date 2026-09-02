@@ -307,7 +307,11 @@ test("the three capability questions agree with the ladder", () => {
     ["off", false, false, false],
     ["assistant", true, false, false],
     ["library", true, true, false],
-    ["web", true, true, true],
+    /* Not a rank. "Quick" is a question about the literature -- search
+       OpenAlex, cite it, seconds -- and the personal library is a different
+       question; offering both there made one feature out of two. Deep keeps it
+       until it has a control of its own. See ladder.ts and RESEARCH-REWORK.md. */
+    ["web", true, false, true],
     ["deep", true, true, true],
   ];
   for (const [mode, docs, lib, net] of table) {
@@ -480,12 +484,21 @@ test("the library rung searches Zotero and still cannot reach the web", async ()
   restoreResearchConfig();
 });
 
-test("every rung above the library keeps it, so moving up never takes anything away", async () => {
-  for (const mode of ["library", "web", "deep"] as const) {
+test("the library is offered where it is a sensible question, and nowhere else", async () => {
+  /* Deliberately not "every rung above the library keeps it". Quick is the
+     fast literature lookup, and a personal-library search sitting inside it
+     made two features read as one. Deep keeps it because reading what you
+     already have belongs in a long run -- but it needs its own on/off and
+     collection choice first, which is why this is written out per mode rather
+     than as a rank. */
+  for (const [mode, expected] of [
+    ["library", true], ["web", false], ["deep", true],
+  ] as const) {
     const registry = await registryFor({ v: 2, mode, category: "science" });
-    assert.ok(
+    assert.equal(
       registry.activeNames().includes("search_library"),
-      `${mode} should keep the library`,
+      expected,
+      `${mode}: search_library`,
     );
   }
   restoreResearchConfig();

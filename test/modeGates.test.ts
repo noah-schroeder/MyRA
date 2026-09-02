@@ -27,7 +27,7 @@ const ROOTS = ["src/core", "src/main", "src/preload"];
  * The one file allowed to name a rung: the ladder itself, plus the migration
  * that has to say "off" out loud to reinterpret an unversioned one.
  */
-const LADDER = join("src", "core", "research", "config.ts");
+const LADDER = join("src", "core", "research", "ladder.ts");
 
 function sources(dir: string): string[] {
   const out: string[] = [];
