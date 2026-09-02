@@ -14,7 +14,10 @@
  */
 
 import { readResearchConfig, readsLibrary } from "../../research/config.ts";
-import { formatItems, type LibraryItem, type SearchMode } from "../../library/zotero.ts";
+import {
+  descendantKeys, formatItems, MAX_FANOUT,
+  type LibraryItem, type SearchMode, type ZoteroCollection,
+} from "../../library/zotero.ts";
 import type { ToolDef } from "../registry.ts";
 
 /**
@@ -26,7 +29,15 @@ import type { ToolDef } from "../registry.ts";
  * different answers, and only one of them is honest.
  */
 export interface LibraryHost {
-  search(opts: { query: string; limit?: number; mode?: SearchMode }): Promise<LibraryItem[]>;
+  search(opts: {
+    query: string;
+    limit?: number;
+    mode?: SearchMode;
+    /** The collection subtree to search inside. All of it, when absent. */
+    collections?: string[];
+  }): Promise<LibraryItem[]>;
+  /** Every collection in the library, flat; the subtree is resolved from it. */
+  collections(): Promise<ZoteroCollection[]>;
 }
 
 let host: LibraryHost | undefined;
@@ -55,7 +66,8 @@ export const searchLibraryTool: ToolDef = {
     "keyword, author or subject. Searches titles, abstracts, tags, notes and the indexed " +
     "text of attached PDFs. Returns each item's authors, year, DOI and abstract. This is " +
     "the user's personal collection, not the wider literature; it runs entirely on this " +
-    "machine and reaches no network.",
+    "machine and reaches no network. The user may have limited the search to one of their " +
+    "Zotero collections; the result says which, and that limit cannot be widened from here.",
   risk: "safe",
   enabled: available,
   parameters: {
@@ -74,6 +86,18 @@ export const searchLibraryTool: ToolDef = {
     required: ["query"],
     additionalProperties: false,
   },
+  /**
+   * Which collection to search, resolved against the library as it is NOW.
+   *
+   * The scope is a stored key, and Zotero is another program: the collection
+   * can be renamed, moved or deleted between the choice and the search. So the
+   * name is taken from Zotero rather than from the setting, and a key that is
+   * no longer there is an error rather than a request Zotero would answer with
+   * a 404 that reads like the library being unreachable.
+   *
+   * Not overridable by the model, for the same reason `effectiveCategory` is
+   * not: a scope the model could widen at will would not be a scope.
+   */
   async handler(params) {
     if (!host) {
       throw new Error(
@@ -88,15 +112,42 @@ export const searchLibraryTool: ToolDef = {
     const mode: SearchMode = rawMode === "titleCreatorYear" ? "titleCreatorYear" : "everything";
     const rawLimit = Number(params["limit"]);
 
+    const chosen = readResearchConfig().collection;
+    let collections: string[] = [];
+    let scope = "";
+    let truncated = false;
+    if (chosen) {
+      const all = await host.collections();
+      const found = all.find((c) => c.key === chosen);
+      if (!found) {
+        throw new Error(
+          "The Zotero collection this search was limited to is no longer in the library — " +
+            "it has probably been deleted or is in a different Zotero profile. Choose another " +
+            "collection, or “All collections”, next to the Library button.",
+        );
+      }
+      collections = descendantKeys(all, chosen);
+      truncated = collections.length >= MAX_FANOUT;
+      scope =
+        collections.length > 1
+          ? `${found.name} (and ${collections.length - 1} collection(s) below it)`
+          : found.name;
+    }
+
     const items = await host.search({
       query,
       mode,
+      ...(collections.length ? { collections } : {}),
       ...(Number.isFinite(rawLimit) && rawLimit >= 1 ? { limit: rawLimit } : {}),
     });
 
+    const content = formatItems(items, query, scope);
     return {
-      content: formatItems(items, query),
-      detail: { count: items.length, keys: items.map((i) => i.key) },
+      content: truncated
+        ? `${content}\n\nOnly the first ${MAX_FANOUT} collections of that subtree were ` +
+          "searched; it has more. Say so if the answer looks incomplete."
+        : content,
+      detail: { count: items.length, keys: items.map((i) => i.key), ...(scope ? { scope } : {}) },
     };
   },
 };

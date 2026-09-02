@@ -148,6 +148,18 @@ export interface ResearchConfig {
   mode: ResearchMode;
   category: string;
   timeRange?: string;
+  /** The Zotero collection the library rung is limited to. All of it if absent. */
+  collection?: string | undefined;
+  collectionName?: string | undefined;
+}
+
+/** One row of the collection picker: nested, with its full path for the title. */
+export interface CollectionNode {
+  key: string;
+  name: string;
+  depth: number;
+  path: string;
+  children: number;
 }
 
 export interface VaultStatus {
@@ -329,6 +341,7 @@ export interface KarenApi {
   discoverModels(which: "llm" | "transcription" | "embeddings"): Promise<{ ok: boolean; models?: string[]; error?: string }>;
   testEndpoint(which: "llm" | "transcription" | "embeddings"): Promise<{ ok: boolean; status?: number; error?: string }>;
   chooseDirectory(opts: { title?: string; current?: string }): Promise<string | undefined>;
+  zoteroCollections(): Promise<{ ok: boolean; collections?: CollectionNode[]; error?: string }>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
   engines(): Promise<{ pandoc: boolean; pandocPath?: string; pandocVersion?: string; pdftotext: boolean }>;

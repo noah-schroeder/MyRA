@@ -59,6 +59,7 @@ const api = {
   onDocument: (cb: (doc: unknown) => void) => on("karen:document", cb),
   revealDocument: (path: string) => ipcRenderer.invoke("karen:document-reveal", path),
 
+  zoteroCollections: () => ipcRenderer.invoke("karen:zotero-collections"),
   setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
   getResearch: () => ipcRenderer.invoke("karen:get-research"),
   engines: () => ipcRenderer.invoke("karen:engines"),

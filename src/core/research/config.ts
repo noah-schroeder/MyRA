@@ -10,6 +10,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { isCollectionKey } from "../library/zotero.ts";
+
 /** OpenAlex's "polite pool" is faster and more generously rate limited. */
 export const OPENALEX_MAILTO = process.env["KAREN_OPENALEX_MAILTO"] ?? "";
 
@@ -134,6 +136,22 @@ export interface ResearchConfig {
   /** Where to search: "science" for the literature, "general" for the web. */
   category: string;
   timeRange?: string;
+  /**
+   * Which Zotero collection the library rung searches. Absent means all of it.
+   *
+   * `| undefined` on both, and not merely optional, because clearing this has
+   * to be expressible: under exactOptionalPropertyTypes a bare optional cannot
+   * be assigned undefined, so "back to the whole library" would be unsayable.
+   */
+  collection?: string | undefined;
+  /**
+   * The chosen collection's name, for display and for saying what was searched.
+   *
+   * Stored beside the key rather than looked up, so the control still reads
+   * correctly when Zotero is closed -- which is most of the time, and exactly
+   * when a silently blank control would look like a lost setting.
+   */
+  collectionName?: string | undefined;
 }
 
 /**
@@ -189,6 +207,21 @@ function storedMode(value: unknown, versioned: boolean): ResearchMode {
   return DEFAULT_RESEARCH.mode;
 }
 
+/**
+ * The collection scope, or nothing at all.
+ *
+ * The two fields stand or fall together: a key with no name would give the user
+ * a control that says nothing, and a name with no key would say it had searched
+ * somewhere it had not. The key is shape-checked here as well as at the client,
+ * because this file is what a hand-edited research.json reaches first.
+ */
+function collectionFields(key: unknown, name: unknown): Record<string, string> {
+  if (!isCollectionKey(key)) return {};
+  const label = typeof name === "string" ? name.trim().slice(0, 200) : "";
+  if (!label) return {};
+  return { collection: key, collectionName: label };
+}
+
 export function readResearchConfig(path = researchConfigPath()): ResearchConfig {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ResearchConfig> & { v?: unknown };
@@ -204,6 +237,7 @@ export function readResearchConfig(path = researchConfigPath()): ResearchConfig 
           ? parsed.category
           : FALLBACK_CATEGORY,
       ...(typeof parsed.timeRange === "string" ? { timeRange: parsed.timeRange } : {}),
+      ...collectionFields(parsed.collection, parsed.collectionName),
     };
   } catch {
     // No file yet, or corrupt: behave exactly as before the GUI existed rather
@@ -235,6 +269,7 @@ export function serializeResearchConfig(next: unknown): Record<string, unknown> 
         ? cfg.category
         : FALLBACK_CATEGORY,
     ...(typeof cfg.timeRange === "string" ? { timeRange: cfg.timeRange } : {}),
+    ...collectionFields(cfg.collection, cfg.collectionName),
   };
 }
 
