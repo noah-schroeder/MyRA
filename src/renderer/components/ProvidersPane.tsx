@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Provider, Settings } from "../types.ts";
 import {
   effectiveKind, kindWasOverridden, newProviderId, urlIsLocal,
@@ -100,6 +100,20 @@ function ProviderCard({
      dropped one of them -- silently, and the box came back unticked a moment
      later. */
   const [models, setModels] = useState<string[]>(provider.models);
+  /*
+   * Committed on the way out as well as on blur.
+   *
+   * Blur is the normal path and it is not the only one: closing Settings while
+   * the cursor is still in the URL box unmounts the card, and React fires no
+   * blur on unmount -- so the address just typed was silently thrown away, and
+   * the provider it belonged to was left with no address at all. The ref is
+   * rewritten every render so the cleanup sees the last values rather than the
+   * first ones. Re-adding a deleted provider is not a risk: the save maps over
+   * the list by id, and an id no longer in it matches nothing.
+   */
+  const commit = useRef<() => void>(() => {});
+  useEffect(() => () => commit.current(), []);
+
   const [key, setKey] = useState("");
   const [keyNote, setKeyNote] = useState("");
   /* Whether one is stored, never what it is. Without this a saved key and no
@@ -114,6 +128,12 @@ function ProviderCard({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
+  commit.current = (): void => {
+    if (label !== provider.label || baseUrl !== provider.baseUrl) {
+      onChange({ ...provider, label, baseUrl });
+    }
+  };
+
   /* Judged on what is in the box, so the answer appears as the URL is typed
      rather than after the field loses focus. */
   const asTyped: Provider = { ...provider, baseUrl };
@@ -127,9 +147,12 @@ function ProviderCard({
       .providerModels({ baseUrl, id: provider.id, ...(key ? { apiKey: key } : {}) })
       .then((r) => {
         setFound(r.models ?? []);
+        const n = (r.models ?? []).length;
         setStatus(
           r.ok
-            ? `${(r.models ?? []).length} model(s) available. Tick the ones you want in the picker.`
+            ? n === 1
+              ? "One model available. Tick it to put it in the picker."
+              : `${n.toLocaleString()} models available. Tick the ones you want in the picker.`
             : (r.error ?? "The endpoint did not answer."),
         );
       })
@@ -144,6 +167,13 @@ function ProviderCard({
       onChange({ ...provider, models: next });
       return next;
     });
+  };
+
+  /* Whole-list changes go through the same path, so ticking two hundred boxes
+     is one write rather than two hundred races. */
+  const setChosen = (next: string[]): void => {
+    setModels(next);
+    onChange({ ...provider, models: next });
   };
 
   /* What the endpoint offers, plus anything already ticked that it no longer
@@ -278,24 +308,124 @@ function ProviderCard({
       {status ? <p className="provider-note">{status}</p> : null}
 
       {rows.length ? (
+        <ModelChooser
+          all={rows}
+          chosen={models}
+          {...(found ? { served: found } : {})}
+          onToggle={toggleModel}
+          onSet={setChosen}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Choosing a handful of models out of an endpoint's whole catalogue.
+ *
+ * This was a plain scrolling list of checkboxes, which is fine for the eight a
+ * lab server offers and unusable for the hundred and seventy a hosted API
+ * lists: no way to find one by name, and no way to see what you had already
+ * ticked without scrolling the entire list looking for marks.
+ *
+ * So: a filter, a tally that always says how many of how many, and bulk
+ * actions that operate on WHAT IS SHOWN rather than on everything. That last
+ * part is the important one -- "tick all" against a filtered list is a useful
+ * thing to mean and a destructive thing to guess at, so the button says which
+ * it is doing and the count next to it says how many that is.
+ */
+function ModelChooser({
+  all,
+  served,
+  chosen,
+  onToggle,
+  onSet,
+}: {
+  all: string[];
+  /** What the endpoint listed this time; absent until it has been asked. */
+  served?: string[];
+  chosen: string[];
+  onToggle: (name: string) => void;
+  onSet: (next: string[]) => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const [onlyChosen, setOnlyChosen] = useState(false);
+
+  const picked = useMemo(() => new Set(chosen), [chosen]);
+  const needle = filter.trim().toLowerCase();
+  const shown = all.filter(
+    (name) => (!needle || name.toLowerCase().includes(needle)) && (!onlyChosen || picked.has(name)),
+  );
+  const filtered = shown.length !== all.length;
+  const allShownChosen = shown.length > 0 && shown.every((name) => picked.has(name));
+
+  return (
+    <div className="models">
+      <div className="models-head">
+        <input
+          className="input-line models-filter"
+          type="search"
+          placeholder="Filter by name"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <span className="models-tally">
+          {chosen.length} of {all.length} chosen
+          {filtered ? ` · ${shown.length} shown` : ""}
+        </span>
+      </div>
+
+      <div className="models-bulk">
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={allShownChosen || shown.length === 0}
+          onClick={() => onSet([...new Set([...chosen, ...shown])])}
+        >
+          {filtered ? `Tick the ${shown.length} shown` : "Tick all"}
+        </button>
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={!shown.some((name) => picked.has(name))}
+          onClick={() => onSet(chosen.filter((name) => !shown.includes(name)))}
+        >
+          {filtered ? "Untick those shown" : "Untick all"}
+        </button>
+        <label className="check models-only">
+          <input
+            type="checkbox"
+            checked={onlyChosen}
+            onChange={(e) => setOnlyChosen(e.target.checked)}
+          />
+          Only the ones I picked
+        </label>
+      </div>
+
+      {shown.length ? (
         <ul className="provider-models">
-          {rows.map((name) => (
-            <li key={name}>
+          {shown.map((name) => (
+            <li key={name} className={picked.has(name) ? "on" : ""}>
               <label>
-                <input
-                  type="checkbox"
-                  checked={models.includes(name)}
-                  onChange={() => toggleModel(name)}
-                />
-                <span>{name}</span>
-                {found && !found.includes(name) ? (
-                  <em className="gone"> — no longer served here</em>
+                <input type="checkbox" checked={picked.has(name)} onChange={() => onToggle(name)} />
+                <span className="model-id">{name}</span>
+                {/* Ticked, but the endpoint no longer lists it. Shown rather
+                    than quietly dropped: it is still in the picker, and this is
+                    the only place it can be taken out. */}
+                {served && !served.includes(name) ? (
+                  <em className="gone">no longer served here</em>
                 ) : null}
               </label>
             </li>
           ))}
         </ul>
-      ) : null}
-    </section>
+      ) : (
+        <p className="provider-note">
+          {onlyChosen && !needle
+            ? "You have not picked any yet."
+            : `Nothing here matches “${filter.trim()}”.`}
+        </p>
+      )}
+    </div>
   );
 }
