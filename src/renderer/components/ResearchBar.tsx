@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { readsLibrary } from "../types.ts";
 import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 
 /**
@@ -144,7 +145,7 @@ export function ResearchBar({
         </div>
       </div>
 
-      {config.mode === "library" && !lookup ? (
+      {readsLibrary(config.mode) && !lookup ? (
         <CollectionPicker
           chosen={config.collection ?? ALL}
           chosenName={config.collectionName ?? ""}
@@ -220,9 +221,9 @@ function CollectionPicker({
     <div className="collection-ask">
       <label
         htmlFor="zotero-collection"
-        title="Only the collection you pick is searched. The rest of your Zotero library is left alone."
+        title="Only the collection you pick is searched when Karen looks in your Zotero library. The rest of it is left alone. This does not affect web searching."
       >
-        Which collection?
+        Which Zotero collection?
       </label>
       <select
         id="zotero-collection"
