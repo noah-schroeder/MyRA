@@ -35,7 +35,7 @@ const SECRETS_PATH = join(CONFIG_DIR, "secrets.enc.json");
  * be tested without Electron.
  */
 export { isSecretName, type SecretName } from "../core/secretNames.ts";
-import type { SecretName } from "../core/secretNames.ts";
+import { vaultAction, type SecretName } from "../core/secretNames.ts";
 
 export interface VaultStatus {
   usable: boolean;
@@ -156,16 +156,45 @@ export class SecretVault {
   }
 
   async set(name: SecretName, plaintext: string): Promise<SetResult> {
-    if (!this.status().usable) {
-      if (plaintext === "") this.#memory.delete(name);
-      else this.#memory.set(name, plaintext);
+    /*
+     * Removal always reaches the disk, whatever the keyring is doing.
+     *
+     * It used to take the memory-only branch below whenever the vault was not
+     * `usable`, which meant it deleted the in-memory copy and left the
+     * ciphertext exactly where it was. Two ways that goes wrong, and both are
+     * bad in the direction a credential store must never be bad in:
+     *
+     *   - The secret the user just deleted is still on disk.
+     *   - `get()` falls through to disk when memory has nothing, so it is not
+     *     merely still there, it is still in USE. Removing a provider's API key
+     *     would have gone on sending it.
+     *
+     * The state that triggers this is reachable in ordinary use: the
+     * persistence probe runs when Settings is opened, and on a machine whose
+     * keyring will not persist it flips `usable` to false for the rest of the
+     * session -- so a key stored earlier in that same session, while it was
+     * still true, was on disk and undeletable. Observed, not theorised.
+     *
+     * Deleting needs no encryption, so there is no reason for it to depend on
+     * whether encryption is available.
+     */
+    if (vaultAction(plaintext, this.status().usable) === "remove") {
+      this.#memory.delete(name);
+      const data = await this.#load();
+      if (!(name in data)) return { persisted: true };
+      delete data[name];
+      await this.#save(data);
+      return { persisted: true };
+    }
+
+    if (vaultAction(plaintext, this.status().usable) === "memory") {
+      this.#memory.set(name, plaintext);
       return { persisted: false };
     }
 
     this.#memory.delete(name);
     const data = await this.#load();
-    if (plaintext === "") delete data[name];
-    else data[name] = safeStorage.encryptString(plaintext).toString("base64");
+    data[name] = safeStorage.encryptString(plaintext).toString("base64");
     await this.#save(data);
     return { persisted: true };
   }

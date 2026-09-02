@@ -12,8 +12,8 @@ import assert from "node:assert/strict";
 
 import {
   choiceIsExternal, effectiveKind, isExternal, kindWasOverridden, newProviderId,
-  orphanedSecrets, parseModelRef, parseProviders, providerFor, providerSecret, qualify,
-  urlIsLocal,
+  isUsable, orphanedSecrets, parseModelRef, parseProviders, providerFor, providerSecret,
+  qualify, urlIsLocal,
   type Provider,
 } from "../src/core/providers.ts";
 
@@ -93,6 +93,29 @@ test("a bare model is not external; a model whose provider is gone is", () => {
   assert.equal(providerFor(providers, "vanished::gpt-4o"), undefined);
 });
 
+test("a provider exists before it has an address", () => {
+  /* "Add a provider" creates one with nothing but an id and then it is filled
+     in. Requiring a base URL on the way into storage meant the save that
+     follows the button discarded it, so the button did nothing at all. */
+  const fresh = { id: "pnew", label: "", kind: "external", baseUrl: "", models: [], enabled: true };
+  assert.deepEqual(parseProviders([fresh]), [fresh]);
+  // It is still not something a request can be sent to, and that is separate.
+  assert.equal(isUsable(fresh as Provider), false);
+  assert.equal(isUsable({ ...fresh, baseUrl: "http://127.0.0.1:1/v1" } as Provider), true);
+  assert.equal(isUsable({ ...fresh, baseUrl: "http://127.0.0.1:1/v1", enabled: false } as Provider), false);
+});
+
+test("a half-typed provider is not told its blank address is remote", () => {
+  const typing = { id: "p1", label: "", kind: "local", baseUrl: "", models: [], enabled: true } as Provider;
+  assert.equal(kindWasOverridden(typing), false);
+  // But the moment there is an address to disagree with, it says so.
+  assert.equal(kindWasOverridden({ ...typing, baseUrl: "https://elsewhere.example/v1" }), true);
+});
+
+test("an id with no base URL still survives, but a record with no id does not", () => {
+  assert.deepEqual(parseProviders([{ baseUrl: "http://127.0.0.1:1/v1" }]), []);
+});
+
 test("a stored provider is rebuilt field by field, not spread", () => {
   const parsed = parseProviders([
     { id: "p1", label: "OpenAI", kind: "external", baseUrl: "https://api.openai.com/v1",
@@ -102,10 +125,9 @@ test("a stored provider is rebuilt field by field, not spread", () => {
     { id: "p3" },
     "nonsense",
   ]);
-  assert.deepEqual(parsed.map((p) => p.id), ["p1", "p2"]);
+  assert.deepEqual(parsed.map((p) => p.id), ["p1", "p2", "p3"]);
   assert.deepEqual(parsed[0]!.models, ["gpt-4o", "gpt-4o-mini"], "duplicates collapse");
   assert.equal("sneaky" in parsed[0]!, false);
-  assert.equal(parsed[1]!.label, "http://127.0.0.1:9/v1", "an unnamed provider is named by its URL");
 });
 
 test("a missing or corrupt kind reads as external", () => {
@@ -163,4 +185,61 @@ test("only a known secret name may be written to the vault", async () => {
     "provider:" + "x".repeat(65)]) {
     assert.equal(isSecretName(bad), false, bad);
   }
+});
+
+test("deleting a secret does not depend on the keyring working", async () => {
+  /* Found by review, and it is the worst shape of bug a credential store has:
+     the removal branch sat after the usability check, so once the persistence
+     probe decided the keyring would not persist -- which it can decide
+     mid-session, when Settings is opened -- a delete cleared the in-memory copy
+     and left the ciphertext on disk. `get()` reads through to disk, so the key
+     the user had just removed went on being sent. Deleting is not encrypting
+     and must not need a keyring. */
+  const { vaultAction } = await import("../src/core/secretNames.ts");
+  assert.equal(vaultAction("", true), "remove");
+  assert.equal(vaultAction("", false), "remove", "a degraded keyring must still delete");
+  assert.equal(vaultAction("sk-abc", true), "encrypt");
+  assert.equal(vaultAction("sk-abc", false), "memory", "never written when it cannot be protected");
+});
+
+test("a choice whose provider is gone is broken, not quietly local", () => {
+  /* It fell through to whatever model was loaded: answering from something the
+     user did not choose, under a picker still showing the model they did, with
+     the bar warning "external" about a request that never left the machine.
+     The UI half of this is `choiceIsExternal` returning true for an
+     unaccountable choice; the routing half must agree, and refuse. */
+  const providers = [provider({ id: "alive" })];
+  assert.equal(parseModelRef("gone::gpt-4o").providerId, "gone");
+  assert.equal(providerFor(providers, "gone::gpt-4o"), undefined);
+  assert.equal(choiceIsExternal(providers, "gone::gpt-4o"), true);
+  // A bare name is not a dangling reference; it is the ordinary local case.
+  assert.equal(parseModelRef("Qwen3-4B").providerId, "");
+});
+
+test("the privacy report gives the same answer as the rest of the app", async () => {
+  /* One question -- does this leave the machine -- must have one answer. A
+     loopback provider the user deliberately marked external is warned about at
+     the picker and withheld the llama.cpp-only samplers; a report calling it
+     "local" would be the app contradicting itself in the one document whose
+     entire job is to be right about this. */
+  const { configuredEndpoints, DEFAULT_SETTINGS } = await import("../src/core/config.ts");
+  const rows = configuredEndpoints({
+    ...DEFAULT_SETTINGS,
+    providers: [
+      provider({ id: "a", label: "Cautious", kind: "external", baseUrl: "http://127.0.0.1:9/v1" }),
+      provider({ id: "b", label: "Genuinely local", kind: "local", baseUrl: "http://127.0.0.1:9/v1" }),
+      provider({ id: "c", label: "Mislabelled", kind: "local", baseUrl: "https://elsewhere.example/v1" }),
+      provider({ id: "d", label: "Off", kind: "external", baseUrl: "https://elsewhere.example/v1", enabled: false }),
+      provider({ id: "e", label: "Half-typed", kind: "external", baseUrl: "" }),
+    ],
+  });
+  assert.deepEqual(
+    rows.filter((r) => r.label.startsWith("Models")).map((r) => [r.label, r.local]),
+    [
+      ["Models — Cautious", false],
+      ["Models — Genuinely local", true],
+      // The one that matters: a remote address never reads as local.
+      ["Models — Mislabelled", false],
+    ],
+  );
 });
