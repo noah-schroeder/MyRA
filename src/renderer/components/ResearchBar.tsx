@@ -4,10 +4,16 @@ import type { ResearchConfig, ResearchMode } from "../types.ts";
 /**
  * One control for the whole question of how far Karen may reach.
  *
- * Four of these five choices are a ladder, each rung a superset of the one
- * below: nothing, then your files, then the literature, then the literature
- * done properly. The fifth takes the model out of the loop entirely and hands
- * the query to OpenAlex and arXiv directly. They were two separate controls --
+ * Five of these six choices are a ladder, each rung a superset of the one
+ * below: nothing, then your files, then your own library, then the literature,
+ * then the literature done properly. The sixth takes the model out of the loop
+ * entirely and hands the query to OpenAlex and arXiv directly.
+ *
+ * "Library" sits below "Quick" rather than beside it because it reaches further
+ * into THIS MACHINE rather than outward: Zotero answers on loopback with no
+ * key, so nothing leaves. That placement is most of the point -- it is what
+ * makes a personal library searchable by someone who keeps the web switched
+ * off. They were two separate controls --
  * a mode switch here and a "Look up papers" button beside it -- which read as
  * unrelated features when they are really one decision, and hid the fastest of
  * them behind a modal.
@@ -26,6 +32,7 @@ import type { ResearchConfig, ResearchMode } from "../types.ts";
 const MODES: { value: ResearchMode; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "No tools at all. The model answers from what it knows, and cannot search, open a URL, or touch a file." },
   { value: "assistant", label: "Documents", hint: "The model can read and write in your documents folder. It still cannot reach the network." },
+  { value: "library", label: "Library", hint: "The model can also search your own Zotero library — your collected papers, on this machine. Still no network, and Zotero must be open." },
   { value: "web", label: "Quick", hint: "The model searches OpenAlex and arXiv, and cites what it used. Seconds." },
   { value: "deep", label: "Deep", hint: "Plan, search, read, verify and synthesise a cited report. Minutes." },
 ];

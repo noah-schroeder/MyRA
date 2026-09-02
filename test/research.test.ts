@@ -163,7 +163,10 @@ test("arXiv still returns a parseable Atom feed", { skip: !live }, async () => {
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readResearchConfig, searches, serializeResearchConfig } from "../src/core/research/config.ts";
+import {
+  readResearchConfig, readsDocuments, readsLibrary, reaches, RESEARCH_MODES, searches,
+  serializeResearchConfig, type ResearchMode,
+} from "../src/core/research/config.ts";
 
 
 /**
@@ -233,8 +236,51 @@ test("searches() is false for every mode that has no network tool", () => {
   // The one that matters: `mode !== "off"` was true here, which would have
   // handed fetch_page to the rung that must not reach the web.
   assert.equal(searches("assistant"), false);
+  // And again, for the same reason, one rung later. "library" searches — it
+  // searches loopback — so a gate that asked "does this mode search?" instead
+  // of "does it reach the network?" would put Zotero users on the web.
+  assert.equal(searches("library"), false);
   assert.equal(searches("web"), true);
   assert.equal(searches("deep"), true);
+});
+
+test("the ladder is ordered, and every gate is a rank on it", () => {
+  /* The order IS the semantics: `reaches` indexes RESEARCH_MODES, so a rung
+     added out of place changes what every gate means. Pinned here because that
+     failure would be silent everywhere else. */
+  assert.deepEqual([...RESEARCH_MODES], ["off", "assistant", "library", "web", "deep"]);
+
+  assert.equal(reaches("deep", "off"), true);
+  assert.equal(reaches("off", "assistant"), false);
+  assert.equal(reaches("library", "assistant"), true, "rungs are supersets");
+  assert.equal(reaches("library", "web"), false, "the library does not reach outward");
+  assert.equal(reaches("web", "library"), true, "but searching keeps the library");
+  assert.equal(reaches("deep", "deep"), true, "at least means at least");
+});
+
+test("the three capability questions agree with the ladder", () => {
+  const table: [ResearchMode, boolean, boolean, boolean][] = [
+    // mode          documents  library  network
+    ["off", false, false, false],
+    ["assistant", true, false, false],
+    ["library", true, true, false],
+    ["web", true, true, true],
+    ["deep", true, true, true],
+  ];
+  for (const [mode, docs, lib, net] of table) {
+    assert.equal(readsDocuments(mode), docs, `${mode}: documents`);
+    assert.equal(readsLibrary(mode), lib, `${mode}: library`);
+    assert.equal(searches(mode), net, `${mode}: network`);
+  }
+});
+
+test("a stored rung is not coerced away just because it is new", () => {
+  /* storedMode once enumerated the modes by hand, which would have quietly
+     turned a saved "library" back into the default and left the user wondering
+     why their choice never stuck. */
+  const cfg = readResearchConfig(configFile({ v: 2, mode: "library", category: "science" }));
+  assert.equal(cfg.mode, "library");
+  assert.equal(serializeResearchConfig({ mode: "library", category: "science" })["mode"], "library");
 });
 
 test("a stored category with no backend is corrected on read", () => {
@@ -327,14 +373,18 @@ async function registryFor(cfg: Record<string, unknown>) {
   const { ToolRegistry } = await import("../src/core/agent/registry.ts");
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
   const { DOCUMENT_TOOL_DEFS } = await import("../src/core/agent/tools/documents.ts");
+  const { LIBRARY_TOOL_DEFS } = await import("../src/core/agent/tools/library.ts");
   process.env["KAREN_RESEARCH_CONFIG"] = configFile(cfg);
   const registry = new ToolRegistry();
-  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS]) registry.register(def);
+  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS]) {
+    registry.register(def);
+  }
   return registry;
 }
 
 const NETWORK_TOOLS = ["web_search", "academic_research", "deep_research", "fetch_page"];
 const DOCUMENT_TOOLS = ["write_document", "read_document", "convert_document"];
+const LIBRARY_TOOLS = ["search_library"];
 
 test("off leaves the model with no tool of any kind", async () => {
   const registry = await registryFor({ v: 2, mode: "off", category: "science" });
@@ -346,7 +396,7 @@ test("off leaves the model with no tool of any kind", async () => {
   assert.deepEqual(registry.activeNames(), [], "off must send an empty schema");
   assert.deepEqual(registry.schemas(), []);
 
-  for (const t of [...NETWORK_TOOLS, ...DOCUMENT_TOOLS]) {
+  for (const t of [...NETWORK_TOOLS, ...DOCUMENT_TOOLS, ...LIBRARY_TOOLS]) {
     await assert.rejects(() => registry.dispatch(t, {}), /not enabled/, `${t} must be refused at off`);
   }
   restoreResearchConfig();
@@ -357,12 +407,43 @@ test("the document rung gets the documents and nothing that reaches the network"
   const active = registry.activeNames();
 
   for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} should be active`);
+  /* Not the library. It was reachable here once, with nothing on screen saying
+     so -- which a user cannot tell apart from the feature not existing. It has
+     its own rung now, and a rung is a control. */
+  assert.ok(!active.includes("search_library"), "the library needs its own rung to be honest");
   for (const t of NETWORK_TOOLS) {
     // fetch_page is the one that nearly slipped through: it was gated on
     // `mode !== "off"`, which was true for exactly one mode when it was written
     // and became true for this one the moment the rung was added.
     assert.ok(!active.includes(t), `${t} must NOT be reachable without searching on`);
     await assert.rejects(() => registry.dispatch(t, {}), /not enabled/);
+  }
+  restoreResearchConfig();
+});
+
+test("the library rung searches Zotero and still cannot reach the web", async () => {
+  const registry = await registryFor({ v: 2, mode: "library", category: "science" });
+  const active = registry.activeNames();
+
+  assert.ok(active.includes("search_library"), "the rung exists to enable this");
+  for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} must survive: rungs are supersets`);
+  for (const t of NETWORK_TOOLS) {
+    /* The point of placing the library BELOW "web": Zotero answers on loopback,
+       so this rung searches without anything leaving the machine. A rung that
+       quietly brought the web with it would defeat the reason it exists. */
+    assert.ok(!active.includes(t), `${t} must NOT be reachable at the library rung`);
+    await assert.rejects(() => registry.dispatch(t, {}), /not enabled/);
+  }
+  restoreResearchConfig();
+});
+
+test("every rung above the library keeps it, so moving up never takes anything away", async () => {
+  for (const mode of ["library", "web", "deep"] as const) {
+    const registry = await registryFor({ v: 2, mode, category: "science" });
+    assert.ok(
+      registry.activeNames().includes("search_library"),
+      `${mode} should keep the library`,
+    );
   }
   restoreResearchConfig();
 });

@@ -47,7 +47,8 @@ import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, deleteRun, listRuns, readRun, readRunSource, runFootprint } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import {
-  readResearchConfig, researchConfigPath, researchRoot, searches, serializeResearchConfig,
+  readResearchConfig, readsDocuments, readsLibrary, researchConfigPath, researchRoot, searches,
+  serializeResearchConfig,
 } from "../core/research/config.ts";
 import { access, writeFile } from "node:fs/promises";
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE, tightenTree } from "../core/paths.ts";
@@ -400,9 +401,17 @@ const SYSTEM_PROMPT: string[] = [
  */
 function systemPrompt(): string {
   const mode = readResearchConfig().mode;
-  const tools = mode === "off" ? [] : ["", ...TOOL_DISCIPLINE];
+  const tools = readsDocuments(mode) ? ["", ...TOOL_DISCIPLINE] : [];
+
+  /*
+   * One branch per rung, because the facts are independent and a model told the
+   * wrong one guesses at the rest. At "library" in particular, "searching is
+   * off" would be a lie about the one tool that rung exists for -- and left
+   * unsaid, a model that has search_library and no web reaches for the web
+   * anyway and spends the turn discovering it is not there.
+   */
   const closing =
-    mode === "off"
+    !readsDocuments(mode)
       ? [
           "You have no tools at all in this conversation: you cannot search, open a URL, or",
           "read or write a file. Answer from what you already know, and say plainly where you",
@@ -411,13 +420,22 @@ function systemPrompt(): string {
         ]
       : searches(mode)
         ? []
-        : [
-            "Searching is switched off for this conversation and you have no tool that can reach",
-            "the web, so answer from what you already know. Say plainly where you are unsure, or",
-            "where a claim would need a source you cannot fetch. You can still read and write",
-            "files in the documents folder. Do not go looking for a local document unless the",
-            "user named one.",
-          ];
+        : readsLibrary(mode)
+          ? [
+              "You cannot reach the web in this conversation, but you CAN search the user's own",
+              "Zotero library with search_library — their collected papers, on this machine. Use",
+              "it whenever the question is about the literature: it is the only source you have.",
+              "Cite what it returns using the authors, year and DOI it gives you, and never a",
+              "reference it did not. If the library holds nothing on the question, say so rather",
+              "than answering from memory as though it did.",
+            ]
+          : [
+              "Searching is switched off for this conversation and you have no tool that can reach",
+              "the web, so answer from what you already know. Say plainly where you are unsure, or",
+              "where a claim would need a source you cannot fetch. You can still read and write",
+              "files in the documents folder. Do not go looking for a local document unless the",
+              "user named one.",
+            ];
   return [...IDENTITY, ...tools, "", ...SYSTEM_PROMPT, ...(closing.length ? ["", ...closing] : [])].join("\n");
 }
 

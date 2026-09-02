@@ -19,7 +19,7 @@ import {
 } from "../../documents/office.ts";
 import type { ToolDef } from "../registry.ts";
 import { asUntrusted } from "../../research/html.ts";
-import { readResearchConfig } from "../../research/config.ts";
+import { readResearchConfig, readsDocuments } from "../../research/config.ts";
 import { runDraft, type DraftUi } from "../../documents/draft.ts";
 import type { Outline } from "../../documents/outline.ts";
 
@@ -37,7 +37,7 @@ import type { Outline } from "../../documents/outline.ts";
  * That is why this is a gate and not another paragraph in the system prompt.
  */
 function available(): boolean {
-  return readResearchConfig().mode !== "off";
+  return readsDocuments(readResearchConfig().mode);
 }
 
 /**

@@ -142,7 +142,7 @@ export interface SessionSummary {
  * the renderer does not import from core. Adding a rung here without adding it
  * there makes a control that writes a value the reader coerces away.
  */
-export type ResearchMode = "off" | "assistant" | "web" | "deep";
+export type ResearchMode = "off" | "assistant" | "library" | "web" | "deep";
 
 export interface ResearchConfig {
   mode: ResearchMode;
