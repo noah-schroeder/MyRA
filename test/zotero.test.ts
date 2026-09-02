@@ -176,8 +176,16 @@ test("a very long abstract is truncated rather than allowed to fill the reply", 
 test("Zotero closed and Zotero locked down are different problems", () => {
   /* They are indistinguishable from the reply and have completely different
      fixes, so they must not share a message. */
-  assert.match(describeFailure(undefined), /does not appear to be running/);
+  assert.match(describeFailure(undefined), /does not appear to be reachable/);
   assert.match(describeFailure(undefined), new RegExp(String(ZOTERO_PORT)));
+  /* Both addresses named. "localhost" is two of them, and reporting only the
+     v4 one told a user with a v6-bound Zotero that it was not running while it
+     sat there running. */
+  assert.match(describeFailure(undefined), /127\.0\.0\.1/);
+  assert.match(describeFailure(undefined), /\[::1\]/);
+  // The sandbox case, because Zotero saying "available" and nothing reaching it
+  // is otherwise a dead end for anyone running it from Flatpak or Snap.
+  assert.match(describeFailure(undefined), /Flatpak/);
   assert.match(describeFailure(403), /Allow other applications/);
   assert.match(describeFailure(404), /Zotero 7 or newer/);
   assert.match(describeFailure(500), /answered 500/);
