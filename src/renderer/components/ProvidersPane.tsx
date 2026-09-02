@@ -127,6 +127,8 @@ function ProviderCard({
   const [found, setFound] = useState<string[] | undefined>();
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [thinking, setThinking] = useState("");
+  const [checking, setChecking] = useState(false);
 
   commit.current = (): void => {
     if (label !== provider.label || baseUrl !== provider.baseUrl) {
@@ -157,6 +159,28 @@ function ProviderCard({
         );
       })
       .finally(() => setBusy(false));
+  };
+
+  /*
+   * "Why can't I see the reasoning?" answered by asking, not by guessing.
+   *
+   * Every explanation for a missing chain of thought -- the model did not
+   * reason, the provider withholds it, it has to be asked, Karen does not know
+   * the field name -- looks the same from the chat window. One request settles
+   * it, and if asking is what helps, this turns asking on.
+   */
+  const checkReasoning = (): void => {
+    const model = models[0];
+    if (!model) {
+      setThinking("Tick a model first — the check has to ask one of them.");
+      return;
+    }
+    setChecking(true);
+    setThinking(`Asking ${model} to think…`);
+    void window.karen
+      .providerReasoning({ baseUrl, id: provider.id, model, ...(key ? { apiKey: key } : {}) })
+      .then((r) => setThinking(r.message ?? r.error ?? "No answer."))
+      .finally(() => setChecking(false));
   };
 
   const toggleModel = (name: string): void => {
@@ -299,6 +323,15 @@ function ProviderCard({
         <button type="button" className="btn-sm" disabled={busy || !baseUrl.trim()} onClick={fetchModels}>
           {busy ? "Asking…" : "Fetch models"}
         </button>
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={checking || !baseUrl.trim() || models.length === 0}
+          title="Send one short question and report whether this endpoint returns the model's reasoning"
+          onClick={checkReasoning}
+        >
+          {checking ? "Checking…" : "Check reasoning"}
+        </button>
         <span className="provider-count">
           {models.length
             ? `${models.length} chosen`
@@ -306,6 +339,17 @@ function ProviderCard({
         </span>
       </div>
       {status ? <p className="provider-note">{status}</p> : null}
+      {thinking ? <p className="provider-note reasoning-note">{thinking}</p> : null}
+      {provider.askReasoning ? (
+        <label className="check models-only">
+          <input
+            type="checkbox"
+            checked
+            onChange={() => onChange({ ...provider, askReasoning: false })}
+          />
+          Asking this provider to include its reasoning
+        </label>
+      ) : null}
 
       {rows.length ? (
         <ModelChooser

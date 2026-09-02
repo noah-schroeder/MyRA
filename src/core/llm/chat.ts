@@ -104,9 +104,20 @@ export function buildRequest(opts: {
    * invents owners for action items nobody volunteered for.
    */
   sampling?: Record<string, number>;
+  /**
+   * Extra top-level request fields, for a provider that needs asking.
+   *
+   * Reasoning is the case that brought this: several endpoints send the
+   * model's thinking only when the request says to, each with its own spelling.
+   * Spread FIRST, so nothing here can displace the messages, the model, the
+   * tools or the stream flag -- an extras bag that could rewrite those would be
+   * a way to send a different request than the one the caller asked for.
+   */
+  extra?: Record<string, unknown>;
 }): ChatRequest {
   const { temperature: tuned, ...otherSampling } = opts.sampling ?? {};
   return {
+    ...(opts.extra ?? {}),
     ...(opts.model ? { model: opts.model } : {}),
     messages: opts.messages,
     // Extraction and screening are not creative tasks, and a warm model
@@ -144,6 +155,8 @@ export interface ChatOptions {
   tools?: ToolSchema[];
   /** Sampler settings for this model, already filtered for this endpoint. */
   sampling?: Record<string, number>;
+  /** Extra request fields this provider needs, e.g. asking for reasoning. */
+  extra?: Record<string, unknown>;
 }
 
 export interface ChatUsage {
@@ -232,6 +245,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
           stream: streaming,
           ...(opts.tools?.length ? { tools: opts.tools } : {}),
           ...(opts.sampling ? { sampling: opts.sampling } : {}),
+          ...(opts.extra ? { extra: opts.extra } : {}),
         }),
       ),
       signal,

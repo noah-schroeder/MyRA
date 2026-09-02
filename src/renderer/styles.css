@@ -4185,6 +4185,11 @@ p.warning { margin: 0; font-size: 12.5px; }
 .models-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .models-bulk .btn-sm:disabled { opacity: 0.45; cursor: default; }
 .models-only { font-size: 11.5px; color: var(--text-faint); gap: 6px; }
+/* The reasoning check's verdict. Quoted back rather than styled as an alert:
+   "this provider does not send it" is an answer, not a fault. */
+.reasoning-note { border-left: 2px solid var(--border-strong); padding-left: 9px; }
+/* Not a warning: reading the file is the library working, by the other route. */
+.collection-note.reading-file { color: var(--blue); }
 
 .provider-models {
   list-style: none; margin: 0; padding: 4px;
