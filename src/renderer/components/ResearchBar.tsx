@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { exactly } from "../../core/research/ladder.ts";
+import { databaseLabel } from "../../core/research/databases.ts";
 import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 
 /**
@@ -129,7 +130,17 @@ export function ResearchBar({
         </div>
 
         <div className="mode-ring web" title={WEB_HINT}>
-          <span className="mode-ring-label">Web</span>
+          {/* The databases, not the word "web".
+            *
+            * "Web" was doing two jobs badly: warning that these rungs leave the
+            * machine -- which the buttons' own hint already says, and which the
+            * privacy report says properly -- and describing what they search,
+            * which is not the web. They search two scholarly indexes, and
+            * naming them is the difference between "it looked online" and
+            * something a researcher can judge the coverage of. */}
+          <span className="mode-ring-label" title={`Searches ${databaseLabel()}`}>
+            {databaseLabel()}
+          </span>
           <div className="mode-ring-row" role="group" aria-label="Web: these reach the internet">
             {WEB.map(rung)}
             <button

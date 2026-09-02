@@ -13,6 +13,7 @@
  */
 
 import { arxivSearch } from "./arxiv.ts";
+import { SCHOLARLY_DATABASES } from "./databases.ts";
 import {
   abstractFromInverted, authorsOf, oaUrl, openAlexSearch, venueOf, type Work,
 } from "./openalex.ts";
@@ -100,7 +101,9 @@ export function workToHit(w: Work): SearchHit | undefined {
 
 export const openAlexProvider: SearchProvider = {
   id: "openalex",
-  label: "OpenAlex",
+  /* Taken from the list the research bar prints, so the name on screen is the
+     name of the thing that was actually queried. */
+  label: SCHOLARLY_DATABASES[0],
   scholarly: true,
   timeRange: true,
   async search(query, opts = {}) {
@@ -111,7 +114,7 @@ export const openAlexProvider: SearchProvider = {
 
 export const arxivProvider: SearchProvider = {
   id: "arxiv",
-  label: "arXiv",
+  label: SCHOLARLY_DATABASES[1],
   scholarly: true,
   // The Atom API sorts by date but does not filter by it.
   timeRange: false,

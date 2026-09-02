@@ -167,6 +167,8 @@ import {
   readResearchConfig, readsDocuments, readsLibrary, reaches, RESEARCH_MODES, searches,
   serializeResearchConfig, type ResearchMode,
 } from "../src/core/research/config.ts";
+import { databaseLabel, SCHOLARLY_DATABASES } from "../src/core/research/databases.ts";
+import { providers } from "../src/core/research/providers.ts";
 
 
 /**
@@ -670,4 +672,18 @@ test("the scholarly tool describes the providers it actually searches", async ()
   // and Semantic Scholar only resolves PDFs -- it is not a search backend.
   assert.ok(!/Crossref/i.test(academic.description), academic.description);
   assert.match(academic.description, /OpenAlex and arXiv/);
+});
+
+/* -------------------------------------------- the databases, by name --- */
+
+test("the bar names exactly the databases the search actually queries", () => {
+  /* The research bar prints these names above Quick and Deep. It cannot import
+     the provider list -- that reaches the network clients and the config
+     reader, neither of which belongs in a browser bundle -- so the names live
+     in their own module and the providers take their labels from it. This is
+     what stops the two from drifting: add a database and forget the bar, or
+     drop one and leave it advertised, and this fails. */
+  const scholarly = providers().filter((p) => p.scholarly).map((p) => p.label);
+  assert.deepEqual([...scholarly].sort(), [...SCHOLARLY_DATABASES].sort());
+  assert.equal(databaseLabel(), "OpenAlex · arXiv");
 });
