@@ -13,7 +13,7 @@
 
 import {
   collectionsPath, describeFailure, parseCollections, parseItems, searchPath, ZoteroError,
-  ZOTERO_HOST, ZOTERO_PORT,
+  ZOTERO_HOSTS, ZOTERO_PORT,
   type LibraryItem, type QueryTier, type SearchMode, type ZoteroCollection,
 } from "../../core/library/zotero.ts";
 
@@ -32,24 +32,46 @@ const TIMEOUT_MS = 5_000;
  * The path is always built by this module's own helpers from typed fields; it
  * is never assembled from a caller's string.
  */
-async function get(path: string): Promise<unknown> {
-  const url = `http://${ZOTERO_HOST}:${ZOTERO_PORT}${path}`;
+/**
+ * Which loopback address answered last time.
+ *
+ * Remembered for the session so a library search is one request rather than a
+ * failed one followed by a real one. Reset on a connection failure, because the
+ * address that worked is exactly the thing that has changed when Zotero is
+ * restarted differently.
+ */
+let reachedAt: string | undefined;
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: {
-        // The version Zotero's local API speaks. Sent explicitly so a future
-        // Zotero that changes its default shape does not silently change ours.
-        "zotero-api-version": "3",
-        accept: "application/json",
-      },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    /* Connection refused, DNS, timeout -- all indistinguishable here and all
-       meaning the same thing to the user: Zotero is not answering. `undefined`
-       is what describeFailure renders as "not running". */
+async function get(path: string): Promise<unknown> {
+  /* Both loopback families, the one that worked last time first.
+     Zotero's settings pane says "localhost", which is two addresses, and a
+     server bound to only the v6 one was reported as not running. */
+  const hosts = reachedAt ? [reachedAt, ...ZOTERO_HOSTS.filter((h) => h !== reachedAt)] : [...ZOTERO_HOSTS];
+
+  let res: Response | undefined;
+  for (const host of hosts) {
+    try {
+      res = await fetch(`http://${host}:${ZOTERO_PORT}${path}`, {
+        headers: {
+          // The version Zotero's local API speaks. Sent explicitly so a future
+          // Zotero that changes its default shape does not silently change ours.
+          "zotero-api-version": "3",
+          accept: "application/json",
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      reachedAt = host;
+      break;
+    } catch {
+      /* Connection refused, timeout -- indistinguishable here, and both mean
+         this address is not the one. Try the other before giving up. */
+      reachedAt = undefined;
+    }
+  }
+
+  if (!res) {
+    /* `undefined` is what describeFailure renders as "not reachable", and it
+       now names both addresses rather than the one Karen used to try. */
     throw new ZoteroError(describeFailure(undefined));
   }
 

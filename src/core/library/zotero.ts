@@ -25,7 +25,24 @@
  * missing paper.
  */
 
-export const ZOTERO_HOST = "127.0.0.1";
+/**
+ * Both loopback addresses, tried in order.
+ *
+ * Zotero's own settings pane advertises `http://localhost:23119/api/`, and
+ * "localhost" is not one address: it is 127.0.0.1 and ::1, and which one a
+ * server ends up bound to depends on the resolver, the platform and — under
+ * Flatpak — the sandbox. Karen dialled the v4 address alone, so a Zotero
+ * listening on the v6 one was reported as "not running" while sitting there
+ * plainly running, with the checkbox ticked and the URL on screen.
+ *
+ * Not resolved through "localhost" itself, because that would make the address
+ * Karen connects to depend on /etc/hosts. Both entries here are loopback by
+ * construction, which is the property the whole feature rests on.
+ */
+export const ZOTERO_HOSTS = ["127.0.0.1", "[::1]"] as const;
+
+/** The first one, for messages that name a single address. */
+export const ZOTERO_HOST = ZOTERO_HOSTS[0];
 export const ZOTERO_PORT = 23119;
 
 /**
@@ -473,8 +490,12 @@ export function describeFailure(status: number | undefined, body = ""): string {
   }
   if (status === undefined) {
     return (
-      `Nothing is listening on ${ZOTERO_HOST}:${ZOTERO_PORT}, so Zotero does not appear to be ` +
-      "running. Open Zotero and try again — the library is only readable while it is open."
+      `Nothing answered on ${ZOTERO_HOSTS.join(" or ")} port ${ZOTERO_PORT}, so Zotero does ` +
+      "not appear to be reachable. Check that Zotero is open, and that Settings → Advanced → " +
+      "“Allow other applications on this computer to communicate with Zotero” is ticked. " +
+      "If Zotero is running as a Flatpak or Snap, its sandbox may be keeping the port to " +
+      "itself — that is the usual cause when Zotero says it is available and nothing can " +
+      "reach it."
     );
   }
   /* Zotero's own words, when it had any.
