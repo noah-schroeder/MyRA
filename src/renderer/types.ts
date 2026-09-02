@@ -1,4 +1,5 @@
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
+import type { Provider } from "../core/providers.ts";
 import type { ApiState } from "../main/api/manager.ts";
 
 /* Re-exported so the renderer imports it from one place, the way every
@@ -125,7 +126,21 @@ export interface Settings {
   /** Closing the window leaves Karen running in the tray. */
   keepRunningInTray: boolean;
   setupCompleted: boolean;
+  providers: Provider[];
+  /** Sampler settings per model, keyed the way a model is chosen. */
+  sampling: Record<string, Record<string, number>>;
 }
+
+/*
+ * Imported, not re-declared.
+ *
+ * ResearchMode is kept in step by hand because only its NAMES cross the
+ * boundary. A provider brings a rule with it -- whether an endpoint is really
+ * on this machine -- and the picker's warning and the main process's routing
+ * have to reach the same answer every time. Two copies of that rule is two
+ * chances to disagree about the only thing this app promises.
+ */
+export type { Provider, ProviderKind } from "../core/providers.ts";
 
 export interface SessionSummary {
   id: string;
@@ -372,6 +387,10 @@ export interface KarenApi {
   chooseDirectory(opts: { title?: string; current?: string }): Promise<string | undefined>;
   /** Put text on the system clipboard. Main-process, so it works off file://. */
   copy(text: string): Promise<void>;
+  providerModels(opts: { baseUrl: string; id?: string; apiKey?: string }): Promise<{
+    ok: boolean; models?: string[]; error?: string;
+  }>;
+  setProviderKey(id: string, value: string): Promise<unknown>;
   zoteroCollections(): Promise<{ ok: boolean; collections?: CollectionNode[]; error?: string }>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;

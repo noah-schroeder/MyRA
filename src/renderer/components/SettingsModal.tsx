@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AudioSource, PrivacyReport, Settings, VaultStatus } from "../types.ts";
 import { enumerate } from "../capture.ts";
 import { RuntimePane } from "./RuntimePane.tsx";
+import { ProvidersPane } from "./ProvidersPane.tsx";
 
 /**
  * Everything configurable, in one place.
@@ -12,10 +13,15 @@ import { RuntimePane } from "./RuntimePane.tsx";
  * configured.
  */
 
-type Tab = "endpoints" | "runtime" | "storage" | "audio" | "appearance" | "permissions" | "about";
+type Tab =
+  | "endpoints" | "providers" | "runtime" | "storage" | "audio" | "appearance"
+  | "permissions" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "endpoints", label: "Endpoints" },
+  /* Next to Endpoints, because they answer the same question -- where does a
+     request go -- and someone looking for one will look for the other. */
+  { id: "providers", label: "Providers" },
   { id: "runtime", label: "Runtime" },
   { id: "storage", label: "Folders" },
   { id: "audio", label: "Audio" },
@@ -82,6 +88,7 @@ export function SettingsModal({
 
         <div className="settings-body">
           {tab === "endpoints" ? <Endpoints settings={settings} patch={patch} vault={vault} /> : null}
+          {tab === "providers" ? <ProvidersPane settings={settings} patch={patch} /> : null}
           {tab === "runtime" ? <RuntimePane {...(onOpenHub ? { onOpenHub } : {})} /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}

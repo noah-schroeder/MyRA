@@ -52,6 +52,8 @@ export interface AgentTurnOptions {
   messages: ChatMessage[];
   endpoint: EndpointSettings;
   apiKey?: string;
+  /** Sampler settings, already filtered for what this endpoint accepts. */
+  sampling?: Record<string, number>;
   system?: string;
   maxSteps?: number;
   signal?: AbortSignal;
@@ -238,6 +240,7 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
       messages: history(),
       tools: opts.registry.schemas(),
       ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+      ...(opts.sampling ? { sampling: opts.sampling } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onEvent
         ? { onDelta: (d: string, kind: DeltaKind) => opts.onEvent!({ type: "text", text: d, kind }) }

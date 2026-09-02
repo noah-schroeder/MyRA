@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Machine } from "../../core/runtime/fit.ts";
+import { SamplingEditor } from "./SamplingEditor.tsx";
 import { displayModelName } from "../../core/runtime/foreign.ts";
 import {
   effectiveValue,
@@ -222,6 +223,11 @@ export function ModelOptionsEditor({
       <button type="button" className="lem-more" onClick={() => setShowAdvanced((v) => !v)}>
         {showAdvanced ? "Hide the advanced settings" : "Show the advanced settings"}
       </button>
+
+      {/* The other half of tuning a model, and deliberately below the fold of
+          the load settings: these take effect on the next message, while
+          everything above costs a reload. */}
+      <SamplingEditor model={model} />
 
       {error ? <p className="run-error">{error}</p> : null}
       {note ? <p className="mopt-note">{note}</p> : null}

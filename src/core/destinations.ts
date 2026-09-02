@@ -87,10 +87,22 @@ export const DESTINATIONS: readonly Destination[] = [
 ] as const;
 
 /** Loopback and this machine, which are not "leaving" by any definition. */
-const LOCAL = /^(127\.\d+\.\d+\.\d+|::1|localhost|0\.0\.0\.0)$/i;
+const LOCAL = /^(127\.\d+\.\d+\.\d+|::1|0:0:0:0:0:0:0:1|localhost|0\.0\.0\.0)$/i;
 
+/**
+ * The one place the app decides whether an address is off this machine.
+ *
+ * One place on purpose: this line is what the privacy report draws and what
+ * decides whether choosing a model warns the user, and two functions answering
+ * it would eventually answer it differently.
+ *
+ * Brackets are stripped because every caller gets its host from
+ * `new URL(...).hostname`, which returns IPv6 literals bracketed -- "[::1]",
+ * never "::1". Without this, the one loopback address a person is most likely
+ * to type by hand read as remote.
+ */
 export function isLocalHost(host: string): boolean {
-  return LOCAL.test(host);
+  return LOCAL.test(host.replace(/^\[|\]$/g, ""));
 }
 
 export function describes(host: string): Destination | undefined {

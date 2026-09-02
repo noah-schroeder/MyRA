@@ -266,6 +266,7 @@ export function App() {
               Everything else moved to the rail or into the composer. */}
           <ModelBar
             settings={settings}
+            onSettingsChange={setSettings}
             onOpenSettings={() => setShowSettings(true)}
             onOpenHub={() => setPage("models")}
           />
