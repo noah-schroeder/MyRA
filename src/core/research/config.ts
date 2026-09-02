@@ -70,30 +70,63 @@ export function researchConfigPath(): string {
  * and the ranking stage silently never ran. Endpoints belong in Settings with
  * every other endpoint; this file is only the search controls.
  */
-export type ResearchMode = "off" | "assistant" | "web" | "deep";
+export type ResearchMode = "off" | "assistant" | "library" | "web" | "deep";
 
 /**
- * One ladder, not two controls: how far Karen may reach on its own.
+ * One ladder, not five controls: how far Karen may reach on its own.
  *
  * Each rung is a superset of the one below, which is what lets a single control
- * express the whole question. "off" is the only rung that means literally
- * nothing -- no tool of any kind is sent in the schema, so the answer is the
- * model's own. "assistant" adds the local document tools and stops there; it
- * cannot reach the network. "web" and "deep" add searching, and differ only in
- * how hard they look.
+ * express the whole question -- and, more usefully, what lets every gate be
+ * written as "at least this far" instead of a list of modes that has to be
+ * revisited each time a rung appears.
+ *
+ *   off        nothing at all. No tool is sent in the schema, so the answer is
+ *              the model's own and there is nothing for it to call.
+ *   assistant  the documents folder. Local, jailed, no network.
+ *   library    + the user's own Zotero, over its loopback API. Still no network:
+ *              this rung reaches further into THIS MACHINE, not outward.
+ *   web        + searching the literature. The first rung that leaves the box.
+ *   deep       + the multi-stage pipeline, instead of a single lookup.
+ *
+ * IN ORDER. `reaches` indexes this array, so the order is the semantics.
  */
-export const RESEARCH_MODES: readonly ResearchMode[] = ["off", "assistant", "web", "deep"];
+export const RESEARCH_MODES: readonly ResearchMode[] = [
+  "off", "assistant", "library", "web", "deep",
+];
 
 /**
- * Whether this mode may reach the network at all.
+ * Does this mode reach at least as far as that one?
  *
- * Written as a function and not as `mode !== "off"` because that comparison was
- * true for exactly one mode when it was written and would have silently become
- * true for "assistant" the moment that rung was added -- handing the web to the
- * one mode that must not have it. Every network gate asks HERE.
+ * The whole reason gates are written this way. `fetch_page` was once gated on
+ * `mode !== "off"`, which was correct for exactly as long as there were two
+ * modes: adding "assistant" would have handed the web to the one rung that must
+ * not have it, and adding "library" would have done it again. A rank comparison
+ * cannot develop that bug, because a new rung has to be placed in the ladder
+ * before it can be placed anywhere else.
+ */
+export function reaches(mode: ResearchMode, atLeast: ResearchMode): boolean {
+  return RESEARCH_MODES.indexOf(mode) >= RESEARCH_MODES.indexOf(atLeast);
+}
+
+/**
+ * Whether this mode may reach the NETWORK.
+ *
+ * Deliberately not "may search anything": the library rung searches, and it
+ * searches loopback. This is the egress question, and it is the one that has to
+ * stay exact.
  */
 export function searches(mode: ResearchMode): boolean {
-  return mode === "web" || mode === "deep";
+  return reaches(mode, "web");
+}
+
+/** Whether the user's own Zotero library is readable in this mode. */
+export function readsLibrary(mode: ResearchMode): boolean {
+  return reaches(mode, "library");
+}
+
+/** Whether the local document tools are in the schema. */
+export function readsDocuments(mode: ResearchMode): boolean {
+  return reaches(mode, "assistant");
 }
 
 export interface ResearchConfig {
@@ -147,7 +180,12 @@ export const DEFAULT_RESEARCH: ResearchConfig = { mode: "assistant", category: F
  */
 function storedMode(value: unknown, versioned: boolean): ResearchMode {
   if (value === "off") return versioned ? "off" : "assistant";
-  if (value === "assistant" || value === "web" || value === "deep") return value;
+  /* Checked against the ladder rather than a hand-written list, so a rung added
+     above cannot be silently coerced away here -- which is exactly what would
+     happen to a stored "library" if this still enumerated three names. */
+  if (typeof value === "string" && (RESEARCH_MODES as readonly string[]).includes(value)) {
+    return value as ResearchMode;
+  }
   return DEFAULT_RESEARCH.mode;
 }
 

@@ -1,16 +1,19 @@
 /**
  * Searching the user's own Zotero library.
  *
- * Gated with the document tools rather than with the searching ones, and that
- * is a deliberate reading of what the rungs mean. They are a ladder of how far
- * Karen may reach: "off" is nothing, "assistant" is things on this machine,
- * "web"/"deep" reach the network. Zotero's local API is loopback with no key,
- * so a library search reaches no further than reading a file does — and the
- * researcher who keeps searching switched off for privacy is exactly the person
- * who most wants their own papers searchable.
+ * Its own rung on the ladder, below the two that reach the network. That
+ * placement is the whole design: Zotero's local API is loopback with no key, so
+ * a library search reaches no further than reading a file does — which means
+ * the researcher who keeps searching switched off for privacy is exactly the
+ * person who can still have their own papers searchable.
+ *
+ * It began gated with the documents, which was defensible and wrong in
+ * practice: reachable, but with nothing on screen saying so, which a user
+ * cannot tell apart from the feature not existing. A rung is a control, and a
+ * control is the difference.
  */
 
-import { readResearchConfig } from "../../research/config.ts";
+import { readResearchConfig, readsLibrary } from "../../research/config.ts";
 import { formatItems, type LibraryItem, type SearchMode } from "../../library/zotero.ts";
 import type { ToolDef } from "../registry.ts";
 
@@ -32,9 +35,17 @@ export function setLibraryHost(installed: LibraryHost | undefined): void {
   host = installed;
 }
 
-/** Same rule as the document tools: everything except "off". */
+/**
+ * The library rung and everything above it.
+ *
+ * Its own rung rather than riding along with the documents, because the point
+ * of a control is that you can see what it does: the tool was reachable at the
+ * document rung and nothing on screen said so, which is indistinguishable from
+ * it not existing. Choosing "Library" is now how you turn it on, and the two
+ * searching rungs keep it, so moving up never takes it away.
+ */
 function available(): boolean {
-  return readResearchConfig().mode !== "off";
+  return readsLibrary(readResearchConfig().mode);
 }
 
 export const searchLibraryTool: ToolDef = {
