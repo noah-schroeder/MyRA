@@ -11,6 +11,20 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PermissionMode } from "./policy.ts";
+import { parseProviders, type Provider } from "./providers.ts";
+import { parseSampling, type Sampling } from "./llm/sampling.ts";
+
+/** Per-model sampler settings, each rebuilt field by field on the way in. */
+function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, Sampling> = {};
+  for (const [model, value] of Object.entries(raw as Record<string, unknown>)) {
+    const parsed = parseSampling(value);
+    // An entry with nothing usable left in it is not an entry.
+    if (Object.keys(parsed).length) out[model] = parsed;
+  }
+  return out;
+}
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "./paths.ts";
 import { isLocalHost } from "./destinations.ts";
 
@@ -101,6 +115,22 @@ export interface Settings {
    */
   keepRunningInTray: boolean;
   setupCompleted: boolean;
+  /**
+   * Extra endpoints models can be served from, beyond the managed local one.
+   *
+   * Empty by default and empty for anyone who never adds one, which is the
+   * point: Karen without providers is Karen as it was, with no route off the
+   * machine at all.
+   */
+  providers: Provider[];
+  /**
+   * Sampler settings per model, keyed the way a model is chosen.
+   *
+   * Per model rather than global, because the right temperature for a 4B
+   * instruct model is not the right temperature for a 70B one, and a single
+   * slider would be re-tuned on every switch until it was abandoned.
+   */
+  sampling: Record<string, Sampling>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -122,6 +152,8 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingInstructions: "",
   keepRunningInTray: true,
   setupCompleted: false,
+  providers: [],
+  sampling: {},
 };
 
 /**
@@ -176,6 +208,11 @@ export class ConfigStore {
         // endpoint existed, or holding only a baseUrl, would otherwise drop
         // envVar and leave the key with nowhere to arrive.
         embeddings: endpoint(DEFAULT_SETTINGS.embeddings, parsed.embeddings),
+        /* Rebuilt from the file rather than spread, because this list decides
+           where conversations are sent: a half-formed entry must not become a
+           route. */
+        providers: parseProviders(parsed.providers),
+        sampling: parseSamplingByModel(parsed.sampling),
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -190,6 +227,10 @@ export class ConfigStore {
       ...patch,
       llm: { ...this.#settings.llm, ...patch.llm },
       transcription: { ...this.#settings.transcription, ...patch.transcription },
+      // Replaced wholesale, not merged: removing a provider is a thing the user
+      // must be able to do, and a merge cannot express a deletion.
+      ...(patch.providers ? { providers: parseProviders(patch.providers) } : {}),
+      ...(patch.sampling ? { sampling: parseSamplingByModel(patch.sampling) } : {}),
     };
     await this.save();
     this.#emit();
@@ -238,5 +279,13 @@ export function configuredEndpoints(
   add("Chat and reasoning", settings.llm.baseUrl);
   add("Transcription", settings.transcription.baseUrl);
   add("Embeddings", settings.embeddings.baseUrl);
+  /* Providers belong here for the same reason the three above do, and more
+     urgently: a privacy report that listed only the built-in endpoints while a
+     hosted provider sat configured would be a report that is wrong about
+     exactly the thing it exists to be right about. */
+  for (const provider of settings.providers) {
+    if (!provider.enabled) continue;
+    add(`Models — ${provider.label}`, provider.baseUrl);
+  }
   return rows;
 }

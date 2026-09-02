@@ -28,6 +28,8 @@ import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.t
 import { listZoteroCollections, searchZotero } from "./runtime/zoteroClient.ts";
 import { collectionTree } from "../core/library/zotero.ts";
 import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
+import { isExternal, parseModelRef, providerFor, providerSecret } from "../core/providers.ts";
+import { samplingForRequest } from "../core/llm/sampling.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
@@ -328,6 +330,25 @@ function createWindow(): void {
 
 /* ---------------------------------------------------------------- agent --- */
 
+/**
+ * How a chat turn finds out where to send itself.
+ *
+ * Assigned once, in main(), because the resolver closes over the runtime
+ * manager and the vault. Throwing before that happens is right: a turn that
+ * arrives before the app has finished starting has no endpoint to use, and
+ * inventing a fallback here would be inventing a second answer to the question
+ * this exists to have only one answer to.
+ */
+type EndpointResolution = {
+  endpoint: EndpointSettings;
+  apiKey?: string;
+  label?: string;
+  sampling?: Record<string, number>;
+};
+let resolveEndpoint: () => Promise<EndpointResolution> = () => {
+  throw new Error("The app is still starting up.");
+};
+
 function currentSession(): Session {
   if (!session_) {
     const now = new Date().toISOString();
@@ -494,18 +515,17 @@ async function handleSend(text: string): Promise<void> {
 
   try {
     /*
-     * A model Karen is serving itself wins over the configured endpoint, but
-     * only while it is actually ready -- see RuntimeManager.chatEndpoint. The
-     * address and key change on every launch and exist only in this process,
-     * which is why this is resolved here rather than written into settings.
+     * Resolved by the one resolver, not a second copy of its reasoning.
+     *
+     * This used to work it out inline -- managed runtime first, configured
+     * endpoint otherwise -- alongside an identical passage further down that
+     * meetings, research and subagents use. They agreed right up until
+     * providers arrived, at which point choosing a hosted model changed where
+     * every one of those went and left the actual conversation, the one thing
+     * the picker is above, still answering from whatever was resident.
      */
+    const { endpoint, apiKey, sampling } = await resolveEndpoint();
     const managed = runtime.chatEndpoint();
-    const apiKey = managed ? managed.apiKey : await vault.get("llmKey");
-    /* `model` as well as `baseUrl`: the configured model name belongs to the
-       user's own endpoint and means nothing to the daemon Karen started. */
-    const endpoint = managed
-      ? { ...settings.llm, baseUrl: managed.baseUrl, model: managed.model }
-      : settings.llm;
     /*
      * How big the window actually is, when that is knowable.
      *
@@ -527,6 +547,7 @@ async function handleSend(text: string): Promise<void> {
       messages: conversation.messages_,
       system: systemPrompt(),
       ...(apiKey ? { apiKey } : {}),
+      ...(Object.keys(sampling ?? {}).length ? { sampling: sampling! } : {}),
       signal: inFlight.signal,
       approve,
       onEvent: (event: AgentEvent) => send("karen:agent-event", event),
@@ -686,6 +707,58 @@ function installIpc(): void {
       return { ok: false, error: (err as Error).message };
     }
   });
+
+  /*
+   * List what a provider serves, so the user can tick the ones they want.
+   *
+   * Takes the base URL and key from the ARGUMENTS rather than from stored
+   * settings, because this is used while adding a provider that has not been
+   * saved yet -- making someone save an endpoint before they can find out
+   * whether it answers is how you end up with a list of broken entries.
+   *
+   * The key is only read from the vault when the caller does not supply one,
+   * which is the editing case: a provider already saved should not have to have
+   * its key retyped to refresh its model list.
+   */
+  ipcMain.handle(
+    "karen:provider-models",
+    async (_e, opts: { baseUrl?: unknown; id?: unknown; apiKey?: unknown }) => {
+      const baseUrl = String(opts?.baseUrl ?? "").trim();
+      if (!baseUrl) return { ok: false, error: "No base URL is set for this provider." };
+      const base = baseUrl.replace(/\/+$/, "");
+      const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
+
+      const supplied = String(opts?.apiKey ?? "");
+      const id = String(opts?.id ?? "");
+      const key = supplied || (id ? await vault.get(providerSecret(id)) : undefined);
+
+      try {
+        const res = await fetch(url, {
+          headers: key ? { authorization: `Bearer ${key}` } : {},
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) {
+          return {
+            ok: false,
+            error:
+              res.status === 401 || res.status === 403
+                ? `${res.status}: the endpoint refused the key. Check the API key for this provider.`
+                : `${res.status} ${res.statusText}`,
+          };
+        }
+        const body = (await res.json()) as { data?: { id?: string }[] };
+        const models = (body.data ?? []).map((m) => m.id).filter(Boolean) as string[];
+        return { ok: true, models: [...new Set(models)].sort((a, b) => a.localeCompare(b)) };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
+  /** A provider's API key. Write-only from the renderer, like every other secret. */
+  ipcMain.handle("karen:provider-key", async (_e, id: unknown, value: unknown) =>
+    vault.set(providerSecret(String(id ?? "")), String(value ?? "")),
+  );
 
   ipcMain.handle("karen:test-endpoint", async (_e, which: "llm" | "transcription" | "embeddings") => {
     const endpoint = config.current[which];
@@ -1101,12 +1174,57 @@ async function main(): Promise<void> {
    * running a local model, they failed with "No LLM endpoint is configured"
    * while a model sat loaded three feet away.
    */
+  /**
+   * The sampler settings for a chosen model, filtered for where it is going.
+   *
+   * The filter is not a nicety. llama.cpp accepts top_k, min_p, DRY and the
+   * rest; a hosted API answers 400 for the whole request when it sees one. So
+   * somebody who tuned min-p for their local model would find every hosted
+   * model broken, with nothing saying which setting did it.
+   */
+  const samplingFor = (stored: string, local: boolean): Record<string, number> =>
+    samplingForRequest(config.current.sampling[stored] ?? {}, !local);
+
   const resolveLlm = async (): Promise<{
     endpoint: EndpointSettings;
     apiKey?: string;
     /** What to write down as the model that did the work. */
     label?: string;
+    sampling?: Record<string, number>;
   }> => {
+    /*
+     * A provider-qualified choice wins over the loaded local model.
+     *
+     * It has to: choosing a hosted model is an explicit instruction about where
+     * this conversation goes, and quietly answering from whatever happens to be
+     * resident instead would make the picker a suggestion. The reverse matters
+     * more -- a local choice must never be routed outward -- and that direction
+     * is guarded by `providerFor` returning nothing for a bare name.
+     */
+    const chosen = config.current.llm.model ?? "";
+    const provider = providerFor(config.current.providers, chosen);
+    if (provider && provider.enabled) {
+      const { model } = parseModelRef(chosen);
+      const key = await vault.get(providerSecret(provider.id));
+      return {
+        endpoint: { ...config.current.llm, baseUrl: provider.baseUrl, model },
+        ...(key ? { apiKey: key } : {}),
+        label: `${model} (${provider.label})`,
+        // Only what this endpoint will accept. A provider the user runs on
+        // loopback gets the whole set; anything else gets the standard fields.
+        sampling: samplingFor(chosen, !isExternal(provider)),
+      };
+    }
+    if (provider && !provider.enabled) {
+      /* Named, not silently fallen back from. Falling back would answer from a
+         local model under a label the user did not choose, which is the one
+         substitution this app should never make quietly. */
+      throw new Error(
+        `The model chosen is served by "${provider.label}", which is switched off in ` +
+          "Settings → Providers. Turn it back on, or choose another model.",
+      );
+    }
+
     const managed = runtime.chatEndpoint();
     if (managed) {
       return {
@@ -1116,6 +1234,10 @@ async function main(): Promise<void> {
         // "http://127.0.0.1:37617/v1" as the model that wrote it says nothing
         // a month later, when the port is long gone.
         label: basename(runtime.config.activeModel ?? "") || config.current.llm.model || "a local model",
+        /* Keyed by the loaded model's own id, not by whatever llm.model holds:
+           the managed runtime is what is actually answering, and tuning
+           follows the model rather than the setting that used to name it. */
+        sampling: samplingFor(managed.model, true),
       };
     }
     /*
@@ -1142,6 +1264,10 @@ async function main(): Promise<void> {
     };
   };
   setEndpointResolver(resolveLlm);
+  /* The chat turn runs in a different scope from this one, and it must not grow
+     its own copy of the reasoning above: that divergence is what let a chosen
+     provider apply everywhere except the conversation. */
+  resolveEndpoint = resolveLlm;
 
   installIpc();
   installMeetingIpc({

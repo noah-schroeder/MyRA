@@ -4,6 +4,7 @@ import {
   displayModelName, filterModels, shortModelName as shorten, SOURCE_LABELS, sourceOfModel,
 } from "../../core/runtime/foreign.ts";
 import { formatTokens } from "../../core/tokens.ts";
+import { choiceIsExternal, isExternal, parseModelRef, qualify } from "../../core/providers.ts";
 
 /**
  * Which model is answering — and, now, which one answers next.
@@ -30,10 +31,14 @@ export function ModelBar({
   settings,
   onOpenSettings,
   onOpenHub,
+  onSettingsChange,
 }: {
   settings: Settings | undefined;
   onOpenSettings: () => void;
   onOpenHub: () => void;
+  /* Choosing a hosted model is a settings change made from the chat screen, so
+     the change has to reach the app and not only this menu. */
+  onSettingsChange: (s: Settings) => void;
 }) {
   const [runtime, setRuntime] = useState<RuntimeState | undefined>();
   const [models, setModels] = useState<LocalModel[]>([]);
@@ -42,6 +47,9 @@ export function ModelBar({
   /* Cleared every time the menu opens. A filter left over from last time would
      hide most of the list with no obvious reason why. */
   const [query, setQuery] = useState("");
+  /* Which half of the menu is showing. Local first, always: it is the default
+     answer and the one that needs no warning. */
+  const [pane, setPane] = useState<"local" | "external">("local");
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -97,6 +105,23 @@ export function ModelBar({
     return () => clearInterval(timer);
   }, [loadingModel]);
 
+  const providers = (settings?.providers ?? []).filter((p) => p.enabled && p.models.length);
+  const chosenExternal = choiceIsExternal(settings?.providers ?? [], settings?.llm.model ?? "");
+
+  /**
+   * Choose a hosted model.
+   *
+   * Stored provider-qualified, which is what lets the main process route it
+   * without guessing, and what makes "the provider this came from was deleted"
+   * a question with an answer.
+   */
+  const pick = async (providerId: string, model: string): Promise<void> => {
+    setOpen(false);
+    onSettingsChange(
+      await window.karen.updateSettings({ llm: { ...settings!.llm, model: qualify(providerId, model) } }),
+    );
+  };
+
   const backend = runtime?.lemonade;
   const usingLocal = runtime?.config.useForChat === true;
   const local = usingLocal && backend?.state === "ready" && Boolean(backend.loaded);
@@ -113,6 +138,12 @@ export function ModelBar({
   } else if (loading) {
     label = "Starting the local engine…";
     tone = "loading";
+  } else if (chosenExternal) {
+    /* Ahead of the loaded local model, matching how the request is actually
+       routed: a hosted choice wins, so the bar must not keep naming whatever
+       happens to be resident. */
+    label = shorten(parseModelRef(settings?.llm.model ?? "").model);
+    tone = "remote";
   } else if (local && activePath) {
     label = shorten(activePath);
     tone = "local";
@@ -222,6 +253,75 @@ export function ModelBar({
 
       {open ? (
         <div className="modelmenu" role="menu">
+          {/* Only when there is a second place to look. With no providers set
+              up the tabs would be a control with one option, which teaches the
+              user nothing and costs a row of the menu. */}
+          {providers.length ? (
+            <div className="modelmenu-tabs" role="tablist" aria-label="Where models come from">
+              {(["local", "external"] as const).map((which) => (
+                <button
+                  key={which}
+                  type="button"
+                  role="tab"
+                  aria-selected={pane === which}
+                  className={pane === which ? "modelmenu-tab on" : "modelmenu-tab"}
+                  onClick={() => setPane(which)}
+                >
+                  {which === "local" ? "Local" : "External"}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {pane === "external" && providers.length ? (
+            <div className="modelmenu-external">
+              <p className="modelmenu-warn" role="note">
+                Anything you send to these leaves your computer, including whatever is already in
+                the conversation.
+              </p>
+              {providers.map((provider) => (
+                <div key={provider.id}>
+                  <p className="modelmenu-head">
+                    {provider.label}
+                    {!isExternal(provider) ? <span className="dim"> — on this machine</span> : null}
+                  </p>
+                  <ul className="modelmenu-list">
+                    {provider.models.map((model) => {
+                      const on = settings?.llm.model === qualify(provider.id, model);
+                      return (
+                        <li key={model} className="modelmenu-row">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className={on ? "modelmenu-item active" : "modelmenu-item"}
+                            onClick={() => void pick(provider.id, model)}
+                          >
+                            <span className="modelmenu-name">{model}</span>
+                            <span className="modelmenu-meta">
+                              {on ? <span className="pill on">in use</span> : null}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+              <div className="modelmenu-foot">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenSettings();
+                  }}
+                >
+                  Manage providers…
+                </button>
+              </div>
+            </div>
+          ) : (
+          <>
           <p className="modelmenu-head">On this machine</p>
 
           {/* Shown once there are enough models that scrolling is the slow way
@@ -345,7 +445,30 @@ export function ModelBar({
                 : "Endpoints and runtime…"}
             </button>
           </div>
+          </>
+          )}
         </div>
+      ) : null}
+
+      {/*
+        * Beside the picker, not inside the menu.
+        *
+        * The menu is where the choice is made; this is where it is LIVED WITH.
+        * Someone who picked a hosted model twenty minutes ago and is now
+        * pasting an interview transcript into the composer is exactly the
+        * person this is for, and they are not looking at the menu.
+        *
+        * Drawn from the same function the main process routes with, so it
+        * cannot say "local" about a request that is about to leave.
+        */}
+      {chosenExternal ? (
+        <span className="modelbar-external" role="note" title="Change this in the model picker, or under Settings → Providers.">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+          </svg>
+          External model — what you send goes to another system
+        </span>
       ) : null}
 
       {error ? <span className="modelbar-error">{error}</span> : null}

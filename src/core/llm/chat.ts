@@ -70,6 +70,14 @@ export interface ChatRequest {
   stream_options?: { include_usage: true };
   tools?: ToolSchema[];
   tool_choice?: "auto";
+  /**
+   * Sampler fields, which vary by backend.
+   *
+   * Open rather than enumerated because llama.cpp's set is long and grows: the
+   * list of what Karen offers lives in llm/sampling.ts, where each field also
+   * says whether a hosted API will accept it.
+   */
+  [sampler: string]: unknown;
 }
 
 /**
@@ -87,13 +95,24 @@ export function buildRequest(opts: {
   temperature?: number;
   stream?: boolean;
   tools?: ToolSchema[];
+  /**
+   * Per-model sampler settings, already filtered for this endpoint.
+   *
+   * Spread LAST so a tuned temperature beats the default below — but not the
+   * one a CALLER passed, because those come from tasks that must not be warm:
+   * screening and extraction ask for facts, and a creative setting there
+   * invents owners for action items nobody volunteered for.
+   */
+  sampling?: Record<string, number>;
 }): ChatRequest {
+  const { temperature: tuned, ...otherSampling } = opts.sampling ?? {};
   return {
     ...(opts.model ? { model: opts.model } : {}),
     messages: opts.messages,
     // Extraction and screening are not creative tasks, and a warm model
     // invents owners for action items nobody volunteered for.
-    temperature: opts.temperature ?? 0.2,
+    temperature: opts.temperature ?? tuned ?? 0.2,
+    ...otherSampling,
     stream: opts.stream ?? false,
     /*
      * A streaming response carries no token counts unless they are asked for.
@@ -123,6 +142,8 @@ export interface ChatOptions {
    */
   onDelta?: (delta: string, kind: DeltaKind) => void;
   tools?: ToolSchema[];
+  /** Sampler settings for this model, already filtered for this endpoint. */
+  sampling?: Record<string, number>;
 }
 
 export interface ChatUsage {
@@ -185,6 +206,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
           ...(opts.temperature === undefined ? {} : { temperature: opts.temperature }),
           stream: streaming,
           ...(opts.tools?.length ? { tools: opts.tools } : {}),
+          ...(opts.sampling ? { sampling: opts.sampling } : {}),
         }),
       ),
       signal,

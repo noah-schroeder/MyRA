@@ -26,7 +26,16 @@ const SECRETS_PATH = join(CONFIG_DIR, "secrets.enc.json");
 /* hfToken is here rather than in settings.json for the same reason as the
  * others: a HuggingFace access token grants read access to a person's private
  * repositories, so it belongs in the keyring, not in a JSON file. */
-export type SecretName = "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken" | "hfToken";
+/**
+ * The named secrets, plus one key per configured provider.
+ *
+ * Providers are added at runtime, so their names cannot be enumerated here.
+ * They are namespaced instead, which is what keeps a provider called "llmKey"
+ * from overwriting the built-in one.
+ */
+export type SecretName =
+  | "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken" | "hfToken"
+  | `provider:${string}`;
 
 export interface VaultStatus {
   usable: boolean;

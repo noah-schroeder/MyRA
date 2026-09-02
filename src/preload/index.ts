@@ -60,6 +60,10 @@ const api = {
   revealDocument: (path: string) => ipcRenderer.invoke("karen:document-reveal", path),
 
   copy: (text: string) => ipcRenderer.invoke("karen:copy", text),
+  providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
+    ipcRenderer.invoke("karen:provider-models", opts),
+  setProviderKey: (id: string, value: string) =>
+    ipcRenderer.invoke("karen:provider-key", id, value),
   zoteroCollections: () => ipcRenderer.invoke("karen:zotero-collections"),
   setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
   getResearch: () => ipcRenderer.invoke("karen:get-research"),
