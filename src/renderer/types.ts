@@ -168,6 +168,11 @@ export function readsLibrary(mode: ResearchMode): boolean {
   return reaches(mode, "library");
 }
 
+/** Whether this rung can reach the network. */
+export function searches(mode: ResearchMode): boolean {
+  return reaches(mode, "web");
+}
+
 export interface ResearchConfig {
   mode: ResearchMode;
   category: string;
@@ -365,6 +370,8 @@ export interface KarenApi {
   discoverModels(which: "llm" | "transcription" | "embeddings"): Promise<{ ok: boolean; models?: string[]; error?: string }>;
   testEndpoint(which: "llm" | "transcription" | "embeddings"): Promise<{ ok: boolean; status?: number; error?: string }>;
   chooseDirectory(opts: { title?: string; current?: string }): Promise<string | undefined>;
+  /** Put text on the system clipboard. Main-process, so it works off file://. */
+  copy(text: string): Promise<void>;
   zoteroCollections(): Promise<{ ok: boolean; collections?: CollectionNode[]; error?: string }>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;

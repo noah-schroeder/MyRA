@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CitedSource, DocumentUpdate } from "../types.ts";
+import { clampWidth, DEFAULT_WIDTH, WIDTH_KEY } from "./artifactWidth.ts";
+import { CopyButton } from "./CopyButton.tsx";
 import { Markdown } from "./Markdown.tsx";
 
 /**
@@ -21,12 +23,14 @@ export function ArtifactPanel({
   active,
   onSelect,
   onClose,
+  onResize,
 }: {
   /** In the order they were first written. */
   docs: DocumentUpdate[];
   active: string;
   onSelect: (path: string) => void;
   onClose: () => void;
+  onResize: (width: number) => void;
 }) {
   const doc = docs.find((d) => d.path === active) ?? docs[docs.length - 1];
   const body = useRef<HTMLDivElement>(null);
@@ -53,6 +57,7 @@ export function ArtifactPanel({
 
   return (
     <aside className="artifact" aria-label="Documents written in this conversation">
+      <ResizeHandle onResize={onResize} />
       <header className="artifact-head">
         <div className="artifact-title" title={doc.path}>
           {doc.name}
@@ -100,11 +105,84 @@ export function ArtifactPanel({
               that nothing exists yet. */}
           {doc.final ? `${words.toLocaleString()} words` : `${words.toLocaleString()} words · still writing…`}
         </span>
+        {/* The markdown as written, not the rendered HTML: this is a document
+            somebody is about to paste into their own draft, and headings and
+            citation markers have to survive that. Read at click time, so
+            copying a document still being written takes what exists now. */}
+        <CopyButton className="artifact-open" text={() => doc.markdown} title="Copy the document as Markdown" />
         <button type="button" className="artifact-open" onClick={() => void reveal(doc.path)}>
           Show in folder
         </button>
       </footer>
     </aside>
+  );
+}
+
+/**
+ * Drag the edge.
+ *
+ * A fixed 400px is right for a section and wrong for a table, and the document
+ * is the thing being read -- so the reader decides, not the layout. Keyboard as
+ * well as pointer, because a drag handle is unusable without one and this is a
+ * pane somebody may live in for an hour.
+ *
+ * Pointer capture rather than window listeners: without it, dragging faster
+ * than React re-renders takes the pointer outside the handle and the resize
+ * stops dead halfway across the screen.
+ */
+function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
+  /* The drag's own state, rather than asking whether pointer capture is held.
+     Capture is an optimisation here -- it keeps a fast drag from outrunning the
+     handle -- and setPointerCapture can refuse. Gating the whole control on it
+     succeeding means one throw leaves a grip that looks draggable and is not. */
+  const dragging = useRef(false);
+
+  const stop = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
+  useEffect(() => {
+    /* A pointerup that never reaches the handle -- capture refused, the button
+       released off-window -- would otherwise leave the panel following the
+       mouse forever, with no way to put it down. */
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    return () => {
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+  }, [stop]);
+
+  return (
+    <div
+      className="artifact-grip"
+      role="separator"
+      aria-label="Resize the document panel"
+      aria-orientation="vertical"
+      tabIndex={0}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        dragging.current = true;
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* Best effort; the drag works without it, just less smoothly. */
+        }
+      }}
+      onPointerMove={(e) => {
+        if (!dragging.current) return;
+        // Measured from the right edge, which is where the panel is anchored.
+        onResize(clampWidth(window.innerWidth - e.clientX, window.innerWidth));
+      }}
+      onPointerUp={stop}
+      onKeyDown={(e) => {
+        const step = e.key === "ArrowLeft" ? 24 : e.key === "ArrowRight" ? -24 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const now = document.querySelector(".artifact")?.getBoundingClientRect().width ?? 400;
+        onResize(clampWidth(now + step, window.innerWidth));
+      }}
+    />
   );
 }
 
@@ -136,11 +214,22 @@ export function useDocuments(): {
   setActive: (path: string) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
+  width: number;
+  setWidth: (px: number) => void;
   reset: () => void;
 } {
   const [docs, setDocs] = useState<DocumentUpdate[]>([]);
   const [active, setActive] = useState("");
   const [open, setOpen] = useState(false);
+  /* Remembered, because a width is a decision about how you read and not about
+     this document: having to re-drag it on every launch would make the control
+     annoying enough to be worth less than the fixed 400px it replaced. */
+  const [width, setWidthState] = useState(() => {
+    const stored = Number(localStorage.getItem(WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0
+      ? clampWidth(stored, window.innerWidth)
+      : DEFAULT_WIDTH;
+  });
   /* Reopening on every save would fight a reader who had just closed it -- and
      a draft saves a dozen times. Opens itself once per document instead. */
   const announced = useRef(new Set<string>());
@@ -164,12 +253,25 @@ export function useDocuments(): {
     [],
   );
 
+  const setWidth = useCallback((px: number) => {
+    setWidthState(px);
+    // Best effort: a browser with storage blocked still resizes, it just
+    // forgets. Losing a preference is not a reason to break the drag.
+    try {
+      localStorage.setItem(WIDTH_KEY, String(px));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   return {
     docs,
     active,
     setActive,
     open,
     setOpen,
+    width,
+    setWidth,
     reset: () => {
       setDocs([]);
       setActive("");

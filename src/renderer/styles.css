@@ -1007,16 +1007,41 @@ kbd {
    something covering that conversation makes the two impossible to hold at
    once. minmax on the middle column, so the thread shrinks and the panel keeps
    a readable measure rather than the reverse. */
-.app.with-artifact { grid-template-columns: 248px minmax(0, 1fr) 400px; }
+/* The third track is dragged, so it is a variable with a fallback rather than
+   a constant -- the fallback is what it was before the grip existed. */
+.app.with-artifact { grid-template-columns: 248px minmax(0, 1fr) var(--artifact-w, 400px); }
 
 /* ---------- the document panel ---------- */
 
 .artifact {
+  position: relative;
   display: flex; flex-direction: column;
   min-width: 0; min-height: 0;
   border-left: 1px solid var(--border);
   background: var(--bg-float);
 }
+
+/* The drag edge.
+ *
+ * Sits ON the border and reaches a few pixels either side of it, because a
+ * 1px target is a target you miss. Invisible until pointed at: it is a control
+ * you look for only in the moment you want it, and a permanent stripe down the
+ * middle of the app would be furniture the rest of the time. */
+.artifact-grip {
+  position: absolute; top: 0; bottom: 0; left: -3px;
+  width: 7px; z-index: 2;
+  cursor: col-resize;
+  background: transparent;
+  transition: background var(--t-fast);
+}
+.artifact-grip:hover,
+.artifact-grip:focus-visible { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.artifact-grip:focus-visible { outline: none; }
+
+/* No text selection anywhere while a drag is in progress: dragging left across
+   the conversation would otherwise highlight the whole thread behind it. */
+.artifact-grip:active { background: var(--accent); }
+body:has(.artifact-grip:active) { user-select: none; }
 
 .artifact-head {
   display: flex; align-items: center; gap: 8px;
@@ -1075,6 +1100,30 @@ kbd {
   color: var(--text-dim); cursor: pointer; flex: none;
 }
 .artifact-open:hover { color: var(--text); background: var(--bg-inset); }
+.artifact-open.done { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+
+/* The per-turn copy.
+ *
+ * Held back until the turn is pointed at, and kept out of the text flow, so a
+ * thread being READ is not a column of buttons. It stays put once focused by
+ * keyboard, which is the only way it can be reached without a pointer. */
+.turn { position: relative; }
+.turn-copy {
+  position: absolute; top: 2px; right: 0;
+  font: inherit; font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-float); color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0; transition: opacity var(--t-fast), color var(--t-fast);
+}
+.turn:hover .turn-copy,
+.turn-copy:focus-visible { opacity: 1; }
+.turn-copy:hover { color: var(--text); }
+.turn-copy.done { opacity: 1; color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+
+/* A user turn is a bubble the button would otherwise sit inside. */
+.turn.user .turn-copy { top: -8px; right: -4px; }
 
 .artifact-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

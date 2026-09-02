@@ -104,6 +104,23 @@ export function safeRelativePath(name: string): string | undefined {
   return parts.join("/");
 }
 
+/**
+ * The name the model gave, ending in the extension the format needs.
+ *
+ * A name is supplied far more often than not, and it was used verbatim: asked
+ * for "wm-transfer" as Markdown, Karen wrote a file called `wm-transfer` with
+ * no extension at all. It has the right bytes in it and it opens in nothing --
+ * a double click gets a "choose an application" dialog, and the file manager
+ * shows it as unknown. Observed, not hypothesised.
+ *
+ * Appended rather than replaced, so nothing in the name is destroyed. A name
+ * that already ends in the right extension is left exactly as it is.
+ */
+export function withExtension(name: string, ext: string): string {
+  const base = name.slice(name.lastIndexOf("/") + 1);
+  return base.toLowerCase().endsWith(`.${ext.toLowerCase()}`) ? name : `${name}.${ext}`;
+}
+
 /** A filename for a draft, when the model did not give a usable one. */
 export function slugName(title: string, ext: string): string {
   const slug = title

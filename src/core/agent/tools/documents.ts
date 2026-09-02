@@ -12,7 +12,7 @@
 import { realpath } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
-  FORMAT_NAMES, isReadable, resolveFormat, safeRelativePath, slugName,
+  FORMAT_NAMES, isReadable, resolveFormat, safeRelativePath, slugName, withExtension,
 } from "../../documents/formats.ts";
 import {
   DocsError, convert, documentsDir, exists, readAsText, writeText,
@@ -149,7 +149,12 @@ export const writeDocumentTool: ToolDef = {
     }
 
     const given = String(params["name"] ?? "").trim();
-    const name = given || slugName(String(params["title"] ?? "document"), format.ext);
+    /* The given name still gets the extension. slugName has always added one;
+       a supplied name did not, so the common path produced files that opened in
+       nothing while the fallback path produced files that opened correctly. */
+    const name = given
+      ? withExtension(given, format.ext)
+      : slugName(String(params["title"] ?? "document"), format.ext);
     const abs = await resolveInJail(documentsDir(), name);
 
     if (format.ext === "md") {

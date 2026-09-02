@@ -40,6 +40,38 @@ test("attachments and notes are excluded, so parents do not look duplicated", ()
   assert.match(searchPath({ query: "x" }), /itemType=-attachment\+%7C%7C\+note/);
 });
 
+test("the plain tier sends only what every Zotero must accept", () => {
+  /* The reported failure: the collection listing worked and the search did not,
+     on the same host, port and /api/ prefix, through the same function. The
+     only difference between those two requests is the query string, so the
+     extras are what a refusal is about. */
+  const plain = searchPath({ query: "working memory" }, "plain");
+  assert.match(plain, /^\/api\/users\/0\/items\?/);
+  assert.match(plain, /q=working\+memory/);
+  assert.match(plain, /qmode=everything/);
+  assert.match(plain, /limit=25/);
+  for (const dropped of ["itemType", "sort", "direction"]) {
+    assert.doesNotMatch(plain, new RegExp(dropped), `${dropped} must not survive the fallback`);
+  }
+  // The scope is not an extra: dropping it would search somewhere else.
+  assert.match(
+    searchPath({ query: "x", collection: "AAAAAAAA" }, "plain"),
+    /^\/api\/users\/0\/collections\/AAAAAAAA\/items\?/,
+  );
+});
+
+test("attachments and notes are dropped again on the way in", () => {
+  // Belt and braces on purpose: the plain tier never sends the itemType filter,
+  // so without this a fallback search reads as duplicated results -- every
+  // paper once, plus its PDF and its note as separate rows.
+  const parsed = parseItems([
+    ITEM,
+    { data: { key: "PDFPDFPD", itemType: "attachment", title: "Full Text PDF" } },
+    { data: { key: "NOTENOTE", itemType: "note", title: "My note" } },
+  ]);
+  assert.deepEqual(parsed.map((i) => i.key), ["ABCD1234"]);
+});
+
 test("the limit is clamped rather than trusted", () => {
   assert.match(searchPath({ query: "x", limit: 5000 }), /limit=100/);
   assert.match(searchPath({ query: "x", limit: 0 }), /limit=1/);
@@ -148,6 +180,18 @@ test("Zotero closed and Zotero locked down are different problems", () => {
   assert.match(describeFailure(403), /Allow other applications/);
   assert.match(describeFailure(404), /Zotero 7 or newer/);
   assert.match(describeFailure(500), /answered 500/);
+});
+
+test("an unexplained refusal repeats what Zotero actually said", () => {
+  /* "Zotero answered 400" was the entire message. It says a request was
+     refused without saying which part of it was, which left the user and me
+     guessing at a local server that had already written the answer down. */
+  assert.match(describeFailure(400, "Invalid parameter 'itemType'"), /Invalid parameter 'itemType'/);
+  assert.match(describeFailure(400, "  a\n\n  b  "), /answered 400: a b\.$/);
+  assert.match(describeFailure(400, ""), /with no explanation/);
+  assert.ok(describeFailure(400, "x".repeat(5000)).length < 400, "a body is not a place to hide a wall of text");
+  // The two that name their own fix keep their own words.
+  assert.match(describeFailure(403, "nope"), /Allow other applications/);
 });
 
 /* --------------------------------------------------------- collections --- */
