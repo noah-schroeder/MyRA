@@ -221,7 +221,7 @@ function usageFrom(raw: unknown): ChatUsage {
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
   const { endpoint } = opts;
   if (!endpoint.baseUrl) {
-    throw new LlmError("No LLM endpoint is configured. Set one in Settings → Endpoints.");
+    throw new LlmError("No model is configured. Add one in Settings → Providers, or load a local one from Models.");
   }
 
   const timeoutMs = endpoint.timeoutMs || 120_000;
@@ -258,7 +258,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       throw new LlmError(
         `The LLM endpoint did not respond within ${timeoutMs / 1000}s. ` +
           `A model still loading into memory can take longer than this on a first request; ` +
-          `raise the timeout in Settings → Endpoints if that is what is happening.`,
+          `raise the timeout in Settings → Providers if that is what is happening.`,
       );
     }
     throw new LlmError(
@@ -310,7 +310,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       throw new LlmError(
         `The model stopped producing output for ${timeoutMs / 1000}s and the reply was cut off. ` +
           `If it is loading a large model or thinking for a long time, raise the timeout in ` +
-          `Settings → Endpoints.`,
+          `Settings → Providers.`,
       );
     }
     throw err;

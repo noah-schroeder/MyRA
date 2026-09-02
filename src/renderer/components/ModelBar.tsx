@@ -5,6 +5,7 @@ import {
 } from "../../core/runtime/foreign.ts";
 import { formatTokens } from "../../core/tokens.ts";
 import { choiceIsExternal, isExternal, parseModelRef, qualify } from "../../core/providers.ts";
+import { priceLabel, priceTitle } from "../../core/pricing.ts";
 
 /**
  * Which model is answering — and, now, which one answers next.
@@ -298,6 +299,18 @@ export function ModelBar({
                           >
                             <span className="modelmenu-name">{model}</span>
                             <span className="modelmenu-meta">
+                              {/* The provider's own figure, from the last time
+                                  its models were fetched. Absent for the many
+                                  endpoints that publish no prices, because the
+                                  alternative would be a number Karen made up. */}
+                              {provider.prices?.[model] ? (
+                                <span
+                                  className="modelmenu-price"
+                                  title={priceTitle(provider.prices[model])}
+                                >
+                                  {priceLabel(provider.prices[model])}
+                                </span>
+                              ) : null}
                               {on ? <span className="pill on">in use</span> : null}
                             </span>
                           </button>
@@ -404,7 +417,7 @@ export function ModelBar({
           {defaultModel && !runtime?.config.startOnLaunch ? (
             <p className="modelmenu-note">
               A starred model loads at startup only while “Start the local engine when Karen
-              opens” is on, under Endpoints and runtime.
+              opens” is on, under Settings → Runtime.
             </p>
           ) : null}
 
@@ -442,7 +455,7 @@ export function ModelBar({
             >
               {settings?.llm.baseUrl && !local
                 ? `Endpoint: ${new URL(settings.llm.baseUrl).host}`
-                : "Endpoints and runtime…"}
+                : "Providers and runtime…"}
             </button>
           </div>
           </>

@@ -4208,8 +4208,23 @@ p.warning { margin: 0; font-size: 12.5px; }
    is visible while scrolling a list this long rather than only on the box. */
 .provider-models li.on > label { background: var(--accent-wash); color: var(--text); }
 .provider-models .model-id { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
-.provider-models .gone {
+/* Right-aligned so a column of prices reads as a column, and tabular so the
+   digits line up in it. */
+.add-provider { align-self: flex-start; }
+.timeout-field .timeout-row { display: flex; align-items: center; gap: 8px; }
+.timeout-field input { width: 7em; }
+.modelmenu-price {
+  font-size: 11px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.model-price {
   margin-left: auto; flex: none;
+  font-size: 11px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.provider-models li.on .model-price { color: var(--text-dim); }
+.provider-models .gone {
+  flex: none;
   color: var(--amber); font-style: normal; font-size: 11px; white-space: nowrap;
 }
 

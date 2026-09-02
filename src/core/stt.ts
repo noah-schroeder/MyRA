@@ -69,7 +69,7 @@ async function post(opts: TranscribeOptions, format: "json" | "verbose_json"): P
   const { endpoint, audio } = opts;
   if (!endpoint.baseUrl) {
     throw new TranscriptionError(
-      "No transcription endpoint is configured. Set one in Settings → Endpoints.",
+      "No transcription endpoint is configured. Set one in Settings → Audio.",
     );
   }
 

@@ -82,7 +82,7 @@ test("a role with no model at all names the setting that fixes it", () => {
   };
   assert.throws(
     () => parsePlan(renderPlan(none), none),
-    (e: Error) => e instanceof PlanError && /Settings → Endpoints/.test(e.message),
+    (e: Error) => e instanceof PlanError && /Settings → Providers/.test(e.message),
   );
 });
 
