@@ -16,7 +16,7 @@ import {
   ConfigStore, configuredEndpoints, DEFAULT_SETTINGS, type EndpointSettings,
 } from "../core/config.ts";
 import { DESTINATIONS } from "../core/destinations.ts";
-import { SecretVault, type SecretName } from "./secrets.ts";
+import { isSecretName, SecretVault, type SecretName } from "./secrets.ts";
 import { ToolRegistry } from "../core/agent/registry.ts";
 import { runTurn, type AgentEvent } from "../core/agent/loop.ts";
 import { decide } from "../core/policy.ts";
@@ -28,7 +28,9 @@ import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.t
 import { listZoteroCollections, searchZotero } from "./runtime/zoteroClient.ts";
 import { collectionTree } from "../core/library/zotero.ts";
 import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
-import { isExternal, parseModelRef, providerFor, providerSecret } from "../core/providers.ts";
+import {
+  isExternal, orphanedSecrets, parseModelRef, providerFor, providerSecret,
+} from "../core/providers.ts";
 import { samplingForRequest } from "../core/llm/sampling.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
@@ -675,12 +677,34 @@ function installIpc(): void {
      "keep running when closed" can do anything at all. Linux answers this
      differently per desktop, so it is reported rather than assumed. */
   ipcMain.handle("karen:tray-available", () => tray?.available ?? false);
-  ipcMain.handle("karen:update-settings", (_e, patch: unknown) =>
-    config.update(patch as Partial<typeof config.current>),
-  );
-  ipcMain.handle("karen:set-secret", (_e, name: string, value: string) =>
-    vault.set(name as SecretName, String(value)),
-  );
+  ipcMain.handle("karen:update-settings", async (_e, patch: unknown) => {
+    const before = config.current.providers;
+    const next = await config.update(patch as Partial<typeof config.current>);
+    /*
+     * A removed provider's API key goes with it.
+     *
+     * Done here rather than in the pane's Remove button, because this is the
+     * one place every provider change passes through and a key left behind is
+     * not a tidiness problem: it is a credential still on disk that the person
+     * believes they deleted, and -- before ids stopped being reused -- it was
+     * the key a later provider for a different vendor would have been given.
+     */
+    for (const name of orphanedSecrets(before, next.providers)) {
+      await vault.set(name as SecretName, "").catch(() => undefined);
+    }
+    return next;
+  });
+  ipcMain.handle("karen:set-secret", (_e, name: string, value: string) => {
+    /* Checked rather than cast. The renderer is Karen's own code, but this
+       handler takes a name off the wire and writes it into the vault, and the
+       set of things that may be written there should be stated somewhere
+       rather than being whatever a caller passes. */
+    const requested = String(name);
+    if (!isSecretName(requested)) {
+      throw new Error(`Refusing to store a secret under an unknown name.`);
+    }
+    return vault.set(requested, String(value));
+  });
   ipcMain.handle("karen:secrets-backend", async () => ({
     ...vault.status(),
     persistent: await vault.checkPersistence(),
@@ -756,9 +780,30 @@ function installIpc(): void {
   );
 
   /** A provider's API key. Write-only from the renderer, like every other secret. */
-  ipcMain.handle("karen:provider-key", async (_e, id: unknown, value: unknown) =>
-    vault.set(providerSecret(String(id ?? "")), String(value ?? "")),
-  );
+  ipcMain.handle("karen:provider-key", async (_e, id: unknown, value: unknown) => {
+    const target = String(id ?? "");
+    /* Only a provider that exists. Otherwise this writes keys for providers
+       nobody can see and nothing will ever clean up. */
+    if (!config.current.providers.some((p) => p.id === target)) {
+      throw new Error("No such provider.");
+    }
+    return vault.set(providerSecret(target), String(value ?? ""));
+  });
+
+  /**
+   * WHETHER a provider has a key, never what it is.
+   *
+   * The field is write-only, which is right, but with nothing reported back a
+   * saved key and no key look identical -- so the honest thing to do about a
+   * provider that is refusing requests is retype the key, every time.
+   */
+  ipcMain.handle("karen:provider-keys-present", async () => {
+    const out: Record<string, boolean> = {};
+    for (const provider of config.current.providers) {
+      out[provider.id] = Boolean(await vault.get(providerSecret(provider.id)));
+    }
+    return out;
+  });
 
   ipcMain.handle("karen:test-endpoint", async (_e, which: "llm" | "transcription" | "embeddings") => {
     const endpoint = config.current[which];
@@ -1106,6 +1151,24 @@ async function main(): Promise<void> {
   }
   if (!process.env["KAREN_RESEARCH_ROOT"]) {
     await makeOwnDir(researchRoot()).catch(() => undefined);
+  }
+
+  /*
+   * Provider keys with no provider.
+   *
+   * Removing a provider takes its key with it, but that only protects removals
+   * from now on: a key deleted before that existed is still encrypted on disk,
+   * belonging to nothing, invisible to an interface that deliberately never
+   * lists secrets. Swept at startup, where it costs one read.
+   */
+  {
+    const live = new Set<string>(config.current.providers.map((p) => providerSecret(p.id)));
+    for (const name of await vault.names().catch(() => [])) {
+      // Checked, not asserted -- the same rule the set-secret handler follows.
+      if (name.startsWith("provider:") && !live.has(name) && isSecretName(name)) {
+        await vault.set(name, "").catch(() => undefined);
+      }
+    }
   }
 
   await tightenExistingContent();

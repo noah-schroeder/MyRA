@@ -190,11 +190,47 @@ export function parseProviders(raw: unknown): Provider[] {
   return out;
 }
 
-/** A short, collision-resistant id that does not change when the label does. */
+/**
+ * An id that has never been used before, and will not be used again.
+ *
+ * This was `p1`, `p2`, … counting up past whatever was in the list, and that is
+ * a credential bug rather than an aesthetic one. A provider's API key is stored
+ * under `provider:<id>`. Delete the provider you had for one vendor, add
+ * another for a different vendor, and the counter hands out the same id again —
+ * so the new provider inherits the old one's key and Karen sends one company's
+ * credential to another company. Nothing on screen would show it, because the
+ * key is write-only from the interface.
+ *
+ * The stored key is deleted when a provider is removed, which closes the same
+ * hole from the other side. Both, because one of them is somewhere a future
+ * code path could forget to call.
+ *
+ * Random rather than a high-water mark: there is nowhere to keep a high-water
+ * mark that survives a settings file being edited or restored from a backup,
+ * and 60 bits of randomness will not repeat.
+ */
 export function newProviderId(existing: Provider[]): string {
   const taken = new Set(existing.map((p) => p.id));
-  for (let i = 1; ; i++) {
-    const id = `p${i}`;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const bytes = new Uint8Array(8);
+    globalThis.crypto.getRandomValues(bytes);
+    const id = `p${[...bytes].map((b) => b.toString(36).padStart(2, "0")).join("").slice(0, 12)}`;
     if (!taken.has(id)) return id;
   }
+  /* Unreachable short of a broken RNG, and a duplicate id is exactly the case
+     that must not be quietly produced -- it is the one that leaks a key. */
+  throw new Error("Could not allocate a provider id.");
+}
+
+/**
+ * Provider keys that no provider claims any more.
+ *
+ * Returned as secret names so the caller can forget them. An API key that
+ * outlives the provider it belonged to is a credential kept on disk that the
+ * person believes they deleted, and it is also what a reused id would hand to
+ * the wrong endpoint.
+ */
+export function orphanedSecrets(before: Provider[], after: Provider[]): string[] {
+  const kept = new Set(after.map((p) => p.id));
+  return before.filter((p) => !kept.has(p.id)).map((p) => providerSecret(p.id));
 }

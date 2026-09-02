@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 
 import {
   choiceIsExternal, effectiveKind, isExternal, kindWasOverridden, newProviderId,
-  parseModelRef, parseProviders, providerFor, providerSecret, qualify, urlIsLocal,
+  orphanedSecrets, parseModelRef, parseProviders, providerFor, providerSecret, qualify,
+  urlIsLocal,
   type Provider,
 } from "../src/core/providers.ts";
 
@@ -121,9 +122,45 @@ test("a duplicate id is dropped rather than making routing depend on order", () 
   assert.equal(parsed[0]!.label, "First");
 });
 
-test("ids are unique and do not move when a label changes", () => {
-  const existing = [provider({ id: "p1" }), provider({ id: "p2" })];
-  assert.equal(newProviderId(existing), "p3");
-  assert.equal(newProviderId([]), "p1");
-  assert.equal(providerSecret("p3"), "provider:p3");
+test("a provider id is never handed out twice", () => {
+  /* This is a credential rule, not a naming one. The key lives at
+     `provider:<id>`, so a counter that reissued "p1" after the first provider
+     was deleted would hand one vendor's API key to the next provider added --
+     silently, because the field is write-only and shows nothing. */
+  const seen = new Set<string>();
+  let existing: Provider[] = [];
+  for (let i = 0; i < 500; i++) {
+    const id = newProviderId(existing);
+    assert.equal(seen.has(id), false, `${id} was issued twice`);
+    seen.add(id);
+    existing = [...existing, provider({ id })];
+  }
+  // And deleting one does not free its id for the next provider.
+  const after = existing.filter((p) => p.id !== existing[0]!.id);
+  assert.equal(seen.has(newProviderId(after)), false);
+});
+
+test("a removed provider's key is named for deletion", () => {
+  /* An API key that outlives the provider it belonged to is a credential still
+     on disk that the person believes they deleted. */
+  const before = [provider({ id: "pa" }), provider({ id: "pb" }), provider({ id: "pc" })];
+  const after = [before[0]!, before[2]!];
+  assert.deepEqual(orphanedSecrets(before, after), ["provider:pb"]);
+  assert.deepEqual(orphanedSecrets(before, before), []);
+  assert.deepEqual(orphanedSecrets(before, []).sort(),
+    ["provider:pa", "provider:pb", "provider:pc"]);
+  assert.equal(providerSecret("pb"), "provider:pb");
+});
+
+test("only a known secret name may be written to the vault", async () => {
+  /* The type is a compile-time promise; this handler takes a name off the IPC
+     wire, where `as SecretName` asserts rather than checks. */
+  const { isSecretName } = await import("../src/core/secretNames.ts");
+  for (const good of ["llmKey", "hfToken", "provider:pab12", "provider:p-1_2"]) {
+    assert.equal(isSecretName(good), true, good);
+  }
+  for (const bad of ["", "provider:", "provider:../../etc", "provider:a b", "nonsense",
+    "provider:" + "x".repeat(65)]) {
+    assert.equal(isSecretName(bad), false, bad);
+  }
 });

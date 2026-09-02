@@ -447,3 +447,17 @@ test("a DOI already written as a URL is not doubled up", () => {
   ]);
   assert.equal(linkFor(item!), "https://doi.org/10.1234/abc");
 });
+
+test("the collection scope applies only at the rung that shows the picker", async () => {
+  /* The picker sits under Library alone -- Quick and Deep are questions about
+     the literature, and a Zotero collection control beneath them reads as
+     though the two were one feature. Once the control is gone the setting has
+     to go with it, or a scope keeps narrowing results at a rung with nothing
+     on screen to see or change it. */
+  const { collectionScope } = await import("../src/core/agent/tools/library.ts");
+  const cfg = { category: "science", collection: "AAAAAAAA", collectionName: "Projects" };
+  assert.equal(collectionScope({ ...cfg, mode: "library" }), "AAAAAAAA");
+  for (const mode of ["web", "deep"] as const) {
+    assert.equal(collectionScope({ ...cfg, mode }), undefined, mode);
+  }
+});

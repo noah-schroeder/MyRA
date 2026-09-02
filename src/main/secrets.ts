@@ -31,11 +31,11 @@ const SECRETS_PATH = join(CONFIG_DIR, "secrets.enc.json");
  *
  * Providers are added at runtime, so their names cannot be enumerated here.
  * They are namespaced instead, which is what keeps a provider called "llmKey"
- * from overwriting the built-in one.
+ * from overwriting the built-in one. Declared in core so the boundary check can
+ * be tested without Electron.
  */
-export type SecretName =
-  | "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken" | "hfToken"
-  | `provider:${string}`;
+export { isSecretName, type SecretName } from "../core/secretNames.ts";
+import type { SecretName } from "../core/secretNames.ts";
 
 export interface VaultStatus {
   usable: boolean;
@@ -183,6 +183,18 @@ export class SecretVault {
       // Typically means the keyring changed underneath us.
       return undefined;
     }
+  }
+
+  /**
+   * The names of stored secrets. Names only, never values.
+   *
+   * Exists so orphaned provider keys can be found and removed. A key whose
+   * provider was deleted before that cleanup existed is still sitting on disk,
+   * and it will not be noticed by anything else: nothing in the interface lists
+   * secrets, which is otherwise the right decision.
+   */
+  async names(): Promise<string[]> {
+    return [...new Set([...Object.keys(await this.#load()), ...this.#memory.keys()])];
   }
 
   /** Which secrets exist, without revealing any value. */

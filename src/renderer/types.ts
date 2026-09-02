@@ -150,43 +150,17 @@ export interface SessionSummary {
   messages: number;
 }
 
-/**
- * How far Karen may reach on its own, as one ladder.
- *
- * Kept in step with the same type in core/research/config.ts by hand, because
- * the renderer does not import from core. Adding a rung here without adding it
- * there makes a control that writes a value the reader coerces away.
+/*
+ * The ladder itself lives in core/research/ladder.ts and is imported, not
+ * copied. It used to be redeclared here with a note asking the next person to
+ * keep the two in step -- which held right up until a rung was added to one of
+ * them. ladder.ts touches no filesystem, so the renderer can have the real one.
  */
-export type ResearchMode = "off" | "assistant" | "library" | "web" | "deep";
-
-/** IN ORDER, and for the same reason as in core: `reaches` indexes it. */
-export const RESEARCH_MODES: readonly ResearchMode[] = [
-  "off", "assistant", "library", "web", "deep",
-];
-
-export function reaches(mode: ResearchMode, atLeast: ResearchMode): boolean {
-  return RESEARCH_MODES.indexOf(mode) >= RESEARCH_MODES.indexOf(atLeast);
-}
-
-/**
- * Whether the Zotero library is readable -- and so whether the collection scope
- * is in force and has to be visible.
- *
- * A rank, not `mode === "library"`. The scope applies wherever search_library
- * is in the schema, which is the library rung AND both searching ones; a picker
- * that only appeared at "library" would leave someone who scoped to one
- * collection and then switched to Quick with a live scope, no control, and no
- * way to know. That is the same "reachable, and nothing on screen says so"
- * failure the library rung was added to fix.
- */
-export function readsLibrary(mode: ResearchMode): boolean {
-  return reaches(mode, "library");
-}
-
-/** Whether this rung can reach the network. */
-export function searches(mode: ResearchMode): boolean {
-  return reaches(mode, "web");
-}
+export type { ResearchMode } from "../core/research/ladder.ts";
+import type { ResearchMode } from "../core/research/ladder.ts";
+export {
+  RESEARCH_MODES, reaches, exactly, searches, readsLibrary, readsDocuments,
+} from "../core/research/ladder.ts";
 
 export interface ResearchConfig {
   mode: ResearchMode;
@@ -391,6 +365,8 @@ export interface KarenApi {
     ok: boolean; models?: string[]; error?: string;
   }>;
   setProviderKey(id: string, value: string): Promise<unknown>;
+  /** Which providers have a key stored. Never the keys themselves. */
+  providerKeysPresent(): Promise<Record<string, boolean>>;
   zoteroCollections(): Promise<{ ok: boolean; collections?: CollectionNode[]; error?: string }>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;
