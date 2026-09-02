@@ -11,7 +11,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PermissionMode } from "./policy.ts";
-import { parseProviders, type Provider } from "./providers.ts";
+import { effectiveKind, parseProviders, type Provider } from "./providers.ts";
 import { parseSampling, type Sampling } from "./llm/sampling.ts";
 
 /** Per-model sampler settings, each rebuilt field by field on the way in. */
@@ -284,8 +284,19 @@ export function configuredEndpoints(
      hosted provider sat configured would be a report that is wrong about
      exactly the thing it exists to be right about. */
   for (const provider of settings.providers) {
-    if (!provider.enabled) continue;
-    add(`Models — ${provider.label}`, provider.baseUrl);
+    if (!provider.enabled || !provider.baseUrl.trim()) continue;
+    /* effectiveKind, not the address alone.
+       A loopback provider the user has deliberately marked external is treated
+       as external everywhere else in the app -- the picker warns about it, and
+       the llama.cpp-only samplers are withheld from it. A report calling that
+       same provider "local" would be the app giving two answers to its one
+       important question. The dangerous direction was already safe: a remote
+       address never reads as local whatever the label says. */
+    rows.push({
+      label: `Models — ${provider.label || provider.baseUrl}`,
+      url: provider.baseUrl,
+      local: effectiveKind(provider) === "local",
+    });
   }
   return rows;
 }

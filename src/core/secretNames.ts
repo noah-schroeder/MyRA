@@ -29,3 +29,32 @@ export function isSecretName(value: string): value is SecretName {
   if (NAMED.includes(value)) return true;
   return /^provider:[A-Za-z0-9_-]{1,64}$/.test(value);
 }
+
+/* --------------------------------------------------------- what to do --- */
+
+/**
+ * What storing a secret should actually do.
+ *
+ * Split out because getting it wrong is not recoverable by the user and is
+ * invisible while it happens. The vault itself cannot be imported by a test --
+ * it pulls in Electron's safeStorage -- so the rule lives here where it can be
+ * pinned.
+ *
+ *   remove   take it off the disk. Needs no keyring: deleting is not
+ *            encrypting, so it must not depend on whether encryption works.
+ *   encrypt  the normal path.
+ *   memory   the keyring cannot protect it at rest, so it is held for this run
+ *            only and the user is told. Still never written.
+ */
+export type VaultAction = "remove" | "encrypt" | "memory";
+
+export function vaultAction(plaintext: string, usable: boolean): VaultAction {
+  /* FIRST, and before `usable` is consulted at all.
+     This branch used to sit after it, so whenever the keyring stopped being
+     usable -- which the persistence probe can decide mid-session, on opening
+     Settings -- a delete cleared only the in-memory copy and left the
+     ciphertext on disk. `get()` reads through to disk, so the secret was not
+     just still stored, it was still being sent. */
+  if (plaintext === "") return "remove";
+  return usable ? "encrypt" : "memory";
+}

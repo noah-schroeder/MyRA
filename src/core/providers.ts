@@ -80,6 +80,10 @@ export function isExternal(provider: Provider): boolean {
  * place they will find that out.
  */
 export function kindWasOverridden(provider: Provider): boolean {
+  /* Nothing is overridden while there is no address to disagree with. A
+     provider halfway through being typed should not be told its blank URL is
+     not on this machine. */
+  if (!provider.baseUrl.trim()) return false;
   return provider.kind === "local" && !urlIsLocal(provider.baseUrl);
 }
 
@@ -161,10 +165,16 @@ export function parseProvider(raw: unknown): Provider | undefined {
   const row = raw as Record<string, unknown>;
   const id = str(row["id"], 64);
   const baseUrl = str(row["baseUrl"], 500);
-  if (!id || !baseUrl) return undefined;
+  /* An id is required; a base URL is NOT.
+     A provider is created by a button and then filled in, so it exists for a
+     moment with nothing but an id -- and requiring a URL here meant the save
+     that follows the button silently discarded it. "Add a provider" did
+     nothing at all, which is how this was found. Routing refuses a provider
+     with no URL separately, where it can say so. */
+  if (!id) return undefined;
   return {
     id,
-    label: str(row["label"]) || baseUrl,
+    label: str(row["label"]),
     // Anything that is not the word "local" is external, so a corrupt or
     // missing value fails to the cautious side rather than the convenient one.
     kind: row["kind"] === "local" ? "local" : "external",
@@ -188,6 +198,11 @@ export function parseProviders(raw: unknown): Provider[] {
     out.push(provider);
   }
   return out;
+}
+
+/** Whether this provider can actually be sent a request. */
+export function isUsable(provider: Provider): boolean {
+  return provider.enabled && provider.baseUrl.trim().length > 0;
 }
 
 /**

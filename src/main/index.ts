@@ -29,7 +29,7 @@ import { listZoteroCollections, searchZotero } from "./runtime/zoteroClient.ts";
 import { collectionTree } from "../core/library/zotero.ts";
 import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
 import {
-  isExternal, orphanedSecrets, parseModelRef, providerFor, providerSecret,
+  isExternal, isUsable, orphanedSecrets, parseModelRef, providerFor, providerSecret,
 } from "../core/providers.ts";
 import { samplingForRequest } from "../core/llm/sampling.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
@@ -701,7 +701,15 @@ function installIpc(): void {
        rather than being whatever a caller passes. */
     const requested = String(name);
     if (!isSecretName(requested)) {
-      throw new Error(`Refusing to store a secret under an unknown name.`);
+      throw new Error("Refusing to store a secret under an unknown name.");
+    }
+    /* Provider keys go through karen:provider-key, which checks that the
+       provider exists. Allowing them here too would leave a second door into
+       the vault with the check on only one of them -- and a key written for a
+       provider that does not exist belongs to nothing and is cleaned up by
+       nothing until the next startup sweep. */
+    if (requested.startsWith("provider:")) {
+      throw new Error("Use the provider key channel for provider keys.");
     }
     return vault.set(requested, String(value));
   });
@@ -1265,12 +1273,39 @@ async function main(): Promise<void> {
      * is guarded by `providerFor` returning nothing for a bare name.
      */
     const chosen = config.current.llm.model ?? "";
+    const { providerId } = parseModelRef(chosen);
     const provider = providerFor(config.current.providers, chosen);
-    if (provider && provider.enabled) {
+    /*
+     * A choice naming a provider that is gone is broken, not local.
+     *
+     * Without this it fell through to whatever model happened to be loaded --
+     * answering from something the user did not choose, under a picker still
+     * showing the model they did, and with the bar warning "external" about a
+     * request that had just gone nowhere near a network. Every other
+     * substitution in this file is refused out loud; this one was silent
+     * because it arrived by deletion rather than by choice.
+     */
+    if (providerId && !provider) {
+      throw new Error(
+        "The model this conversation is set to came from a provider that no longer exists. " +
+          "Choose another model from the picker.",
+      );
+    }
+    if (provider && isUsable(provider)) {
       const { model } = parseModelRef(chosen);
       const key = await vault.get(providerSecret(provider.id));
       return {
-        endpoint: { ...config.current.llm, baseUrl: provider.baseUrl, model },
+        /* Built rather than spread from llm. `envVar` names where THAT
+           endpoint's key comes from and would be carried onto a provider it
+           has nothing to do with -- inert today, because chat takes its key as
+           an argument, and exactly the sort of wrong field that is true right
+           up until something reads it. */
+        endpoint: {
+          baseUrl: provider.baseUrl,
+          model,
+          envVar: "",
+          timeoutMs: config.current.llm.timeoutMs,
+        },
         ...(key ? { apiKey: key } : {}),
         label: `${model} (${provider.label})`,
         // Only what this endpoint will accept. A provider the user runs on
@@ -1278,13 +1313,17 @@ async function main(): Promise<void> {
         sampling: samplingFor(chosen, !isExternal(provider)),
       };
     }
-    if (provider && !provider.enabled) {
+    if (provider && !isUsable(provider)) {
       /* Named, not silently fallen back from. Falling back would answer from a
          local model under a label the user did not choose, which is the one
          substitution this app should never make quietly. */
+      const name = provider.label || "a provider";
       throw new Error(
-        `The model chosen is served by "${provider.label}", which is switched off in ` +
-          "Settings → Providers. Turn it back on, or choose another model.",
+        provider.enabled
+          ? `The model chosen is served by ${name}, which has no address set in ` +
+            "Settings → Providers. Give it a base URL, or choose another model."
+          : `The model chosen is served by ${name}, which is switched off in ` +
+            "Settings → Providers. Turn it back on, or choose another model.",
       );
     }
 

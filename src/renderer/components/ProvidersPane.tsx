@@ -83,6 +83,23 @@ function ProviderCard({
   onChange: (next: Provider) => void;
   onRemove: () => void;
 }) {
+  /*
+   * The text fields are held here and committed on blur.
+   *
+   * They were bound straight to the stored provider, with every keystroke
+   * writing settings and the reply setting the value back. That is a round
+   * trip through the main process between one character and the next, so a URL
+   * typed at speed came out with letters missing: each change was computed
+   * from whatever had made it back, not from what was on screen.
+   */
+  const [label, setLabel] = useState(provider.label);
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
+  /* The ticks are held here for the same reason, and it is not only about
+     speed. Each toggle was computed from the last list that had made it back
+     from the main process, so ticking two boxes before the first save returned
+     dropped one of them -- silently, and the box came back unticked a moment
+     later. */
+  const [models, setModels] = useState<string[]>(provider.models);
   const [key, setKey] = useState("");
   const [keyNote, setKeyNote] = useState("");
   /* Whether one is stored, never what it is. Without this a saved key and no
@@ -97,14 +114,17 @@ function ProviderCard({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const real = effectiveKind(provider);
-  const overridden = kindWasOverridden(provider);
+  /* Judged on what is in the box, so the answer appears as the URL is typed
+     rather than after the field loses focus. */
+  const asTyped: Provider = { ...provider, baseUrl };
+  const real = effectiveKind(asTyped);
+  const overridden = kindWasOverridden(asTyped);
 
   const fetchModels = (): void => {
     setBusy(true);
     setStatus("Asking the endpoint…");
     void window.karen
-      .providerModels({ baseUrl: provider.baseUrl, id: provider.id, ...(key ? { apiKey: key } : {}) })
+      .providerModels({ baseUrl, id: provider.id, ...(key ? { apiKey: key } : {}) })
       .then((r) => {
         setFound(r.models ?? []);
         setStatus(
@@ -117,17 +137,20 @@ function ProviderCard({
   };
 
   const toggleModel = (name: string): void => {
-    const models = provider.models.includes(name)
-      ? provider.models.filter((m) => m !== name)
-      : [...provider.models, name];
-    onChange({ ...provider, models });
+    setModels((current) => {
+      const next = current.includes(name)
+        ? current.filter((m) => m !== name)
+        : [...current, name];
+      onChange({ ...provider, models: next });
+      return next;
+    });
   };
 
   /* What the endpoint offers, plus anything already ticked that it no longer
      lists. A model that vanished from the endpoint but is still selected is
      something the user needs to see and untick -- silently dropping it from
      this list would leave it in the picker with no way to remove it. */
-  const rows = [...new Set([...(found ?? []), ...provider.models])].sort((a, b) =>
+  const rows = [...new Set([...(found ?? []), ...models])].sort((a, b) =>
     a.localeCompare(b),
   );
 
@@ -136,9 +159,10 @@ function ProviderCard({
       <div className="provider-head">
         <input
           className="input-line provider-label"
-          placeholder="Name — e.g. OpenAI, or the lab's server"
-          value={provider.label}
-          onChange={(e) => onChange({ ...provider, label: e.target.value })}
+          placeholder="Name — e.g. the vendor, or the lab's server"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={() => label !== provider.label && onChange({ ...provider, label })}
         />
         <label className="provider-toggle">
           <input
@@ -164,8 +188,9 @@ function ProviderCard({
              named in a placeholder is not somewhere Karen goes until somebody
              types it. Saying what to type is no worse than showing it. */
           placeholder="The endpoint's base URL, usually ending in /v1"
-          value={provider.baseUrl}
-          onChange={(e) => onChange({ ...provider, baseUrl: e.target.value })}
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          onBlur={() => baseUrl !== provider.baseUrl && onChange({ ...provider, baseUrl })}
         />
       </label>
 
@@ -194,8 +219,16 @@ function ProviderCard({
         </p>
       ) : real === "local" ? (
         <p className="provider-note local">Loopback — conversations sent here stay on this machine.</p>
-      ) : provider.baseUrl.trim() && !urlIsLocal(provider.baseUrl) ? (
+      ) : baseUrl.trim() && !urlIsLocal(baseUrl) ? (
         <p className="provider-note">Conversations sent here leave your computer.</p>
+      ) : baseUrl.trim() ? (
+        /* Loopback, marked external by choice. Saying nothing here left the one
+           combination with no explanation on screen, which reads as the app not
+           having noticed. */
+        <p className="provider-note">
+          This address is on this machine, but you have marked it external, so Karen will treat it
+          that way and warn when it is in use.
+        </p>
       ) : null}
 
       <label className="field">
@@ -233,12 +266,12 @@ function ProviderCard({
       ) : null}
 
       <div className="provider-actions">
-        <button type="button" className="btn-sm" disabled={busy || !provider.baseUrl.trim()} onClick={fetchModels}>
+        <button type="button" className="btn-sm" disabled={busy || !baseUrl.trim()} onClick={fetchModels}>
           {busy ? "Asking…" : "Fetch models"}
         </button>
         <span className="provider-count">
-          {provider.models.length
-            ? `${provider.models.length} chosen`
+          {models.length
+            ? `${models.length} chosen`
             : "None chosen — this provider adds nothing to the picker yet"}
         </span>
       </div>
@@ -251,7 +284,7 @@ function ProviderCard({
               <label>
                 <input
                   type="checkbox"
-                  checked={provider.models.includes(name)}
+                  checked={models.includes(name)}
                   onChange={() => toggleModel(name)}
                 />
                 <span>{name}</span>
