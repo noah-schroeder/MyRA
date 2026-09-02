@@ -11,10 +11,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { searchLibraryTool, setLibraryHost } from "../src/core/agent/tools/library.ts";
 
 import {
-  describeFailure, formatCreators, formatItems, parseItems, searchPath, yearOf,
-  ZOTERO_PORT,
+  collectionTree, descendantKeys, describeFailure, formatCreators, formatItems, MAX_FANOUT,
+  parseCollections, parseItems, searchPath, yearOf, ZOTERO_PORT,
 } from "../src/core/library/zotero.ts";
 
 /* ------------------------------------------------------------ the query --- */
@@ -143,4 +148,206 @@ test("Zotero closed and Zotero locked down are different problems", () => {
   assert.match(describeFailure(403), /Allow other applications/);
   assert.match(describeFailure(404), /Zotero 7 or newer/);
   assert.match(describeFailure(500), /answered 500/);
+});
+
+/* --------------------------------------------------------- collections --- */
+
+const COLS = [
+  { key: "AAAAAAAA", data: { key: "AAAAAAAA", name: "Projects", parentCollection: false } },
+  { key: "BBBBBBBB", data: { key: "BBBBBBBB", name: "2026", parentCollection: "AAAAAAAA" } },
+  { key: "CCCCCCCC", data: { key: "CCCCCCCC", name: "Memory", parentCollection: "BBBBBBBB" } },
+  { key: "DDDDDDDD", data: { key: "DDDDDDDD", name: "Archive", parentCollection: false } },
+];
+
+test("a collection needs both a key and a name to be offered", () => {
+  const parsed = parseCollections([
+    ...COLS,
+    { data: { key: "EEEEEEEE", name: "" } },
+    { data: { name: "no key" } },
+    { data: { key: "lowercase", name: "wrong shape" } },
+    "nonsense",
+  ]);
+  assert.deepEqual(parsed.map((c) => c.key), ["AAAAAAAA", "BBBBBBBB", "CCCCCCCC", "DDDDDDDD"]);
+  assert.equal(parsed[1]!.parent, "AAAAAAAA");
+  // `false` is Zotero's encoding of "top level", not a parent to carry around.
+  assert.equal(parsed[0]!.parent, undefined);
+});
+
+test("the tree reads the way the collection list reads in Zotero", () => {
+  const tree = collectionTree(parseCollections(COLS));
+  assert.deepEqual(
+    tree.map((c) => `${"  ".repeat(c.depth)}${c.name}`),
+    ["Archive", "Projects", "  2026", "    Memory"],
+  );
+  assert.equal(tree[3]!.path, "Projects › 2026 › Memory");
+  // The count is what tells a user that choosing "Projects" reaches further.
+  assert.equal(tree[1]!.children, 2);
+  assert.equal(tree[0]!.children, 0);
+});
+
+test("a collection whose parent is not in the library is still shown", () => {
+  // A dangling parent key would otherwise drop the collection from the tree
+  // entirely -- present in Zotero, absent from the picker, and unchoosable.
+  const tree = collectionTree(parseCollections([
+    { data: { key: "FFFFFFFF", name: "Orphan", parentCollection: "ZZZZZZZZ" } },
+  ]));
+  assert.deepEqual(tree.map((c) => [c.name, c.depth]), [["Orphan", 0]]);
+});
+
+test("a cycle in the parent chain comes out flat, not as a hang", () => {
+  /* This is another program's database and the loop would be a bug there, but
+     "Karen freezes when you click Library" is not an acceptable way to find out. */
+  const cyclic = parseCollections([
+    { data: { key: "AAAAAAAA", name: "A", parentCollection: "BBBBBBBB" } },
+    { data: { key: "BBBBBBBB", name: "B", parentCollection: "AAAAAAAA" } },
+  ]);
+  /* Both have a parent, so neither is a root and the walk reaches neither.
+     They are still real collections, so they are offered at the top level. */
+  assert.deepEqual(collectionTree(cyclic).map((c) => [c.name, c.depth]), [["A", 0], ["B", 0]]);
+  assert.deepEqual(descendantKeys(cyclic, "AAAAAAAA"), ["AAAAAAAA", "BBBBBBBB"]);
+});
+
+test("choosing a collection also searches what is filed below it", () => {
+  /* Zotero's own API is not recursive: asking for "Projects" returns nothing
+     that lives in "Projects › 2026". Someone who files one level down would be
+     told their collection is empty, which is false and unfalsifiable from the
+     answer. */
+  const cols = parseCollections(COLS);
+  assert.deepEqual(descendantKeys(cols, "AAAAAAAA"), ["AAAAAAAA", "BBBBBBBB", "CCCCCCCC"]);
+  assert.deepEqual(descendantKeys(cols, "CCCCCCCC"), ["CCCCCCCC"]);
+  assert.deepEqual(descendantKeys(cols, "DDDDDDDD"), ["DDDDDDDD"]);
+});
+
+test("the fan-out is capped rather than unbounded", () => {
+  const wide = parseCollections([
+    { data: { key: "AAAAAAAA", name: "Root", parentCollection: false } },
+    ...Array.from({ length: 60 }, (_, i) => ({
+      data: { key: `K${String(i).padStart(7, "0")}`, name: `c${i}`, parentCollection: "AAAAAAAA" },
+    })),
+  ]);
+  assert.equal(descendantKeys(wide, "AAAAAAAA").length, MAX_FANOUT);
+});
+
+test("a scoped search asks the collection's own items endpoint", () => {
+  assert.match(
+    searchPath({ query: "memory", collection: "AAAAAAAA" }),
+    /^\/api\/users\/0\/collections\/AAAAAAAA\/items\?/,
+  );
+});
+
+test("a key that is not a key searches the whole library, not a made-up path", () => {
+  /* The one value that reaches the URL PATH, where URLSearchParams cannot
+     escape it. Widening is the safe direction: a wider answer cannot be
+     mistaken for a narrower one, and the header says which was searched. */
+  for (const bad of ["../../secrets", "AAAA AAAA", "", "aaaaaaaa", "AAAAAAAAA"]) {
+    assert.match(searchPath({ query: "x", collection: bad }), /^\/api\/users\/0\/items\?/);
+  }
+});
+
+test("an empty scoped result says the rest of the library was not searched", () => {
+  // Otherwise "nothing found" reads as "you do not have this paper", which is a
+  // different and much stronger claim than the search actually made.
+  const text = formatItems([], "attention", "Projects (and 2 collection(s) below it)");
+  assert.match(text, /Nothing in the Zotero collection "Projects/);
+  assert.match(text, /the rest of their library was not looked at/);
+});
+
+test("a scoped result names its scope in the header", () => {
+  const [item] = parseItems([ITEM]);
+  const text = formatItems([item!], "memory", "Archive");
+  assert.match(text, /1 item\(s\) from the Zotero collection "Archive"/);
+  assert.match(text, /No other collection was searched/);
+  // And the unscoped header is unchanged, so nothing implies a scope there.
+  assert.match(formatItems([item!], "memory"), /from the user's own Zotero library/);
+});
+
+/* ----------------------------------------------------- the tool's scope --- */
+
+/**
+ * The scope is a setting, so the MODEL must not be able to widen it, and the
+ * collection is somebody else's database, so it must not be assumed to still be
+ * there. Both are checked in the tool rather than the client, because that is
+ * where the stored choice and the live library meet.
+ */
+
+async function runTool(
+  cfg: Record<string, unknown>,
+  cols: { key: string; name: string; parent?: string }[],
+  params: Record<string, unknown> = { query: "memory" },
+): Promise<{ text: string; asked: string[] | undefined; error?: string }> {
+  const file = join(mkdtempSync(join(tmpdir(), "karen-lib-")), "research.json");
+  writeFileSync(file, JSON.stringify({ v: 2, category: "science", ...cfg }));
+  const previous = process.env["KAREN_RESEARCH_CONFIG"];
+  process.env["KAREN_RESEARCH_CONFIG"] = file;
+
+  let asked: string[] | undefined;
+  setLibraryHost({
+    collections: () => Promise.resolve(cols),
+    search: (opts) => {
+      asked = opts.collections;
+      return Promise.resolve(parseItems([ITEM]));
+    },
+  });
+  try {
+    const res = await searchLibraryTool.handler(params, {} as never);
+    return { text: String((res as { content: string }).content), asked };
+  } catch (err) {
+    return { text: "", asked, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    setLibraryHost(undefined);
+    if (previous === undefined) delete process.env["KAREN_RESEARCH_CONFIG"];
+    else process.env["KAREN_RESEARCH_CONFIG"] = previous;
+  }
+}
+
+const TREE = [
+  { key: "AAAAAAAA", name: "Projects" },
+  { key: "BBBBBBBB", name: "2026", parent: "AAAAAAAA" },
+  { key: "DDDDDDDD", name: "Archive" },
+];
+
+test("with no collection chosen the whole library is searched", async () => {
+  const { asked, text } = await runTool({ mode: "library" }, TREE);
+  assert.equal(asked, undefined);
+  assert.match(text, /from the user's own Zotero library/);
+});
+
+test("the chosen collection is searched with everything below it", async () => {
+  const { asked, text } = await runTool(
+    { mode: "library", collection: "AAAAAAAA", collectionName: "Projects" }, TREE,
+  );
+  assert.deepEqual(asked, ["AAAAAAAA", "BBBBBBBB"]);
+  assert.match(text, /Projects \(and 1 collection\(s\) below it\)/);
+});
+
+test("the model cannot widen the scope the user chose", async () => {
+  /* Same rule as effectiveCategory: a setting the model can quietly override is
+     not a setting. There is no parameter for this, and adding one to the call
+     must not create one. */
+  const { asked } = await runTool(
+    { mode: "library", collection: "DDDDDDDD", collectionName: "Archive" }, TREE,
+    { query: "memory", collection: "", collections: [], scope: "all" },
+  );
+  assert.deepEqual(asked, ["DDDDDDDD"]);
+});
+
+test("the scope's NAME comes from Zotero, not from the stored setting", async () => {
+  // Zotero is another program and the collection can be renamed between the
+  // choice and the search. Reporting the stale name would misstate what was
+  // searched, which is the one thing a library search is for.
+  const { text } = await runTool(
+    { mode: "library", collection: "DDDDDDDD", collectionName: "Old name" }, TREE,
+  );
+  assert.match(text, /"Archive"/);
+  assert.doesNotMatch(text, /Old name/);
+});
+
+test("a collection Zotero no longer has is an error, not a silent whole-library search", async () => {
+  /* Falling back to everything would answer a question nobody asked, and the
+     user would have no way to notice their scope had quietly gone. */
+  const { error, asked } = await runTool(
+    { mode: "library", collection: "CCCCCCCC", collectionName: "Deleted" }, TREE,
+  );
+  assert.equal(asked, undefined, "nothing should have been searched");
+  assert.match(String(error), /no longer in the library/);
 });

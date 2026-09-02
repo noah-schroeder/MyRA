@@ -56,6 +56,153 @@ export interface LibraryItem {
 export type SearchMode = "everything" | "titleCreatorYear";
 
 /**
+ * One of the user's own collections -- the folders down the left of Zotero.
+ *
+ * `parent` is Zotero's `parentCollection`, which is the key of the collection
+ * above or `false` at the top level. Held as a string-or-undefined because the
+ * `false` is a Zotero encoding, not something the rest of Karen should carry.
+ */
+export interface ZoteroCollection {
+  key: string;
+  name: string;
+  parent?: string;
+}
+
+/** A collection as it is offered to the user: in tree order, with its depth. */
+export interface CollectionNode extends ZoteroCollection {
+  depth: number;
+  /** "Projects › 2026 › Memory". What a result says it searched. */
+  path: string;
+  /** How many collections are below it. Zero means the choice has no subtlety. */
+  children: number;
+}
+
+/**
+ * Zotero's key shape, checked because a key becomes part of a URL PATH.
+ *
+ * Everything else this module puts in a URL goes through URLSearchParams, which
+ * escapes it. A path segment does not, so this is the one input that could
+ * otherwise reach outside `/api/users/0/` -- and the narrowness of this client
+ * is the reason it is allowed to exist at all.
+ */
+const KEY_SHAPE = /^[A-Z0-9]{8}$/;
+
+export function isCollectionKey(value: unknown): value is string {
+  return typeof value === "string" && KEY_SHAPE.test(value);
+}
+
+export function parseCollections(body: unknown): ZoteroCollection[] {
+  if (!Array.isArray(body)) return [];
+  const out: ZoteroCollection[] = [];
+  for (const entry of body) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const data = (row["data"] ?? {}) as Record<string, unknown>;
+    const key = str(data["key"]) || str(row["key"]);
+    const name = str(data["name"]);
+    // A collection with no key cannot be searched and a collection with no name
+    // cannot be chosen, so neither is worth offering.
+    if (!isCollectionKey(key) || !name) continue;
+    const parent = data["parentCollection"];
+    out.push({ key, name, ...(isCollectionKey(parent) ? { parent } : {}) });
+  }
+  return out;
+}
+
+/**
+ * The collections in the order they are read in Zotero: nested, alphabetical.
+ *
+ * Cycle-safe throughout. A parent chain is data from another program's
+ * database, and a loop in it -- however it got there -- must come out as a
+ * flat list, not a hang.
+ */
+export function collectionTree(collections: ZoteroCollection[]): CollectionNode[] {
+  const byKey = new Map(collections.map((c) => [c.key, c]));
+  const children = new Map<string | undefined, ZoteroCollection[]>();
+  for (const c of collections) {
+    /* A parent that is not in the list is not a parent: it is a dangling key,
+       and the collection would otherwise vanish from the tree entirely. */
+    const under = c.parent && byKey.has(c.parent) ? c.parent : undefined;
+    const bucket = children.get(under);
+    if (bucket) bucket.push(c);
+    else children.set(under, [c]);
+  }
+  for (const bucket of children.values()) {
+    bucket.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const out: CollectionNode[] = [];
+  const seen = new Set<string>();
+  const walk = (parent: string | undefined, depth: number, prefix: string): void => {
+    for (const c of children.get(parent) ?? []) {
+      if (seen.has(c.key)) continue;
+      seen.add(c.key);
+      const path = prefix ? `${prefix} › ${c.name}` : c.name;
+      out.push({ ...c, depth, path, children: descendantKeys(collections, c.key).length - 1 });
+      walk(c.key, depth + 1, path);
+    }
+  };
+  walk(undefined, 0, "");
+
+  /* Anything the walk never reached, which means its parent chain loops. Shown
+     at the top level rather than dropped, on the same reasoning as a dangling
+     parent: a collection that exists in Zotero and is missing from the picker
+     is one the user cannot choose and cannot see why. */
+  for (const c of collections) {
+    if (seen.has(c.key)) continue;
+    seen.add(c.key);
+    out.push({ ...c, depth: 0, path: c.name, children: 0 });
+  }
+  return out;
+}
+
+/**
+ * How many collections one search may fan out over.
+ *
+ * There is a fan-out at all because Zotero's own API is not recursive: asking
+ * `/collections/<key>/items` for "Projects" returns nothing that lives in
+ * "Projects › 2026". A researcher who files everything one level down and is
+ * told their collection is empty has been told something false, and would have
+ * no way to tell it from the paper genuinely not being there.
+ *
+ * Capped because the fan-out is one request each. Twenty-five is past any
+ * subtree a person actually navigates, and the result says when it was reached
+ * rather than quietly searching less than it claimed.
+ */
+export const MAX_FANOUT = 25;
+
+/**
+ * A collection and everything under it, the chosen one first.
+ *
+ * Breadth-first and visited-guarded: see collectionTree on why a cycle here is
+ * a real possibility rather than a defensive flourish.
+ */
+export function descendantKeys(collections: ZoteroCollection[], root: string): string[] {
+  const kids = new Map<string, string[]>();
+  for (const c of collections) {
+    if (!c.parent) continue;
+    const bucket = kids.get(c.parent);
+    if (bucket) bucket.push(c.key);
+    else kids.set(c.parent, [c.key]);
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const queue = [root];
+  while (queue.length && out.length < MAX_FANOUT) {
+    const key = queue.shift()!;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    queue.push(...(kids.get(key) ?? []));
+  }
+  return out;
+}
+
+export function collectionsPath(): string {
+  return `/api/${ZOTERO_PREFIX}/collections`;
+}
+
+/**
  * Where to look.
  *
  * "everything" is the default because it is the one that justifies the feature:
@@ -68,6 +215,8 @@ export function searchPath(opts: {
   query: string;
   limit?: number;
   mode?: SearchMode;
+  /** One collection to search inside. Everything, when absent. */
+  collection?: string;
 }): string {
   const params = new URLSearchParams({
     q: opts.query,
@@ -79,7 +228,12 @@ export function searchPath(opts: {
     sort: "dateModified",
     direction: "desc",
   });
-  return `/api/${ZOTERO_PREFIX}/items?${params.toString()}`;
+  /* The key is checked, not trusted, because unlike every other value here it
+     lands in the path rather than the query string and is therefore not
+     escaped. An unrecognisable key searches the whole library, which is the
+     wider answer and so cannot be mistaken for a narrower one. */
+  const scope = isCollectionKey(opts.collection) ? `/collections/${opts.collection}` : "";
+  return `/api/${ZOTERO_PREFIX}${scope}/items?${params.toString()}`;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
@@ -169,9 +323,19 @@ const ABSTRACT_CHARS = 700;
  * the model would have no way to tell "no abstract stored" from "abstract not
  * shown", and would fill the gap.
  */
-export function formatItems(items: LibraryItem[], query: string): string {
+export function formatItems(items: LibraryItem[], query: string, scope = ""): string {
+  /* Where the search looked, said in both branches. A scoped search that finds
+     nothing and an unscoped one that finds nothing are different facts, and the
+     model cannot tell them apart unless the empty answer says which it was. */
+  const where = scope ? `the Zotero collection ${JSON.stringify(scope)}` : "the Zotero library";
   if (items.length === 0) {
-    return `Nothing in the Zotero library matches ${JSON.stringify(query)}.`;
+    return (
+      `Nothing in ${where} matches ${JSON.stringify(query)}.` +
+      (scope
+        ? " Only that collection was searched, because the user chose it in the research bar; " +
+          "the rest of their library was not looked at."
+        : "")
+    );
   }
   const lines = items.map((item, i) => {
     const head = [
@@ -201,8 +365,9 @@ export function formatItems(items: LibraryItem[], query: string): string {
 
   const withAbstract = items.filter((i) => i.abstract).length;
   return [
-    `${items.length} item(s) from the user's own Zotero library, ` +
-      `${withAbstract} with an abstract stored.`,
+    `${items.length} item(s) from ${scope ? where : "the user's own Zotero library"}, ` +
+      `${withAbstract} with an abstract stored.` +
+      (scope ? " No other collection was searched." : ""),
     "",
     lines.join("\n\n"),
   ].join("\n");

@@ -25,7 +25,8 @@ import {
   DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
 } from "../core/agent/tools/documents.ts";
 import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
-import { searchZotero } from "./runtime/zoteroClient.ts";
+import { listZoteroCollections, searchZotero } from "./runtime/zoteroClient.ts";
+import { collectionTree } from "../core/library/zotero.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
@@ -870,6 +871,22 @@ function installIpc(): void {
     await shell.openPath(dirname(abs));
   });
 
+  /*
+   * The user's Zotero collections, for the picker beside the Library button.
+   *
+   * Answers with the failure TEXT rather than throwing, because the two ways
+   * this fails -- Zotero closed, or its local API switched off -- are things
+   * the user fixes in Zotero, and a picker that was merely empty would be
+   * indistinguishable from a library with no collections in it.
+   */
+  ipcMain.handle("karen:zotero-collections", async () => {
+    try {
+      return { ok: true, collections: collectionTree(await listZoteroCollections()) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   ipcMain.handle("karen:get-research", () => readResearchConfig());
   ipcMain.handle("karen:set-research", async (_e, next: unknown) => {
     await makeOwnDir(dirname(researchConfigPath()));
@@ -989,7 +1006,10 @@ async function main(): Promise<void> {
 
   /* Loopback, no key, nothing cached. The client is in the main process for the
      same reason every other one is: the renderer never makes a request. */
-  setLibraryHost({ search: (opts) => searchZotero(opts) });
+  setLibraryHost({
+    search: (opts) => searchZotero(opts),
+    collections: () => listZoteroCollections(),
+  });
 
   setResearchHost({
     fallbackModel: config.current.llm.model ?? "",

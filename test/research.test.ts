@@ -231,6 +231,49 @@ test("serializeResearchConfig keeps every field the reader looks for", () => {
   assert.deepEqual(cfg, { mode: "deep", category: "science", timeRange: "year" });
 });
 
+test("the Zotero collection scope survives a round trip", () => {
+  const cfg = readResearchConfig(
+    configFile(serializeResearchConfig({
+      mode: "library", category: "science",
+      collection: "AAAAAAAA", collectionName: "Projects",
+    })),
+  );
+  assert.deepEqual(cfg, {
+    mode: "library", category: "science",
+    collection: "AAAAAAAA", collectionName: "Projects",
+  });
+});
+
+test("a collection scope is only kept when both halves are there", () => {
+  /* A key with no name gives the user a control that says nothing; a name with
+     no key would claim a search happened somewhere it did not. Neither half is
+     usable alone, so neither is kept alone -- the search falls back to the
+     whole library, which is the wider answer and cannot be mistaken for the
+     narrower one. */
+  const partial = [
+    { collection: "AAAAAAAA" },
+    { collectionName: "Projects" },
+    { collection: "not a key", collectionName: "Projects" },
+    { collection: "AAAAAAAA", collectionName: "   " },
+  ];
+  for (const extra of partial) {
+    const cfg = readResearchConfig(configFile({ v: 2, mode: "library", category: "science", ...extra }));
+    assert.equal(cfg.collection, undefined, JSON.stringify(extra));
+    assert.equal(cfg.collectionName, undefined, JSON.stringify(extra));
+  }
+});
+
+test("clearing the collection back to the whole library is expressible", () => {
+  // exactOptionalPropertyTypes makes this a real question: a bare optional
+  // could not be assigned undefined, so "all collections" would be unsayable
+  // and the scope would be a one-way door.
+  const written = serializeResearchConfig({
+    mode: "library", category: "science", collection: undefined, collectionName: undefined,
+  });
+  assert.equal("collection" in written, false);
+  assert.equal(readResearchConfig(configFile(written)).collection, undefined);
+});
+
 test("searches() is false for every mode that has no network tool", () => {
   assert.equal(searches("off"), false);
   // The one that matters: `mode !== "off"` was true here, which would have
