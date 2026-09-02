@@ -20,6 +20,7 @@ import {
   descendantKeys, formatItems, linkFor, MAX_FANOUT,
   type LibraryItem, type SearchMode, type ZoteroCollection,
 } from "../../library/zotero.ts";
+import { DATABASE_ROUTE_NOTE } from "../../library/zoteroDb.ts";
 import { cite } from "../../research/ledger.ts";
 import type { ToolDef } from "../registry.ts";
 
@@ -41,6 +42,16 @@ export interface LibraryHost {
   }): Promise<LibraryItem[]>;
   /** Every collection in the library, flat; the subtree is resolved from it. */
   collections(): Promise<ZoteroCollection[]>;
+  /**
+   * How the last read was served.
+   *
+   * Absent means the API, which is what a host that knows of only one way in
+   * can be. It matters to the reply because the two routes do not search the
+   * same thing: reading the database file cannot reach the text inside PDFs,
+   * and an answer that did not say so would let a thinner search pass for the
+   * wider one.
+   */
+  route?(): "api" | "database";
 }
 
 let host: LibraryHost | undefined;
@@ -168,12 +179,16 @@ export const searchLibraryTool: ToolDef = {
        link, so a paper the user has in Zotero AND that a web search returns
        keeps one number across both. */
     const links = items.map(linkFor).filter(Boolean);
+    const notes = [
+      truncated
+        ? `Only the first ${MAX_FANOUT} collections of that subtree were searched; it has ` +
+          "more. Say so if the answer looks incomplete."
+        : "",
+      host.route?.() === "database" ? DATABASE_ROUTE_NOTE : "",
+    ].filter(Boolean);
     const content = formatItems(items, query, scope, cite(links));
     return {
-      content: truncated
-        ? `${content}\n\nOnly the first ${MAX_FANOUT} collections of that subtree were ` +
-          "searched; it has more. Say so if the answer looks incomplete."
-        : content,
+      content: notes.length ? `${content}\n\n${notes.join("\n\n")}` : content,
       detail: { count: items.length, keys: items.map((i) => i.key), ...(scope ? { scope } : {}) },
     };
   },

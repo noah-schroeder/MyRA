@@ -25,13 +25,15 @@ import {
   DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
 } from "../core/agent/tools/documents.ts";
 import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
-import { listZoteroCollections, searchZotero } from "./runtime/zoteroClient.ts";
+import { libraryCollections, librarySearch, libraryRoute } from "./runtime/zoteroLibrary.ts";
+import { forgetZoteroSnapshot } from "./runtime/zoteroSqlite.ts";
 import { collectionTree } from "../core/library/zotero.ts";
 import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
 import {
   isExternal, isUsable, orphanedSecrets, parseModelRef, providerFor, providerSecret,
 } from "../core/providers.ts";
 import { samplingForRequest } from "../core/llm/sampling.ts";
+import { ASK_FOR_REASONING, describeProbe, probeReasoning } from "../core/llm/reasoningProbe.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
@@ -346,6 +348,8 @@ type EndpointResolution = {
   apiKey?: string;
   label?: string;
   sampling?: Record<string, number>;
+  /** Extra request fields this endpoint needs, e.g. asking for reasoning. */
+  extra?: Record<string, unknown>;
 };
 let resolveEndpoint: () => Promise<EndpointResolution> = () => {
   throw new Error("The app is still starting up.");
@@ -526,7 +530,7 @@ async function handleSend(text: string): Promise<void> {
      * every one of those went and left the actual conversation, the one thing
      * the picker is above, still answering from whatever was resident.
      */
-    const { endpoint, apiKey, sampling } = await resolveEndpoint();
+    const { endpoint, apiKey, sampling, extra } = await resolveEndpoint();
     const managed = runtime.chatEndpoint();
     /*
      * How big the window actually is, when that is knowable.
@@ -550,6 +554,7 @@ async function handleSend(text: string): Promise<void> {
       system: systemPrompt(),
       ...(apiKey ? { apiKey } : {}),
       ...(Object.keys(sampling ?? {}).length ? { sampling: sampling! } : {}),
+      ...(extra ? { extra } : {}),
       signal: inFlight.signal,
       approve,
       onEvent: (event: AgentEvent) => send("karen:agent-event", event),
@@ -784,6 +789,62 @@ function installIpc(): void {
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
+    },
+  );
+
+  /*
+   * Ask a provider, in one request, whether it sends the model's reasoning.
+   *
+   * The answer cannot be worked out from the outside -- "the model did not
+   * reason", "the provider withholds it", "it needs asking" and "Karen does not
+   * know that field name" all look identical from the chat window. So Karen
+   * asks, twice if the first answer is nothing: once plainly, once with the
+   * fields that ask for reasoning. If asking is what worked, the switch is
+   * turned on for that provider and stays on.
+   *
+   * The prompt is a fixed arithmetic question. No part of the user's
+   * conversation is sent, and no part of the reply is stored -- the report is
+   * field names and character counts.
+   */
+  ipcMain.handle(
+    "karen:provider-reasoning",
+    async (_e, opts: { baseUrl?: unknown; id?: unknown; model?: unknown; apiKey?: unknown }) => {
+      const baseUrl = String(opts?.baseUrl ?? "").trim();
+      const model = String(opts?.model ?? "").trim();
+      if (!baseUrl) return { ok: false, error: "No base URL is set for this provider." };
+      if (!model) return { ok: false, error: "Tick a model first; the check has to ask one." };
+
+      const id = String(opts?.id ?? "");
+      const supplied = String(opts?.apiKey ?? "");
+      const key = supplied || (id ? await vault.get(providerSecret(id)) : undefined);
+      const endpoint = { baseUrl, model, envVar: "", timeoutMs: 60_000 };
+
+      const plain = await probeReasoning({ endpoint, ...(key ? { apiKey: key } : {}) });
+      const found = (r: typeof plain): boolean => r.read.length > 0 || r.inline || r.unread.length > 0;
+      let asked: typeof plain | undefined;
+      if (plain.ok && !found(plain)) {
+        asked = await probeReasoning({
+          endpoint,
+          ...(key ? { apiKey: key } : {}),
+          extra: ASK_FOR_REASONING,
+        });
+      }
+
+      /* Remembered only when asking is what made the difference, and only for
+         a provider that exists to remember it against. */
+      const helps = Boolean(asked?.ok && found(asked) && !found(plain));
+      if (helps && id && config.current.providers.some((p) => p.id === id)) {
+        await config.update({
+          providers: config.current.providers.map((p) =>
+            p.id === id ? { ...p, askReasoning: true } : p,
+          ),
+        });
+      }
+      return {
+        ok: plain.ok || Boolean(asked?.ok),
+        message: describeProbe(plain, asked),
+        asking: helps,
+      };
     },
   );
 
@@ -1031,7 +1092,11 @@ function installIpc(): void {
    */
   ipcMain.handle("karen:zotero-collections", async () => {
     try {
-      return { ok: true, collections: collectionTree(await listZoteroCollections()) };
+      const collections = collectionTree(await libraryCollections());
+      /* Which way in answered, so the picker can say when it is reading the
+         file rather than talking to Zotero. Those two do not search the same
+         thing, and only one of them reaches the text inside PDFs. */
+      return { ok: true, collections, via: libraryRoute() };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -1188,8 +1253,9 @@ async function main(): Promise<void> {
   /* Loopback, no key, nothing cached. The client is in the main process for the
      same reason every other one is: the renderer never makes a request. */
   setLibraryHost({
-    search: (opts) => searchZotero(opts),
-    collections: () => listZoteroCollections(),
+    search: (opts) => librarySearch(opts),
+    collections: () => libraryCollections(),
+    route: () => libraryRoute(),
   });
 
   setResearchHost({
@@ -1256,13 +1322,7 @@ async function main(): Promise<void> {
   const samplingFor = (stored: string, local: boolean): Record<string, number> =>
     samplingForRequest(config.current.sampling[stored] ?? {}, !local);
 
-  const resolveLlm = async (): Promise<{
-    endpoint: EndpointSettings;
-    apiKey?: string;
-    /** What to write down as the model that did the work. */
-    label?: string;
-    sampling?: Record<string, number>;
-  }> => {
+  const resolveLlm = async (): Promise<EndpointResolution> => {
     /*
      * A provider-qualified choice wins over the loaded local model.
      *
@@ -1311,6 +1371,10 @@ async function main(): Promise<void> {
         // Only what this endpoint will accept. A provider the user runs on
         // loopback gets the whole set; anything else gets the standard fields.
         sampling: samplingFor(chosen, !isExternal(provider)),
+        /* Sent only to a provider the reasoning check found needs asking.
+           Never speculatively: a server that does not know these fields
+           refuses the whole request. */
+        ...(provider.askReasoning ? { extra: ASK_FOR_REASONING } : {}),
       };
     }
     if (provider && !isUsable(provider)) {
@@ -1566,6 +1630,10 @@ app.on("before-quit", () => {
      close rather than being blocked by the hide-on-close handler. */
   quitting = true;
   tray?.destroy();
+  /* The Zotero snapshot is a copy of the user's library. It is theirs, it is
+     under their own config directory, and it still has no business outliving
+     the app that made it. */
+  forgetZoteroSnapshot();
   runtime.killNow();
   /* The listening socket must not outlive the window either -- and the key
      usage counters are only flushed on stop. */
