@@ -14,7 +14,7 @@
 import {
   collectionsPath, describeFailure, parseCollections, parseItems, searchPath, ZoteroError,
   ZOTERO_HOST, ZOTERO_PORT,
-  type LibraryItem, type SearchMode, type ZoteroCollection,
+  type LibraryItem, type QueryTier, type SearchMode, type ZoteroCollection,
 } from "../../core/library/zotero.ts";
 
 /**
@@ -53,7 +53,11 @@ async function get(path: string): Promise<unknown> {
     throw new ZoteroError(describeFailure(undefined));
   }
 
-  if (!res.ok) throw new ZoteroError(describeFailure(res.status));
+  if (!res.ok) {
+    // Read before throwing: the body is where Zotero says what it objected to.
+    const body = await res.text().catch(() => "");
+    throw new ZoteroError(describeFailure(res.status, body), res.status);
+  }
 
   try {
     return await res.json();
@@ -78,6 +82,31 @@ export async function listZoteroCollections(): Promise<ZoteroCollection[]> {
  * in the order asked, chosen collection first, then trimmed to the limit that
  * one request would have honoured.
  */
+/**
+ * Ask for the search, and if the request itself is refused, ask for less.
+ *
+ * The collection listing works on installs where the search does not, and the
+ * two differ only in the query string -- same host, same port, same `/api/`
+ * prefix, same function below. So the extras are what a refusal is about, and
+ * dropping them is a search that works rather than an error that explains.
+ *
+ * Only for a refusal of the REQUEST. A 403 is the local API switched off and a
+ * 404 is a Zotero too old; both have messages that name the fix, and retrying
+ * either would replace an answer the user can act on with one they cannot.
+ */
+async function searchOnce(path: (tier: QueryTier) => string): Promise<{
+  body: unknown;
+  tier: QueryTier;
+}> {
+  try {
+    return { body: await get(path("full")), tier: "full" };
+  } catch (err) {
+    const status = err instanceof ZoteroError ? err.status : undefined;
+    if (status === undefined || status === 403 || status === 404) throw err;
+    return { body: await get(path("plain")), tier: "plain" };
+  }
+}
+
 export async function searchZotero(opts: {
   query: string;
   limit?: number;
@@ -85,11 +114,17 @@ export async function searchZotero(opts: {
   collections?: string[];
 }): Promise<LibraryItem[]> {
   const { collections, ...rest } = opts;
-  if (!collections?.length) return parseItems(await get(searchPath(rest)));
+  if (!collections?.length) {
+    return parseItems((await searchOnce((tier) => searchPath(rest, tier))).body);
+  }
 
-  const pages = await Promise.all(
-    collections.map((collection) => get(searchPath({ ...rest, collection }))),
-  );
+  const pages = (
+    await Promise.all(
+      collections.map((collection) =>
+        searchOnce((tier) => searchPath({ ...rest, collection }, tier)),
+      ),
+    )
+  ).map((r) => r.body);
 
   const seen = new Set<string>();
   const merged: LibraryItem[] = [];

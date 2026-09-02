@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useAgent } from "./useAgent.ts";
+import { answerText } from "./components/turnText.ts";
+import { CopyButton } from "./components/CopyButton.tsx";
 import { Markdown } from "./components/Markdown.tsx";
 import { ArtifactPanel, useDocuments } from "./components/ArtifactPanel.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
@@ -194,7 +196,13 @@ export function App() {
   };
 
   return (
-    <div className={documents.open && page === "chat" && !lookup ? "app with-artifact" : "app"}>
+    <div
+      className={documents.open && page === "chat" && !lookup ? "app with-artifact" : "app"}
+      /* The grid reads the width from here rather than the panel styling
+         itself, because the panel is a grid TRACK: a width set on the aside
+         would be overridden by the column it sits in. */
+      style={{ "--artifact-w": `${documents.width}px` } as CSSProperties}
+    >
       <aside className="rail">
         <div className="rail-brand">
           <span className="rail-mark" aria-hidden="true" />
@@ -337,6 +345,7 @@ export function App() {
               return (
                 <article key={item.id} className="turn user">
                   <p>{item.text}</p>
+                  <CopyButton className="turn-copy" text={() => item.text} />
                 </article>
               );
             }
@@ -359,6 +368,15 @@ export function App() {
                     <Markdown key={i} text={block.text} sources={sources} />
                   ),
                 )}
+                {/* The answer, not the working-out. Reasoning is deliberately
+                    never part of what this conversation keeps, and a copy that
+                    swept it into somebody's paper would be the one route by
+                    which it escaped that. */}
+                <CopyButton
+                  className="turn-copy"
+                  text={() => answerText(item.blocks)}
+                  title="Copy this answer as Markdown"
+                />
               </article>
             );
           })}
@@ -471,6 +489,7 @@ export function App() {
           hub, and would just be taking a third of those. */}
       {documents.open && page === "chat" && !lookup ? (
         <ArtifactPanel
+          onResize={documents.setWidth}
           docs={documents.docs}
           active={documents.active}
           onSelect={documents.setActive}

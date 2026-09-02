@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   extensionOf, FORMATS, isReadable, outputName, pandocArgs, resolveFormat, safeRelativePath, slugName,
+  withExtension,
 } from "../src/core/documents/formats.ts";
 
 test("formats are named the several ways a model will name them", () => {
@@ -105,4 +106,22 @@ test("the documents folder is the only place these tools reach", async () => {
   // safeRelativePath refuses these first; inWorkspace is the second lock.
   assert.throws(() => inWorkspace("../../.ssh/id_rsa"), DocsError);
   assert.throws(() => inWorkspace("/etc/passwd"), DocsError);
+});
+
+test("a supplied name still gets the extension its format needs", () => {
+  /* Observed: asked for "wm-transfer" as Markdown, Karen wrote a file called
+     `wm-transfer` with the right bytes and no extension -- it opens in nothing.
+     slugName has always appended one, so the fallback path produced usable
+     files while the common path did not. */
+  assert.equal(withExtension("wm-transfer", "md"), "wm-transfer.md");
+  assert.equal(withExtension("notes/january", "md"), "notes/january.md");
+  // Already right: left exactly alone, including its case.
+  assert.equal(withExtension("Report.MD", "md"), "Report.MD");
+  assert.equal(withExtension("report.md", "md"), "report.md");
+  /* Appended, never replaced. "v2" and "2026-01-05" are not extensions, and a
+     rule that replaced the last dotted segment would eat them. */
+  assert.equal(withExtension("draft.v2", "md"), "draft.v2.md");
+  assert.equal(withExtension("minutes.2026-01-05", "docx"), "minutes.2026-01-05.docx");
+  // A different real extension is kept too: nothing in the name is destroyed.
+  assert.equal(withExtension("report.txt", "md"), "report.txt.md");
 });

@@ -9,7 +9,7 @@
  * loop running in this same process.
  */
 
-import { app, BrowserWindow, Notification, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, Notification, clipboard, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import {
@@ -885,6 +885,19 @@ function installIpc(): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  /*
+   * Copy, through the main process rather than navigator.clipboard.
+   *
+   * The Clipboard API is available in the renderer -- Electron treats the
+   * file:// document as a secure context -- but it is conditional on focus and
+   * a permission, and signals failure by rejecting a promise. This one is
+   * unconditional. A copy button that fails is worse than none, because the
+   * user walks away believing they have the text.
+   */
+  ipcMain.handle("karen:copy", (_e, text: unknown) => {
+    clipboard.writeText(String(text ?? ""));
   });
 
   ipcMain.handle("karen:get-research", () => readResearchConfig());

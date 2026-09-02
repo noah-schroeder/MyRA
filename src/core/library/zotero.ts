@@ -211,23 +211,45 @@ export function collectionsPath(): string {
  * for the case where that is too broad -- a common word matching every PDF in
  * the library is a real outcome on a large one.
  */
+/**
+ * How much of the query to send.
+ *
+ * "full" is what we want; "plain" is `q` and `qmode` and nothing else.
+ *
+ * The local API is a different implementation from api.zotero.org and does not
+ * document itself as accepting every search parameter the web API does -- the
+ * pagination it omits is documented, the rest is not. A request that is refused
+ * whole comes back as one status with no indication of WHICH parameter was
+ * unwelcome, which is indistinguishable from the library being unreachable and
+ * is exactly as useful to the user: not at all.
+ *
+ * So the extras are the part that can be dropped. Everything they do can be
+ * done here instead -- the item filtering happens in `parseItems` regardless,
+ * and ordering a list of twenty-five papers is not why anyone opened Karen.
+ */
+export type QueryTier = "full" | "plain";
+
 export function searchPath(opts: {
   query: string;
   limit?: number;
   mode?: SearchMode;
   /** One collection to search inside. Everything, when absent. */
   collection?: string;
-}): string {
+}, tier: QueryTier = "full"): string {
   const params = new URLSearchParams({
     q: opts.query,
     qmode: opts.mode ?? "everything",
-    // Attachments and notes are children of the items worth showing; listing
-    // them alongside their parents is noise that reads as duplicates.
-    itemType: "-attachment || note",
     limit: String(Math.min(Math.max(Math.floor(opts.limit ?? 25), 1), 100)),
-    sort: "dateModified",
-    direction: "desc",
   });
+  if (tier === "full") {
+    /* Attachments and notes are children of the items worth showing, and listing
+       them beside their parents reads as duplicates. Asked for here so the
+       server does not spend the limit on them -- and done again in parseItems,
+       because on the plain tier this line is not sent at all. */
+    params.set("itemType", "-attachment || note");
+    params.set("sort", "dateModified");
+    params.set("direction", "desc");
+  }
   /* The key is checked, not trusted, because unlike every other value here it
      lands in the path rather than the query string and is therefore not
      escaped. An unrecognisable key searches the whole library, which is the
@@ -286,11 +308,16 @@ export function parseItems(body: unknown): LibraryItem[] {
     const meta = (row["meta"] ?? {}) as Record<string, unknown>;
     const key = str(data["key"]) || str(row["key"]);
     const title = str(data["title"]);
+    /* Again, not only in the query string. The plain tier does not send the
+       itemType filter at all, and a reply full of "PDF" and "Note" rows beside
+       their parents would look like duplicated results. */
+    const itemType = str(data["itemType"]);
+    if (itemType === "attachment" || itemType === "note") continue;
     // A record with neither is not something a person can be shown.
     if (!key && !title) continue;
     out.push({
       key,
-      itemType: str(data["itemType"]),
+      itemType,
       title,
       creators: formatCreators(data["creators"]),
       year: yearOf(data, meta),
@@ -375,6 +402,12 @@ export function formatItems(items: LibraryItem[], query: string, scope = ""): st
 
 export class ZoteroError extends Error {
   override readonly name = "ZoteroError";
+  /** The HTTP status, when there was one. Absent means nothing answered. */
+  readonly status: number | undefined;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 /**
@@ -385,7 +418,7 @@ export class ZoteroError extends Error {
  * listening on the port means Zotero is closed, and a 403 means it is running
  * with the local API switched off.
  */
-export function describeFailure(status: number | undefined): string {
+export function describeFailure(status: number | undefined, body = ""): string {
   if (status === 403) {
     return (
       "Zotero is running but its local API is switched off. Turn on " +
@@ -405,5 +438,13 @@ export function describeFailure(status: number | undefined): string {
       "running. Open Zotero and try again — the library is only readable while it is open."
     );
   }
-  return `Zotero answered ${status}.`;
+  /* Zotero's own words, when it had any.
+   *
+   * "Zotero answered 400" was the whole message, which says a request was
+   * refused without saying which part of it was refused -- and left the user
+   * and me guessing at a local server that had already written down the answer.
+   * The body of a local API error is Zotero's own diagnostic text about a
+   * request Karen composed; it carries none of the user's content. */
+  const said = body.trim().replace(/\s+/g, " ").slice(0, 300);
+  return `Zotero answered ${status}${said ? `: ${said}` : " with no explanation"}.`;
 }
