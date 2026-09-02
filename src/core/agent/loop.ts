@@ -54,6 +54,8 @@ export interface AgentTurnOptions {
   apiKey?: string;
   /** Sampler settings, already filtered for what this endpoint accepts. */
   sampling?: Record<string, number>;
+  /** Extra request fields this provider needs, e.g. asking for reasoning. */
+  extra?: Record<string, unknown>;
   system?: string;
   maxSteps?: number;
   signal?: AbortSignal;
@@ -244,6 +246,7 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
       tools: opts.registry.schemas(),
       ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
       ...(opts.sampling ? { sampling: opts.sampling } : {}),
+      ...(opts.extra ? { extra: opts.extra } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onEvent
         ? { onDelta: (d: string, kind: DeltaKind) => opts.onEvent!({ type: "text", text: d, kind }) }

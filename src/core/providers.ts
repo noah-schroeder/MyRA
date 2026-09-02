@@ -34,6 +34,14 @@ export interface Provider {
   /** Which of this endpoint's models are offered in the picker. */
   models: string[];
   enabled: boolean;
+  /**
+   * Send this endpoint the fields that ask a model to show its reasoning.
+   *
+   * Off unless the reasoning check has established that asking helps: a strict
+   * server refuses a request carrying parameters it does not know, and a chat
+   * that fails outright is much worse than a chat with no reasoning shown.
+   */
+  askReasoning?: boolean;
 }
 
 /**
@@ -183,6 +191,8 @@ export function parseProvider(raw: unknown): Provider | undefined {
       ? [...new Set(row["models"].map((m) => str(m, 200)).filter(Boolean))]
       : [],
     enabled: row["enabled"] !== false,
+    // Absent means off, and only an explicit true turns it on.
+    ...(row["askReasoning"] === true ? { askReasoning: true } : {}),
   };
 }
 

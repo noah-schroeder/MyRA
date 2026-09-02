@@ -62,6 +62,8 @@ const api = {
   copy: (text: string) => ipcRenderer.invoke("karen:copy", text),
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
     ipcRenderer.invoke("karen:provider-models", opts),
+  providerReasoning: (opts: { baseUrl: string; id?: string; model: string; apiKey?: string }) =>
+    ipcRenderer.invoke("karen:provider-reasoning", opts),
   setProviderKey: (id: string, value: string) =>
     ipcRenderer.invoke("karen:provider-key", id, value),
   providerKeysPresent: () => ipcRenderer.invoke("karen:provider-keys-present"),
