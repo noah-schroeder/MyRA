@@ -99,7 +99,7 @@ export function renderPlan(plan: Plan): string {
           ``,
           `> With no embeddings model, candidates cannot be ranked by meaning. The`,
           `> screener sees an even slice taken across all queries instead — set one`,
-          `> in Settings → Endpoints to rank ${plan.screenTop} by relevance.`,
+          `> in Settings → Providers to rank ${plan.screenTop} by relevance.`,
         ]),
     ``,
   ].join("\n");
@@ -207,7 +207,7 @@ export function parsePlan(text: string, previous: Plan, knownModels?: string[]):
     if (!value || PLACEHOLDER.test(value)) {
       throw new PlanError(
         `${role}: no model chosen, and no default to fall back on. Set a model in ` +
-          `Settings → Endpoints, or name one in the Models section above.`,
+          `Settings → Providers, or name one in the Models section above.`,
       );
     }
     if (knownModels?.length && !knownModels.includes(value)) {

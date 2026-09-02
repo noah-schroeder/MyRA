@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Provider, Settings } from "../types.ts";
+import type { ModelPrice, Provider, Settings, VaultStatus } from "../types.ts";
+import { EMBEDDINGS, EndpointField } from "./EndpointField.tsx";
+import { priceLabel, priceTitle } from "../../core/pricing.ts";
 import {
   effectiveKind, kindWasOverridden, newProviderId, urlIsLocal,
 } from "../../core/providers.ts";
@@ -25,9 +27,11 @@ import {
 export function ProvidersPane({
   settings,
   patch,
+  vault,
 }: {
   settings: Settings;
   patch: (p: Partial<Settings>) => Promise<void>;
+  vault?: VaultStatus | undefined;
 }) {
   const providers = settings.providers ?? [];
 
@@ -58,6 +62,15 @@ export function ProvidersPane({
         in the conversation. Karen checks the address rather than taking the label's word for it.
       </p>
 
+      {/* Said once, at the top, because it applies to every key on this screen
+          rather than to any one provider. */}
+      {vault && !vault.usable ? (
+        <p className="warning" role="alert">
+          <strong>Keys cannot be stored securely here.</strong> {vault.reason} Keys will be kept
+          for this session only rather than written to disk with a password that is not a secret.
+        </p>
+      ) : null}
+
       {providers.map((provider) => (
         <ProviderCard
           key={provider.id}
@@ -67,9 +80,61 @@ export function ProvidersPane({
         />
       ))}
 
-      <button type="button" className="btn" onClick={add}>
+      <button type="button" className="btn add-provider" onClick={add}>
         Add a provider
       </button>
+
+      {/*
+        * How long to wait, once for all of them.
+        *
+        * It was a field on each endpoint, which made it look like a property of
+        * an address rather than of a reply. Every provider uses this number,
+        * and it counts SILENCE rather than total time -- a long answer that is
+        * still arriving is not a stall, and the version that measured duration
+        * cut off answers that were working perfectly well.
+        */}
+      <label className="field timeout-field">
+        <span>Give up on a chat reply after</span>
+        <span className="timeout-row">
+          <input
+            className="input-line"
+            type="number"
+            min={5}
+            max={3600}
+            value={Math.round(settings.llm.timeoutMs / 1000)}
+            onChange={(e) =>
+              void patch({
+                llm: { ...settings.llm, timeoutMs: Math.max(5, Number(e.target.value)) * 1000 },
+              })
+            }
+          />
+          <span className="unit">seconds with nothing arriving</span>
+        </span>
+      </label>
+
+      {/* Not a chat provider, and not given a screen of its own for one
+          optional field. It ranks search results by meaning; with nothing set,
+          the ranking stage simply does not run. */}
+      <EndpointField which={EMBEDDINGS} settings={settings} patch={patch} />
+
+      {settings.llm.baseUrl.trim() ? (
+        /* An endpoint from before Providers existed. It still answers when no
+           provider and no local model is chosen, so it is shown rather than
+           quietly kept -- but the way to have it back properly is to add it as
+           a provider, where it gets a model list and a key of its own. */
+        <p className="provider-note wrong" role="note">
+          <strong>An older single endpoint is still set:</strong> {settings.llm.baseUrl}. It is
+          used only when no model is chosen anywhere else. Add it above as a provider, then clear
+          it here.{" "}
+          <button
+            type="button"
+            className="link"
+            onClick={() => void patch({ llm: { ...settings.llm, baseUrl: "", model: "" } })}
+          >
+            Clear it
+          </button>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -149,6 +214,15 @@ function ProviderCard({
       .providerModels({ baseUrl, id: provider.id, ...(key ? { apiKey: key } : {}) })
       .then((r) => {
         setFound(r.models ?? []);
+        /* Stored with the provider, so the picker can show a price without
+           asking the endpoint again every time it opens. Replaced wholesale
+           rather than merged: a model whose price has been withdrawn must stop
+           showing the old one. */
+        /* `label` and `baseUrl` from the fields rather than from the stored
+           provider: this closure was made before the blur that commits them,
+           so spreading the stored copy would write back the URL that was there
+           a keystroke ago -- the very address that was just replaced. */
+        if (r.ok) onChange({ ...provider, label, baseUrl, models, prices: r.prices ?? {} });
         const n = (r.models ?? []).length;
         setStatus(
           r.ok
@@ -356,6 +430,7 @@ function ProviderCard({
           all={rows}
           chosen={models}
           {...(found ? { served: found } : {})}
+          prices={provider.prices ?? {}}
           onToggle={toggleModel}
           onSet={setChosen}
         />
@@ -382,6 +457,7 @@ function ModelChooser({
   all,
   served,
   chosen,
+  prices,
   onToggle,
   onSet,
 }: {
@@ -389,6 +465,8 @@ function ModelChooser({
   /** What the endpoint listed this time; absent until it has been asked. */
   served?: string[];
   chosen: string[];
+  /** Per million tokens, in and out, for the models the endpoint priced. */
+  prices: Record<string, ModelPrice>;
   onToggle: (name: string) => void;
   onSet: (next: string[]) => void;
 }) {
@@ -453,6 +531,15 @@ function ModelChooser({
               <label>
                 <input type="checkbox" checked={picked.has(name)} onChange={() => onToggle(name)} />
                 <span className="model-id">{name}</span>
+                {/* Only for the models this endpoint priced. Most endpoints
+                    price nothing, and an empty column is the honest rendering
+                    of that -- there is no table of prices here to fall back
+                    on. */}
+                {prices[name] ? (
+                  <span className="model-price" title={priceTitle(prices[name])}>
+                    {priceLabel(prices[name])}
+                  </span>
+                ) : null}
                 {/* Ticked, but the endpoint no longer lists it. Shown rather
                     than quietly dropped: it is still in the picker, and this is
                     the only place it can be taken out. */}

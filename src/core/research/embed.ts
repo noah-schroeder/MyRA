@@ -42,7 +42,7 @@ export function configuredEmbeddingEndpoint(
   if (cfg.envVar && !apiKey) {
     throw new Error(
       `${cfg.envVar} is not set in this process — the embeddings key has not been ` +
-        `unlocked. Re-enter it in Settings → Endpoints.`,
+        `unlocked. Re-enter it in Settings → Providers.`,
     );
   }
   return { baseUrl: cfg.baseUrl.replace(/\/$/, ""), apiKey, model: cfg.model };
