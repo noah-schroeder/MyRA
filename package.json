@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Karen \u2014 a private, local-first assistant for academic work",
+  "description": "Karen — a private, local-first assistant for academic work",
   "license": "MIT",
   "main": "./out/main/index.js",
   "engines": {
@@ -20,6 +20,7 @@
     "deb": "electron-vite build && electron-builder --linux deb"
   },
   "dependencies": {
+    "katex": "^0.16.47",
     "marked": "^18.0.10"
   },
   "devDependencies": {

@@ -1,8 +1,10 @@
-import { marked, type Token, type Tokens } from "marked";
+import { Marked, type Token, type TokenizerAndRendererExtension, type Tokens } from "marked";
+import katex from "katex";
 import { Component, type ReactNode } from "react";
 import { isSafeExternalUrl } from "../../shared/safeUrl.ts";
 import type { CitedSource } from "../types.ts";
 import { withCitations } from "./Citations.tsx";
+import { KATEX_OPTIONS, matchMathAt } from "./math.ts";
 
 /*
  * Markdown, rendered as React elements rather than HTML.
@@ -22,6 +24,71 @@ import { withCitations } from "./Citations.tsx";
 interface Ctx {
   sources: Map<number, CitedSource>;
   key: () => string;
+}
+
+/**
+ * Maths, as its own token, found before anything else looks at the text.
+ *
+ * It has to be a tokenizer rather than a pass over the finished text, because
+ * markdown gets to the subscripts first: `$x_1 + y_2$` contains two
+ * underscores, and by the time a paragraph has been lexed the middle of that
+ * equation is an <em> and the token boundaries no longer line up with the
+ * delimiters. An inline extension runs before emphasis, so the equation is
+ * lifted out whole and never offered to the emphasis rule at all.
+ */
+const mathExtension: TokenizerAndRendererExtension = {
+  name: "math",
+  level: "inline",
+  /* Where the next candidate might be, so marked can skip ahead instead of
+     asking about every character. */
+  start(src: string) {
+    const at = src.search(/\$|\\\(|\\\[/);
+    return at === -1 ? undefined : at;
+  },
+  tokenizer(src: string) {
+    const found = matchMathAt(src, 0);
+    if (!found) return undefined;
+    return { type: "math", raw: found.raw, text: found.value, display: found.display };
+  },
+};
+
+/* Its own instance rather than marked.use(), which mutates the module for
+   every other caller in the process. */
+const lexer = new Marked({ gfm: true, breaks: true, extensions: [mathExtension] });
+
+/**
+ * KaTeX's output, which is the one place this file lets HTML through.
+ *
+ * Everything else here is built as React elements precisely so that nothing the
+ * model wrote can become markup. Maths cannot work that way -- a rendered
+ * equation IS markup, several hundred nested spans of it -- so the rule is
+ * narrower instead of absent: the HTML comes from KaTeX, from a string KaTeX
+ * itself parsed, with `trust` off. That switch is the whole question: with it
+ * off KaTeX refuses \href, \url and \includegraphics, and every other command
+ * produces spans and text that KaTeX escaped. The model's text is an argument
+ * to a parser, never markup on its own account.
+ *
+ * `throwOnError` off, because half an equation is the normal state of a reply
+ * that is still streaming, and an exception here would blank the answer.
+ */
+function Maths({ tex, display }: { tex: string; display: boolean }) {
+  let html: string;
+  try {
+    html = katex.renderToString(tex, { ...KATEX_OPTIONS, displayMode: display });
+  } catch {
+    /* KaTeX still throws for a few inputs even with throwOnError off. The
+       source is then shown as the text it is, which is what happened before
+       this feature existed and is never worse than that. */
+    return <code className="md-math-raw">{tex}</code>;
+  }
+  const Tag = display ? "div" : "span";
+  return (
+    <Tag
+      className={display ? "md-math md-math-display" : "md-math"}
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
 /** Links in model prose get the same treatment as citations: external only. */
@@ -80,6 +147,11 @@ function inline(tokens: Token[] | undefined, ctx: Ctx, fallback = ""): ReactNode
         // the request would be cancelled and leave a broken frame. Show the alt.
         out.push(<em key={k} className="md-noimage">{(t as Tokens.Image).text || "image"}</em>);
         break;
+      case "math": {
+        const tok = t as unknown as { text: string; display: boolean };
+        out.push(<Maths key={k} tex={tok.text} display={Boolean(tok.display)} />);
+        break;
+      }
       case "escape":
         out.push(<span key={k}>{(t as Tokens.Escape).text}</span>);
         break;
@@ -162,6 +234,11 @@ function block(tokens: Token[], ctx: Ctx, tight = false): ReactNode[] {
           </blockquote>,
         );
         break;
+      case "math": {
+        const tok = t as unknown as { text: string; display: boolean };
+        out.push(<Maths key={k} tex={tok.text} display={Boolean(tok.display)} />);
+        break;
+      }
       case "hr":
         out.push(<hr key={k} className="md-hr" />);
         break;
@@ -249,7 +326,7 @@ function Rendered({
   try {
     // gfm covers tables, strikethrough and autolinks -- all of which appear in
     // research reports. Partial input is expected: this renders mid-stream.
-    tokens = marked.lexer(text, { gfm: true, breaks: true });
+    tokens = lexer.lexer(text);
   } catch {
     // A lexer failure must never blank the answer.
     return <span className="md-raw">{withCitations(text, sources)}</span>;
