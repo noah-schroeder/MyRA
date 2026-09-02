@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Provider, Settings } from "../types.ts";
 import {
   effectiveKind, kindWasOverridden, newProviderId, urlIsLocal,
@@ -85,6 +85,14 @@ function ProviderCard({
 }) {
   const [key, setKey] = useState("");
   const [keyNote, setKeyNote] = useState("");
+  /* Whether one is stored, never what it is. Without this a saved key and no
+     key look identical, so the only way to deal with a provider that is
+     refusing requests is to retype the key every time. */
+  const [hasKey, setHasKey] = useState<boolean | undefined>();
+
+  useEffect(() => {
+    void window.karen.providerKeysPresent().then((all) => setHasKey(Boolean(all[provider.id])));
+  }, [provider.id, keyNote]);
   const [found, setFound] = useState<string[] | undefined>();
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -195,7 +203,11 @@ function ProviderCard({
         <input
           className="input-line"
           type="password"
-          placeholder={"Stored in your keyring; never shown again"}
+          placeholder={
+            hasKey
+              ? "A key is stored. Type a new one to replace it."
+              : "Not set. Encrypted into your login keyring when saved."
+          }
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onBlur={() => {
@@ -208,6 +220,17 @@ function ProviderCard({
         />
       </label>
       {keyNote ? <p className="provider-note">{keyNote}</p> : null}
+      {hasKey ? (
+        <button
+          type="button"
+          className="btn-sm"
+          onClick={() =>
+            void window.karen.setProviderKey(provider.id, "").then(() => setKeyNote("Key removed."))
+          }
+        >
+          Remove the stored key
+        </button>
+      ) : null}
 
       <div className="provider-actions">
         <button type="button" className="btn-sm" disabled={busy || !provider.baseUrl.trim()} onClick={fetchModels}>

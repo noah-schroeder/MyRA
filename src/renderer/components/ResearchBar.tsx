@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { readsLibrary, searches } from "../types.ts";
+import { exactly } from "../../core/research/ladder.ts";
 import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 
 /**
@@ -145,19 +145,19 @@ export function ResearchBar({
         </div>
       </div>
 
-      {readsLibrary(config.mode) && !lookup ? (
+      {/* At the Library rung only.
+        *
+        * It was shown wherever search_library is in the schema -- Library,
+        * Quick and Deep -- reasoning that a scope in force must stay visible.
+        * That was the right instinct about the wrong thing: Quick and Deep are
+        * questions about the literature, and a Zotero collection picker sitting
+        * under them says the two are one feature when they are not.
+        *
+        * So the SCOPE now belongs to the rung as well, not just its control:
+        * see `collectionScope` in tools/library.ts. Nothing invisible is left
+        * applying up there, which is the property that mattered. */}
+      {exactly(config.mode, "library") && !lookup ? (
         <CollectionPicker
-          /* Whether an unreachable Zotero is worth saying out loud.
-           *
-           * At "Library" it is the point of the rung: the user picked the one
-           * setting whose entire job is the library, and silence would leave
-           * them waiting on a search that cannot happen. At "Quick" and "Deep"
-           * they asked about the literature and the library is a bonus, so a
-           * standing warning about a program they may not even have open is
-           * just something in the way of the composer. The picker still appears
-           * up there when Zotero IS answering, because the scope applies at
-           * those rungs and a live scope has to stay visible. */
-          announceFailure={!searches(config.mode)}
           chosen={config.collection ?? ALL}
           chosenName={config.collectionName ?? ""}
           onChoose={(key, name) =>
@@ -182,12 +182,10 @@ export function ResearchBar({
  * those three is something the user can do nothing about.
  */
 function CollectionPicker({
-  announceFailure,
   chosen,
   chosenName,
   onChoose,
 }: {
-  announceFailure: boolean;
   chosen: string;
   chosenName: string;
   onChoose: (key: string, name: string) => void;
@@ -220,10 +218,6 @@ function CollectionPicker({
   /* Said out loud, because it is the one thing about the choice that is not
      visible in it: picking a parent reaches the collections underneath. */
   const below = found?.children ?? 0;
-
-  /* Nothing at all, rather than a quieter warning: at a searching rung this is
-     news about a program the user did not ask Karen to use this turn. */
-  if (state.error && !announceFailure) return null;
 
   if (state.error) {
     return (

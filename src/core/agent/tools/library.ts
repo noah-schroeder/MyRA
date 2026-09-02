@@ -13,7 +13,9 @@
  * control is the difference.
  */
 
-import { readResearchConfig, readsLibrary } from "../../research/config.ts";
+import {
+  exactly, readResearchConfig, readsLibrary, type ResearchConfig,
+} from "../../research/config.ts";
 import {
   descendantKeys, formatItems, linkFor, MAX_FANOUT,
   type LibraryItem, type SearchMode, type ZoteroCollection,
@@ -58,6 +60,24 @@ export function setLibraryHost(installed: LibraryHost | undefined): void {
  */
 function available(): boolean {
   return readsLibrary(readResearchConfig().mode);
+}
+
+/**
+ * The collection scope, but only at the rung that shows the control.
+ *
+ * The picker sits under "Library" and nowhere else, because Quick and Deep are
+ * questions about the literature and a Zotero collection picker beneath them
+ * reads as though the two were one feature. Once the control is gone, the
+ * setting has to go with it: a scope still narrowing results at a rung with
+ * nothing on screen to see or change it is the "reachable, and nothing says so"
+ * failure the library rung was created to fix, in miniature.
+ *
+ * So above Library the whole library is searched. That is the wider answer,
+ * which cannot be mistaken for a narrower one, and the reply says which it was
+ * either way.
+ */
+export function collectionScope(cfg: ResearchConfig): string | undefined {
+  return exactly(cfg.mode, "library") ? cfg.collection : undefined;
 }
 
 export const searchLibraryTool: ToolDef = {
@@ -113,7 +133,7 @@ export const searchLibraryTool: ToolDef = {
     const mode: SearchMode = rawMode === "titleCreatorYear" ? "titleCreatorYear" : "everything";
     const rawLimit = Number(params["limit"]);
 
-    const chosen = readResearchConfig().collection;
+    const chosen = collectionScope(readResearchConfig());
     let collections: string[] = [];
     let scope = "";
     let truncated = false;
