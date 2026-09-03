@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DictationCapture } from "./capture.ts";
+import { isSpeech, levelFromAmplitude, nextFloor } from "../core/audio/endpointing.ts";
 import type { DictationState } from "./types.ts";
 
 export type HandsFreePhase = "off" | "listening" | "thinking" | "speaking";
@@ -41,18 +42,16 @@ export type HandsFreePhase = "off" | "listening" | "thinking" | "speaking";
  */
 const END_OF_TURN_MS = 1_500;
 
-/** The raw amplitude that counts as somebody talking. Matches useDictation. */
-const SPEECH_AMPLITUDE = 0.004;
-
-/**
- * The same floor, on the scale the dictation meter reports.
+/*
+ * What counts as somebody talking is now a question about the room.
  *
- * `useDictation` hands out a dB-mapped 0-1 reading rather than the amplitude:
- * 20·log10(0.004) is −48 dBFS, which that mapping puts at (−48+60)/60 = 0.2.
- * Comparing the raw threshold against the scaled number -- which is what this
- * did first -- treats an ordinary speaking voice as silence.
+ * It was a fixed −48 dBFS, which any room with a fan, a laptop fan or a
+ * window sits above without anybody saying a word -- so the level never fell
+ * below it, the turn never ended, and the report was "if I'm quiet for 1.5
+ * seconds it still thinks I'm talking". `endpointing.ts` learns the room's own
+ * level from the samples that are not speech and puts the bar a fixed margin
+ * above it, never lower than the old fixed value.
  */
-const SPEECH_LEVEL = 0.2;
 
 /**
  * How long they must keep talking before the answer is cut off.
@@ -124,6 +123,9 @@ export function useHandsFree({
 
   const heardSpeech = useRef(false);
   const lastSound = useRef(0);
+  /* The room, as heard so far. Kept across turns: it is a property of where
+     the user is sitting, not of the sentence they just said. */
+  const floor = useRef(0);
   const spokenId = useRef<string | undefined>(undefined);
   const phaseRef = useRef<HandsFreePhase>("off");
   const running = useRef(false);
@@ -172,7 +174,12 @@ export function useHandsFree({
         echoCancellation: true,
         onChunk: () => {},
         onLevel: ({ rms }) => {
-          if (rms <= SPEECH_AMPLITUDE) {
+          /* The same learned threshold, on the same scale: a room loud enough
+             to hold a turn open is also loud enough to cut an answer off
+             mid-sentence, and that one cannot be undone. */
+          const level = levelFromAmplitude(rms);
+          if (!isSpeech(level, floor.current)) {
+            floor.current = nextFloor(floor.current, level);
             loudSince = 0;
             return;
           }
@@ -224,10 +231,12 @@ export function useHandsFree({
      facts the end-of-turn test needs: that speech happened at all, and when it
      was last heard. */
   useEffect(() => {
-    if (dictation.state.level > SPEECH_LEVEL) {
+    const level = dictation.state.level;
+    if (isSpeech(level, floor.current)) {
       heardSpeech.current = true;
       lastSound.current = Date.now();
     }
+    floor.current = nextFloor(floor.current, level);
   }, [dictation.state.level]);
 
   // End of turn: a pause, but only once something has actually been said.

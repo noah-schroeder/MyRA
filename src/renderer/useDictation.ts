@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DictationCapture } from "./capture.ts";
+import { levelFromAmplitude } from "../core/audio/endpointing.ts";
 import type { DictationState } from "./types.ts";
 
 /*
@@ -18,16 +19,13 @@ import type { DictationState } from "./types.ts";
  * numbers, calibrated the same way: an open mic in a quiet room sits well above
  * the amplitude floor and a muted one sits far below, and 2.5s is long enough
  * that a pause between sentences does not trip the warning.
+ *
+ * This one stays fixed on purpose. It answers "is this microphone dead", where
+ * hands-free asks "has this person stopped talking" -- a question about the
+ * room, which core/audio/endpointing.ts answers by learning it.
  */
 const SILENCE_AMPLITUDE = 0.004;
 const SILENCE_MS = 2_500;
-
-/** Matches core's meter: speech sits near -20 dBFS, so a linear bar reads as broken. */
-function scale(amplitude: number): number {
-  if (!(amplitude > 0)) return 0;
-  const db = 20 * Math.log10(Math.min(1, amplitude));
-  return db <= -60 ? 0 : Math.min(1, (db + 60) / 60);
-}
 
 const IDLE: DictationState = { phase: "idle", elapsedMs: 0, level: 0 };
 
@@ -66,7 +64,7 @@ export function useDictation(onText: (text: string) => void) {
         onChunk: (pcm) => void window.karen.dictationAudio(pcm),
         onLevel: ({ peak, rms }) => {
           if (rms > SILENCE_AMPLITUDE) lastSound.current = Date.now();
-          setState((s) => ({ ...s, level: scale(rms), clipping: peak >= 0.99 }));
+          setState((s) => ({ ...s, level: levelFromAmplitude(rms), clipping: peak >= 0.99 }));
         },
       });
       capture.current = session;
