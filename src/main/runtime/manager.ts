@@ -27,6 +27,7 @@ import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
 import { bundledLoader } from "./loader.ts";
+import { repairEngines } from "./engineRuntime.ts";
 import { buildIndex, readIndexSources, type IndexResult } from "./foreignScan.ts";
 import {
   defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
@@ -250,7 +251,46 @@ export class RuntimeManager {
       modelsDir: indexDir,
     });
     if (status.state !== "ready") throw new Error(status.error ?? "Lemonade did not start.");
+    await this.#repairEngines(dirname(binary));
     return this.#api;
+  }
+
+  /**
+   * Give the installed engines the C runtime the daemon itself is using.
+   *
+   * Runs on every launch rather than once, because Lemonade installs engines
+   * whenever the user asks for one and reinstalls them on an upgrade -- and a
+   * wrapper that exists only if you were running the right version of Karen on
+   * the day you pressed the button is not a fix.
+   *
+   * Never fatal. A machine that cannot be repaired still has a working daemon
+   * and working chat, and the failure it produces afterwards now says what is
+   * wrong; losing the backend over this would be the worse trade.
+   */
+  async #repairEngines(lemondDir: string): Promise<void> {
+    try {
+      for (const fixed of await repairEngines(lemonadeCacheDir(), lemondDir)) {
+        this.#lemonade.note(
+          `${fixed.recipe} (${fixed.backend}) needs ${fixed.missing.join(", ")}, which this ` +
+            `system does not have; started it through the C library Karen ships instead.`,
+        );
+      }
+    } catch (err) {
+      this.#lemonade.note(`Could not adapt the engines to this system: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * The same repair, for an engine that has just been installed.
+   *
+   * Separate entry point because an install happens with the daemon already
+   * running, so nothing would otherwise look at the new directory until the
+   * next launch -- and the user installs an engine precisely because they are
+   * about to use it.
+   */
+  async repairInstalledEngines(): Promise<void> {
+    const binary = await findLemonade(lemonadeDir(LEMONADE_VERSION));
+    if (binary) await this.#repairEngines(dirname(binary));
   }
 
   /**

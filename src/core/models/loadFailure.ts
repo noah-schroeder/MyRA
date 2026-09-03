@@ -108,11 +108,12 @@ export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): str
   if (opts.engineState === "ready" && opts.oldSystem) {
     return (
       opening +
-      `${engine} is installed, so this is not something left undone. Its server needs newer ` +
-      "system libraries than this machine has — Karen ships its own copy for the Lemonade " +
-      "daemon, but Lemonade starts its engines itself and they get no such help. Chat keeps " +
-      "working because llama.cpp is built against an older system than the speech and image " +
-      "engines are. A hosted model under Settings → Providers is the way to use this today."
+      `${engine} is installed, so this is not something left undone: its server needs newer ` +
+      "system libraries than this machine has, which is also why chat keeps working — " +
+      "llama.cpp is built against an older system than the speech and image engines are. " +
+      "Karen adapts those engines to this machine using the C library it ships for the " +
+      "Lemonade daemon, and this failing means that did not take. Restarting Karen tries " +
+      "again; Settings → Runtime has the log if it does not."
     );
   }
 
