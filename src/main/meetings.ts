@@ -45,6 +45,15 @@ export interface MeetingDeps {
    * Settings → Audio, and one resolver behind it.
    */
   transcription: () => Promise<{ endpoint: EndpointSettings; apiKey?: string | undefined }>;
+  /**
+   * A transcription failure, in words the person can act on.
+   *
+   * Supplied rather than worked out here, for the same reason the endpoint is:
+   * naming the engine behind a model needs the catalogue, and this file has
+   * deliberately never known about the runtime. Absent, the original message
+   * stands — which is what every other failure here already gets.
+   */
+  explainTranscription?: (err: unknown) => Promise<string>;
   send: (channel: string, payload?: unknown) => void;
 }
 
@@ -198,6 +207,14 @@ export function installMeetingIpc(deps: MeetingDeps): void {
         transcriptModel: endpoint.model ?? endpoint.baseUrl,
         error: undefined,
       });
+    } catch (err) {
+      /* Rethrown with a better sentence rather than handled: `attempt` above is
+         what records a failure against the meeting and tells the window, and
+         this stage's job is only to say what went wrong. The commonest cause is
+         an engine that is not installed, which the raw error never mentions. */
+      const said = await deps.explainTranscription?.(err).catch(() => undefined);
+      if (said && said !== (err as Error).message) throw new Error(said);
+      throw err;
     } finally {
       running = undefined;
     }

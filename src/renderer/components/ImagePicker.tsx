@@ -4,6 +4,7 @@ import { shortModelName as shorten } from "../../core/runtime/foreign.ts";
 import { modelNamer } from "../../core/models/roles.ts";
 import { choiceIsExternal, parseModelRef } from "../../core/providers.ts";
 import { ModelMenu } from "./ModelMenu.tsx";
+import { engineStates, type Runnable } from "../../core/runtime/runnable.ts";
 
 /**
  * Which model draws.
@@ -37,6 +38,10 @@ export function ImagePicker({
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
   const [progress, setProgress] = useState<AudioProgress | undefined>();
+  /* Which engines are installed, asked alongside the options and for the same
+     reason: a row that needs an engine nobody has installed should say so
+     before it is chosen, not after a multi-gigabyte download. */
+  const [engines, setEngines] = useState<Map<string, Runnable>>(new Map());
   const wrap = useRef<HTMLDivElement>(null);
 
   const chosen = settings?.image.model ?? "";
@@ -51,6 +56,12 @@ export function ImagePicker({
     void window.karen.imageModels().then((r) => {
       setOptions(r.options);
       setError(r.ok ? undefined : r.error);
+    });
+    /* Best effort, and silent when it fails: not knowing which engines are
+       installed costs a warning, while blocking the menu on it would cost the
+       menu. */
+    void window.karen.lemonadeInfo().then((r) => {
+      if (r.ok && r.info) setEngines(engineStates(r.info.engines));
     });
   }, [open]);
 
@@ -160,6 +171,7 @@ export function ImagePicker({
           busy={busy}
           progress={progress}
           error={error}
+          engines={engines}
           emptyText="Nothing here can make pictures yet."
           externalWarning="Prompts sent here leave your computer."
           onChoose={(option) => void choose(option)}

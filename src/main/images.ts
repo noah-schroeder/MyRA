@@ -23,7 +23,9 @@ import {
   assertImageId, byNewest, idOfSidecar, imageId, parseRecord, sidecarName, type ImageRecord,
 } from "../core/images/store.ts";
 import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
-import { modelOptions, resolveMediaModel, type MediaDeps, type ResolvedModel } from "./models.ts";
+import {
+  explainModelFailure, modelOptions, resolveMediaModel, type MediaDeps, type ResolvedModel,
+} from "./models.ts";
 
 export type ImageDeps = MediaDeps;
 
@@ -212,7 +214,10 @@ export function installImageIpc(deps: ImageDeps): void {
          `new Blob()` on the far side. */
       return { ok: true, record, image: new Uint8Array(bytes) };
     } catch (err) {
-      return { ok: false, error: (err as Error).message };
+      return {
+        ok: false,
+        error: await explainModelFailure(deps, "image", deps.config.current.image.model, err),
+      };
     } finally {
       running = undefined;
     }

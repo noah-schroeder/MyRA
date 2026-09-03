@@ -7,6 +7,7 @@ import { RuntimePane } from "./RuntimePane.tsx";
 import { ProvidersPane } from "./ProvidersPane.tsx";
 import { EndpointField } from "./EndpointField.tsx";
 import { voicesFor } from "../../core/audio/voices.ts";
+import { engineStates, runnable, type Runnable } from "../../core/runtime/runnable.ts";
 import { modelIdOf } from "../../core/audio/models.ts";
 
 /**
@@ -383,6 +384,11 @@ function AudioModelField({
   const [options, setOptions] = useState<AudioOption[]>([]);
   const [status, setStatus] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  /* Which engines are installed. A speech model whose engine is not there
+     downloads perfectly and then fails to load, which is what a user met at
+     the end of a dictated sentence: "whisper-server failed to start or become
+     ready". The list is where that is cheapest to say. */
+  const [engines, setEngines] = useState<Map<string, Runnable>>(new Map());
 
   const chosen = role === "transcription"
     ? settings.audio.transcriptionModel
@@ -393,6 +399,11 @@ function AudioModelField({
       setOptions(r.options);
       if (!r.ok) setStatus(r.error);
     });
+    // Best effort: not knowing costs a warning, and waiting on it would cost
+    // the list.
+    void window.karen.lemonadeInfo().then((r) => {
+      if (r.ok && r.info) setEngines(engineStates(r.info.engines));
+    });
   };
   useEffect(refresh, [role]);
   useEffect(() => window.karen.onAudioProgress((p) =>
@@ -400,6 +411,15 @@ function AudioModelField({
 
   const current = options.find((o) => o.ref === chosen);
   const needsDownload = current?.where === "local" && current.downloaded === false;
+
+  /* Only "installable but not installed". An engine this hardware cannot run
+     at all belongs on the Models screen with the explanation; here it would be
+     a verdict about somebody's GPU in a dropdown about dictation. */
+  const needsEngine = (option: AudioOption): boolean =>
+    Boolean(
+      engines.size && option.where === "local" && option.recipe &&
+        runnable(option.recipe, engines).state === "needs-engine",
+    );
 
   const choose = (ref: string): void => {
     void patch({
@@ -457,6 +477,7 @@ function AudioModelField({
                 <option key={o.ref} value={o.ref}>
                   {o.model}
                   {o.downloaded ? (o.loaded ? " — loaded" : "") : ` — ${sizeOf(o)} download`}
+                  {needsEngine(o) ? ` — needs the ${o.recipe} engine` : ""}
                 </option>
               ))}
             </optgroup>
@@ -490,6 +511,14 @@ function AudioModelField({
           Nothing on this machine can {role === "transcription" ? "listen" : "speak"} yet. Local
           speech models come with the model runtime — install it under Settings → Runtime — or
           choose one from a provider you have added.
+        </p>
+      ) : null}
+
+      {current && needsEngine(current) ? (
+        <p className="warning" role="note">
+          {current.model} runs on the {current.recipe} engine, which is not installed. Install it
+          under Settings → Runtime — downloading the model alone is not enough, and the failure
+          otherwise arrives at the end of the first thing you say.
         </p>
       ) : null}
 

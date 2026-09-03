@@ -85,8 +85,12 @@ export function useDictation(onText: (text: string) => void) {
     // look as though the recording was thrown away.
     setState((s) => ({ ...s, phase: "transcribing" }));
     try {
-      await window.karen.dictationStop();
-      setState(IDLE);
+      /* The handler answers rather than rejecting, so that a transcription
+         failure reads as Karen's own sentence instead of Electron's "Error
+         invoking remote method" with a JSON body on the end. The catch is
+         still here for the bridge itself going wrong. */
+      const result = await window.karen.dictationStop();
+      setState(result?.ok === false ? { ...IDLE, error: result.error ?? "" } : IDLE);
     } catch (err) {
       setState({ ...IDLE, error: (err as Error).message });
     }

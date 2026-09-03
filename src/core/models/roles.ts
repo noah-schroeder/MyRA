@@ -67,6 +67,16 @@ export interface ModelOption {
   sizeBytes?: number | undefined;
   /** Currently held in memory by the daemon. */
   loaded?: boolean;
+  /**
+   * The engine a local model runs on: `whispercpp`, `kokoro`, `sd-cpp`…
+   *
+   * Carried so a picker can say that an engine is not installed BEFORE the
+   * model is chosen. Lemonade installs engines one recipe at a time, and
+   * installing the one that answers chat installs none of the others — so the
+   * list happily offered Whisper, the download succeeded, and the failure
+   * waited until the end of the first sentence somebody dictated.
+   */
+  recipe?: string;
 }
 
 /**
