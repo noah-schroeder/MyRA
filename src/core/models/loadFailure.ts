@@ -18,10 +18,12 @@
  * the download succeeds, and the failure waits until the first thing you say.
  *
  * This is the pure half: recognising that shape and writing the sentence. The
- * engine's name is passed in, because only the main process has the catalogue
- * that maps a model to its recipe.
+ * engine's name and its state on this machine are passed in, because only the
+ * main process has the catalogue that maps a model to its recipe and the
+ * daemon's answer about which engines are installed here.
  */
 
+import type { Runnable } from "../runtime/runnable.ts";
 import type { MediaRole } from "./roles.ts";
 
 export interface LoadFailure {
@@ -47,32 +49,102 @@ export function loadFailureIn(text: string): LoadFailure | undefined {
   return { model: named?.[1] ?? "" };
 }
 
+
 const DOES: Record<MediaRole, string> = {
   transcription: "transcribe",
   voice: "speak",
   image: "draw",
 };
 
+export interface LoadContext {
+  role: MediaRole;
+  /** The Lemonade recipe that runs this model, when it is known. */
+  engine?: string | undefined;
+  /**
+   * What the daemon says about that engine on THIS machine.
+   *
+   * The reason the advice cannot be one sentence. Karen told a user with
+   * whisper.cpp already installed to go and install whisper.cpp, because the
+   * only sentence it had assumed the common case. The daemon knows which case
+   * it is -- `/api/v1/system-info` reports every backend as installed,
+   * installable or unsupported -- so asking it is the difference between
+   * advice and a guess.
+   */
+  engineState?: Runnable | undefined;
+  /**
+   * True when Karen had to ship a C runtime for the daemon on this machine.
+   *
+   * Which makes this the likeliest cause of all, and a certain one rather than
+   * a guess: the engines Lemonade downloads are built against GLIBC_2.38 --
+   * measured on the released `whisper-server` and `koko` binaries -- and get
+   * none of the help the daemon gets, because Lemonade starts them itself.
+   * llama.cpp's build asks for 2.34, so on such a machine chat works and every
+   * speech model exits the moment it starts. That asymmetry is the whole
+   * confusing part of the symptom, and it deserves to be named.
+   */
+  oldSystem?: boolean | undefined;
+}
+
 /**
  * What to say instead of the raw body.
  *
- * Names the model, names the engine when it is known, and points at the one
- * screen that can fix it. Deliberately does NOT claim the engine is missing:
- * an installed engine that crashes on startup produces this same error, and
- * the daemon's log — which is on that screen — is what tells the two apart.
+ * Three different failures arrive as this one error, and they have nothing in
+ * common but the message:
+ *
+ *   - the engine is not installed, which is the usual one, because installing
+ *     the engine that answers chat does not install the others;
+ *   - the engine IS installed and its server died on startup, which is a
+ *     half-downloaded model or a backend this machine cannot initialise;
+ *   - the engine cannot run here at all.
+ *
+ * Naming the wrong one is worse than saying less: it sends somebody to a
+ * screen where the button they are told to press is already done.
  */
-export function explainLoadFailure(
-  failure: LoadFailure,
-  opts: { role: MediaRole; engine?: string | undefined },
-): string {
-  const model = failure.model || `the ${opts.role === "voice" ? "voice" : opts.role} model`;
-  const engine = opts.engine
-    ? `It runs on the ${opts.engine} engine`
-    : "It runs on an engine of its own";
+export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): string {
+  const model = failure.model || `the ${opts.role} model`;
+  const engine = opts.engine ? `the ${opts.engine} engine` : "an engine of its own";
+  const opening = `${model} would not load, so there was nothing to ${DOES[opts.role]} with. `;
+
+  if (opts.engineState === "ready" && opts.oldSystem) {
+    return (
+      opening +
+      `${engine} is installed, so this is not something left undone. Its server needs newer ` +
+      "system libraries than this machine has — Karen ships its own copy for the Lemonade " +
+      "daemon, but Lemonade starts its engines itself and they get no such help. Chat keeps " +
+      "working because llama.cpp is built against an older system than the speech and image " +
+      "engines are. A hosted model under Settings → Providers is the way to use this today."
+    );
+  }
+
+  if (opts.engineState === "ready") {
+    /* The engine is there and its server exited anyway. Karen cannot see that
+       server's own output -- the daemon starts it and keeps its stderr -- so
+       this names the two causes that actually produce it rather than
+       pretending to know which. A model file that stopped short is first
+       because it is the one the user can fix without knowing anything. */
+    return (
+      opening +
+      `${engine} is installed, so this is that engine's server exiting as soon as it ` +
+      "started. Two things do that: a model file that did not finish downloading, and a " +
+      "backend this machine cannot start. Settings → Runtime has the daemon's log, and " +
+      "downloading the model again is the quicker of the two to rule out."
+    );
+  }
+
+  if (opts.engineState === "unsupported") {
+    return (
+      opening +
+      `This machine has no way to run ${engine} — the hardware it needs is not here, so ` +
+      "another model is the only way forward. Settings → Runtime lists what this machine can run."
+    );
+  }
+
+  const installed = opts.engineState === "needs-engine"
+    ? `It runs on ${engine}, which is not installed yet`
+    : `It runs on ${engine}, which is installed separately from the one that answers chat`;
   return (
-    `${model} would not load, so there was nothing to ${DOES[opts.role]} with. ` +
-    `${engine}, which is installed separately from the one that answers chat — ` +
-    "open Settings → Runtime to install it, or to see the log if it is installed " +
+    opening + installed +
+    " — open Settings → Runtime to install it, or to see the log if it is installed " +
     "and failing to start."
   );
 }
@@ -84,10 +156,7 @@ export function explainLoadFailure(
  * refused key and a 404 all have their own messages that are better than this
  * one, and overwriting them would be a downgrade.
  */
-export function explainIfLoadFailure(
-  text: string,
-  opts: { role: MediaRole; engine?: string | undefined },
-): string | undefined {
+export function explainIfLoadFailure(text: string, opts: LoadContext): string | undefined {
   const failure = loadFailureIn(text);
   return failure ? explainLoadFailure(failure, opts) : undefined;
 }
