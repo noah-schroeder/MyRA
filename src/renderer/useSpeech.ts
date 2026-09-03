@@ -69,7 +69,8 @@ export function useSpeech() {
       return;
     }
 
-    const blob = new Blob([new Uint8Array(result.audio)], { type: result.mime ?? "audio/mpeg" });
+    const type = result.mime ?? "audio/mpeg";
+    const blob = new Blob([new Uint8Array(result.audio)], { type });
     const src = URL.createObjectURL(blob);
     url.current = src;
     const element = new Audio(src);
@@ -85,11 +86,18 @@ export function useSpeech() {
         resolve();
       };
       element.onended = () => done();
-      /* A decode failure is worth naming: it means the container was not what
-         the header claimed, which is a real thing servers do and is otherwise
-         indistinguishable from a voice model that answered with silence. */
-      element.onerror = () => done("That audio could not be played.");
-      element.play().catch((err: unknown) => done((err as Error).message));
+      /*
+       * A decode failure names the format, because that is the whole question.
+       *
+       * "Failed to load because no supported source was found" was reported
+       * after a synthesis that had worked: the audio was there and this build
+       * would not decode it. Which format it was is the difference between a
+       * missing codec and a mislabelled container, and neither is guessable
+       * from the sentence Chromium supplies.
+       */
+      const cannotPlay = `That audio could not be played: the voice model returned ${type}.`;
+      element.onerror = () => done(cannotPlay);
+      element.play().catch(() => done(cannotPlay));
     });
   }, [release]);
 

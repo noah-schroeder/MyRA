@@ -21,6 +21,7 @@
  *     tells the user a download may be happening.
  */
 
+import { audioMime, PREFERRED_FORMAT, refusedTheFormat } from "./container.ts";
 import type { EndpointSettings } from "../config.ts";
 
 export class SpeechError extends Error {
@@ -76,9 +77,8 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
   const timeout = AbortSignal.timeout(SPEECH_TIMEOUT_MS);
   const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
 
-  let res: Response;
-  try {
-    res = await fetch(speechUrl(endpoint.baseUrl), {
+  const send = async (format: string | undefined): Promise<Response> =>
+    fetch(speechUrl(endpoint.baseUrl), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -89,9 +89,30 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
         input: text,
         ...(opts.voice ? { voice: opts.voice } : {}),
         ...(opts.speed && opts.speed !== 1 ? { speed: opts.speed } : {}),
+        ...(format ? { response_format: format } : {}),
       }),
       signal,
     });
+
+  let res: Response;
+  try {
+    /*
+     * WAV is asked for, and asked for first.
+     *
+     * With no format named the local daemon answers MP3 -- measured -- and an
+     * MP3 needs a codec the renderer may not have, which arrives as "Failed to
+     * load because no supported source was found" after a synthesis that
+     * worked perfectly. WAV needs no codec at all. It is five times the bytes
+     * for one sentence and every one of them travels over loopback.
+     *
+     * An endpoint that does not take the field gets asked again without it,
+     * because being unable to speak at all is a worse failure than a container
+     * that might not play.
+     */
+    res = await send(PREFERRED_FORMAT);
+    if (!res.ok && refusedTheFormat(res.status, await res.clone().text().catch(() => ""))) {
+      res = await send(undefined);
+    }
   } catch (err) {
     const name = (err as Error).name;
     if (name === "AbortError" && opts.signal?.aborted) {
@@ -137,9 +158,10 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
   if (audio.length === 0) throw new SpeechError("The voice model returned no audio.");
   return {
     audio,
-    /* Read, not assumed: the request cannot choose the container, so the
-       renderer has to be told what it is being handed or the <audio> element
-       gets a Blob it may decline to play. */
-    mime: res.headers.get("content-type")?.split(";")[0]?.trim() || "audio/mpeg",
+    /* The bytes are asked before the header. A server that labels its audio
+       `application/octet-stream`, or mislabels it outright, otherwise hands
+       the <audio> element a Blob it declines to play -- and the failure looks
+       identical to a voice model that answered with silence. */
+    mime: audioMime(audio, res.headers.get("content-type") ?? undefined),
   };
 }

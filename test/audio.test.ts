@@ -16,6 +16,9 @@ import {
 } from "../src/core/audio/voices.ts";
 import { fitsRole, guessRole, modelNamer } from "../src/core/models/roles.ts";
 import { modelOptions } from "../src/main/models.ts";
+import {
+  audioMime, PREFERRED_FORMAT, refusedTheFormat, sniffAudio,
+} from "../src/core/audio/container.ts";
 import { isForRole, isProviderRef, modelIdOf } from "../src/core/audio/models.ts";
 import { speakable, MAX_SPOKEN_CHARS } from "../src/core/audio/speakable.ts";
 import { speechUrl, speak, SpeechError } from "../src/core/audio/speech.ts";
@@ -545,5 +548,63 @@ describe("guessing what a provider's model is for", () => {
     assert.equal(fitsRole("whisper-1", "chat"), false);
     assert.equal(fitsRole("gpt-4o", "chat"), true);
     assert.equal(fitsRole("gpt-4o", "voice"), false);
+  });
+});
+
+describe("what the voice model actually handed back", () => {
+  const bytes = (...parts: (string | number[])[]): Uint8Array => {
+    const out: number[] = [];
+    for (const p of parts) {
+      if (typeof p === "string") for (const c of p) out.push(c.charCodeAt(0));
+      else out.push(...p);
+    }
+    return new Uint8Array(out);
+  };
+
+  it("recognises each container from its own first bytes", () => {
+    /* Measured against the local daemon, which returns exactly these for
+       response_format wav / mp3 / opus. */
+    assert.equal(sniffAudio(bytes("RIFF", [0, 0, 0, 0], "WAVEfmt ")), "audio/wav");
+    assert.equal(sniffAudio(bytes("ID3", [3, 0, 0, 0])), "audio/mpeg");
+    assert.equal(sniffAudio(bytes("OggS", [0, 2, 0, 0])), "audio/ogg");
+    assert.equal(sniffAudio(bytes("fLaC", [0, 0, 0, 0])), "audio/flac");
+    assert.equal(sniffAudio(bytes([0, 0, 0, 32], "ftypM4A ")), "audio/mp4");
+    // An MP3 with no ID3 tag, which is a bare frame sync.
+    assert.equal(sniffAudio(bytes([0xff, 0xfb, 0x90, 0x00])), "audio/mpeg");
+  });
+
+  it("says nothing about bytes it does not recognise", () => {
+    // Undefined means "trust the header", not "refuse to play it".
+    assert.equal(sniffAudio(bytes("nope")), undefined);
+    assert.equal(sniffAudio(new Uint8Array([1, 2])), undefined);
+  });
+
+  it("believes the bytes over the header", () => {
+    /* The failure this exists for: a Blob typed from a header that did not
+       match its content reaches the window as "Failed to load because no
+       supported source was found", indistinguishable from a voice model that
+       answered with silence. */
+    assert.equal(audioMime(bytes("RIFF", [0, 0, 0, 0], "WAVE"), "audio/mpeg"), "audio/wav");
+  });
+
+  it("throws away a header that says nothing", () => {
+    // What a server sends when it has not thought about it. Chromium will not
+    // sniff a Blob, so passing this on is the difference between sound and none.
+    assert.equal(audioMime(bytes("nope"), "application/octet-stream"), "audio/mpeg");
+    assert.equal(audioMime(bytes("nope"), undefined), "audio/mpeg");
+    assert.equal(audioMime(bytes("nope"), "audio/l16;rate=24000"), "audio/l16");
+  });
+
+  it("only retries without the format when that is what was refused", () => {
+    assert.equal(refusedTheFormat(400, '{"error":"unsupported response_format"}'), true);
+    assert.equal(refusedTheFormat(400, '{"error":"model not found"}'), false);
+    assert.equal(refusedTheFormat(500, "response_format"), false);
+  });
+
+  it("asks for the container that needs no codec", () => {
+    /* WAV, deliberately: MP3 needs a decoder this build may not ship, and that
+       is what "no supported source was found" meant after a synthesis that had
+       already succeeded. */
+    assert.equal(PREFERRED_FORMAT, "wav");
   });
 });
