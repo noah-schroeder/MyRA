@@ -15,6 +15,7 @@ import {
   describeVoice, isKokoro, voicesFor, voiceForModel, voiceIsValid, KOKORO_VOICE_IDS, DEFAULT_VOICE,
 } from "../src/core/audio/voices.ts";
 import { modelNamer } from "../src/core/models/roles.ts";
+import { modelOptions } from "../src/main/models.ts";
 import { isForRole, isProviderRef, modelIdOf } from "../src/core/audio/models.ts";
 import { speakable, MAX_SPOKEN_CHARS } from "../src/core/audio/speakable.ts";
 import { speechUrl, speak, SpeechError } from "../src/core/audio/speech.ts";
@@ -455,5 +456,48 @@ describe("keeping the voice and its model in step", () => {
   it("leaves an unset voice unset", () => {
     assert.equal(voiceForModel("kokoro-v1", ""), "");
     assert.equal(voiceForModel("kokoro-v1", "   "), "");
+  });
+});
+
+/**
+ * Which engine a model needs, carried to the place it is chosen.
+ *
+ * Lemonade installs engines one recipe at a time, and installing the one that
+ * answers chat installs none of the others. So a picker that does not know a
+ * model's recipe cannot warn, and the first sign of trouble is
+ * "whisper-server failed to start or become ready" at the end of a dictated
+ * sentence — which is exactly how this was found.
+ */
+describe("what a model needs to run", () => {
+  const deps = (installed: { id: string; downloaded?: boolean; labels?: string[] }[]) => ({
+    config: { current: { providers: [] } },
+    runtime: {
+      lemonade: { status: { state: "ready", health: { loaded: [] } } },
+      installedModels: async () => installed,
+      catalog: async () => [
+        { id: "Whisper-Large-v3-Turbo", recipe: "whispercpp", labels: ["transcription"],
+          suggested: true, source: "huggingface", sizeBytes: 1_600_000_000 },
+        { id: "kokoro-v1", recipe: "kokoro", labels: ["tts"], suggested: true, source: "huggingface" },
+      ],
+    },
+  }) as unknown as Parameters<typeof modelOptions>[0];
+
+  it("puts the engine on a model that has not been downloaded yet", async () => {
+    const options = await modelOptions(deps([]), "transcription");
+    const whisper = options.find((o) => o.model === "Whisper-Large-v3-Turbo");
+    assert.equal(whisper?.recipe, "whispercpp");
+  });
+
+  it("puts it on one that IS downloaded, which /models does not report", async () => {
+    /* The daemon's model listing carries no recipe, so an installed model would
+       otherwise be the one row that could not be warned about -- and it is the
+       row most likely to be chosen. */
+    const options = await modelOptions(
+      deps([{ id: "Whisper-Large-v3-Turbo", downloaded: true, labels: ["transcription"] }]),
+      "transcription",
+    );
+    const whisper = options.find((o) => o.model === "Whisper-Large-v3-Turbo");
+    assert.equal(whisper?.downloaded, true);
+    assert.equal(whisper?.recipe, "whispercpp");
   });
 });

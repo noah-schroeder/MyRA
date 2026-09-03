@@ -1,6 +1,7 @@
 import type { ModelOption, AudioProgress } from "../types.ts";
 import { shortModelName as shorten } from "../../core/runtime/foreign.ts";
 import { modelNamer } from "../../core/models/roles.ts";
+import { runnable, type Runnable } from "../../core/runtime/runnable.ts";
 
 /**
  * The body of a model dropdown: what is here, what could be downloaded, and
@@ -30,12 +31,23 @@ export function ModelMenu({
   progress,
   error,
   emptyText,
+  engines,
   externalWarning,
   footer,
   onChoose,
 }: {
   options: ModelOption[];
   chosen: string;
+  /**
+   * What each engine can do on this machine, when the daemon has been asked.
+   *
+   * Empty is "not known yet" and shows nothing: a picker that guessed would be
+   * warning about engines it had not checked. When it IS known, a model whose
+   * engine is not installed says so on the row, because the alternative is what
+   * happened to a user -- a 1.6 GB Whisper download, chosen from a list that
+   * said nothing, failing at the end of the first dictated sentence.
+   */
+  engines?: Map<string, Runnable>;
   /** The ref currently downloading or loading, if any. */
   busy: string | undefined;
   progress: AudioProgress | undefined;
@@ -58,6 +70,15 @@ export function ModelMenu({
   }
 
   const name = modelNamer(options.map((o) => o.model), shorten);
+
+  /* Only ever "not installed", never "unsupported": an engine this machine
+     cannot run at all is the Models screen's business, and a chat bar menu is
+     not where somebody should learn their GPU is the wrong one. */
+  const needsEngine = (option: ModelOption): boolean =>
+    Boolean(
+      engines?.size && option.where === "local" && option.recipe &&
+        runnable(option.recipe, engines).state === "needs-engine",
+    );
 
   const row = (option: ModelOption): React.JSX.Element => {
     const on = option.ref === chosen;
@@ -84,6 +105,9 @@ export function ModelMenu({
             {!loading && option.loaded ? <span className="pill on">loaded</span> : null}
             {!loading && !option.loaded && option.downloaded === false ? (
               <span className="pill">download</span>
+            ) : null}
+            {!loading && needsEngine(option) ? (
+              <span className="pill warn">needs {option.recipe}</span>
             ) : null}
           </span>
         </button>

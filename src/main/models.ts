@@ -17,7 +17,10 @@
  */
 
 import type { ConfigStore, EndpointSettings } from "../core/config.ts";
-import { isForRole, modelIdOf, type MediaRole, type ModelOption } from "../core/models/roles.ts";
+import {
+  isForRole, isProviderRef, modelIdOf, type MediaRole, type ModelOption,
+} from "../core/models/roles.ts";
+import { explainIfLoadFailure } from "../core/models/loadFailure.ts";
 import {
   isExternal, isUsable, parseModelRef, providerFor, providerSecret, qualify,
 } from "../core/providers.ts";
@@ -147,6 +150,12 @@ export async function modelOptions(
   const out: ModelOption[] = [];
   const seen = new Set<string>();
 
+  /* Read once, and used for both lists: /models says what is installed but not
+     which engine runs it, and that is exactly the fact a picker needs to warn
+     before a 1.6 GB download that cannot be loaded afterwards. */
+  const catalog = enabledOnly(await deps.runtime.catalog().catch(() => []));
+  const recipeOf = new Map(catalog.map((e) => [e.id, e.recipe]));
+
   const loaded = new Set(deps.runtime.lemonade.status.health?.loaded ?? []);
 
   /* Only asked of a daemon that is already up. Listing what could be chosen is
@@ -166,13 +175,14 @@ export async function modelOptions(
       downloaded: model.downloaded !== false,
       loaded: loaded.has(model.id),
       ...(model.sizeBytes !== undefined ? { sizeBytes: model.sizeBytes } : {}),
+      ...(recipeOf.get(model.id) ? { recipe: recipeOf.get(model.id)! } : {}),
     });
   }
 
   /* The catalogue needs no daemon: it is a file inside the install, which is
      what lets the pane offer a first speech model on a machine where nothing
      has been downloaded and nothing is running yet. */
-  for (const entry of enabledOnly(await deps.runtime.catalog().catch(() => []))) {
+  for (const entry of catalog) {
     if (!isForRole(entry.labels, role) || seen.has(entry.id)) continue;
     seen.add(entry.id);
     out.push({
@@ -182,6 +192,7 @@ export async function modelOptions(
       external: false,
       downloaded: false,
       ...(entry.sizeBytes !== undefined ? { sizeBytes: entry.sizeBytes } : {}),
+      ...(entry.recipe ? { recipe: entry.recipe } : {}),
     });
   }
 
@@ -204,4 +215,40 @@ export async function modelOptions(
   }
 
   return out;
+}
+
+/**
+ * Which engine runs a model, from the catalogue the daemon ships.
+ *
+ * Only local models have one: a provider's model runs on the provider's own
+ * machinery, and naming an engine there would be inventing a fact. Undefined
+ * is a normal answer and the sentence above is written to work without it.
+ */
+export async function engineFor(
+  deps: Pick<MediaDeps, "runtime">,
+  ref: string,
+): Promise<string | undefined> {
+  if (isProviderRef(ref)) return undefined;
+  const id = modelIdOf(ref);
+  const entry = (await deps.runtime.catalog().catch(() => [])).find((e) => e.id === id);
+  return entry?.recipe;
+}
+
+/**
+ * A failure from a model call, in words, with the engine named where it helps.
+ *
+ * Wraps rather than replaces: only the daemon's "would not load" is rewritten,
+ * because every other failure — a timeout, a refused key, a 404 — already has a
+ * message that says more than this one could. This is what stands between the
+ * user and a raw 500 body arriving at the end of a sentence they just spoke.
+ */
+export async function explainModelFailure(
+  deps: Pick<MediaDeps, "runtime">,
+  role: MediaRole,
+  ref: string,
+  err: unknown,
+): Promise<string> {
+  const message = err instanceof Error ? err.message : String(err);
+  const engine = await engineFor(deps, ref).catch(() => undefined);
+  return explainIfLoadFailure(message, { role, ...(engine ? { engine } : {}) }) ?? message;
 }

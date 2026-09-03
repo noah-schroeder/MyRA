@@ -49,6 +49,7 @@ import { installMeetingIpc } from "./meetings.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installAudioIpc, resolveAudio } from "./audio.ts";
 import { installImageIpc } from "./images.ts";
+import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
@@ -1640,6 +1641,17 @@ async function main(): Promise<void> {
        inference engine coming up because a stage ran is a surprise; dictation
        makes the opposite call because somebody is holding the microphone. */
     transcription: () => resolveAudio({ config, vault, runtime }, "transcription"),
+    /* A meeting that failed to transcribe must say why in the same words
+       dictation does: the model list offers Whisper whether or not the engine
+       that runs it is installed, and "whisper-server failed to start" is not a
+       sentence anybody can act on. */
+    explainTranscription: (err) =>
+      explainModelFailure(
+        { runtime },
+        "transcription",
+        config.current.audio.transcriptionModel,
+        err,
+      ),
   });
   installDictationIpc({ config, vault, runtime, send });
   installAudioIpc({ config, vault, runtime, send });

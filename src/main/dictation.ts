@@ -13,6 +13,7 @@ import type { RuntimeManager } from "./runtime/manager.ts";
 import { Recorder } from "../core/meetings/capture.ts";
 import { transcribe } from "../core/stt.ts";
 import { resolveAudio } from "./audio.ts";
+import { explainModelFailure } from "./models.ts";
 import { readFile } from "node:fs/promises";
 
 export interface DictationDeps {
@@ -39,10 +40,19 @@ export function installDictationIpc(deps: DictationDeps): void {
     await recorder?.write(Buffer.from(pcm));
   });
 
+  /**
+   * Answered with a result, never a rejection.
+   *
+   * A handler that throws reaches the window as "Error invoking remote method
+   * 'karen:dictation-stop': TranscriptionError: …" with the daemon's JSON body
+   * on the end — which is what a user saw after speaking a sentence. Electron
+   * adds that wrapper to anything thrown across the bridge, so the only way to
+   * put a plain sentence in front of somebody is to return one.
+   */
   ipcMain.handle("karen:dictation-stop", async () => {
     const active = recorder;
     recorder = undefined;
-    if (!active) return;
+    if (!active) return { ok: true };
 
     const recording = await active.stop();
     try {
@@ -63,6 +73,20 @@ export function installDictationIpc(deps: DictationDeps): void {
         ...(settings.dictationLanguage ? { language: settings.dictationLanguage } : {}),
       });
       if (text.trim()) send("karen:dictation-text", text.trim());
+      return { ok: true };
+    } catch (err) {
+      /* The engine, not the model, is usually what failed: Lemonade installs
+         one per recipe, and installing the one that answers chat does not
+         install Whisper's. Said here, where the catalogue can name it. */
+      return {
+        ok: false,
+        error: await explainModelFailure(
+          deps,
+          "transcription",
+          config.current.audio.transcriptionModel,
+          err,
+        ),
+      };
     } finally {
       // The audio was a means to the text and is never kept: dictation is not
       // a recording feature, and a stray WAV per utterance adds up.

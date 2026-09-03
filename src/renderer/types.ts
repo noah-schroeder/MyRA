@@ -512,7 +512,9 @@ export interface KarenApi {
 
   dictationStart(): Promise<void>;
   dictationAudio(pcm: ArrayBuffer): Promise<void>;
-  dictationStop(): Promise<void>;
+  /** Answers rather than rejecting: a failed transcription is a sentence, not a
+   *  rejection wrapped in "Error invoking remote method". */
+  dictationStop(): Promise<{ ok: boolean; error?: string } | undefined>;
   dictationCancel(): Promise<void>;
   onDictationText(cb: (text: string) => void): () => void;
 

@@ -22,7 +22,9 @@ import { ipcMain } from "electron";
 import type { AudioOption, AudioRole } from "../core/audio/models.ts";
 import { speak, type Spoken } from "../core/audio/speech.ts";
 import { speakable } from "../core/audio/speakable.ts";
-import { modelOptions, resolveMediaModel, type MediaDeps, type ResolvedModel } from "./models.ts";
+import {
+  explainModelFailure, modelOptions, resolveMediaModel, type MediaDeps, type ResolvedModel,
+} from "./models.ts";
 
 /** Audio asks the same things of the app that every other model role does. */
 export type AudioDeps = MediaDeps;
@@ -120,7 +122,10 @@ export function installAudioIpc(deps: AudioDeps): void {
          `new Blob()` on the far side. */
       return { ok: true, audio: new Uint8Array(spoken.audio), mime: spoken.mime };
     } catch (err) {
-      return { ok: false, error: (err as Error).message };
+      return {
+        ok: false,
+        error: await explainModelFailure(deps, "voice", deps.config.current.audio.voiceModel, err),
+      };
     }
   });
 
@@ -136,7 +141,10 @@ export function installAudioIpc(deps: AudioDeps): void {
       });
       return { ok: true, audio: new Uint8Array(spoken.audio), mime: spoken.mime };
     } catch (err) {
-      return { ok: false, error: (err as Error).message };
+      return {
+        ok: false,
+        error: await explainModelFailure(deps, "voice", deps.config.current.audio.voiceModel, err),
+      };
     }
   });
 }

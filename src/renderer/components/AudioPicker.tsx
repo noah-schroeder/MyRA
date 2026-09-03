@@ -4,6 +4,7 @@ import { shortModelName as shorten } from "../../core/runtime/foreign.ts";
 import { modelNamer } from "../../core/models/roles.ts";
 import { describeVoice } from "../../core/audio/voices.ts";
 import { ModelMenu } from "./ModelMenu.tsx";
+import { engineStates, type Runnable } from "../../core/runtime/runnable.ts";
 import { choiceIsExternal, parseModelRef } from "../../core/providers.ts";
 
 /**
@@ -53,6 +54,10 @@ export function AudioPicker({
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
   const [progress, setProgress] = useState<AudioProgress | undefined>();
+  /* Which engines are installed, asked alongside the options and for the same
+     reason: a row that needs an engine nobody has installed should say so
+     before it is chosen, not after a multi-gigabyte download. */
+  const [engines, setEngines] = useState<Map<string, Runnable>>(new Map());
   const wrap = useRef<HTMLDivElement>(null);
 
   const chosen = role === "transcription"
@@ -69,6 +74,12 @@ export function AudioPicker({
     void window.karen.audioModels(role).then((r) => {
       setOptions(r.options);
       setError(r.ok ? undefined : r.error);
+    });
+    /* Best effort, and silent when it fails: not knowing which engines are
+       installed costs a warning, while blocking the menu on it would cost the
+       menu. */
+    void window.karen.lemonadeInfo().then((r) => {
+      if (r.ok && r.info) setEngines(engineStates(r.info.engines));
     });
   }, [open, role]);
 
@@ -191,6 +202,7 @@ export function AudioPicker({
           busy={busy}
           progress={progress}
           error={error}
+          engines={engines}
           emptyText={ROLE_COPY[role].none}
           externalWarning={
             role === "transcription"
