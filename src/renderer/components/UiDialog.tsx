@@ -3,7 +3,7 @@ import type { PromptRequest, Provider, Settings } from "../types.ts";
 import type { InstalledModel } from "../../main/runtime/lemonadeApi.ts";
 import { qualify } from "../../core/providers.ts";
 import { priceLabel } from "../../core/pricing.ts";
-import { JOIN, OTHER } from "../../core/research/questions.ts";
+import { JOIN, NO_EMBEDDER, OTHER } from "../../core/research/questions.ts";
 
 /**
  * The research pipeline asking the user something mid-run.
@@ -239,8 +239,16 @@ function ModelsDialog({
   const [chosen, setChosen] = useState<Record<string, string>>(request.current ?? {});
   const [local, setLocal] = useState<InstalledModel[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  /* The embeddings endpoint's own catalogue, which has nothing to do with the
+     chat one: a chat model does not answer /embeddings, so offering the chat
+     list here would be offering models that cannot do the job. Undefined while
+     the request is still out, so an empty dropdown is not shown as an answer. */
+  const [embedModels, setEmbedModels] = useState<string[]>();
+  const [embedError, setEmbedError] = useState<string>();
 
   useEffect(() => setChosen(request.current ?? {}), [request.id, request.current]);
+
+  const wantsEmbedder = slots.some((s) => s.key === "embedder");
 
   useEffect(() => {
     void window.karen.lemonadeModels().then((r) => setLocal(r.models ?? []));
@@ -248,6 +256,18 @@ function ModelsDialog({
       setProviders((s.providers ?? []).filter((p) => p.enabled && p.models.length)),
     );
   }, []);
+
+  useEffect(() => {
+    if (!wantsEmbedder) return;
+    void window.karen.discoverModels("embeddings").then((r) => {
+      setEmbedModels(r.models ?? []);
+      /* The endpoint's own words, not a rewrite of them. "No base URL is set
+         for this endpoint" and "401 Unauthorized" are different problems with
+         different fixes, and a single friendly sentence covering both would
+         name neither. */
+      if (!r.ok) setEmbedError(r.error ?? "The embeddings endpoint did not answer.");
+    });
+  }, [wantsEmbedder]);
 
   /* Anything already assigned that is not in either list. A role saved from a
      provider since removed must stay visible and selected, or the dialog would
@@ -276,6 +296,14 @@ function ModelsDialog({
                 Same as the synthesist, so the review will be self-review. The run will say so.
               </span>
             ) : null}
+            {slot.key === "embedder" ? (
+              <EmbedSelect
+                value={chosen["embedder"] ?? NO_EMBEDDER}
+                models={embedModels}
+                error={embedError}
+                onChange={(v) => setChosen((c) => ({ ...c, embedder: v }))}
+              />
+            ) : (
             <select
               className="select-sm"
               value={chosen[slot.key] ?? ""}
@@ -313,6 +341,7 @@ function ModelsDialog({
                 </optgroup>
               ))}
             </select>
+            )}
           </label>
         ))}
 
@@ -330,5 +359,62 @@ function ModelsDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The one dropdown whose models come from somewhere else.
+ *
+ * Asked here because this is where the run is configured, and the stage it
+ * controls is the one nobody knew about: ranking by meaning is what decides
+ * WHICH candidates the screener ever sees, and with no embedder the shortlist
+ * is whatever order the search returned. That was previously settable only in
+ * Settings → Providers, two panes from the run it affects.
+ *
+ * What is NOT moved here is the endpoint and its key. Those stay in Settings
+ * with every other endpoint, which is why this dropdown can be empty and says
+ * so in the endpoint's own words rather than pretending there is nothing to
+ * choose from.
+ */
+function EmbedSelect({
+  value,
+  models,
+  error,
+  onChange,
+}: {
+  value: string;
+  models: string[] | undefined;
+  error: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  /* A model saved from an endpoint that no longer lists it stays selectable,
+     for the same reason an orphaned chat model does: silently reassigning a
+     stage the user did not touch is worse than showing that it is missing. */
+  const listed = models ?? [];
+  const orphan = value && value !== NO_EMBEDDER && !listed.includes(value) ? value : "";
+
+  return (
+    <>
+      <select className="select-sm" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value={NO_EMBEDDER}>None — screen in search order</option>
+        {orphan ? (
+          <option value={orphan}>{orphan} — not listed by the endpoint</option>
+        ) : null}
+        {listed.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      {models === undefined && !error ? (
+        <span className="role-hint">Asking the embeddings endpoint what it serves…</span>
+      ) : null}
+      {error ? (
+        <span className="role-warn">
+          {error} Set an embeddings endpoint in Settings → Providers to rank by meaning; the
+          run works without one, and says in the plan that it did.
+        </span>
+      ) : null}
+    </>
   );
 }

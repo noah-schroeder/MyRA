@@ -1293,9 +1293,12 @@ async function main(): Promise<void> {
          local and hosted model through a dialog payload would be a copy that
          goes stale the moment somebody ticks a box in Settings. */
       models: async (slots, current) => {
+        /* The embedder is always in the list and never a stage anyone assigns
+           a job to, so it cannot decide which title this is. */
+        const perStage = slots.filter((s) => s.key !== "embedder").length > 1;
         const answer = await prompt({
           method: "models",
-          title: slots.length === 1 ? "Which model?" : "Which model does which job?",
+          title: perStage ? "Which model does which job?" : "Which models?",
           slots,
           current,
         });

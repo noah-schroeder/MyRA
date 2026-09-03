@@ -10,8 +10,9 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  cleanOptions, DEPTH_PRESETS, DEFAULT_DEPTH, depthFromLabel, depthFromText, depthLabel,
-  joinAnswers, SAME_MODEL_QUESTION, wantsSeparateModels,
+  applyRoleAnswer, cleanOptions, DEPTH_PRESETS, DEFAULT_DEPTH, depthFromLabel, depthFromText,
+  depthLabel, embedderChoice, EMBEDDER_SLOT, joinAnswers, NO_EMBEDDER, ROLE_SLOTS,
+  SAME_MODEL_QUESTION, wantsSeparateModels,
 } from "../src/core/research/questions.ts";
 
 describe("options a model proposed", () => {
@@ -116,5 +117,35 @@ describe("the model question", () => {
     assert.equal(wantsSeparateModels("Yes — one model for everything"), false);
     // Typed by hand through "Other", which is always available.
     assert.equal(wantsSeparateModels("no, different ones please"), true);
+  });
+});
+
+describe("the embedder slot", () => {
+  it("is not one of the chat roles, and says so where the choice is made", () => {
+    assert.equal(ROLE_SLOTS.some((s) => s.key === "embedder"), false);
+    assert.match(EMBEDDER_SLOT.label, /not a chat model/i);
+    // What it costs to leave it unset, in what actually changes: the shortlist.
+    assert.match(EMBEDDER_SLOT.hint, /search order/i);
+  });
+
+  it("keeps the three answers apart", () => {
+    // Never shown: leave the configured model alone.
+    assert.equal(embedderChoice({ screener: "x" }, "bge-m3"), "bge-m3");
+    // Chosen.
+    assert.equal(embedderChoice({ embedder: "nomic-embed-text" }, "bge-m3"), "nomic-embed-text");
+    // Deliberately none -- which must CLEAR a model that was set before, or
+    // "None" would be a control that does nothing.
+    assert.equal(embedderChoice({ embedder: NO_EMBEDDER }, "bge-m3"), undefined);
+    // An empty dropdown sends "", and that is the same no.
+    assert.equal(embedderChoice({ embedder: "" }, "bge-m3"), undefined);
+  });
+
+  it("is never folded into the chat roles by the one-model answer", () => {
+    const current = { screener: "a", analyst: "a", synthesist: "a", reviewer: "a" };
+    const roles = applyRoleAnswer(current, { all: "big", embedder: "bge-m3" });
+    assert.deepEqual(roles, {
+      screener: "big", analyst: "big", synthesist: "big", reviewer: "big",
+    });
+    assert.equal(Object.keys(roles).includes("embedder"), false);
   });
 });

@@ -36,8 +36,8 @@ import { toBibtex, toCslJson } from "./export.ts";
 import { readRoleConfig, resolveRoles, writeRoleConfig } from "./roles.ts";
 import {
   applyRoleAnswer, defaultDepth, DEPTH_PRESETS, depthFromLabel, depthFromText, depthLabel,
-  ROLE_SLOTS, SAME_MODEL_QUESTION, SINGLE_SLOT, wantsSeparateModels,
-  type Choice, type RoleSlot,
+  embedderChoice, EMBEDDER_SLOT, ROLE_SLOTS, SAME_MODEL_QUESTION, SINGLE_SLOT,
+  wantsSeparateModels, type Choice, type RoleSlot,
 } from "./questions.ts";
 import type { ResearchRun } from "./run.ts";
 
@@ -236,13 +236,26 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
      * is the same fact where it can be acted on.
      */
     let chosenRoles = roles;
+    /* Settings owns the embeddings ENDPOINT, so its model is what the dialog
+       opens on; the saved role assignment only fills in when Settings has
+       none. */
+    let chosenEmbed = embeddings?.model ?? config.embedModel;
     if (ui.choose && ui.models) {
       const same = await ui.choose(SAME_MODEL_QUESTION);
       if (same === undefined) throw new CancelledError("plan not approved");
-      const slots = wantsSeparateModels(same) ? ROLE_SLOTS : [SINGLE_SLOT];
-      const picked = await ui.models(slots, { ...roles, all: roles.synthesist });
+      /* The embedder is appended to BOTH answers. It is not a chat model, so
+         "one model for everything" cannot cover it -- and leaving it out of
+         the one-model branch is what used to send people to Settings for the
+         single stage they had no way of knowing was there. */
+      const slots = [...(wantsSeparateModels(same) ? ROLE_SLOTS : [SINGLE_SLOT]), EMBEDDER_SLOT];
+      const picked = await ui.models(slots, {
+        ...roles,
+        all: roles.synthesist,
+        ...(chosenEmbed ? { embedder: chosenEmbed } : {}),
+      });
       if (picked === undefined) throw new CancelledError("plan not approved");
       chosenRoles = applyRoleAnswer(roles, picked);
+      chosenEmbed = embedderChoice(picked, chosenEmbed);
     }
 
     const proposed: Plan = {
@@ -254,11 +267,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       fullTexts: depth.fullTexts,
       snowball: depth.snowball,
       roles: chosenRoles,
-      // Settings owns the embeddings endpoint, so its model is the default;
-      // the saved role assignment only fills in when Settings has none.
-      ...(embeddings?.model ?? config.embedModel
-        ? { embedModel: embeddings?.model ?? config.embedModel! }
-        : {}),
+      ...(chosenEmbed ? { embedModel: chosenEmbed } : {}),
     };
 
     const edited = await ui.editor("Research plan — edit anything, then save", renderPlan(proposed));
