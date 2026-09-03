@@ -13,6 +13,7 @@
  */
 
 import { parseJsonReply, runSubagent, type SubagentUsage } from "../llm/chat.ts";
+import { cleanOptions } from "./questions.ts";
 
 export interface Scope {
   question: string;
@@ -27,6 +28,20 @@ export interface Scope {
 export interface ScopeQuestion {
   slot: "population" | "timeframe" | "include" | "exclude" | "other";
   ask: string;
+  /**
+   * Answers to offer, two to four of them.
+   *
+   * The model knows which slot it is asking about, so it knows the shape of a
+   * good answer; proposing some turns a blank box into a decision. Empty means
+   * it offered none worth showing, and the question falls back to the box it
+   * used to be -- which is the honest outcome for a genuinely open question,
+   * and for a small model that cannot do this well.
+   *
+   * "Other" is never in here. The app adds that to every question.
+   */
+  options: string[];
+  /** Whether several of those options can be true at once. */
+  multi?: boolean;
   /** Filled in when the user's original question already answers it. */
   prefilled?: string;
 }
@@ -56,6 +71,13 @@ export function buildScopePrompt(question: string): string {
     `   to confirm what they just wrote is worse than not asking at all.`,
     `   Ask at most 4 questions. Fewer is better. None is a fine answer.`,
     "",
+    `   Give each question 2-4 "options": the answers a researcher in this field`,
+    `   would most likely give. They must be concrete, specific to THIS question,`,
+    `   and mutually exclusive unless you set "multi": true. Do not offer "Other",`,
+    `   "All of the above" or "None" — the app adds an Other box and a skip to`,
+    `   every question already. If you cannot think of two real options, give none`,
+    `   and the user will type their own.`,
+    "",
     `Also propose inclusion and exclusion criteria for screening — concrete and`,
     `checkable from a title and abstract, not statements of taste.`,
     "",
@@ -67,7 +89,9 @@ export function buildScopePrompt(question: string): string {
     `  "include": ["..."],`,
     `  "exclude": ["..."],`,
     `  "questions": [{"slot": "population|timeframe|include|exclude|other",`,
-    `                 "ask": "<the question, one line>"}]`,
+    `                 "ask": "<the question, one line>",`,
+    `                 "options": ["<a likely answer>", "..."],`,
+    `                 "multi": <true only if several answers can hold at once>}]`,
     `}`,
   ].join("\n");
 }
@@ -95,13 +119,16 @@ export function parseScopeDraft(reply: string, question: string): ScopeDraft {
   const raw = parseJsonReply<RawScope>(reply, "scoping reply");
   const questions: ScopeQuestion[] = [];
   for (const q of Array.isArray(raw.questions) ? raw.questions : []) {
-    const row = q as { slot?: unknown; ask?: unknown };
+    const row = q as { slot?: unknown; ask?: unknown; options?: unknown; multi?: unknown };
     const ask = typeof row?.ask === "string" ? row.ask.trim() : "";
     if (!ask) continue;
     const slot = SLOTS.includes(row?.slot as (typeof SLOTS)[number])
       ? (row.slot as ScopeQuestion["slot"])
       : "other";
-    questions.push({ slot, ask });
+    /* Criteria are the slots where several answers genuinely hold at once, so
+       a model that forgets to say so is corrected rather than obeyed. */
+    const multi = row.multi === true || slot === "include" || slot === "exclude";
+    questions.push({ slot, ask, options: cleanOptions(row.options), ...(multi ? { multi } : {}) });
     if (questions.length >= 4) break;
   }
 

@@ -638,12 +638,44 @@ export class SubagentError extends Error {
   }
 }
 
-/** Resolves the endpoint a stage should use. Overridable so tests need no disk. */
-let endpointResolver: () => Promise<{ endpoint: EndpointSettings; apiKey?: string }> = async () => {
+/**
+ * What resolving a model reference answers with.
+ *
+ * `sampling` travels with the endpoint because tuning belongs to a model, not
+ * to a conversation: the same model answers a chat turn and a screening pass,
+ * and the settings the user gave it should hold in both.
+ */
+export interface ResolvedEndpoint {
+  endpoint: EndpointSettings;
+  apiKey?: string;
+  sampling?: Record<string, number>;
+}
+
+/**
+ * Resolves a MODEL REFERENCE to somewhere to send it.
+ *
+ * The argument is the whole point. This used to take none: it answered for
+ * whatever the chat picker was set to, and `runSubagent` then overrode the
+ * model NAME on the endpoint it got back. So a research stage assigned a model
+ * from a different provider -- the entire purpose of per-stage assignment --
+ * sent that name to the CHAT model's address, with the chat model's key. A
+ * local screener named while talking to a hosted model went to the hosted
+ * provider, which had never heard of it.
+ *
+ * Passing the reference instead means each stage is resolved on its own terms:
+ * its endpoint, its key, its tuning. Undefined still means "whatever the
+ * conversation is set to", which is what every non-research caller wants.
+ */
+export type EndpointResolver = (ref?: string) => Promise<ResolvedEndpoint>;
+
+const fromSettings: EndpointResolver = async () => {
   const store = new ConfigStore();
   const settings = await store.load();
   return { endpoint: settings.llm };
 };
+
+/** Resolves the endpoint a stage should use. Overridable so tests need no disk. */
+let endpointResolver: EndpointResolver = fromSettings;
 
 /**
  * Point every stage somewhere else.
@@ -654,14 +686,8 @@ let endpointResolver: () => Promise<{ endpoint: EndpointSettings; apiKey?: strin
  * research stages have to follow chat to the same server, or a run would talk
  * to a different model than the conversation that started it.
  */
-export function setEndpointResolver(
-  fn: (() => Promise<{ endpoint: EndpointSettings; apiKey?: string }>) | undefined,
-): void {
-  endpointResolver = fn ?? (async () => {
-    const store = new ConfigStore();
-    const settings = await store.load();
-    return { endpoint: settings.llm };
-  });
+export function setEndpointResolver(fn: EndpointResolver | undefined): void {
+  endpointResolver = fn ?? fromSettings;
 }
 
 
@@ -702,16 +728,33 @@ function retryable(err: unknown): boolean {
  * produced no text is a failure the run must see, not an empty string quietly
  * carried forward into the next stage.
  */
+/** Everything the user tuned except the one setting these stages must own. */
+export function withoutTemperature(sampling: Record<string, number>): Record<string, number> {
+  const { temperature: _dropped, ...rest } = sampling;
+  return rest;
+}
+
 export async function runSubagent(opts: SubagentOptions): Promise<SubagentResult> {
   const started = Date.now();
+  /*
+   * Resolved from THIS stage's model, not from the conversation's.
+   *
+   * The model name used to be pasted onto whatever endpoint the chat picker
+   * resolved to, which meant a stage could only ever run on the chat model's
+   * server. Handing the reference to the resolver is what lets the screener be
+   * a local model while the synthesist is a hosted one.
+   */
   const resolved = opts.endpoint
     ? { endpoint: opts.endpoint, ...(opts.apiKey ? { apiKey: opts.apiKey } : {}) }
-    : await endpointResolver();
+    : await endpointResolver(opts.model);
 
   const idle = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const endpoint: EndpointSettings = {
     ...resolved.endpoint,
-    ...(opts.model ? { model: opts.model } : {}),
+    /* Still applied, for the one case the resolver cannot cover: a caller that
+       supplied its own `endpoint` and a model to use on it. When the resolver
+       answered, it has already put the right model there. */
+    ...(opts.endpoint && opts.model ? { model: opts.model } : {}),
     ...(idle > 0 ? { timeoutMs: idle } : {}),
   };
 
@@ -734,6 +777,16 @@ export async function runSubagent(opts: SubagentOptions): Promise<SubagentResult
         endpoint,
         messages,
         ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
+        /*
+         * The model's own tuning, minus temperature.
+         *
+         * Tuning follows the model, so a top_p or a repeat penalty set for it
+         * applies wherever it answers. Temperature is the exception and is
+         * deliberately left to `buildRequest`'s 0.2: these stages screen,
+         * extract and verify, and a model tuned warm for writing would start
+         * inventing at exactly the points this pipeline exists to be literal.
+         */
+        ...(resolved.sampling ? { sampling: withoutTemperature(resolved.sampling) } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.onDelta ? { onDelta: (d: string) => opts.onDelta!(d, "text") } : {}),
       });

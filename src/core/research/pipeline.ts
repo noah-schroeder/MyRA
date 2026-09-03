@@ -34,12 +34,27 @@ import { openAlexByDoi, openAlexByIds } from "./openalex.ts";
 import { coCitationThreshold, coCitedWorks } from "./snowball.ts";
 import { toBibtex, toCslJson } from "./export.ts";
 import { readRoleConfig, resolveRoles, writeRoleConfig } from "./roles.ts";
+import {
+  applyRoleAnswer, defaultDepth, DEPTH_PRESETS, depthFromLabel, depthFromText, depthLabel,
+  ROLE_SLOTS, SAME_MODEL_QUESTION, SINGLE_SLOT, wantsSeparateModels,
+  type Choice, type RoleSlot,
+} from "./questions.ts";
 import type { ResearchRun } from "./run.ts";
 
 /** Just the dialog surface the pipeline needs, so it can be run headless in tests. */
 export interface PipelineUi {
   input(title: string, placeholder?: string): Promise<string | undefined>;
   editor(title: string, prefill?: string): Promise<string | undefined>;
+  /**
+   * A question with answers to pick from.
+   *
+   * The app adds "Other" and a skip; this only carries what the question is
+   * and what the likely answers are. Returns the chosen text -- several
+   * answers joined by `JOIN` when `multi` -- or undefined for skipped.
+   */
+  choose?(choice: Choice): Promise<string | undefined>;
+  /** One dropdown per role, grouped by where the model runs. JSON back. */
+  models?(slots: readonly RoleSlot[], current: Record<string, string>): Promise<Record<string, string> | undefined>;
   notify?(message: string, type?: "info" | "warning" | "error"): void;
 }
 
@@ -152,7 +167,14 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       // Announce the dialog before blocking on it: if the app cannot show it,
       // the conversation says what it is waiting for instead of going quiet.
       say(`question ${i + 1}/${draft.questions.length}: ${q.ask}`);
-      const answer = await ui.input(q.ask, "Enter to skip");
+      /* Options when the model proposed any, a blank box when it did not.
+         The fallback is not a failure mode: some questions are genuinely open,
+         and a small scoping model that cannot propose good answers should
+         degrade to the box rather than to two bad options. */
+      const answer =
+        q.options.length && ui.choose
+          ? await ui.choose({ title: q.ask, options: q.options, ...(q.multi ? { multi: true } : {}) })
+          : await ui.input(q.ask, "Enter to skip");
       // Cancelling the dialog ends the run; skipping one question does not.
       if (answer === undefined) throw new CancelledError("scoping cancelled");
       answers.set(q, answer);
@@ -183,18 +205,55 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       onDelta: stream("planning"),
     });
 
+    /*
+     * How deep, asked rather than defaulted.
+     *
+     * These were four numbers in the plan document. They are a fair way to
+     * store the decision and a poor way to make it: nobody picks 150 over 250
+     * from a blank field, and what is really being chosen is how long the run
+     * takes against how much it misses. The numbers are still in the labels,
+     * and still editable in the plan afterwards.
+     */
+    const fallbackDepth = defaultDepth();
+    let depth = fallbackDepth;
+    if (ui.choose) {
+      const answer = await ui.choose({
+        title: "How thorough should this run be?",
+        message:
+          "Each step up roughly doubles the time and the cost. Nothing here is fixed — " +
+          "you can change any of it in the plan on the next screen.",
+        options: DEPTH_PRESETS.map(depthLabel),
+      });
+      if (answer === undefined) throw new CancelledError("plan not approved");
+      depth = answer.trim() ? depthFromLabel(answer) ?? depthFromText(answer, fallbackDepth) : fallbackDepth;
+    }
+
+    /*
+     * And who does the work, always asked, always last.
+     *
+     * The self-review warning existed already, as a blockquote inside a
+     * markdown document somebody had to read. A question asked before the run
+     * is the same fact where it can be acted on.
+     */
+    let chosenRoles = roles;
+    if (ui.choose && ui.models) {
+      const same = await ui.choose(SAME_MODEL_QUESTION);
+      if (same === undefined) throw new CancelledError("plan not approved");
+      const slots = wantsSeparateModels(same) ? ROLE_SLOTS : [SINGLE_SLOT];
+      const picked = await ui.models(slots, { ...roles, all: roles.synthesist });
+      if (picked === undefined) throw new CancelledError("plan not approved");
+      chosenRoles = applyRoleAnswer(roles, picked);
+    }
+
     const proposed: Plan = {
       scope,
       category: opts.category ?? effectiveCategory(undefined, "science"),
       queries,
-      pages: 2,
-      screenTop: 150,
-      fullTexts: 30,
-      // Off by default: a round of traversal roughly doubles a run's length,
-      // and it should be a decision you make in the plan rather than one the
-      // app makes for you.
-      snowball: 0,
-      roles,
+      pages: depth.pages,
+      screenTop: depth.screenTop,
+      fullTexts: depth.fullTexts,
+      snowball: depth.snowball,
+      roles: chosenRoles,
       // Settings owns the embeddings endpoint, so its model is the default;
       // the saved role assignment only fills in when Settings has none.
       ...(embeddings?.model ?? config.embedModel

@@ -130,7 +130,7 @@ test("scoping pre-fills what the question already answered", () => {
 });
 
 test("a skipped question keeps what the model inferred", () => {
-  const q: ScopeQuestion = { slot: "timeframe", ask: "How far back?" };
+  const q: ScopeQuestion = { slot: "timeframe", ask: "How far back?", options: [] };
   const draft = { subQuestions: ["a"], include: [], exclude: [], timeframe: "2010 onwards", questions: [q] };
   const scope = applyAnswers(draft, "Q", new Map([[q, "   "]]));
   assert.equal(scope.timeframe, "2010 onwards");
@@ -139,7 +139,7 @@ test("a skipped question keeps what the model inferred", () => {
 });
 
 test("an answer with nowhere structured to go still constrains the run", () => {
-  const q: ScopeQuestion = { slot: "other", ask: "Anything else?" };
+  const q: ScopeQuestion = { slot: "other", ask: "Anything else?", options: [] };
   const scope = applyAnswers(
     { subQuestions: ["a"], include: [], exclude: [], questions: [q] },
     "Q",
@@ -209,4 +209,32 @@ test("snowball rounds accept zero and are clamped at two", () => {
 
   const bad = renderPlan(plan).replace("snowball: 0", "snowball: -1");
   assert.throws(() => parsePlan(bad, plan), (e: Error) => /0 or more/.test(e.message));
+});
+
+test("the scoping model's options reach the question, cleaned", () => {
+  // A question with options is a decision; one without falls back to a text
+  // box, which is what every question used to be.
+  const draft = parseScopeDraft(
+    JSON.stringify({
+      subQuestions: ["a"],
+      questions: [
+        { slot: "population", ask: "Which learners?", options: ["Undergraduates", "School pupils", "Other"] },
+        { slot: "other", ask: "Anything else?", options: ["only one"] },
+      ],
+    }),
+    "Q",
+  );
+  assert.deepEqual(draft.questions[0]!.options, ["Undergraduates", "School pupils"]);
+  assert.deepEqual(draft.questions[1]!.options, [], "one option is not a choice");
+});
+
+test("criteria questions take several answers even when the model forgets to say so", () => {
+  const draft = parseScopeDraft(
+    JSON.stringify({
+      subQuestions: ["a"],
+      questions: [{ slot: "exclude", ask: "What should be left out?", options: ["Preprints", "Non-English"] }],
+    }),
+    "Q",
+  );
+  assert.equal(draft.questions[0]!.multi, true);
 });
