@@ -215,8 +215,9 @@ export async function transcribeMeeting(
       // half the meeting. Fail loudly instead.
       if (result.segments.length === 0 && record.tracks.length > 1) {
         throw new MeetingRunError(
-          "The transcription endpoint returned no timestamps, so the two recordings " +
-            "cannot be interleaved. It needs to support response_format=verbose_json.",
+          "The transcription model returned no timestamps, so the two recordings " +
+            "cannot be interleaved. It needs to support response_format=verbose_json — " +
+            "the Whisper models under Settings → Audio do.",
         );
       }
       tracks.push({

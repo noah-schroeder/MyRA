@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useAgent } from "./useAgent.ts";
 import { answerText } from "./components/turnText.ts";
 import { CopyButton } from "./components/CopyButton.tsx";
@@ -10,6 +10,7 @@ import { ApiPage } from "./components/ApiPage.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
+import { AudioPicker } from "./components/AudioPicker.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
 import { MeetingsPage } from "./components/MeetingsPage.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
@@ -22,12 +23,16 @@ import { UiDialog } from "./components/UiDialog.tsx";
 import { FirstRun } from "./components/FirstRun.tsx";
 import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
+import { useSpeech } from "./useSpeech.ts";
+import { useHandsFree } from "./useHandsFree.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
+import { ImagePage } from "./components/ImagePage.tsx";
+import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings" | "api";
+type Page = "chat" | "runs" | "models" | "meetings" | "images" | "api";
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
@@ -107,15 +112,59 @@ export function App() {
     lookupRef.current = lookup;
   }, [lookup]);
 
+  const speech = useSpeech();
+  /* Read through a ref for the same reason the lookup box is: the transcript
+     lands a second or two after the callback was built, and by then the mode
+     may have been switched off. */
+  const handsFreeRef = useRef(false);
+  const handsFree = settings?.audio.speechToSpeech === true;
+  useEffect(() => {
+    handsFreeRef.current = handsFree;
+  }, [handsFree]);
+
   // Appended rather than replacing: dictation is for adding to what you were
   // already writing, and overwriting a half-typed question would be a bad way
-  // to find that out.
+  // to find that out. Hands-free is the exception -- there the transcript IS
+  // the message, and putting it in the box for someone who is not looking at
+  // the screen would be a conversation that never goes anywhere.
   const dictation = useDictation(
     useCallback((text: string) => {
+      if (handsFreeRef.current) {
+        void send(text);
+        return;
+      }
       const set = lookupRef.current ? setQueryDraft : setDraft;
       set((d) => (d ? `${d} ${text}` : text));
-    }, []),
+    }, [send]),
   );
+
+  /*
+   * What the hands-free loop should read out.
+   *
+   * Only once the turn has finished. Speaking a partial answer means starting
+   * the sentence before the model has decided how it ends, and the audio cannot
+   * be taken back once it is playing -- so the loop waits, which costs a pause
+   * and never reads out something Karen then contradicts.
+   */
+  const lastAnswer = useMemo(() => {
+    if (busy) return undefined;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (item?.kind !== "assistant") continue;
+      const text = answerText(item.blocks);
+      return text ? { id: item.id, text } : undefined;
+    }
+    return undefined;
+  }, [items, busy]);
+
+  const loop = useHandsFree({
+    enabled: handsFree,
+    busy,
+    answer: lastAnswer,
+    dictation,
+    speech,
+    ...(settings?.dictationSource ? { micDeviceId: settings.dictationSource } : {}),
+  });
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -226,6 +275,15 @@ export function App() {
             active={page === "meetings"}
             onClick={() => setPage((p) => (p === "meetings" ? "chat" : "meetings"))}
           />
+          {/* Beside Meetings rather than beside Models: both of these are
+              things you make, and the two below describe the machine that
+              makes them. */}
+          <RailButton
+            icon="image"
+            label="Images"
+            active={page === "images"}
+            onClick={() => setPage((p) => (p === "images" ? "chat" : "images"))}
+          />
           {/* The audit trail. Every run already wrote its search log, screening
               reasons, source hashes and verification table; until this existed
               none of it was reachable from anywhere in the app. */}
@@ -267,14 +325,48 @@ export function App() {
 
       <main className="main">
         <header className="topbar">
-          {/* The one thing that belongs at the top: which model is answering.
-              Everything else moved to the rail or into the composer. */}
-          <ModelBar
-            settings={settings}
-            onSettingsChange={setSettings}
-            onOpenSettings={() => setShowSettings(true)}
-            onOpenHub={() => setPage("models")}
-          />
+          {/*
+            * The bar says which model is doing the thing on this screen, so it
+            * changes with the screen. On the Images page no chat model is
+            * answering and nothing is being spoken, and leaving those three
+            * controls up would be three pickers that do nothing beside the one
+            * that does.
+            */}
+          {page === "images" ? (
+            <ImagePicker
+              settings={settings}
+              onSettingsChange={setSettings}
+              onOpenHub={() => setPage("models")}
+            />
+          ) : (
+            <>
+              {/* The one thing that belongs at the top: which model is
+                  answering. Everything else moved to the rail or into the
+                  composer. */}
+              <ModelBar
+                settings={settings}
+                onSettingsChange={setSettings}
+                onOpenSettings={() => setShowSettings(true)}
+                onOpenHub={() => setPage("models")}
+              />
+              {/* The other two models, in the same control as the first.
+                  Which model hears you and which one answers aloud are questions
+                  of the same kind as which one thinks, and they are asked at the
+                  same moment -- while talking, not while in Settings. */}
+              <AudioPicker
+                role="transcription"
+                settings={settings}
+                onSettingsChange={setSettings}
+                onOpenSettings={() => setShowSettings(true)}
+              />
+              <AudioPicker
+                role="voice"
+                settings={settings}
+                onSettingsChange={setSettings}
+                onOpenSettings={() => setShowSettings(true)}
+              />
+            </>
+          )}
           {/* The way back. Closing the panel must not be the same as losing the
               document -- it is still on disk and still in this conversation,
               and without this the only route back to it is the file manager. */}
@@ -301,6 +393,9 @@ export function App() {
           */}
         {page === "meetings" && settings ? (
           <MeetingsPage settings={settings} onClose={toChat} />
+        ) : null}
+        {page === "images" && settings ? (
+          <ImagePage settings={settings} onSettingsChange={setSettings} onClose={toChat} />
         ) : null}
         {page === "runs" ? <RunPanel onClose={toChat} /> : null}
         {/* Its own scroll region at full width: the models page is a browser
@@ -407,6 +502,34 @@ export function App() {
           */}
         <footer className="composer" hidden={page !== "chat"}>
           <div className="composer-card">
+            {/*
+              * What the loop is doing, in one line, whenever it is on.
+              *
+              * A mode that holds the microphone has to say so continuously
+              * rather than at the moment it was switched on -- the composer is
+              * where someone's eyes are, and "listening" is the difference
+              * between a pause it is waiting through and one it has stopped
+              * hearing.
+              */}
+            {handsFree ? (
+              <p className={`s2s-status s2s-${loop.phase}`} role="status">
+                <span className={`dot dot-${loop.phase === "listening" ? "ready" : "starting"}`} />
+                {loop.phase === "listening"
+                  ? dictation.state.silent
+                    ? "Listening — say something, or click the wave to stop"
+                    : "Listening…"
+                  : loop.phase === "thinking"
+                    ? "Working on it…"
+                    : loop.phase === "speaking"
+                      ? speech.state.phase === "thinking"
+                        ? "Finding the words…"
+                        : "Speaking — talk over it to interrupt"
+                      : "Starting…"}
+                {loop.error ?? speech.state.error ? (
+                  <span className="s2s-error"> {loop.error ?? speech.state.error}</span>
+                ) : null}
+              </p>
+            ) : null}
             {progress && busy ? <p className="progress">{progress}</p> : null}
             <textarea
               className="input"
@@ -433,12 +556,60 @@ export function App() {
                 onLeaveLookup={() => setLookup(false)}
               />
               <span className="composer-spacer" />
+
+              {/*
+                * Hands-free, as a switch rather than a page.
+                *
+                * Beside the microphone because it is the same decision one step
+                * further: the button records what you say, and this keeps doing
+                * it -- listening, answering aloud, and listening again -- until
+                * it is switched off. It says which state it is in at all times,
+                * because a mode that leaves the microphone open must never be
+                * something you can be in without knowing.
+                */}
+              <button
+                type="button"
+                className={handsFree ? "mic s2s active" : "mic s2s"}
+                aria-pressed={handsFree}
+                aria-label={handsFree ? "Leave speech-to-speech" : "Speech-to-speech"}
+                title={
+                  settings?.audio.voiceModel
+                    ? handsFree
+                      ? `Speech to speech — ${loop.phase}. Click to stop.`
+                      : "Talk to Karen: it listens, answers aloud, and listens again"
+                    : "Choose a voice first — opens Settings → Audio"
+                }
+                onClick={() => {
+                  /* No voice model means this cannot work, and a toggle that
+                     silently does nothing is worse than one that takes you to
+                     the thing that is missing. */
+                  if (!settings?.audio.voiceModel) {
+                    setSettingsTab(undefined);
+                    setShowSettings(true);
+                    return;
+                  }
+                  void window.karen
+                    .updateSettings({ audio: { ...settings.audio, speechToSpeech: !handsFree } })
+                    .then(setSettings);
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M8 13a4 4 0 0 0 8 0M12 3a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                  <path d="M19 12a7 7 0 0 1-1.2 3.9M5 12a7 7 0 0 0 1.2 3.9" />
+                </svg>
+              </button>
+
               <button
                 type="button"
                 className={dictation.state.phase === "recording" ? "mic active" : "mic"}
                 aria-pressed={dictation.state.phase === "recording"}
                 aria-label={dictation.state.phase === "recording" ? "Stop dictation" : "Dictate"}
-                title="Dictate"
+                title={handsFree ? "Hands-free is holding the microphone" : "Dictate"}
+                /* One owner of the microphone at a time. In hands-free the loop
+                   starts and stops it; a second control doing the same thing
+                   would leave a recording nothing is waiting on. */
+                disabled={handsFree}
                 onClick={() =>
                   void (dictation.state.phase === "recording" ? dictation.stop() : dictation.start())
                 }

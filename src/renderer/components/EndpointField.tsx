@@ -9,24 +9,19 @@ import type { Settings } from "../types.ts";
  * list, a key per vendor and a judgement about whether the address is on this
  * machine, and having both meant two screens decided where a conversation went.
  *
- * The two that remain are not really the same kind of thing as each other, so
- * neither of them lives on a shared screen any more. Transcription is part of
- * Audio, beside the microphone it transcribes. Embeddings sit under Providers,
- * because that is the only other place a model endpoint is configured.
+ * Transcription has since gone the same way, and this is now down to one.
+ * Speech is a MODEL, chosen from a list of what the local runtime holds and
+ * what the providers offer, rather than a URL somebody has to know the shape
+ * of -- so it belongs on the Audio tab as a picker and not here as a form.
+ * Embeddings stay, because ranking search results is a provider question and
+ * this is where a provider's endpoint is configured.
  */
 export interface EndpointKind {
-  key: "transcription" | "embeddings";
+  key: "embeddings";
   label: string;
-  secret: "transcriptionKey" | "embedKey";
+  secret: "embedKey";
   hint: string;
 }
-
-export const TRANSCRIPTION: EndpointKind = {
-  key: "transcription",
-  label: "Transcription",
-  secret: "transcriptionKey",
-  hint: "Turns recorded meetings and dictation into text.",
-};
 
 export const EMBEDDINGS: EndpointKind = {
   key: "embeddings",

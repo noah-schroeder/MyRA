@@ -51,9 +51,9 @@ const api = {
   updateSettings: (patch: unknown) => ipcRenderer.invoke("karen:update-settings", patch),
   setSecret: (name: string, value: string) => ipcRenderer.invoke("karen:set-secret", name, value),
   secretsBackend: () => ipcRenderer.invoke("karen:secrets-backend"),
-  discoverModels: (which: "llm" | "transcription" | "embeddings") =>
+  discoverModels: (which: "llm" | "embeddings") =>
     ipcRenderer.invoke("karen:discover-models", which),
-  testEndpoint: (which: "llm" | "transcription" | "embeddings") =>
+  testEndpoint: (which: "llm" | "embeddings") =>
     ipcRenderer.invoke("karen:test-endpoint", which),
   chooseDirectory: (opts: { title?: string; current?: string }) =>
     ipcRenderer.invoke("karen:choose-directory", opts),
@@ -63,6 +63,34 @@ const api = {
   revealDocument: (path: string) => ipcRenderer.invoke("karen:document-reveal", path),
 
   copy: (text: string) => ipcRenderer.invoke("karen:copy", text),
+
+  /* ---- audio: the transcription and voice models ---- */
+  audioModels: (role: "transcription" | "voice") =>
+    ipcRenderer.invoke("karen:audio-models", role),
+  audioLoad: (model: string) => ipcRenderer.invoke("karen:audio-load", model),
+  onAudioProgress: (cb: (p: unknown) => void) => on("karen:audio-progress", cb),
+  /* Returns the audio itself rather than a path. The window is sandboxed and
+     has no filesystem, and an utterance written to disk would leave a record of
+     what was said in the one feature that is spoken and gone. */
+  speak: (text: string) => ipcRenderer.invoke("karen:audio-speak", text),
+  previewVoice: (voice?: string) => ipcRenderer.invoke("karen:audio-preview", voice),
+
+  /* ---- images ---- */
+  imageModels: () => ipcRenderer.invoke("karen:image-models"),
+  imageLoad: (model: string) => ipcRenderer.invoke("karen:image-load", model),
+  onImageProgress: (cb: (p: unknown) => void) => on("karen:image-progress", cb),
+  /* Returns the bytes AND files the picture. Unlike an utterance, a generated
+     figure is a thing somebody wants next week -- so the gallery reads the
+     folder while the window gets something it can draw immediately. */
+  imageGenerate: (request: { prompt: string; negative?: string; preset?: string }) =>
+    ipcRenderer.invoke("karen:image-generate", request),
+  imageCancel: () => ipcRenderer.invoke("karen:image-cancel"),
+  imageList: () => ipcRenderer.invoke("karen:image-list"),
+  imageRead: (id: string) => ipcRenderer.invoke("karen:image-read", id),
+  imageDelete: (id: string) => ipcRenderer.invoke("karen:image-delete", id),
+  imageReveal: (id: string) => ipcRenderer.invoke("karen:image-reveal", id),
+  imageSaveCopy: (id: string) => ipcRenderer.invoke("karen:image-save-copy", id),
+  imageFolder: () => ipcRenderer.invoke("karen:image-folder"),
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
     ipcRenderer.invoke("karen:provider-models", opts),
   providerReasoning: (opts: { baseUrl: string; id?: string; model: string; apiKey?: string }) =>
@@ -71,6 +99,7 @@ const api = {
     ipcRenderer.invoke("karen:provider-key", id, value),
   providerKeysPresent: () => ipcRenderer.invoke("karen:provider-keys-present"),
   zoteroCollections: () => ipcRenderer.invoke("karen:zotero-collections"),
+  zoteroStatus: () => ipcRenderer.invoke("karen:zotero-status"),
   setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
   getResearch: () => ipcRenderer.invoke("karen:get-research"),
   engines: () => ipcRenderer.invoke("karen:engines"),

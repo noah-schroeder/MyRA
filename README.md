@@ -20,6 +20,10 @@ synthesise pipeline that produces a cited report.
 **Documents.** Drafts in Markdown and converts to Word, OpenDocument, HTML or
 PDF, jailed to a folder you choose.
 
+**Images.** Makes figures and illustrations from a description, with the model
+chosen the same way the speech ones are, and files each into a folder you own
+beside a note of what it was asked for.
+
 ## Running it
 
     npm install
@@ -42,6 +46,15 @@ All of it is in Settings; you should never need to open a JSON file. Point the
 endpoints at whatever speaks the OpenAI API — llama.cpp, Ollama, vLLM, or a
 hosted provider. API keys go to the OS keyring, never to disk in the clear.
 
+**Speech** is two models rather than an endpoint: one that hears you and one
+that speaks, both chosen from a list under Settings → Audio. The list holds
+what the bundled runtime can run — Whisper and Moonshine for transcription,
+Kokoro for the voice — and anything a provider you added offers. Dictation and
+meeting transcription both use the first; the second is what reads answers
+aloud in speech-to-speech mode, which is the wave button beside the microphone:
+it listens, sends when you pause, answers out loud, and listens again until you
+switch it off. Talking over an answer interrupts it.
+
 Document conversion uses **pandoc**, bundled per platform — it is what gives you
 CSL citation styles, bibliographies and journal templates. It is not required to
 run: without it, documents are written as Markdown and everything else works
@@ -55,6 +68,14 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
 - **Your prompts and audio go to the endpoints you configured.** Point them at
   localhost and nothing leaves. Point them at a hosted API and that traffic goes
   there. The app cannot change that.
+- **Speech is the same choice made twice.** A transcription or voice model from
+  the bundled runtime stays here; one from a provider you added means your
+  recordings, or the answers Karen reads out, are sent to that provider. The
+  picker says which it is, and the model chosen is named on screen.
+- **Images go wherever their model is.** A model from the bundled runtime draws
+  on this machine and the prompt stays here; one from a provider you added means
+  the prompt is sent to that provider. The picker says which, and warns above the
+  hosted ones.
 - **Scholarly searches** reach OpenAlex and arXiv. Semantic Scholar is asked only
   whether a paper already found has an open-access PDF.
 - **Pages you ask it to read** see a request from this machine.
@@ -74,6 +95,9 @@ Electron main                       Renderer (sandboxed)
 ├─ agent loop  ── the only LLM caller ├─ chat · tool cards · citations
 │   └─ tool registry ~8 tools         ├─ meeting capture (getUserMedia)
 ├─ core/       pure TS, no electron   └─ settings
+│   ├─ audio      speech · voices · what is worth reading aloud
+│   ├─ images     prompts · sizes · where a picture is filed
+│   ├─ library    Zotero: local API, then the database file
 │   ├─ meetings   merge · prompts · verify
 │   ├─ research   OpenAlex · arXiv · S2 · hydrate · pdf
 │   ├─ documents  pandoc argv · path jail

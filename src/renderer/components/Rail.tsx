@@ -37,6 +37,16 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4 6h16M4 12h16M4 18h10" />
     </>
   ),
+  /* A framed picture with a horizon in it. Reads as "a picture" at 16px
+     without borrowing the camera shape, which would say "take a photo"
+     rather than "make one". */
+  image: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="m4 17 5-5 4 4 2.5-2.5L20 17" />
+    </>
+  ),
   /* A stack of layers: what a quantised model is, and distinct at 16px from
      the list icon above it. */
   models: (

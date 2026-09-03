@@ -1,11 +1,16 @@
 /**
- * Speech to text, against the endpoint the user configured.
+ * Speech to text, against wherever the chosen transcription model lives.
  *
- * This is the ONE place the desktop app is allowed to reach the network, and it
- * is on the egress allowlist for exactly that reason. Where the audio actually
- * goes is the user's choice: point this at localhost and nothing leaves the
- * machine; point it at a hosted API and that traffic goes there. The app cannot
- * change that, so it does not pretend to.
+ * Where the audio goes is the user's choice, and it is made once: a model is
+ * picked in Settings → Audio, and `main/audio.ts` resolves it to the local
+ * daemon or to one of the user's providers. Nothing here reads a base URL the
+ * user typed, because there is no longer a field for one -- the endpoint
+ * arrives already resolved, and the messages below are written for somebody who
+ * chose a MODEL rather than an address.
+ *
+ * Its mirror is `core/audio/speech.ts`, which does the same job in the other
+ * direction. This file used to say it was the only place in the app allowed to
+ * reach the network; that was true when it was written and speech makes two.
  */
 
 import type { EndpointSettings } from "./config.ts";
@@ -69,7 +74,7 @@ async function post(opts: TranscribeOptions, format: "json" | "verbose_json"): P
   const { endpoint, audio } = opts;
   if (!endpoint.baseUrl) {
     throw new TranscriptionError(
-      "No transcription endpoint is configured. Set one in Settings → Audio.",
+      "No transcription model is set up. Choose one in Settings → Audio.",
     );
   }
 
@@ -100,11 +105,13 @@ async function post(opts: TranscribeOptions, format: "json" | "verbose_json"): P
   } catch (err) {
     if ((err as Error).name === "TimeoutError" || (err as Error).name === "AbortError") {
       throw new TranscriptionError(
-        `The transcription endpoint did not answer within ${(endpoint.timeoutMs || 120_000) / 1000}s.`,
+        `${endpoint.model || "The transcription model"} did not answer within ` +
+          `${(endpoint.timeoutMs || 120_000) / 1000}s.`,
       );
     }
     throw new TranscriptionError(
-      `Could not reach the transcription endpoint at ${endpoint.baseUrl}: ${(err as Error).message}`,
+      `Could not reach ${endpoint.model || "the transcription model"} at ` +
+        `${endpoint.baseUrl}: ${(err as Error).message}`,
     );
   }
 
@@ -112,12 +119,18 @@ async function post(opts: TranscribeOptions, format: "json" | "verbose_json"): P
     const body = (await res.text().catch(() => "")).slice(0, 400).trim();
     if (res.status === 401 || res.status === 403) {
       throw new TranscriptionError(
-        `The transcription endpoint rejected the API key (${res.status}). Check it in Settings.`,
+        `The transcription model's provider rejected the API key (${res.status}). ` +
+          "Check it in Settings → Providers.",
       );
     }
     if (res.status === 404) {
+      /* A 404 means the address is wrong, and the only address the user
+         controls now is a provider's -- so that is where they are sent. For a
+         local model this is a bug rather than a setting, and naming the URL is
+         what makes it reportable. */
       throw new TranscriptionError(
-        `No transcription endpoint at ${url(endpoint.baseUrl)} (404). Check the base URL.`,
+        `Nothing answers at ${url(endpoint.baseUrl)} (404). If this model came from a ` +
+          "provider, check its base URL in Settings → Providers.",
       );
     }
     throw new TranscriptionError(`Transcription failed: ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`);

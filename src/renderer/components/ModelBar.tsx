@@ -108,6 +108,18 @@ export function ModelBar({
 
   const providers = (settings?.providers ?? []).filter((p) => p.enabled && p.models.length);
   const chosenExternal = choiceIsExternal(settings?.providers ?? [], settings?.llm.model ?? "");
+  /*
+   * Whether a PROVIDER model is chosen at all, which is not the same question.
+   *
+   * The bar used to branch on "is the choice external", and a provider on
+   * 127.0.0.1 -- somebody's own llama.cpp or LM Studio, registered here rather
+   * than run by Karen -- is deliberately not external: destinations.ts calls an
+   * address on this machine local whatever the provider's label says. So the
+   * external branch was skipped, the local branch wanted a model Karen had
+   * loaded itself, and the bar said "No model yet" while every message went to
+   * that provider and came back answered.
+   */
+  const chosenProvider = Boolean(parseModelRef(settings?.llm.model ?? "").providerId);
 
   /**
    * Choose a hosted model.
@@ -139,12 +151,13 @@ export function ModelBar({
   } else if (loading) {
     label = "Starting the local engine…";
     tone = "loading";
-  } else if (chosenExternal) {
+  } else if (chosenProvider) {
     /* Ahead of the loaded local model, matching how the request is actually
-       routed: a hosted choice wins, so the bar must not keep naming whatever
-       happens to be resident. */
+       routed: a provider choice wins, so the bar must not keep naming whatever
+       happens to be resident. The tone still follows where the request goes,
+       so a provider on this machine reads as local. */
     label = shorten(parseModelRef(settings?.llm.model ?? "").model);
-    tone = "remote";
+    tone = chosenExternal ? "remote" : "local";
   } else if (local && activePath) {
     label = shorten(activePath);
     tone = "local";

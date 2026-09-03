@@ -9,13 +9,16 @@
 import { ipcMain } from "electron";
 import type { ConfigStore } from "../core/config.ts";
 import type { SecretVault } from "./secrets.ts";
+import type { RuntimeManager } from "./runtime/manager.ts";
 import { Recorder } from "../core/meetings/capture.ts";
 import { transcribe } from "../core/stt.ts";
+import { resolveAudio } from "./audio.ts";
 import { readFile } from "node:fs/promises";
 
 export interface DictationDeps {
   config: ConfigStore;
   vault: SecretVault;
+  runtime: RuntimeManager;
   send: (channel: string, payload?: unknown) => void;
 }
 
@@ -23,7 +26,7 @@ export interface DictationDeps {
 const MAX_SECONDS = 10 * 60;
 
 export function installDictationIpc(deps: DictationDeps): void {
-  const { config, vault, send } = deps;
+  const { config, send } = deps;
   let recorder: Recorder | undefined;
 
   ipcMain.handle("karen:dictation-start", async () => {
@@ -44,11 +47,19 @@ export function installDictationIpc(deps: DictationDeps): void {
     const recording = await active.stop();
     try {
       const settings = config.current;
-      const key = await vault.get("transcriptionKey");
+      /*
+       * Started if it is not running, unlike every other caller.
+       *
+       * Somebody has just held the microphone down and spoken; the recording
+       * exists and is about to be thrown away. Refusing it because the daemon
+       * was idle would lose what they said in order to avoid a few seconds of
+       * startup, which is the wrong side of that trade.
+       */
+      const resolved = await resolveAudio(deps, "transcription", { start: true });
       const text = await transcribe({
-        endpoint: settings.transcription,
+        endpoint: resolved.endpoint,
         audio: await readFile(recording.path),
-        ...(key ? { apiKey: key } : {}),
+        ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
         ...(settings.dictationLanguage ? { language: settings.dictationLanguage } : {}),
       });
       if (text.trim()) send("karen:dictation-text", text.trim());

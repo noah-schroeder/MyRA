@@ -31,6 +31,16 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface InstalledModel {
   id: string;
+  /**
+   * What the model is FOR: `chat`, `transcription`, `tts`, `embedding`…
+   *
+   * Read but discarded until audio needed it, which was a quiet loss: without
+   * labels the only way to tell a speech model from a chat one is its name, and
+   * Karen did exactly that -- `/whisper|moonshine/i` -- which is a guess that
+   * misses a renamed checkpoint and would mistake a `whisper-tts` voice model
+   * for a transcriber.
+   */
+  labels?: string[];
   downloaded?: boolean;
   /** Converted from the catalogue's gigabytes. */
   sizeBytes?: number;
@@ -252,6 +262,7 @@ export class LemonadeApi {
       .filter((m): m is Raw & { id: string } => typeof m.id === "string")
       .map((m) => ({
         id: m.id,
+        ...(Array.isArray(m.labels) ? { labels: m.labels.filter((l) => typeof l === "string") } : {}),
         ...(m.downloaded !== undefined ? { downloaded: m.downloaded } : {}),
         ...(typeof m.size === "number" && m.size > 0
           ? { sizeBytes: Math.round(m.size * 1024 ** 3) }
