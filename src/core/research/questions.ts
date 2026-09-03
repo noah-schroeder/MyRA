@@ -227,18 +227,55 @@ export const ROLE_SLOTS: readonly RoleSlot[] = [
   },
 ];
 
-/*
- * The embedder is deliberately NOT one of these.
- *
- * It is not a chat model, and offering the chat catalogue for it would be
- * offering models that cannot do the job. It is set once in Settings →
- * Providers, and the plan document names whichever one is configured.
- */
 export const SINGLE_SLOT: RoleSlot = {
   key: "all",
   label: "Model for every stage",
   hint: "Scoping, screening, extraction, synthesis and review all use this one.",
 };
+
+/**
+ * The embedder, asked here and not in Settings.
+ *
+ * It is the one slot that is NOT a chat model, which is why it is asked
+ * separately and why it is asked even when one model does every other stage:
+ * "the same model for everything" cannot include this one, because a chat
+ * model does not answer /embeddings. Its options therefore come from the
+ * embeddings endpoint's own catalogue, never from the chat one.
+ *
+ * It used to live only in Settings → Providers, two panes away from the run it
+ * affects, which meant the stage most people never knew existed was configured
+ * somewhere they had no reason to look. Naming it here does not move the
+ * ENDPOINT -- that is still Settings, with every other endpoint and its key --
+ * it moves the choice of which model on that endpoint this run uses.
+ */
+export const EMBEDDER_SLOT: RoleSlot = {
+  key: "embedder",
+  label: "Embedder (not a chat model)",
+  hint:
+    "Ranks the candidates by meaning before screening, so the papers the screener reads are " +
+    "the ones closest to your question rather than the first N a search returned. Cheap, " +
+    "fast and local if you have one. Without it the shortlist is search order.",
+};
+
+/** What the embedder dropdown sends back for "do not rank at all". */
+export const NO_EMBEDDER = "(none)";
+
+/**
+ * The embedder the run should use, or nothing.
+ *
+ * Three answers, kept apart on purpose. A slot that was never shown leaves the
+ * current setting alone; `NO_EMBEDDER` -- or a dropdown with nothing to offer,
+ * which sends "" -- is a deliberate no and must be able to CLEAR a model that
+ * was configured before; anything else is a model name.
+ */
+export function embedderChoice(
+  picked: Record<string, string>,
+  current?: string,
+): string | undefined {
+  if (!("embedder" in picked)) return current;
+  const value = (picked["embedder"] ?? "").trim();
+  return !value || value === NO_EMBEDDER ? undefined : value;
+}
 
 /** The preset the stated priority points at, as plain numbers. */
 export function defaultDepth(): Depth {
