@@ -110,6 +110,10 @@ export function installRuntimeIpc(
     try {
       await runtime.ensureLemonade();
       await runtime.api.installBackend(String(recipe), String(backend));
+      /* Before reporting success: on a system older than the engine build, a
+         freshly installed engine cannot start, and the moment it was installed
+         is the only moment anybody is watching. */
+      await runtime.repairInstalledEngines();
       return { ok: true, info: await runtime.api.systemInfo() };
     } catch (err) {
       return { ok: false, error: (err as Error).message };

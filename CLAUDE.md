@@ -170,6 +170,18 @@ announcing itself to the network. [api/server.ts](src/main/api/server.ts) is
 the only listening socket: off by default, loopback, refuses to start without a key, and
 forwards only the paths in [core/api/routes.ts](src/core/api/routes.ts).
 
+Lemonade downloads its engines per recipe (`llamacpp`, `whispercpp`, `kokoro`,
+`sd-cpp`) and **starts them itself**, which is a problem Karen has to solve from the
+outside: measured on the released builds, `whisper-server` v1.8.4 and kokoro's `koko`
+b17 need `GLIBC_2.38` while `llama-server` b10375 needs 2.34 — so on Ubuntu 22.04 chat
+works and every speech model exits code 1 within a tenth of a second. Karen already
+carries a newer glibc for `lemond` on such a machine, so
+[engineRuntime.ts](src/main/runtime/engineRuntime.ts) copies it into each engine's
+directory and replaces the binary with a script that `exec`s it through that loader.
+`exec`, because Lemonade kills the engine by the pid it spawned; and the loader goes
+**in the engine's own directory**, because ggml finds `libggml-vulkan.so` relative to
+`/proc/self/exe`, which under a bundled loader is the loader.
+
 Every model that is **not** the chat model — transcription, voice, image — goes through
 one resolver and one lister ([main/models.ts](src/main/models.ts)): a bare id is the local
 daemon, `provider::model` is one of the user's providers, and the routing rules exist once

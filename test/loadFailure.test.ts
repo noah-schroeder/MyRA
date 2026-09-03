@@ -130,8 +130,10 @@ describe("which of the three failures this was", () => {
     });
     assert.match(said, /newer system libraries/);
     // The asymmetry is the confusing part, so it is stated rather than implied.
-    assert.match(said, /Chat keeps working/);
-    assert.match(said, /Settings → Providers/);
+    assert.match(said, /chat keeps working/);
+    // Karen wraps these engines itself, so this says the wrap failed, not that
+    // the machine is out of luck -- and names the thing that retries it.
+    assert.match(said, /Restarting Karen/);
     // Nothing to install and nothing to re-download: neither would help.
     assert.equal(/finish downloading/.test(said), false);
     assert.equal(/to install it/.test(said), false);
