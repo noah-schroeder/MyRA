@@ -188,13 +188,31 @@ describe("an engine that answers with nothing", () => {
     assert.equal(loadFailureIn(REPORTED_IMAGE), undefined);
   });
 
-  it("says the engine is there and points at the backend instead", () => {
+  it("names what is holding the card, which is what the user can act on", () => {
+    /* The measured cause, from running the engine by hand because the daemon
+       throws its stderr away: `cudaMalloc failed: out of memory` allocating
+       1411 MiB on an RTX 4060 that already held a 30B chat model, Whisper and
+       Kokoro. Lemonade's max_loaded_models is 1 per TYPE, so it holds one of
+       each and never evicts across pools. */
+    const said = explainIfLoadFailure(REPORTED_IMAGE, {
+      role: "image",
+      engine: "sd-cpp",
+      gpuResident: ["NVIDIA-Nemotron-3-Nano-30B-A3B", "Whisper-Large-v3-Turbo", "kokoro-v1"],
+    });
+    assert.ok(said);
+    assert.match(said, /graphics card being full/);
+    assert.match(said, /Whisper-Large-v3-Turbo/);
+    assert.match(said, /eject button/);
+    // Not a backend problem, so it must not send anyone to reinstall one.
+    assert.equal(/install/.test(said), false);
+  });
+
+  it("blames the backend only when nothing else is on the card", () => {
     const said = explainIfLoadFailure(REPORTED_IMAGE, { role: "image", engine: "sd-cpp" });
     assert.ok(said);
     assert.match(said, /sd-cpp engine/);
     assert.match(said, /nothing is missing/);
     assert.match(said, /Settings → Runtime/);
-    assert.match(said, /Vulkan/);
     // Nothing to install and nothing to download: neither is the problem here.
     assert.equal(/did not finish downloading/.test(said), false);
   });

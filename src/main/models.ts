@@ -257,6 +257,7 @@ export async function explainModelFailure(
   const message = err instanceof Error ? err.message : String(err);
   const engine = await engineFor(deps, ref).catch(() => undefined);
   const engineState = engine ? await engineStateOf(deps, engine) : undefined;
+  const gpuResident = gpuHolding(deps, modelIdOf(ref));
   const oldSystem = engineState === "ready"
     ? await deps.runtime.bundledLibc().catch(() => false)
     : false;
@@ -266,8 +267,21 @@ export async function explainModelFailure(
       ...(engine ? { engine } : {}),
       ...(engineState ? { engineState } : {}),
       ...(oldSystem ? { oldSystem } : {}),
+      ...(gpuResident.length ? { gpuResident } : {}),
     }) ?? message
   );
+}
+
+/**
+ * What else is on the graphics card right now.
+ *
+ * Read off the health payload, which reports a device per loaded model. The
+ * model this failure is about is excluded: it is the one that could not fit,
+ * not one of the things in the way.
+ */
+function gpuHolding(deps: Pick<MediaDeps, "runtime">, except: string): string[] {
+  const models = deps.runtime.lemonade.status.health?.models ?? [];
+  return models.filter((m) => m.device === "gpu" && m.id !== except).map((m) => m.id);
 }
 
 /**
