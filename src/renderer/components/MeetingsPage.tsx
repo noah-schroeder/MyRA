@@ -3,6 +3,7 @@ import type {
   MeetingState, MeetingSummary, Settings, WhisperSnapshot,
 } from "../types.ts";
 import { MeetingCapture, CaptureError } from "../capture.ts";
+import { parseModelRef } from "../../core/providers.ts";
 import { litSegments, segmentClass } from "./meterBars.ts";
 import { Markdown } from "./Markdown.tsx";
 
@@ -74,8 +75,6 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   const [tab, setTab] = useState<Tab>("record");
   const [state, setState] = useState<MeetingState>({ phase: "idle" });
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
-  /* What the local engine has loaded, when it is Karen's own. */
-  const [whisper, setWhisper] = useState<{ loaded?: string } | undefined>();
   const [title, setTitle] = useState("");
   const [warning, setWarning] = useState<string | undefined>();
   const [levels, setLevels] = useState<Record<string, number>>({});
@@ -181,7 +180,10 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   };
 
   const busy = state.phase === "processing";
-  const ready = Boolean(whisper?.loaded) || Boolean(settings.transcription.baseUrl.trim());
+  /* One question now, not two: a transcription model has been chosen, wherever
+     it runs. It used to also accept "an endpoint is configured", which is the
+     setting that no longer exists. */
+  const ready = Boolean(settings.audio.transcriptionModel.trim());
 
   return (
     <section className="meetings">
@@ -192,9 +194,13 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
         </div>
         <div className="hub-stats">
           <Stat label="Recorded" value={String(meetings.length)} />
+          {/* The model that will actually be used, named. This read
+              `whisper?.loaded` from a piece of state nothing ever set, so it
+              always said "your endpoint" -- true of a setting that no longer
+              exists, and no help in finding out which model was chosen. */}
           <Stat
             label="Transcription"
-            value={whisper?.loaded ?? (ready ? "your endpoint" : "not set up")}
+            value={ready ? parseModelRef(settings.audio.transcriptionModel).model : "not set up"}
             dim={!ready}
           />
         </div>

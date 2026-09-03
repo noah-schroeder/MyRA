@@ -25,13 +25,15 @@ import {
   DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
 } from "../core/agent/tools/documents.ts";
 import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
-import { libraryCollections, librarySearch, libraryRoute } from "./runtime/zoteroLibrary.ts";
-import { forgetZoteroSnapshot } from "./runtime/zoteroSqlite.ts";
+import {
+  libraryCollections, librarySearch, libraryRoute, libraryStatus,
+} from "./runtime/zoteroLibrary.ts";
+import { forgetZoteroSnapshot, setZoteroDataDir } from "./runtime/zoteroSqlite.ts";
 import { collectionTree } from "../core/library/zotero.ts";
 import { resetCitations, resumeCitations } from "../core/research/ledger.ts";
 import {
-  isExternal, isUsable, orphanedSecrets, parseModelRef, providerFor, providerSecret,
-  standsDownForLocal,
+  isExternal, isUsable, newProviderId, orphanedSecrets, parseModelRef, providerFor, providerSecret,
+  qualify, standsDownForLocal, urlIsLocal, type Provider,
 } from "../core/providers.ts";
 import { samplingForRequest } from "../core/llm/sampling.ts";
 import { pricesFrom } from "../core/pricing.ts";
@@ -45,6 +47,8 @@ import {
 } from "../core/sessions.ts";
 import { installMeetingIpc } from "./meetings.ts";
 import { installDictationIpc } from "./dictation.ts";
+import { installAudioIpc, resolveAudio } from "./audio.ts";
+import { installImageIpc } from "./images.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
@@ -688,12 +692,20 @@ function installIpc(): void {
 
   ipcMain.handle("karen:get-settings", () => config.current);
 
+  /* The Zotero folder the user named, handed to the module that looks for the
+     library. Set here rather than read there, so the search path does not
+     depend on settings having been loaded first -- and re-set on every change,
+     because the whole point of the control is that it takes effect when you
+     press the button and not at the next launch. */
+  setZoteroDataDir(config.current.zoteroDataDir);
+
   /* Whether this desktop actually shows a tray icon, which decides whether
      "keep running when closed" can do anything at all. Linux answers this
      differently per desktop, so it is reported rather than assumed. */
   ipcMain.handle("karen:tray-available", () => tray?.available ?? false);
   ipcMain.handle("karen:update-settings", async (_e, patch: unknown) => {
     const before = config.current.providers;
+    const beforeDir = config.current.zoteroDataDir;
     const next = await config.update(patch as Partial<typeof config.current>);
     /*
      * A removed provider's API key goes with it.
@@ -707,6 +719,10 @@ function installIpc(): void {
     for (const name of orphanedSecrets(before, next.providers)) {
       await vault.set(name as SecretName, "").catch(() => undefined);
     }
+    setZoteroDataDir(next.zoteroDataDir);
+    /* A different folder is a different library, so the snapshot taken from
+       the old one must not answer the next search. */
+    if (next.zoteroDataDir !== beforeDir) forgetZoteroSnapshot();
     return next;
   });
   ipcMain.handle("karen:set-secret", (_e, name: string, value: string) => {
@@ -734,14 +750,14 @@ function installIpc(): void {
     present: await vault.present(),
   }));
 
-  ipcMain.handle("karen:discover-models", async (_e, which: "llm" | "transcription" | "embeddings") => {
+  /* No "transcription" any more: it is a model chosen from a list, not an
+     endpoint someone types a URL into, so there is nothing here to discover. */
+  ipcMain.handle("karen:discover-models", async (_e, which: "llm" | "embeddings") => {
     const endpoint = config.current[which];
     if (!endpoint.baseUrl) return { ok: false, error: "No base URL is set for this endpoint." };
     const base = endpoint.baseUrl.replace(/\/+$/, "");
     const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
-    const key = await vault.get(
-      which === "llm" ? "llmKey" : which === "transcription" ? "transcriptionKey" : "embedKey",
-    );
+    const key = await vault.get(which === "llm" ? "llmKey" : "embedKey");
     try {
       const res = await fetch(url, {
         headers: key ? { authorization: `Bearer ${key}` } : {},
@@ -891,7 +907,7 @@ function installIpc(): void {
     return out;
   });
 
-  ipcMain.handle("karen:test-endpoint", async (_e, which: "llm" | "transcription" | "embeddings") => {
+  ipcMain.handle("karen:test-endpoint", async (_e, which: "llm" | "embeddings") => {
     const endpoint = config.current[which];
     if (!endpoint.baseUrl) return { ok: false, error: "No base URL is set." };
     try {
@@ -1120,6 +1136,24 @@ function installIpc(): void {
   });
 
   /*
+   * Both ways into the library, probed on demand.
+   *
+   * For the panel in Settings → Library. It exists because the failure a user
+   * actually reports is "it says it cannot reach Zotero", which is one message
+   * covering two unrelated problems -- a switch inside Zotero, and a library
+   * folder somewhere Karen did not look. This says which, names every place it
+   * looked, and reports what Zotero's own profile said about where the library
+   * is, so the answer does not depend on anyone reading source.
+   */
+  ipcMain.handle("karen:zotero-status", async () => {
+    try {
+      return { ok: true, ...(await libraryStatus()) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  /*
    * Copy, through the main process rather than navigator.clipboard.
    *
    * The Clipboard API is available in the renderer -- Electron treats the
@@ -1195,6 +1229,75 @@ async function tightenExistingContent(): Promise<void> {
 
 /* ----------------------------------------------------------------- boot --- */
 
+/**
+ * Turn a pre-`audio` transcription endpoint into an ordinary provider.
+ *
+ * Transcription used to be configured as a base URL, a key and a model name on
+ * its own screen. It is now a model chosen from a list, and the list is drawn
+ * from the local runtime and from the user's providers -- which is what that
+ * endpoint always was, described in the app's own vocabulary. Rather than
+ * dropping the setting and quietly unconfiguring anyone pointing Karen at their
+ * own whisper server, it is carried across: a provider is created, the key
+ * moves with it, and the choice points at it.
+ *
+ * Runs once, and its own effect is what stops it running twice: the field is
+ * read back from the `transcription` key in settings.json, and the save at the
+ * end writes a file that no longer has one. An install that never configured an
+ * endpoint has nothing here to begin with and returns immediately.
+ */
+async function migrateTranscriptionEndpoint(): Promise<void> {
+  const legacy = config.current.legacyTranscription;
+  if (!legacy?.baseUrl.trim()) return;
+
+  const id = newProviderId(config.current.providers);
+  const model = legacy.model?.trim() || "whisper-1";
+  const provider: Provider = {
+    id,
+    label: "Transcription (imported)",
+    /*
+     * External unless the address proves otherwise, and `effectiveKind` has the
+     * final say on that anyway.
+     *
+     * The safe direction: a wrongly external label costs a warning nobody
+     * needed, a wrongly local one tells someone their recordings stayed on this
+     * machine while they were being posted elsewhere.
+     */
+    kind: urlIsLocal(legacy.baseUrl) ? "local" : "external",
+    baseUrl: legacy.baseUrl,
+    models: [model],
+    enabled: true,
+  };
+
+  /* The key moves before the provider is saved, so a crash in between leaves a
+     provider with no key rather than a key belonging to nothing. */
+  const key = await vault.get("transcriptionKey").catch(() => undefined);
+  let moved = false;
+  if (key) {
+    moved = await vault.set(providerSecret(id), key)
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  await config.update({
+    providers: [...config.current.providers, provider],
+    audio: { ...config.current.audio, transcriptionModel: qualify(id, model) },
+    legacyTranscription: undefined,
+  });
+
+  /*
+   * And the original goes, now that the copy is somewhere it can be reached.
+   *
+   * Last, and only on a copy that actually landed: a credential left behind
+   * under a name nothing reads any more is the same fault this app already
+   * fixed once for providers -- see `orphanedSecrets` above, which deletes a
+   * key when the provider it belonged to is removed. A key with no owner is not
+   * inert, it is simply a key nobody is accounting for.
+   */
+  if (moved) await vault.set("transcriptionKey", "").catch(() => undefined);
+
+  console.info(`Transcription endpoint ${legacy.baseUrl} migrated to a provider.`);
+}
+
 async function main(): Promise<void> {
   /*
    * Close the two directories that are unambiguously ours, before anything
@@ -1216,6 +1319,7 @@ async function main(): Promise<void> {
   await makeOwnDir(CONFIG_DIR).catch(() => undefined);
 
   await config.load();
+  await migrateTranscriptionEndpoint();
 
   /*
    * The content roots too -- but only the ones Karen chose for itself.
@@ -1532,10 +1636,14 @@ async function main(): Promise<void> {
     config,
     send,
     llm: resolveLlm,
-    transcriptionKey: () => vault.get("transcriptionKey"),
-    lemonadeTranscription: () => runtime.transcriptionEndpoint(),
+    /* Not started for a meeting stage. Transcribing is background work, and an
+       inference engine coming up because a stage ran is a surprise; dictation
+       makes the opposite call because somebody is holding the microphone. */
+    transcription: () => resolveAudio({ config, vault, runtime }, "transcription"),
   });
-  installDictationIpc({ config, vault, send });
+  installDictationIpc({ config, vault, runtime, send });
+  installAudioIpc({ config, vault, runtime, send });
+  installImageIpc({ config, vault, runtime, send });
 
   createWindow();
   setPdfRenderer(installPdfRenderer());

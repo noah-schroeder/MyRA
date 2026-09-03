@@ -94,6 +94,17 @@ export class MeetingCapture {
   async start(opts: {
     micDeviceId?: string;
     systemAudio: boolean;
+    /**
+     * Let the browser subtract what the speakers are playing.
+     *
+     * Off everywhere except the hands-free mode, and that one exception is
+     * the whole reason it is a parameter. Karen speaking her own answer through
+     * the speakers, into the microphone she is listening on, is heard as the
+     * user interrupting -- so the loop would cut its own reply off after the
+     * first syllable, every time. Meetings must keep it off for the opposite
+     * reason: the far side of a call IS the thing cancellation removes.
+     */
+    echoCancellation?: boolean;
     onChunk: (trackId: string, pcm: ArrayBuffer) => void;
     onWarning?: (message: string) => void;
   }): Promise<{ id: string; label: string; source?: string }[]> {
@@ -104,10 +115,12 @@ export class MeetingCapture {
       mic = await navigator.mediaDevices.getUserMedia({
         audio: {
           ...(opts.micDeviceId ? { deviceId: { exact: opts.micDeviceId } } : {}),
-          // Off, deliberately. These are tuned for intelligibility on a call,
-          // and echo cancellation in particular will remove the far side of the
-          // conversation -- which is the half the second track exists to keep.
-          echoCancellation: false,
+          // Off unless a caller asks, deliberately. These are tuned for
+          // intelligibility on a call, and echo cancellation in particular will
+          // remove the far side of the conversation -- which is the half the
+          // second track exists to keep. The hands-free mode is the one caller
+          // that wants it; see the option above.
+          echoCancellation: opts.echoCancellation === true,
           noiseSuppression: false,
           autoGainControl: false,
         },
@@ -228,12 +241,15 @@ export class DictationCapture {
 
   async start(opts: {
     micDeviceId?: string;
+    /** Only the hands-free loop sets this; see MeetingCapture.start. */
+    echoCancellation?: boolean;
     onChunk: (pcm: ArrayBuffer) => void;
     onLevel?: (level: { peak: number; rms: number }) => void;
   }): Promise<void> {
     const capture = new MeetingCapture();
     await capture.start({
       ...(opts.micDeviceId ? { micDeviceId: opts.micDeviceId } : {}),
+      ...(opts.echoCancellation ? { echoCancellation: true } : {}),
       systemAudio: false,
       onChunk: (_track, pcm) => {
         opts.onLevel?.(levelOfPcm(new Int16Array(pcm)));

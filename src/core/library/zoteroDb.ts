@@ -63,6 +63,7 @@ export function dataDirCandidates(home: string): string[] {
     join(home, "snap", "zotero-snap", "common", "Zotero"),
     join(home, "snap", "zotero-snap", "current", "Zotero"),
     join(home, "snap", "zotero", "common", "Zotero"),
+    join(home, "snap", "zotero", "current", "Zotero"),
   ];
 }
 
@@ -119,6 +120,23 @@ export const COLLECTIONS_SQL = `
   WHERE c.libraryID = ${USER_LIBRARY}
     AND c.collectionID NOT IN (SELECT collectionID FROM deletedCollections)
   ORDER BY c.collectionName COLLATE NOCASE
+`;
+
+/**
+ * How many real items the library holds, by the same rules a search uses.
+ *
+ * For the check in Settings, which has to answer a question the user actually
+ * has: "did it find MY library?" A path is not an answer to that -- a stale
+ * copy of a library restored from a backup has a perfectly good path -- and a
+ * number the user recognises is.
+ */
+export const ITEM_COUNT_SQL = `
+  SELECT COUNT(*) AS n
+  FROM items i
+  JOIN itemTypes t ON t.itemTypeID = i.itemTypeID
+  WHERE i.libraryID = ${USER_LIBRARY}
+    AND ${NOT_TRASHED}
+    AND ${NOT_A_CHILD}
 `;
 
 /**

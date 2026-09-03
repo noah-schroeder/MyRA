@@ -8,7 +8,16 @@
  * it.
  */
 
-/** Logical secret names, plus one key per configured provider. */
+/**
+ * Logical secret names, plus one key per configured provider.
+ *
+ * `transcriptionKey` is here for one reason and it is not a live one: nothing
+ * writes it any more, because transcription is a model chosen from a list
+ * rather than an endpoint with a key of its own. The name survives so the
+ * migration in main/index.ts can read what an older build stored, move it to
+ * the provider that replaces it, and then delete it. Do not wire anything new
+ * to it.
+ */
 export type SecretName =
   | "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken" | "hfToken"
   | `provider:${string}`;

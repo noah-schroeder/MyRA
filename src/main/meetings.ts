@@ -37,11 +37,14 @@ export interface MeetingDeps {
    * configured" while a model sat loaded.
    */
   llm: () => Promise<{ endpoint: EndpointSettings; apiKey?: string; label?: string }>;
-  /** Only needed when transcription goes to someone else's endpoint. */
-  transcriptionKey: () => Promise<string | undefined>;
-  /** Lemonade's transcription endpoint, when it is running and has a model. */
-  lemonadeTranscription?: () =>
-    Promise<{ baseUrl: string; apiKey: string; model: string } | undefined>;
+  /**
+   * The transcription model the user chose, resolved to somewhere callable.
+   *
+   * Handed in rather than worked out here, so meetings and dictation cannot
+   * end up transcribing with two different models: there is one choice, in
+   * Settings → Audio, and one resolver behind it.
+   */
+  transcription: () => Promise<{ endpoint: EndpointSettings; apiKey?: string | undefined }>;
   send: (channel: string, payload?: unknown) => void;
 }
 
@@ -155,37 +158,8 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       return { path: abs, bytes: Buffer.byteLength(content, "utf8") };
     };
 
-  /**
-   * The transcription endpoint to use.
-   *
-   * Lemonade's speech model when one is installed, otherwise whatever endpoint
-   * the user configured. Nothing is started here: the daemon is brought up by
-   * the runtime pane, and transcription should not be what pays to boot it.
-   */
-  const transcriptionEndpoint = async (): Promise<{ endpoint: EndpointSettings; apiKey?: string }> => {
-    /* Lemonade first: it manages the speech engine and its models the same way
-       it manages everything else, so there is nothing to set up separately.
-       The model name travels with the address because the configured default is
-       OpenAI's `whisper-1`, which this daemon has never heard of -- sending it
-       would fail against a server that is working perfectly. */
-    const lemonade = await deps.lemonadeTranscription?.();
-    if (lemonade) {
-      return {
-        endpoint: { ...config.current.transcription, baseUrl: lemonade.baseUrl, model: lemonade.model },
-        apiKey: lemonade.apiKey,
-      };
-    }
-
-    const settings = config.current.transcription;
-    if (!settings.baseUrl.trim()) {
-      throw new Error(
-        "No transcription model is set up. Open Settings → Runtime and download one under " +
-          "Transcription, or set an endpoint of your own.",
-      );
-    }
-    const key = await deps.transcriptionKey();
-    return { endpoint: settings, ...(key ? { apiKey: key } : {}) };
-  };
+  const transcriptionEndpoint = async (): Promise<{ endpoint: EndpointSettings; apiKey?: string | undefined }> =>
+    deps.transcription();
 
   const contextFor = async (record: MeetingRecord, dir: string) => {
     const stored = await readState(dir);

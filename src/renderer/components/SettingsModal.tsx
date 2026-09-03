@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
-import type { AudioSource, PrivacyReport, Settings, VaultStatus } from "../types.ts";
+import type {
+  AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, VaultStatus,
+} from "../types.ts";
 import { enumerate } from "../capture.ts";
 import { RuntimePane } from "./RuntimePane.tsx";
 import { ProvidersPane } from "./ProvidersPane.tsx";
-import { EndpointField, TRANSCRIPTION } from "./EndpointField.tsx";
+import { EndpointField } from "./EndpointField.tsx";
+import { voicesFor } from "../../core/audio/voices.ts";
+import { modelIdOf } from "../../core/audio/models.ts";
 
 /**
  * Everything configurable, in one place.
@@ -15,7 +19,7 @@ import { EndpointField, TRANSCRIPTION } from "./EndpointField.tsx";
  */
 
 type Tab =
-  | "providers" | "runtime" | "storage" | "audio" | "appearance"
+  | "providers" | "runtime" | "library" | "storage" | "audio" | "appearance"
   | "permissions" | "about";
 
 /*
@@ -25,13 +29,16 @@ type Tab =
  * Providers does and did it worse -- one endpoint, no model picking, no local
  * or external judgement, no key per vendor -- so two screens set where a
  * conversation goes and the one with fewer answers came first. The other two
- * were not endpoints in the same sense and have gone where they belong:
- * transcription is what the Audio tab is about, and embeddings only exist to
- * rank search results, which is a provider question.
+ * have since gone the same way. Transcription is now a model chosen on the
+ * Audio tab, from the same two sources every other model comes from, so nobody
+ * has to know that the daemon on this machine answers at `/v1` and calls its
+ * model `Whisper-Base`. Embeddings are the last one left, and they sit under
+ * Providers because ranking search results is a provider question.
  */
 const TABS: { id: Tab; label: string }[] = [
   { id: "providers", label: "Providers" },
   { id: "runtime", label: "Runtime" },
+  { id: "library", label: "Library" },
   { id: "storage", label: "Folders" },
   { id: "audio", label: "Audio" },
   { id: "appearance", label: "Appearance" },
@@ -100,6 +107,7 @@ export function SettingsModal({
             <ProvidersPane settings={settings} patch={patch} vault={vault} />
           ) : null}
           {tab === "runtime" ? <RuntimePane {...(onOpenHub ? { onOpenHub } : {})} /> : null}
+          {tab === "library" ? <Library settings={settings} patch={patch} /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}
@@ -111,12 +119,169 @@ export function SettingsModal({
   );
 }
 
+/* ----------------------------------------------------------------- library */
+
+/**
+ * Zotero, and a straight answer about whether Karen can read it.
+ *
+ * This tab exists because of one recurring report: "it says it cannot reach
+ * Zotero", made by people whose Zotero is open in front of them. There are two
+ * ways in and they fail for unrelated reasons — a switch inside Zotero for the
+ * first, a folder Karen has not looked in for the second — and a single line
+ * saying the library is unreachable sends everybody to fix the wrong one.
+ *
+ * So both are shown, always, with what each of them found. The folder picker
+ * is the fix for the second, and it is a picker rather than an environment
+ * variable because the person who has moved their library to a second disk is
+ * not going to be relaunching an app from a terminal to tell it so.
+ */
+function Library({
+  settings,
+  patch,
+}: {
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  type Status = Awaited<ReturnType<typeof window.karen.zoteroStatus>>;
+  const [status, setStatus] = useState<Status | undefined>();
+  const [busy, setBusy] = useState(false);
+
+  const check = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      setStatus(await window.karen.zoteroStatus());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Probed on open, because a panel whose whole job is to say what the state
+  // is should not open saying nothing and wait to be asked.
+  useEffect(() => void check(), []);
+
+  const choose = async (): Promise<void> => {
+    const picked = await window.karen.chooseDirectory({
+      title: "The folder holding zotero.sqlite",
+      current: settings.zoteroDataDir,
+    });
+    if (!picked) return;
+    await patch({ zoteroDataDir: picked });
+    await check();
+  };
+
+  const api = status?.api;
+  const file = status?.file;
+
+  return (
+    <div className="pane">
+      <p className="hint">
+        Karen reads your Zotero library two ways. It prefers Zotero&rsquo;s own local
+        connection, which searches the text inside your attached PDFs. When that cannot be
+        reached — a Flatpak or Snap Zotero keeps the port inside its sandbox, where nothing
+        else on the machine can get at it — it reads the library file directly instead, which
+        finds everything except the text inside PDFs.
+      </p>
+
+      <div className="zotero-routes">
+        <div className={`zotero-route ${api?.ok ? "ok" : "bad"}`}>
+          <strong>Zotero&rsquo;s local connection</strong>
+          <span>{api?.message ?? (busy ? "Checking…" : "Not checked yet.")}</span>
+        </div>
+        <div className={`zotero-route ${file?.ok ? "ok" : "bad"}`}>
+          <strong>The library file</strong>
+          <span>{file?.message ?? (busy ? "Checking…" : "Not checked yet.")}</span>
+          {file?.path ? (
+            <span className="hint">
+              {file.path} — {SOURCE_WORDS[file.source ?? ""] ?? "found"}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <label className="folder">
+        Zotero data folder
+        <span className="hint">
+          Leave this empty unless Karen cannot find your library. Empty means it works the
+          folder out itself, asking Zotero&rsquo;s own settings first. Set it to the folder that
+          holds <code>zotero.sqlite</code> — Zotero shows the path under Settings → Advanced →
+          Files and Folders.
+        </span>
+        <div className="folder-row">
+          <input
+            value={settings.zoteroDataDir}
+            placeholder="Found automatically"
+            onChange={(e) => void patch({ zoteroDataDir: e.target.value })}
+          />
+          <button type="button" onClick={() => void choose()}>
+            Choose…
+          </button>
+        </div>
+      </label>
+
+      <div className="folder-row">
+        <button type="button" className="primary" disabled={busy} onClick={() => void check()}>
+          {busy ? "Checking…" : "Check again"}
+        </button>
+        {settings.zoteroDataDir ? (
+          <button
+            type="button"
+            onClick={() => void patch({ zoteroDataDir: "" }).then(check)}
+          >
+            Clear, and find it automatically
+          </button>
+        ) : null}
+      </div>
+
+      {/* Every place that was looked, and what Zotero itself said. This is the
+          part that turns "it failed again" into something anyone can act on,
+          so it is shown rather than logged. */}
+      {status?.looked?.tried?.length ? (
+        <details className="zotero-looked">
+          <summary>Where Karen looked ({status.looked.tried.length})</summary>
+          <ul>
+            {status.looked.tried.map((dir) => (
+              <li key={dir}>{dir}</li>
+            ))}
+          </ul>
+          {status.looked.profiles.length ? (
+            <p className="hint">
+              Zotero profiles read:{" "}
+              {status.looked.profiles
+                .map((p) => (p.dataDir ? `${p.path} (library in ${p.dataDir})` : `${p.path} (default location)`))
+                .join("; ")}
+            </p>
+          ) : (
+            <p className="hint">
+              No Zotero profile was found on this machine, so Karen could not ask Zotero where
+              its library is.
+            </p>
+          )}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** How the folder was arrived at, in words rather than a field name. */
+const SOURCE_WORDS: Record<string, string> = {
+  setting: "the folder set here",
+  environment: "KAREN_ZOTERO_DIR",
+  profile: "where Zotero's own settings say the library is",
+  default: "Zotero's usual location",
+  search: "found by searching",
+};
+
 /* ----------------------------------------------------------------- folders */
 
 const FOLDERS = [
   { key: "vaultRoot", label: "Vault", hint: "Where reports and notes are filed. Your Obsidian vault, if you have one." },
   { key: "workspaceRoot", label: "Documents", hint: "Where drafts and conversions are written." },
   { key: "meetingsRoot", label: "Recordings", hint: "Where meeting audio is kept until it is transcribed." },
+  /* The images folder is settable for the same reason the other three are: the
+     page invites you to open it in a file manager and keep what is in it, and a
+     folder you are told to treat as yours that can only be moved by editing
+     settings.json is not one. */
+  { key: "imagesRoot", label: "Images", hint: "Where generated figures are filed, beside a note of what was asked for." },
 ] as const;
 
 function Folders({
@@ -197,6 +362,259 @@ function Folders({
 
 /* ------------------------------------------------------------------- audio */
 
+/**
+ * One of the two audio models, chosen from what can actually run.
+ *
+ * A dropdown rather than the picker the chat bar uses, because the two screens
+ * are for different moments: the bar is for switching mid-conversation, and this
+ * is for setting the thing up once. What they share is the list, which comes
+ * from the same place -- the local runtime's catalogue plus the user's
+ * providers -- so neither can offer a model the other does not.
+ */
+function AudioModelField({
+  role,
+  settings,
+  patch,
+}: {
+  role: AudioRole;
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  const [options, setOptions] = useState<AudioOption[]>([]);
+  const [status, setStatus] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+
+  const chosen = role === "transcription"
+    ? settings.audio.transcriptionModel
+    : settings.audio.voiceModel;
+
+  const refresh = (): void => {
+    void window.karen.audioModels(role).then((r) => {
+      setOptions(r.options);
+      if (!r.ok) setStatus(r.error);
+    });
+  };
+  useEffect(refresh, [role]);
+  useEffect(() => window.karen.onAudioProgress((p) =>
+    setStatus(p.bytesTotal ? `downloading — ${Math.round(p.percent)}%` : "downloading…")), []);
+
+  const current = options.find((o) => o.ref === chosen);
+  const needsDownload = current?.where === "local" && current.downloaded === false;
+
+  const choose = (ref: string): void => {
+    void patch({
+      audio: {
+        ...settings.audio,
+        ...(role === "transcription" ? { transcriptionModel: ref } : { voiceModel: ref }),
+      },
+    });
+    setStatus(undefined);
+  };
+
+  /**
+   * Fetch it now, rather than on the first thing somebody says.
+   *
+   * Lemonade pulls a model the first time a request names it, which is correct
+   * behaviour and a bad surprise: the download would happen in the middle of
+   * someone's first dictation, with a spinner that says nothing about the 3.1 GB
+   * arriving behind it.
+   */
+  const download = async (): Promise<void> => {
+    if (!current) return;
+    setBusy(true);
+    setStatus("preparing…");
+    const result = await window.karen.audioLoad(current.model);
+    setBusy(false);
+    setStatus(result.ok ? "ready" : result.error);
+    refresh();
+  };
+
+  const local = options.filter((o) => o.where === "local");
+  const byProvider = new Map<string, AudioOption[]>();
+  for (const option of options.filter((o) => o.where === "provider")) {
+    const key = option.providerLabel ?? "Provider";
+    byProvider.set(key, [...(byProvider.get(key) ?? []), option]);
+  }
+
+  return (
+    <fieldset className="endpoint">
+      <legend>{role === "transcription" ? "Transcription" : "Voice"}</legend>
+      <p className="hint">
+        {role === "transcription"
+          ? "Turns dictation and recorded meetings into text."
+          : "Reads answers aloud in speech-to-speech mode. Leave it unset and Karen stays silent."}
+      </p>
+
+      <label>
+        Model
+        <select value={chosen} onChange={(e) => choose(e.target.value)}>
+          <option value="">
+            {role === "voice" ? "None — do not speak" : "Choose a model…"}
+          </option>
+          {local.length ? (
+            <optgroup label="On this machine">
+              {local.map((o) => (
+                <option key={o.ref} value={o.ref}>
+                  {o.model}
+                  {o.downloaded ? (o.loaded ? " — loaded" : "") : ` — ${sizeOf(o)} download`}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
+          {[...byProvider].map(([provider, models]) => (
+            <optgroup key={provider} label={provider}>
+              {models.map((o) => (
+                <option key={o.ref} value={o.ref}>
+                  {o.model}
+                  {o.external ? " — leaves this machine" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+
+      {needsDownload ? (
+        <button type="button" className="ghost" disabled={busy} onClick={() => void download()}>
+          {busy ? "Downloading…" : `Download it now (${sizeOf(current)})`}
+        </button>
+      ) : null}
+
+      {current?.external ? (
+        <p className="warning" role="note">
+          {role === "transcription"
+            ? "Recordings — dictation and whole meetings — are sent to this provider."
+            : "Everything Karen reads aloud is sent to this provider to be spoken."}
+        </p>
+      ) : null}
+
+      {status ? <p className="hint">{status}</p> : null}
+    </fieldset>
+  );
+}
+
+function sizeOf(option: AudioOption | undefined): string {
+  const bytes = option?.sizeBytes;
+  if (!bytes) return "unknown size";
+  return bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
+    : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+
+/**
+ * Which voice, and how fast.
+ *
+ * A dropdown when the voices are knowable and a text box when they are not,
+ * which is not a fallback so much as an honest answer: Kokoro's forty voices
+ * were established by asking a running daemon, and there is no endpoint that
+ * would answer the same question for somebody's hosted provider. An empty
+ * dropdown would be a control that cannot be used; a text box can be.
+ */
+function VoiceField({
+  settings,
+  patch,
+}: {
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  const [status, setStatus] = useState<string | undefined>();
+  const [playing, setPlaying] = useState(false);
+  const voices = voicesFor(modelIdOf(settings.audio.voiceModel));
+
+  if (!settings.audio.voiceModel) return null;
+
+  const preview = async (): Promise<void> => {
+    setPlaying(true);
+    setStatus(undefined);
+    const result = await window.karen.previewVoice(settings.audio.voice);
+    if (!result.ok || !result.audio) {
+      setPlaying(false);
+      setStatus(result.error ?? "Nothing came back.");
+      return;
+    }
+    const url = URL.createObjectURL(
+      new Blob([new Uint8Array(result.audio)], { type: result.mime ?? "audio/mpeg" }),
+    );
+    /* `window.Audio`, not `Audio`: the settings pane below is a component
+       called Audio, which shadows the constructor in this module. */
+    const audio = new window.Audio(url);
+    /* Revoked on every path out, including the error one: a preview somebody
+       clicks twenty times should not leave twenty MP3s in the page. */
+    const done = (): void => {
+      URL.revokeObjectURL(url);
+      setPlaying(false);
+    };
+    audio.onended = done;
+    audio.onerror = done;
+    await audio.play().catch((err: unknown) => {
+      done();
+      setStatus((err as Error).message);
+    });
+  };
+
+  const byLanguage = new Map<string, typeof voices>();
+  for (const voice of voices) {
+    byLanguage.set(voice.language, [...(byLanguage.get(voice.language) ?? []), voice]);
+  }
+
+  return (
+    <fieldset className="endpoint">
+      <legend>Voice</legend>
+
+      <label>
+        {voices.length ? "Which voice" : "Voice name"}
+        {voices.length ? (
+          <select
+            value={settings.audio.voice}
+            onChange={(e) => void patch({ audio: { ...settings.audio, voice: e.target.value } })}
+          >
+            {[...byLanguage].map(([language, group]) => (
+              <optgroup key={language} label={language || "Other"}>
+                {group.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} — {v.gender}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={settings.audio.voice}
+            placeholder="the model's default"
+            onChange={(e) => void patch({ audio: { ...settings.audio, voice: e.target.value } })}
+          />
+        )}
+      </label>
+      {!voices.length ? (
+        <p className="hint">
+          Karen cannot list this model’s voices — no speech server publishes them — so this is
+          whatever name it expects. Leave it empty for its own default.
+        </p>
+      ) : null}
+
+      <label>
+        Pace
+        <input
+          type="range"
+          min={0.5}
+          max={2}
+          step={0.05}
+          value={settings.audio.speed}
+          onChange={(e) =>
+            void patch({ audio: { ...settings.audio, speed: Number(e.target.value) } })}
+        />
+        <span className="unit">{settings.audio.speed.toFixed(2)}×</span>
+      </label>
+
+      <button type="button" className="ghost" disabled={playing} onClick={() => void preview()}>
+        {playing ? "Playing…" : "Hear it"}
+      </button>
+      {status ? <p className="hint">{status}</p> : null}
+    </fieldset>
+  );
+}
+
 function Audio({
   settings,
   patch,
@@ -212,10 +630,20 @@ function Audio({
 
   return (
     <div className="pane">
-      {/* Transcription lives here now rather than on a tab of its own. It is
-          the endpoint that turns this microphone's output into words, and it
-          was previously two screens away from the device it applies to. */}
-      <EndpointField which={TRANSCRIPTION} settings={settings} patch={patch} />
+      <p className="pane-lead">
+        Two models: one that turns speech into text, and one that reads answers back. Both run on
+        this machine unless you pick one from a provider you added.
+      </p>
+
+      {/* A picker, where there used to be a base URL, an API key and a model
+          name typed by hand. Transcription was the last place in the app that
+          asked someone to know the shape of a server's address, and the two
+          things that could answer -- the local runtime and the providers -- were
+          both already lists Karen could offer. */}
+      <AudioModelField role="transcription" settings={settings} patch={patch} />
+      <AudioModelField role="voice" settings={settings} patch={patch} />
+
+      <VoiceField settings={settings} patch={patch} />
 
       <label>
         Microphone

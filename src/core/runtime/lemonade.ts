@@ -161,6 +161,50 @@ export interface LemonadeHealth {
   loaded: string[];
   /** Detail for `modelLoaded`, when the daemon reports it. */
   active?: LoadedModel | undefined;
+  /**
+   * Every model the daemon is holding, with the engine behind each.
+   *
+   * Kept in full because `model_loaded` cannot be read as "the model chat uses"
+   * and was: Lemonade holds several models at once, each on its own backend
+   * port, and that field names whichever was touched LAST. Measured -- load a
+   * chat model, transcribe one clip, and `model_loaded` is `Whisper-Tiny`,
+   * while the chat model is still resident and still answering on 8002. Karen
+   * routed chat by that name, so a single dictation would have pointed the
+   * conversation at a speech-to-text model.
+   */
+  models: LoadedModel[];
+}
+
+/**
+ * The engines that are not chat engines.
+ *
+ * By recipe rather than by model name, because the recipe is what the daemon
+ * launched and cannot be renamed out of correctness -- `whisper-tts` would
+ * defeat a name test, and the catalogue is free to add such a thing.
+ */
+const NON_CHAT_RECIPES = new Set(["whispercpp", "moonshine", "kokoro", "openmoss", "sd-cpp"]);
+
+export function isChatEngine(recipe?: string | undefined): boolean {
+  return !recipe || !NON_CHAT_RECIPES.has(recipe);
+}
+
+/**
+ * Which loaded model a conversation should go to.
+ *
+ * `preferred` is the model Karen last loaded on purpose. It wins when it is
+ * still resident; otherwise the first loaded model that a chat request could
+ * actually be answered by. Returning nothing is a real answer -- a daemon
+ * holding only Kokoro has nothing to chat with, and saying so is better than
+ * naming a voice model and letting the request fail at the far end.
+ */
+export function chatModelOf(
+  health: LemonadeHealth | undefined,
+  preferred?: string | undefined,
+): LoadedModel | undefined {
+  const models = health?.models ?? [];
+  const chosen = preferred ? models.find((m) => m.id === preferred) : undefined;
+  if (chosen && isChatEngine(chosen.recipe)) return chosen;
+  return models.find((m) => isChatEngine(m.recipe));
 }
 
 /**
@@ -207,6 +251,7 @@ export function parseHealth(body: unknown): LemonadeHealth {
   const active = models.find((m) => m.id === modelLoaded) ?? (modelLoaded ? undefined : models[0]);
   return {
     loaded: models.map((m) => m.id),
+    models,
     ...(modelLoaded ? { modelLoaded } : {}),
     ...(active ? { active } : {}),
   };

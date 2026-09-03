@@ -22,7 +22,7 @@ import {
   CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE,
 } from "../../core/paths.ts";
 import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
-import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
+import { chatModelOf, LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
@@ -31,6 +31,8 @@ import {
   defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
 } from "./paths.ts";
 import type { Progress } from "./download.ts";
+import type { PullProgress } from "../../core/runtime/systemInfo.ts";
+import type { InstalledModel } from "./lemonadeApi.ts";
 
 const CONFIG_PATH = join(CONFIG_DIR, "runtime.json");
 
@@ -327,7 +329,20 @@ export class RuntimeManager {
     | undefined {
     if (!this.#config.useForChat) return undefined;
     const status = this.#lemonade.status;
-    if (status.state !== "ready" || !status.baseUrl || !status.health?.modelLoaded) return undefined;
+    if (status.state !== "ready" || !status.baseUrl) return undefined;
+    /*
+     * Resolved from what is loaded, NOT from `model_loaded`.
+     *
+     * That field names the model the daemon touched last, and since audio runs
+     * through the same daemon it is routinely a speech model: transcribe one
+     * clip and it reads `Whisper-Tiny` while the chat model is still resident
+     * on its own backend. Reading it here sent the next message in the
+     * conversation to Whisper. `chatModelOf` prefers the model Karen loaded on
+     * purpose and will only ever return one whose engine can hold a
+     * conversation.
+     */
+    const model = chatModelOf(status.health, this.#config.activeModel);
+    if (!model) return undefined;
     /*
      * The model name travels with the address, and must.
      *
@@ -342,38 +357,74 @@ export class RuntimeManager {
     return {
       baseUrl: status.baseUrl,
       apiKey: this.#lemonade.apiKey,
-      model: status.health.modelLoaded,
+      model: model.id,
       /* The denominator for the token meter and the trigger for compaction.
          Only present when it was actually established -- a guessed window is
-         worse than none, because compaction would fire at the wrong point. */
-      ...(status.health.active?.contextTokens
-        ? { contextTokens: status.health.active.contextTokens }
-        : {}),
+         worse than none, because compaction would fire at the wrong point.
+         Taken from the chat model's own entry, so a loaded voice model cannot
+         lend the meter its (absent) context. */
+      ...(model.contextTokens ? { contextTokens: model.contextTokens } : {}),
     };
   }
 
   /**
-   * A transcription endpoint, when Lemonade has a speech model to offer.
+   * Where a local model that is not the chat model can be reached.
    *
-   * Returns the model name as well as the address, because the two are not
-   * separable here: the configured default is OpenAI's `whisper-1`, which this
-   * daemon has never heard of, so sending that would fail against a server that
-   * is working perfectly. Whichever Whisper is actually present is used.
+   * Speech, voice and image models all ask this, and the model is passed in
+   * rather than looked for. This used to search the installed models for
+   * `/whisper|moonshine/i` and use the first hit, which made "which model
+   * transcribes me" a question with no answer in the interface and the wrong
+   * answer whenever two were downloaded. The choice lives in the settings now
+   * and this only resolves it.
    *
-   * Nothing is started for this. If the daemon is not already running the
-   * answer is "no" -- transcription should not be what pays to boot it.
+   * `start` decides whether it is worth booting the daemon for. Dictation says
+   * yes -- somebody pressed the microphone, and a first press that silently
+   * does nothing is the worst answer available. Meetings says no, because a
+   * background stage should not be what starts an inference engine.
    */
-  async transcriptionEndpoint(): Promise<{ baseUrl: string; apiKey: string; model: string } | undefined> {
+  async auxEndpoint(
+    model: string,
+    { start = false }: { start?: boolean } = {},
+  ): Promise<{ baseUrl: string; apiKey: string; model: string } | undefined> {
+    if (!model.trim()) return undefined;
+    if (start) await this.ensureLemonade();
     const status = this.#lemonade.status;
     if (status.state !== "ready" || !status.baseUrl) return undefined;
-    try {
-      const models = await this.#api.listModels();
-      const speech = models.find((m) => /whisper|moonshine/i.test(m.id));
-      if (!speech) return undefined;
-      return { baseUrl: status.baseUrl, apiKey: this.#lemonade.apiKey, model: speech.id };
-    } catch {
-      return undefined;
+    return { baseUrl: status.baseUrl, apiKey: this.#lemonade.apiKey, model };
+  }
+
+  /**
+   * Load a model without making it the conversation's model.
+   *
+   * `loadModel` records what it loaded as `activeModel`, which is right for the
+   * model you are talking to and wrong for every model that is not answering
+   * you: the chat picker would start showing Whisper as the model in use, and
+   * the startup default could become a speech model that cannot answer a
+   * message. Lemonade holds several at once on separate backends -- measured,
+   * chat on 8002 and Whisper on 8003 -- so nothing is given up by keeping the
+   * records apart. Diffusion models arrive through here for the same reason,
+   * and `sd-cpp` is already in NON_CHAT_RECIPES so one can never be handed a
+   * conversation.
+   */
+  async loadAuxModel(name: string, onProgress?: (p: PullProgress) => void): Promise<void> {
+    await this.ensureLemonade();
+    const installed = await this.#api.listModels().catch(() => []);
+    /* Pulled first when it is not here, so the caller can show a download
+       rather than a load that inexplicably takes twenty minutes. A request
+       would have pulled it anyway -- measured at 19.7 s for Kokoro's 354 MB --
+       but silently, in the middle of somebody dictating. */
+    if (!installed.some((m) => m.id === name && m.downloaded !== false)) {
+      await this.#api.pullModel(name, undefined, undefined, undefined, onProgress);
     }
+    await this.#api.loadModel(name);
+    await this.#lemonade.refreshHealth();
+    this.#emit();
+  }
+
+  /** Every model the daemon knows about, with the labels that say what each is for. */
+  async installedModels(): Promise<InstalledModel[]> {
+    await this.ensureLemonade();
+    return this.#api.listModels();
   }
 
   /* ------------------------------------------------------------ lifecycle -- */

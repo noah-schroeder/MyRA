@@ -4327,3 +4327,180 @@ p.warning { margin: 0; font-size: 12.5px; }
   margin: 10px 0 0; font-size: 11px; line-height: 1.5; text-wrap: pretty;
   color: color-mix(in srgb, var(--amber) 70%, var(--text-faint));
 }
+
+/* Settings → Library: the two ways into Zotero, and what each one found.
+   Both are always on screen, side by side, because they fail for unrelated
+   reasons and one line saying "Zotero could not be reached" has sent people to
+   fix the wrong one for months. */
+.zotero-routes { display: flex; flex-direction: column; gap: 10px; }
+.zotero-route {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: 12.5px; line-height: 1.55; color: var(--text-dim);
+}
+.zotero-route strong { font-size: 12px; font-weight: 600; color: var(--text); }
+.zotero-route.ok { border-left-color: var(--green); }
+.zotero-route.bad { border-left-color: var(--amber); }
+.zotero-route .hint { font-family: var(--mono); font-size: 11px; }
+
+.zotero-looked { font-size: 12px; color: var(--text-dim); }
+.zotero-looked summary { cursor: pointer; color: var(--text-faint); }
+.zotero-looked ul {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  word-break: break-all;
+}
+
+/* ==========================================================================
+   Audio — the two speech models, and the hands-free mode
+   ==========================================================================
+   The pickers reuse .modelbar and .modelmenu wholesale rather than restyling
+   them. Three dropdowns sit on the top bar and they answer the same kind of
+   question -- which model does this job -- so three different-looking controls
+   would be inventing a distinction the app does not have. What is added here
+   is only what differs: they are narrower, because a voice name is short and
+   the chat model's name is not.
+   ========================================================================== */
+
+.audiobar-wrap { min-width: 0; }
+
+.audiobar {
+  max-width: 190px;
+  padding-inline: 8px;
+}
+.audiobar .modelbar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Not a status dot: these two do not have a "starting" state of their own, and
+   an icon says which of the two models the control is for at a glance. */
+.audiobar-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-faint);
+}
+.audiobar:hover .audiobar-icon,
+.audiobar.tone-local .audiobar-icon { color: var(--text-dim); }
+.audiobar.tone-remote .audiobar-icon { color: var(--amber); }
+
+/* The speech-to-speech switch, beside the microphone it supersedes. */
+.mic.s2s.active {
+  /* Green rather than the microphone's red: red is "recording, and you should
+     know", which is the dictation button's job. This one is a mode that is
+     working correctly, and it stays on for as long as a conversation lasts. */
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.mic:disabled { opacity: 0.4; cursor: default; }
+.mic:disabled:hover { color: var(--text-faint); border-color: var(--border); }
+
+.s2s-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.s2s-status .dot { flex: none; }
+/* Steady while listening, breathing while it works: the animation is doing the
+   same job the words are, for someone glancing rather than reading. */
+.s2s-speaking { color: var(--text); }
+.s2s-error { color: var(--red); }
+
+/* ---------- images ---------- */
+
+/* The same skeleton Meetings uses: a header that does not scroll, a body that
+   does, and the composer pinned under it. */
+.images { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.images-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 26px 24px; }
+
+.image-stage { display: flex; justify-content: center; }
+
+.image-shown {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 720px;
+}
+.image-shown img {
+  /* Contained rather than cropped: a figure is looked at to judge it, and a
+     tile that trimmed the edges would hide the part being judged. */
+  max-width: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+.image-shown figcaption { display: flex; flex-direction: column; gap: 6px; }
+.image-shown figcaption p { margin: 0; font-size: 12.5px; }
+.image-prompt { color: var(--text); font-size: 13px; }
+
+.image-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.image-gallery-head {
+  margin: 22px 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.image-gallery {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+.image-tile {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  cursor: pointer;
+  transition: border-color var(--t-fast);
+}
+.image-tile:hover { border-color: var(--border-hover); }
+.image-tile.on { border-color: var(--accent-dim); background: var(--accent-wash); }
+.image-tile img,
+.image-tile-blank {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.image-tile-label {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  /* One line: the prompt is the title here, and a tile that grew to fit a
+     paragraph would break the grid it is in. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-composer { flex: none; }
+.image-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.image-hint { margin: 0; font-size: 11.5px; line-height: 1.45; }
+.image-hint.warn { color: var(--amber); }
+
+.image-tools { flex-wrap: wrap; }
+.image-negative { flex: 1 1 200px; min-width: 0; font-size: 12.5px; }
+.image-size { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.image-size select { font-size: 12px; }

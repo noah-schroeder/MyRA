@@ -107,12 +107,51 @@ export interface EndpointSettings {
   timeoutMs: number;
 }
 
+export type { AudioOption, AudioRole } from "../core/audio/models.ts";
+import type { AudioOption, AudioRole } from "../core/audio/models.ts";
+export type { ModelOption } from "../core/models/roles.ts";
+import type { ModelOption } from "../core/models/roles.ts";
+export type { ImageRecord } from "../core/images/store.ts";
+import type { ImageRecord } from "../core/images/store.ts";
+export type { ImagePreset } from "../core/images/presets.ts";
+
+/** One tick of a model download, as the main process reports it. */
+export interface AudioProgress {
+  model: string;
+  file: string;
+  fileIndex: number;
+  totalFiles: number;
+  bytesDone: number;
+  bytesTotal: number;
+  percent: number;
+}
+
+export interface AudioSettings {
+  /** A model reference: a bare id is local, `provider::model` is a provider's. */
+  transcriptionModel: string;
+  voiceModel: string;
+  voice: string;
+  speed: number;
+  speechToSpeech: boolean;
+}
+
+/** The image model and its size. Mirrors core's ImageSettings. */
+export interface ImageSettings {
+  model: string;
+  size: string;
+}
+
 export interface Settings {
   permissionMode: "manual" | "guarded" | "yolo";
   theme: Theme;
   llm: EndpointSettings;
-  transcription: EndpointSettings;
+  /** The two speech models and the voice. Mirrors core's AudioSettings. */
+  audio: AudioSettings;
+  /** The image model and its size. Mirrors core's ImageSettings. */
+  image: ImageSettings;
   embeddings: EndpointSettings;
+  /** Where Zotero's library is, when Karen cannot work it out. Empty = find it. */
+  zoteroDataDir: string;
   workspaceRoot: string;
   vaultRoot: string;
   vaultWriteSubdir: string;
@@ -121,6 +160,8 @@ export interface Settings {
   dictationLanguage: string;
   deleteRawAudioAfterTranscription: boolean;
   meetingsRoot: string;
+  /** Where generated images and their sidecars are kept. */
+  imagesRoot: string;
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
   meetingInstructions: string;
@@ -366,8 +407,34 @@ export interface KarenApi {
   updateSettings(patch: Partial<Settings>): Promise<Settings>;
   setSecret(name: string, value: string): Promise<unknown>;
   secretsBackend(): Promise<VaultStatus>;
-  discoverModels(which: "llm" | "transcription" | "embeddings"): Promise<{ ok: boolean; models?: string[]; error?: string }>;
-  testEndpoint(which: "llm" | "transcription" | "embeddings"): Promise<{ ok: boolean; status?: number; error?: string }>;
+  discoverModels(which: "llm" | "embeddings"): Promise<{ ok: boolean; models?: string[]; error?: string }>;
+  testEndpoint(which: "llm" | "embeddings"): Promise<{ ok: boolean; status?: number; error?: string }>;
+
+  /* ---- audio ---- */
+  audioModels(role: AudioRole): Promise<{ ok: boolean; options: AudioOption[]; error?: string }>;
+  audioLoad(model: string): Promise<{ ok: boolean; error?: string }>;
+  onAudioProgress(cb: (p: AudioProgress) => void): () => void;
+  /** The spoken form of an answer, as bytes to play. */
+  speak(text: string): Promise<{ ok: boolean; audio?: Uint8Array; mime?: string; error?: string }>;
+  previewVoice(voice?: string): Promise<{ ok: boolean; audio?: Uint8Array; mime?: string; error?: string }>;
+
+  /* ---- images ---- */
+  imageModels(): Promise<{ ok: boolean; options: ModelOption[]; error?: string }>;
+  imageLoad(model: string): Promise<{ ok: boolean; error?: string }>;
+  /** Live progress for a model download; returns an unsubscribe. */
+  onImageProgress(cb: (p: AudioProgress) => void): () => void;
+  /** Draws one image, files it, and hands back the bytes to show. */
+  imageGenerate(request: { prompt: string; negative?: string; preset?: string }): Promise<{
+    ok: boolean; record?: ImageRecord; image?: Uint8Array; error?: string;
+  }>;
+  imageCancel(): Promise<{ ok: boolean }>;
+  imageList(): Promise<{ ok: boolean; images: ImageRecord[]; error?: string }>;
+  imageRead(id: string): Promise<{ ok: boolean; image?: Uint8Array; mime?: string; error?: string }>;
+  imageDelete(id: string): Promise<{ ok: boolean; error?: string }>;
+  imageReveal(id: string): Promise<{ ok: boolean; error?: string }>;
+  imageSaveCopy(id: string): Promise<{ ok: boolean; saved?: boolean; path?: string; error?: string }>;
+  imageFolder(): Promise<{ ok: boolean; error?: string }>;
+
   chooseDirectory(opts: { title?: string; current?: string }): Promise<string | undefined>;
   /** Put text on the system clipboard. Main-process, so it works off file://. */
   copy(text: string): Promise<void>;
@@ -391,6 +458,28 @@ export interface KarenApi {
     error?: string;
     /** "database" means Zotero's API was unreachable and the file was read. */
     via?: "api" | "database";
+  }>;
+  /**
+   * What each route into Zotero can do right now, probed on demand.
+   *
+   * Both are always reported, whether or not the other worked: they fail for
+   * unrelated reasons and only one message on screen has meant, for months,
+   * that the wrong one was fixed.
+   */
+  zoteroStatus(): Promise<{
+    ok: boolean;
+    error?: string;
+    api?: { ok: boolean; message: string; collections?: number };
+    file?: {
+      ok: boolean; message: string; items?: number; collections?: number;
+      path?: string; source?: string;
+    };
+    looked?: {
+      path?: string;
+      source?: string;
+      tried: string[];
+      profiles: { path: string; dataDir?: string }[];
+    };
   }>;
   setResearch(config: ResearchConfig): Promise<void>;
   getResearch(): Promise<ResearchConfig>;

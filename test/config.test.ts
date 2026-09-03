@@ -14,7 +14,7 @@ import test from "node:test";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ConfigStore, DEFAULT_SETTINGS } from "../src/core/config.ts";
+import { ConfigStore, DEFAULT_SETTINGS, type Settings } from "../src/core/config.ts";
 import { CONFIG_DIR } from "../src/core/paths.ts";
 
 const SETTINGS = join(CONFIG_DIR, "settings.json");
@@ -49,8 +49,8 @@ test("a missing or corrupt timeout falls back rather than becoming NaN", async (
   await withSettings({ llm: { baseUrl: "http://x/v1" } }, async (store) => {
     assert.equal(store.current.llm.timeoutMs, DEFAULT_SETTINGS.llm.timeoutMs);
   });
-  await withSettings({ transcription: { timeoutMs: "soon" } }, async (store) => {
-    assert.equal(store.current.transcription.timeoutMs, DEFAULT_SETTINGS.transcription.timeoutMs);
+  await withSettings({ embeddings: { timeoutMs: "soon" } }, async (store) => {
+    assert.equal(store.current.embeddings.timeoutMs, DEFAULT_SETTINGS.embeddings.timeoutMs);
   });
 });
 
@@ -59,5 +59,37 @@ test("an endpoint written before it existed keeps its env var", async () => {
   // nowhere to arrive.
   await withSettings({ embeddings: { baseUrl: "http://e/v1" } }, async (store) => {
     assert.equal(store.current.embeddings.envVar, DEFAULT_SETTINGS.embeddings.envVar);
+  });
+});
+
+test("an image size the picker could not have written is not honoured", async () => {
+  /* Shape, not membership: the three sizes Karen offers are what it shows, not
+     what an engine accepts, so 1152x896 from a hand-edited file is fine and
+     "huge" is not -- that string would go straight into a request body. */
+  await withSettings({ image: { model: "sd-turbo", size: "huge" } }, async (store) => {
+    assert.equal(store.current.image.size, DEFAULT_SETTINGS.image.size);
+    assert.equal(store.current.image.model, "sd-turbo");
+  });
+  await withSettings({ image: { size: "1152x896" } }, async (store) => {
+    assert.equal(store.current.image.size, "1152x896");
+  });
+});
+
+test("an image block that is not one falls back to the defaults", async () => {
+  await withSettings({ image: "sd-turbo" }, async (store) => {
+    assert.deepEqual(store.current.image, DEFAULT_SETTINGS.image);
+  });
+});
+
+test("changing the image model does not send the size back with it", async () => {
+  /* The reason update() merges this block rather than replacing it: the picker
+     in the top bar knows which model was chosen and nothing about the size
+     chosen on the page. The cast is what a caller sending half a block looks
+     like from here; the type asks for the whole block precisely so that
+     spreading is the easy path. */
+  await withSettings({ image: { model: "a", size: "1024x1024" } }, async (store) => {
+    await store.update({ image: { model: "b" } } as Partial<Settings>);
+    assert.equal(store.current.image.model, "b");
+    assert.equal(store.current.image.size, "1024x1024");
   });
 });

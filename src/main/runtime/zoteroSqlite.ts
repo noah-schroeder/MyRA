@@ -16,7 +16,7 @@
  */
 
 import { backup, DatabaseSync } from "node:sqlite";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -24,9 +24,12 @@ import { CONFIG_DIR, OWNER_ONLY_DIR } from "../../core/paths.ts";
 
 import {
   BATCH, chunk, collectionCountSql, COLLECTIONS_SQL, creatorsSql, dataDirCandidates, fieldsSql,
-  inCollectionsSql, likeParam, matchSql, rowsSql, SCAN_BUDGET, searchRoots, searchTerms, shapeItem,
-  SKIP_DIRS, tagsSql, ZOTERO_DB, type ItemParts,
+  inCollectionsSql, ITEM_COUNT_SQL, likeParam, matchSql, rowsSql, SCAN_BUDGET, searchRoots,
+  searchTerms, shapeItem, SKIP_DIRS, tagsSql, ZOTERO_DB, type ItemParts,
 } from "../../core/library/zoteroDb.ts";
+import {
+  dataDirFromPrefs, looksLikeProfileDir, parseProfilesIni, PREFS_FILE, PROFILES_INI, profileRoots,
+} from "../../core/library/zoteroProfile.ts";
 import { ZoteroError, type LibraryItem, type SearchMode, type ZoteroCollection } from "../../core/library/zotero.ts";
 
 /**
@@ -41,27 +44,137 @@ function snapshotDir(): string {
 }
 
 /**
- * The data directory, if one of the usual places has a library in it.
+ * The folder the user named in Settings, if they named one.
  *
- * `KAREN_ZOTERO_DIR` wins, for a library kept somewhere else entirely -- Zotero
- * lets the user move it, and guessing is not going to find it.
+ * Held here rather than read from the config store, because this module is on
+ * the path of every library search and must not acquire a dependency on
+ * settings loading first. The main process sets it at startup and on every
+ * change, which is the same lifetime the setting has.
  */
+let chosenDir = "";
+
+export function setZoteroDataDir(dir: string | undefined): void {
+  chosenDir = (dir ?? "").trim();
+}
+
+/** Where a data directory came from, so the user can be told which. */
+export type DirSource = "setting" | "environment" | "profile" | "default" | "search";
+
+export interface DirFinding {
+  path?: string;
+  source?: DirSource;
+  /** Every directory checked, in order, for a report that can be acted on. */
+  tried: string[];
+  /** Profiles read, and what each said. Empty when Zotero has never run here. */
+  profiles: { path: string; dataDir?: string }[];
+}
+
+function hasLibrary(dir: string): boolean {
+  try {
+    return statSync(join(dir, ZOTERO_DB)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The data directory, and how it was arrived at.
+ *
+ * Five ways, in descending order of how much they are worth trusting:
+ *
+ *   1. What the user typed in Settings. Nothing overrules a person saying
+ *      where their own library is.
+ *   2. KAREN_ZOTERO_DIR, the same answer from a launcher or a script.
+ *   3. Zotero's own `extensions.zotero.dataDir`, read from its profile. This
+ *      is not a guess -- it is the value Zotero itself opens on startup -- and
+ *      it is the only thing that finds a library somebody moved to another
+ *      disk, which is what a researcher with a large library does.
+ *   4. The default locations, including the sandboxed ones.
+ *   5. A bounded search of the sandbox homes, for a layout none of the above
+ *      predicted.
+ *
+ * The first two are exclusive on purpose: told explicitly where the library
+ * is, Karen does not go looking somewhere else and quietly read a different
+ * one. It reports that the named folder holds no library, which is a fact the
+ * user can act on.
+ */
+export function locateZoteroDataDir(): DirFinding {
+  const tried: string[] = [];
+  const profiles: { path: string; dataDir?: string }[] = [];
+
+  for (const [dir, source] of [
+    [chosenDir, "setting"],
+    [process.env["KAREN_ZOTERO_DIR"] ?? "", "environment"],
+  ] as const) {
+    if (!dir) continue;
+    tried.push(dir);
+    return hasLibrary(dir) ? { path: dir, source, tried, profiles } : { tried, profiles };
+  }
+
+  const home = process.env["HOME"] ?? homedir();
+
+  /* Zotero's own answer first, because it is the only one that can be right
+     about a library that is not in any of the usual places. */
+  for (const prefs of readProfiles(home, profiles)) {
+    tried.push(prefs);
+    if (hasLibrary(prefs)) return { path: prefs, source: "profile", tried, profiles };
+  }
+
+  for (const dir of dataDirCandidates(home)) {
+    tried.push(dir);
+    if (hasLibrary(dir)) return { path: dir, source: "default", tried, profiles };
+  }
+
+  const found = scanForLibrary();
+  return found ? { path: found, source: "search", tried, profiles } : { tried, profiles };
+}
+
 export function findZoteroDataDir(): string | undefined {
-  const named = process.env["KAREN_ZOTERO_DIR"];
-  const candidates = named
-    ? [named]
-    : dataDirCandidates(process.env["HOME"] ?? homedir());
-  for (const dir of candidates) {
-    try {
-      if (statSync(join(dir, ZOTERO_DB)).isFile()) return dir;
-    } catch {
-      // Not there. The next candidate, or none.
+  return locateZoteroDataDir().path;
+}
+
+/**
+ * Every data directory Zotero's own profiles name, most-default first.
+ *
+ * Records what each profile said as it goes, including the profiles that said
+ * nothing: "Zotero is here and using its default location" and "Zotero has
+ * never run on this machine" look identical from the outside and need
+ * different advice.
+ */
+function readProfiles(home: string, into: { path: string; dataDir?: string }[]): string[] {
+  const out: string[] = [];
+  for (const root of profileRoots(home, process.env)) {
+    for (const dir of profileDirs(root)) {
+      let dataDir: string | undefined;
+      try {
+        dataDir = dataDirFromPrefs(readFileSync(join(dir, PREFS_FILE), "utf8"));
+      } catch {
+        // No prefs.js in it, or unreadable: not a profile Karen can learn from.
+        continue;
+      }
+      into.push(dataDir ? { path: dir, dataDir } : { path: dir });
+      if (dataDir) out.push(dataDir);
     }
   }
-  /* Named explicitly and wrong is not the same as not named: if the user set
-     the variable, that is the answer, and searching elsewhere would quietly
-     read a library they did not point at. */
-  return named ? undefined : scanForLibrary();
+  return out;
+}
+
+/** The profile folders under one root: what the ini says, else the usual names. */
+function profileDirs(root: string): string[] {
+  const found: string[] = [];
+  try {
+    found.push(...parseProfilesIni(readFileSync(join(root, PROFILES_INI), "utf8"), root));
+  } catch {
+    // No ini, or unreadable. The conventional names below still apply.
+  }
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory() && looksLikeProfileDir(entry.name)) found.push(join(root, entry.name));
+    }
+  } catch {
+    // No such root, which is the normal case for every platform but one.
+  }
+  return [...new Set(found)];
 }
 
 /**
@@ -192,17 +305,52 @@ export function forgetZoteroSnapshot(): void {
   taken = undefined;
 }
 
+/**
+ * What to say when there is no library file to read either.
+ *
+ * Written from what was actually looked at rather than from a fixed list,
+ * because the two cases need opposite advice: a Zotero whose profile Karen
+ * read and whose folder simply is not there has moved, and a machine with no
+ * profile at all has no Zotero on it. Both end with the one thing the user can
+ * do about it, which is a folder picker in Settings and not an environment
+ * variable they would have to relaunch the app to set.
+ */
+export function noLibraryHere(found: DirFinding, opts: { paths?: boolean } = {}): string {
+  const named = found.tried.length === 1 && (found.source === undefined) && !found.profiles.length;
+  const head = named
+    ? `There is no ${ZOTERO_DB} in ${found.tried[0]}.`
+    : found.profiles.length
+      ? "Zotero has run on this machine, but Karen could not find its library file."
+      : "Karen could not find a Zotero library on this machine, and found no Zotero profile either.";
+  const said = found.profiles
+    .filter((p) => p.dataDir)
+    .map((p) => p.dataDir!)
+    .join(", ");
+  /* The panel in Settings lists every path it tried, right underneath this
+     message, so repeating them here turns a two-line diagnosis into a wall of
+     absolute paths and buries the sentence that says what to do. The tool's
+     error has no such list, and names the first few. */
+  const rest = found.tried.length - 3;
+  return [
+    "Zotero's local API did not answer, so Karen tried to read the library file instead. " + head,
+    said ? `Zotero's own settings say the library is in ${said}, and it is not there now.` : "",
+    opts.paths
+      ? `It looked in: ${found.tried.slice(0, 3).join(", ")}${rest > 0 ? `, and ${rest} more` : ""}.`
+      : "",
+    opts.paths
+      ? "If your library is somewhere else — a second disk, or a synced folder — set it in " +
+        "Settings → Library, where there is a folder picker and a check that says what it found."
+      : "If your library is somewhere else — a second disk, or a synced folder — choose the " +
+        "folder below.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 async function open(): Promise<{ db: DatabaseSync; dataDir: string }> {
-  const dataDir = findZoteroDataDir();
-  if (!dataDir) {
-    throw new ZoteroError(
-      "Zotero's local API did not answer, and Karen could not find a Zotero data directory to " +
-        "read instead. It looked in " +
-        dataDirCandidates("~").join(", ") +
-        ". If your library is somewhere else, start Karen with KAREN_ZOTERO_DIR set to that " +
-        "folder — the one containing zotero.sqlite.",
-    );
-  }
+  const found = locateZoteroDataDir();
+  const dataDir = found.path;
+  if (!dataDir) throw new ZoteroError(noLibraryHere(found, { paths: true }));
   try {
     const path = await snapshot(dataDir);
     return { db: new DatabaseSync(path, { readOnly: true }), dataDir };
@@ -357,3 +505,43 @@ export async function searchDb(opts: {
 
 /** Exported for the tests, which need the batch size to exceed it on purpose. */
 export const SQLITE_BATCH = BATCH;
+
+/**
+ * What the file route can actually do right now, in numbers.
+ *
+ * Separate from a search because it answers a different question: not "what
+ * matches" but "is this the library I think it is". It counts rather than
+ * describing, because a count is the one thing a user can check against what
+ * Zotero shows them.
+ */
+export async function inspectLibraryFile(): Promise<{
+  found: DirFinding;
+  ok: boolean;
+  message: string;
+  items?: number;
+  collections?: number;
+}> {
+  const found = locateZoteroDataDir();
+  if (!found.path) return { found, ok: false, message: noLibraryHere(found) };
+  try {
+    const { db } = await open();
+    try {
+      const row = db.prepare(ITEM_COUNT_SQL).get() as { n?: unknown } | undefined;
+      const items = typeof row?.n === "number" ? row.n : 0;
+      const collections = (db.prepare(COLLECTIONS_SQL).all() as unknown[]).length;
+      return {
+        found,
+        ok: true,
+        message: `Read ${items} item${items === 1 ? "" : "s"} and ${collections} collection${
+          collections === 1 ? "" : "s"
+        } from ${join(found.path, ZOTERO_DB)}.`,
+        items,
+        collections,
+      };
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    return { found, ok: false, message: (err as Error).message };
+  }
+}

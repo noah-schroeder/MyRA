@@ -27,6 +27,8 @@ function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
 }
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "./paths.ts";
 import { isLocalHost } from "./destinations.ts";
+import { DEFAULT_VOICE, voiceForModel } from "./audio/voices.ts";
+import { DEFAULT_SIZE, sizeIsValid } from "./images/sizes.ts";
 
 const SETTINGS_PATH = join(CONFIG_DIR, "settings.json");
 
@@ -47,12 +49,77 @@ export interface EndpointSettings {
 
 export type Theme = "dark" | "light";
 
+/**
+ * The two audio models, and the voice one of them speaks in.
+ *
+ * Stored as REFERENCES rather than as endpoints, which is the whole of the
+ * change this block represents. Transcription used to be a base URL, an API key
+ * and a model name typed into a form -- a third way of configuring a model,
+ * beside the local runtime and Providers, and the only one where a person had
+ * to know that the thing on this machine answers at `/v1` and is called
+ * `Whisper-Base` rather than `whisper-1`. A bare id here is a model the local
+ * daemon runs; `provider::model` is one of the user's own providers. Exactly the
+ * shape the chat model already uses, and for the same reason: it is the one
+ * field that can answer both "which model" and "does this leave the machine".
+ */
+export interface AudioSettings {
+  /** What turns speech into text, for dictation and for meetings. */
+  transcriptionModel: string;
+  /** What turns text into speech. Empty means Karen never speaks. */
+  voiceModel: string;
+  /** Which voice, for a model that has more than one. */
+  voice: string;
+  /** 0.5 to 2. Applied only when it is not 1, so a default sends no field. */
+  speed: number;
+  /**
+   * Whether the chat screen is in the hands-free mode.
+   *
+   * Persisted deliberately. It is a toggle on the chat bar rather than a
+   * settings row, but someone who talks to Karen talks to it every day, and a
+   * mode that resets each launch is a mode that has to be switched on before
+   * every conversation.
+   */
+  speechToSpeech: boolean;
+}
+
+/**
+ * The image model, and how big to draw.
+ *
+ * A reference like the audio ones, for the same reason: one field that answers
+ * both "which model" and "does this leave the machine". Everything else about
+ * a generation -- the prompt, what to avoid, which preset -- belongs to the
+ * generation and not to the settings, so it is not here.
+ */
+export interface ImageSettings {
+  /** Empty means none is chosen and the page says so. */
+  model: string;
+  /** `512x512`. Empty is legal and lets the engine pick. */
+  size: string;
+}
+
 export interface Settings {
   permissionMode: PermissionMode;
   /** Dark is the default; the whole palette is defined for both. */
   theme: Theme;
   llm: EndpointSettings;
-  transcription: EndpointSettings;
+  /** The two speech models and the voice. See AudioSettings. */
+  audio: AudioSettings;
+  /** The image model and its size. See ImageSettings. */
+  image: ImageSettings;
+  /**
+   * The transcription endpoint as it was configured before `audio` existed.
+   *
+   * Present for one purpose: to be migrated away from. On the first launch
+   * after the upgrade the main process turns a configured endpoint into an
+   * ordinary provider -- which is what it always was -- moves its key across,
+   * points `audio.transcriptionModel` at it, and clears this. Nothing else
+   * reads it, and once it is empty it stays empty.
+   *
+   * Deleting the field outright was the alternative, and it would have silently
+   * unconfigured transcription for anyone who had pointed Karen at their own
+   * whisper server. A migration that runs once is cheaper than that surprise.
+   */
+  legacyTranscription?: EndpointSettings | undefined;
   /**
    * The embeddings endpoint, separate from the chat one.
    *
@@ -61,6 +128,19 @@ export interface Settings {
    * answers /embeddings rather than /chat/completions.
    */
   embeddings: EndpointSettings;
+  /**
+   * Where the user's Zotero library is, when Karen cannot work it out itself.
+   *
+   * Empty is the normal case and means "find it": Zotero's own profile is read
+   * first, then the default locations. This field is for the library that is
+   * on a second disk or in a synced folder, which is exactly the library a
+   * researcher with twenty years of papers has -- and, before this existed,
+   * the one Karen could only report as "Zotero does not appear to be
+   * reachable", which is the message for an entirely different problem.
+   *
+   * A path, not a file: the folder holding zotero.sqlite.
+   */
+  zoteroDataDir: string;
   /** Inside the VM: where the agent may write freely. */
   workspaceRoot: string;
   /** On the host: the Obsidian vault, and the subtree the agent may write to. */
@@ -75,6 +155,8 @@ export interface Settings {
   deleteRawAudioAfterTranscription: boolean;
   /** On the host: where meeting recordings are kept. */
   meetingsRoot: string;
+  /** On the host: where generated images and their sidecars are kept. */
+  imagesRoot: string;
   /** Vault-relative directory the meeting notes are filed in. */
   meetingReportDir: string;
   /**
@@ -133,12 +215,103 @@ export interface Settings {
   sampling: Record<string, Sampling>;
 }
 
+export const DEFAULT_AUDIO: AudioSettings = {
+  /* Empty rather than a name like `Whisper-Base`: a default naming a model that
+     is not downloaded would make every fresh install fail its first dictation
+     with "no such model" instead of saying that none has been chosen. */
+  transcriptionModel: "",
+  voiceModel: "",
+  voice: DEFAULT_VOICE,
+  speed: 1,
+  speechToSpeech: false,
+};
+
+export const DEFAULT_IMAGE: ImageSettings = {
+  /* Empty for the same reason DEFAULT_AUDIO is: a default naming a model that
+     is not downloaded would make every fresh install fail its first
+     generation with "no such model" instead of saying none has been chosen. */
+  model: "",
+  size: DEFAULT_SIZE,
+};
+
+/**
+ * The image block, rebuilt field by field.
+ *
+ * The size is validated for SHAPE rather than against the offered list: the
+ * three sizes in sizes.ts are what Karen shows, not what an engine accepts, and
+ * a model that wants 1152x896 should not be overruled by a table. What is
+ * rejected is a value that is not a size at all, which can only have come from
+ * an edited file.
+ */
+function parseImage(raw: unknown): ImageSettings {
+  const base = DEFAULT_IMAGE;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...base };
+  const row = raw as Record<string, unknown>;
+  const model = typeof row["model"] === "string" ? (row["model"] as string).trim().slice(0, 300) : base.model;
+  const size = typeof row["size"] === "string" ? (row["size"] as string).trim().slice(0, 20) : base.size;
+  return { model, size: sizeIsValid(size) ? size : base.size };
+}
+
+/**
+ * The audio block, rebuilt field by field.
+ *
+ * The same discipline the providers list gets: these values are model names and
+ * a voice that go straight into a request body, and a settings file is
+ * something a person can edit. A number where a string belongs would otherwise
+ * reach `JSON.stringify` and come back as a 400 nobody can trace to a file.
+ */
+function parseAudio(raw: unknown): AudioSettings {
+  const base = DEFAULT_AUDIO;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...base };
+  const row = raw as Record<string, unknown>;
+  const text = (key: string, fallback: string): string =>
+    typeof row[key] === "string" ? (row[key] as string).trim().slice(0, 300) : fallback;
+  const speed = Number(row["speed"]);
+  const voiceModel = text("voiceModel", base.voiceModel);
+  return {
+    transcriptionModel: text("transcriptionModel", base.transcriptionModel),
+    voiceModel,
+    /* Reconciled with the model, not merely read. The two are set from
+       different screens -- the model from the chat bar or the Audio pane, the
+       voice from the Audio pane alone -- so a voice left over from the
+       previous engine would otherwise be sent to one that has never heard of
+       it, and every answer would fail with a bare 500. */
+    voice: voiceForModel(voiceModel, text("voice", base.voice)),
+    /* Clamped rather than trusted. Kokoro accepts a `speed` it cannot honour
+       and returns audio nobody can follow; the slider stops at these bounds,
+       so anything outside them came from a file. */
+    speed: Number.isFinite(speed) && speed >= 0.5 && speed <= 2 ? speed : base.speed,
+    speechToSpeech: row["speechToSpeech"] === true,
+  };
+}
+
+/**
+ * The pre-`audio` transcription endpoint, read from the key the old build wrote.
+ *
+ * Typed as unknown and dug out by hand because `transcription` is no longer
+ * part of Settings: this is the one place that still knows the name, which is
+ * what a migration source should look like. An endpoint with no base URL was
+ * never configured and is not worth migrating.
+ */
+function legacyEndpoint(raw: unknown): EndpointSettings | undefined {
+  const row = (raw as Record<string, unknown> | null)?.["transcription"];
+  if (!row || typeof row !== "object") return undefined;
+  const stored = row as Partial<EndpointSettings>;
+  if (typeof stored.baseUrl !== "string" || !stored.baseUrl.trim()) return undefined;
+  return endpoint(
+    { baseUrl: "", envVar: "KAREN_TRANSCRIPTION_KEY", model: "whisper-1", timeoutMs: 120_000 },
+    stored,
+  );
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   permissionMode: "guarded",
   theme: "dark",
   llm: { baseUrl: "", envVar: "KAREN_LLM_KEY", timeoutMs: 120_000 },
-  transcription: { baseUrl: "", envVar: "KAREN_TRANSCRIPTION_KEY", model: "whisper-1", timeoutMs: 120_000 },
+  audio: { ...DEFAULT_AUDIO },
+  image: { ...DEFAULT_IMAGE },
   embeddings: { baseUrl: "", envVar: "KAREN_EMBED_KEY", model: "", timeoutMs: 120_000 },
+  zoteroDataDir: "",
   workspaceRoot: join(homedir(), "Documents", "karen"),
   vaultRoot: "",
   vaultWriteSubdir: "Karen",
@@ -147,6 +320,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dictationLanguage: "",
   deleteRawAudioAfterTranscription: false,
   meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
+  imagesRoot: join(homedir(), "Documents", "karen", "images"),
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
   meetingInstructions: "",
@@ -198,12 +372,33 @@ export class ConfigStore {
   async load(): Promise<Settings> {
     try {
       const raw = await readFile(SETTINGS_PATH, "utf8");
-      const parsed = JSON.parse(raw) as Partial<Settings>;
+      const parsed = JSON.parse(raw) as Partial<Settings> & Record<string, unknown>;
+      /*
+       * The old key is taken OUT of what gets spread, not merely read from it.
+       *
+       * `...parsed` copies whatever is in the file, including keys `Settings`
+       * no longer declares -- TypeScript drops them from the type and nothing
+       * drops them from the object. So `transcription` survived the load, was
+       * written back out by the next save, and was lifted into
+       * `legacyTranscription` again on the launch after that: the migration ran
+       * every single time, minting another "Transcription (imported)" provider
+       * on each one. Caught by the test that asserts the migration's own effect
+       * is what stops it repeating.
+       */
+      const { transcription: _migrated, ...stored } = parsed;
       this.#settings = {
         ...DEFAULT_SETTINGS,
-        ...parsed,
+        ...stored,
         llm: endpoint(DEFAULT_SETTINGS.llm, parsed.llm),
-        transcription: endpoint(DEFAULT_SETTINGS.transcription, parsed.transcription),
+        /* Field by field, like the providers list and for the same reason: a
+           settings file is something a person can edit, and a voice or a model
+           reference read straight out of it would be sent to an endpoint. */
+        audio: parseAudio(parsed.audio),
+        image: parseImage(parsed.image),
+        /* Read from the key the old build wrote. `transcription` is not part of
+           Settings any more, so this is the only thing that still knows the
+           name -- which is exactly what a migration source should be. */
+        legacyTranscription: legacyEndpoint(parsed),
         // Merged per key like the others: a settings file written before this
         // endpoint existed, or holding only a baseUrl, would otherwise drop
         // envVar and leave the key with nowhere to arrive.
@@ -226,7 +421,16 @@ export class ConfigStore {
       ...this.#settings,
       ...patch,
       llm: { ...this.#settings.llm, ...patch.llm },
-      transcription: { ...this.#settings.transcription, ...patch.transcription },
+      /* Merged, so the chat bar can change the voice model without having to
+         send the voice and the speed back with it. */
+      ...(patch.audio ? { audio: parseAudio({ ...this.#settings.audio, ...patch.audio }) } : {}),
+      /* Merged too, so the image bar can change the model without sending the
+         size back with it. */
+      ...(patch.image ? { image: parseImage({ ...this.#settings.image, ...patch.image }) } : {}),
+      /* `undefined` is a value here, not an omission: clearing this is how the
+         migration records that it is done, and a spread that skipped it would
+         run the migration again on every launch. */
+      ...("legacyTranscription" in patch ? { legacyTranscription: patch.legacyTranscription } : {}),
       // Replaced wholesale, not merged: removing a provider is a thing the user
       // must be able to do, and a merge cannot express a deletion.
       ...(patch.providers ? { providers: parseProviders(patch.providers) } : {}),
@@ -277,7 +481,6 @@ export function configuredEndpoints(
     rows.push({ label, url, local });
   };
   add("Chat and reasoning", settings.llm.baseUrl);
-  add("Transcription", settings.transcription.baseUrl);
   add("Embeddings", settings.embeddings.baseUrl);
   /* Providers belong here for the same reason the three above do, and more
      urgently: a privacy report that listed only the built-in endpoints while a
