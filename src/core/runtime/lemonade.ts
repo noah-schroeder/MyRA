@@ -351,6 +351,32 @@ export function pinnedConfig(modelsDir?: string): Record<string, unknown> {
      * in it appeared, both marked as already present.
      */
     ...(modelsDir ? { extra_models_dir: modelsDir } : {}),
+    /*
+     * Let the image engine use the card it can actually get.
+     *
+     * Without this, stable-diffusion.cpp asks for the whole diffusion model as
+     * one contiguous VRAM allocation and aborts when it cannot have it:
+     *
+     *     allocating 1411.07 MiB on device 0: cudaMalloc failed: out of memory
+     *
+     * on an 8 GB card that was busy holding a chat model, a Whisper and a
+     * Kokoro -- reported, and reproduced by running the engine by hand,
+     * because the daemon discards its engine's stderr. Lemonade will not free
+     * the card for it: `max_loaded_models` is 1 but applies per TYPE, so it
+     * holds one of each kind and never evicts across pools.
+     *
+     * `--auto-fit` is the engine's own answer, and it is the right one --
+     * "pick the diffusion/te/vae device placements automatically from the
+     * model size and the per-device memory budgets ... defaults to free memory
+     * minus a small margin". A full card means some of the model runs from
+     * RAM, slowly, instead of the generation failing. Measured on a card with
+     * room: 33.6 s with the flag against 33.1 s without, which is noise.
+     *
+     * Merged rather than replacing the block, so Lemonade's own per-backend
+     * arguments -- the Vulkan build gets `--vae-tiling --diffusion-fa` -- are
+     * still added alongside it.
+     */
+    sdcpp: { args: "--auto-fit" },
   };
 }
 

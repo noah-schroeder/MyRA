@@ -136,6 +136,23 @@ describe("mergeConfig", () => {
     assert.equal(out["auto_check_model_updates"], false);
   });
 
+  it("lets the image engine fit itself to whatever VRAM is free", () => {
+    /* Without it, stable-diffusion.cpp demands the diffusion model as one
+       contiguous allocation and aborts: "allocating 1411.07 MiB on device 0:
+       cudaMalloc failed: out of memory" on an 8 GB card already holding a chat
+       model, a Whisper and a Kokoro. Lemonade will not free the card for it --
+       max_loaded_models is 1 per TYPE, so it holds one of each and never
+       evicts across pools. */
+    assert.deepEqual(pinnedConfig()["sdcpp"], { args: "--auto-fit" });
+  });
+
+  it("keeps the engine's other settings while adding that one", () => {
+    /* The block is merged, not replaced: `backend` and `steps` are the
+       daemon's own and losing them would change how every image is made. */
+    const merged = mergeConfig({ sdcpp: { backend: "cuda", steps: 20 } });
+    assert.deepEqual(merged["sdcpp"], { backend: "cuda", steps: 20, args: "--auto-fit" });
+  });
+
   it("does not discard the rest of the telemetry block while disabling it", () => {
     /* A shallow merge would drop hide_inputs and the otlp settings, which are
        the controls someone would have set deliberately. */
