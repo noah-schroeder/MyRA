@@ -44,9 +44,64 @@ export const ROLE_LABELS: Record<MediaRole, readonly string[]> = {
   image: ["image"],
 };
 
+/**
+ * Every label that means "this is not something you hold a conversation with".
+ *
+ * The chat picker's version of `isForRole`, and it has to be a denial rather
+ * than an allow-list: chat models carry `chat`, `reasoning`, `vision`, `tools`
+ * and more besides, and a model with none of them is far more likely to be a
+ * chat model whose entry is thin than a diffusion model in disguise.
+ */
+export const MEDIA_LABELS: ReadonlySet<string> = new Set([
+  ...ROLE_LABELS.transcription, ...ROLE_LABELS.voice, ...ROLE_LABELS.image, "embedding",
+]);
+
 export function isForRole(labels: readonly string[] | undefined, role: MediaRole): boolean {
   const wanted = ROLE_LABELS[role];
   return (labels ?? []).some((label) => wanted.includes(label));
+}
+
+/**
+ * What a PROVIDER's model looks like it is for, from its name alone.
+ *
+ * Guessing is exactly what this module's header says not to do, and the
+ * reasoning still holds — for local models, where `labels` is a fact the
+ * daemon reports. A provider offers no such field: `/v1/models` is a list of
+ * ids and nothing else, so the only alternatives to guessing are to show every
+ * model for every job or to make the user classify their whole catalogue by
+ * hand. The first is what the pickers did, and it put `gpt-4o` in the list of
+ * things that could transcribe a meeting and `whisper-1` in the list of things
+ * that could hold a conversation.
+ *
+ * So: a guess, but never a fence. Everything it excludes stays one click away
+ * in the menu (see ModelMenu), and a model already chosen is never hidden —
+ * the guess decides what is offered FIRST, not what exists.
+ *
+ * Ordered, and deliberately: `gpt-4o-transcribe` and `gpt-4o-mini-tts` both
+ * contain a chat model's name, so the specific patterns are tested before
+ * anything is called chat.
+ */
+const ROLE_HINTS: readonly (readonly [MediaRole, RegExp])[] = [
+  ["transcription", /whisper|transcrib|speech[-_ ]?to[-_ ]?text|(^|[^a-z])stt([^a-z]|$)|moonshine|deepgram|nova-\d|scribe|canary|parakeet/i],
+  ["voice", /(^|[^a-z])tts([^a-z]|$)|text[-_ ]?to[-_ ]?speech|speech-\d|voice|kokoro|eleven|sonic|orpheus|bark/i],
+  ["image", /image|dall[-_ ]?e|diffusion|(^|[^a-z])sd(xl)?([^a-z]|$)|flux|imagen|midjourney|firefly|ideogram|recraft/i],
+];
+
+/** The job a provider's model id suggests, or "chat" when nothing suggests otherwise. */
+export function guessRole(model: string): MediaRole | "chat" {
+  for (const [role, pattern] of ROLE_HINTS) if (pattern.test(model)) return role;
+  return "chat";
+}
+
+/**
+ * Whether a provider's model belongs in the list for this job.
+ *
+ * "chat" is a role here too, because the chat picker has the same problem in
+ * the other direction: a provider's whole catalogue was offered as models to
+ * hold a conversation with, `tts-1` and `whisper-1` included.
+ */
+export function fitsRole(model: string, role: MediaRole | "chat"): boolean {
+  return guessRole(model) === role;
 }
 
 /** One choice a picker can offer. */
@@ -67,6 +122,14 @@ export interface ModelOption {
   sizeBytes?: number | undefined;
   /** Currently held in memory by the daemon. */
   loaded?: boolean;
+  /**
+   * Whether this looks like a model for the job that was asked about.
+   *
+   * Always true for a local model, where the daemon's labels settle it. For a
+   * provider's model it is `guessRole`'s answer, and false means "offered
+   * second, behind one click" — never "hidden".
+   */
+  fits?: boolean;
   /**
    * The engine a local model runs on: `whispercpp`, `kokoro`, `sd-cpp`…
    *

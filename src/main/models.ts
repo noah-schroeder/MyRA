@@ -18,7 +18,7 @@
 
 import type { ConfigStore, EndpointSettings } from "../core/config.ts";
 import {
-  isForRole, isProviderRef, modelIdOf, type MediaRole, type ModelOption,
+  fitsRole, isForRole, isProviderRef, modelIdOf, type MediaRole, type ModelOption,
 } from "../core/models/roles.ts";
 import { explainIfLoadFailure } from "../core/models/loadFailure.ts";
 import {
@@ -210,6 +210,11 @@ export async function modelOptions(
         where: "provider",
         providerLabel: provider.label || provider.baseUrl,
         external: isExternal(provider),
+        /* A guess, and the only signal there is: a provider lists ids and no
+           capabilities. It decides what the menu shows FIRST -- everything
+           else stays behind one click there -- so a wrong guess costs a click
+           rather than a model. */
+        fits: fitsRole(model, role),
       });
     }
   }

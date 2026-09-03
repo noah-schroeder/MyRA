@@ -1284,7 +1284,20 @@ body:has(.artifact-grip:active) { user-select: none; }
   border-radius: var(--radius);
   padding: 10px 13px;
   font-size: 13px;
+  /* The message takes the width and the dismiss sits at the end of it, so a
+     long error wraps against the button rather than under it. */
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
+.error > span { flex: 1; }
+.error-close {
+  font: inherit; font-size: 15px; line-height: 1;
+  background: none; border: none; cursor: pointer;
+  color: inherit; opacity: 0.65;
+  padding: 0 2px; flex: none;
+}
+.error-close:hover { opacity: 1; }
 
 /* ---------- sources ---------- */
 
@@ -4504,3 +4517,20 @@ p.warning { margin: 0; font-size: 12.5px; }
 .image-negative { flex: 1 1 200px; min-width: 0; font-size: 12.5px; }
 .image-size { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .image-size select { font-size: 12px; }
+
+/* "Show the rest of this provider's models." A guess about what a model is for
+   decides what a menu offers first; this is what keeps it from being a fence. */
+.modelmenu-more {
+  width: 100%;
+  text-align: left;
+  font: inherit; font-size: 11.5px;
+  padding: 6px 12px 10px;
+  background: none; border: none;
+  color: var(--text-faint); cursor: pointer;
+}
+.modelmenu-more:hover { color: var(--text-dim); }
+
+/* "Eject" in a model menu: it acts on what the daemon is holding now, which is
+   a different kind of thing from the rows above it that change a setting. */
+.modelmenu-eject { display: flex; flex-direction: column; }
+.modelmenu-eject button { text-align: left; }

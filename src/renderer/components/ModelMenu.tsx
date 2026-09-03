@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ModelOption, AudioProgress } from "../types.ts";
 import { shortModelName as shorten } from "../../core/runtime/foreign.ts";
 import { modelNamer } from "../../core/models/roles.ts";
@@ -59,14 +60,31 @@ export function ModelMenu({
   footer: React.ReactNode;
   onChoose: (option: ModelOption) => void;
 }) {
+  /* Per provider, because one may be a whole catalogue of chat models and the
+     next may be a single Whisper. Kept in state so the list does not collapse
+     under someone the moment the options refresh. */
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
+
   const locals = options.filter((o) => o.where === "local");
   const downloaded = locals.filter((o) => o.downloaded);
   const available = locals.filter((o) => !o.downloaded);
+  /*
+   * A provider's models, split by whether they look like the job in hand.
+   *
+   * A provider publishes ids and no capabilities, so every model was offered
+   * for every job: `gpt-4o` among the things that could transcribe a meeting,
+   * `whisper-1` among the things that could hold a conversation. The guess is
+   * not a fence -- what it excludes is one click away, and the model already
+   * chosen is never hidden, because a list that silently omitted the current
+   * choice would be a list that looks like it forgot.
+   */
   const providers = options.filter((o) => o.where === "provider");
-  const byProvider = new Map<string, ModelOption[]>();
+  const byProvider = new Map<string, { fits: ModelOption[]; rest: ModelOption[] }>();
   for (const option of providers) {
     const key = option.providerLabel ?? "Provider";
-    byProvider.set(key, [...(byProvider.get(key) ?? []), option]);
+    const group = byProvider.get(key) ?? { fits: [], rest: [] };
+    (option.fits === false && option.ref !== chosen ? group.rest : group.fits).push(option);
+    byProvider.set(key, group);
   }
 
   const name = modelNamer(options.map((o) => o.model), shorten);
@@ -133,15 +151,29 @@ export function ModelMenu({
         </>
       ) : null}
 
-      {[...byProvider].map(([provider, models]) => (
+      {[...byProvider].map(([provider, group]) => (
         <div key={provider}>
           <p className="modelmenu-head">{provider}</p>
-          {models.some((m) => m.external) ? (
+          {[...group.fits, ...group.rest].some((m) => m.external) ? (
             <p className="modelmenu-warn" role="note">
               {externalWarning}
             </p>
           ) : null}
-          <ul className="modelmenu-list">{models.map(row)}</ul>
+          <ul className="modelmenu-list">
+            {group.fits.map(row)}
+            {showAll.has(provider) ? group.rest.map(row) : null}
+          </ul>
+          {group.rest.length && !showAll.has(provider) ? (
+            <button
+              type="button"
+              className="modelmenu-more"
+              onClick={() => setShowAll((seen) => new Set(seen).add(provider))}
+            >
+              {group.fits.length
+                ? `Show ${group.rest.length} more from this provider`
+                : `Nothing here looks right for this — show all ${group.rest.length}`}
+            </button>
+          ) : null}
         </div>
       ))}
 

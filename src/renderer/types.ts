@@ -413,6 +413,8 @@ export interface KarenApi {
   /* ---- audio ---- */
   audioModels(role: AudioRole): Promise<{ ok: boolean; options: AudioOption[]; error?: string }>;
   audioLoad(model: string): Promise<{ ok: boolean; error?: string }>;
+  /** Let go of a loaded speech model, by name, freeing what it holds. */
+  audioUnload(model: string): Promise<{ ok: boolean; error?: string }>;
   onAudioProgress(cb: (p: AudioProgress) => void): () => void;
   /** The spoken form of an answer, as bytes to play. */
   speak(text: string): Promise<{ ok: boolean; audio?: Uint8Array; mime?: string; error?: string }>;

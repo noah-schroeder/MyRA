@@ -35,7 +35,7 @@ import type { CitedSource, PromptRequest, Settings } from "./types.ts";
 type Page = "chat" | "runs" | "models" | "meetings" | "images" | "api";
 
 export function App() {
-  const { items, busy, usage, error, sources, send, abort, reset } = useAgent();
+  const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   /* Which tab Settings opens on, when something sent you there for a reason. */
@@ -485,7 +485,16 @@ export function App() {
           {sources.size > 0 ? <SourceList sources={sources} /> : null}
           {error ? (
             <p className="error" role="alert">
-              {error}
+              <span>{error}</span>
+              <button
+                type="button"
+                className="error-close"
+                aria-label="Dismiss this error"
+                title="Dismiss"
+                onClick={dismissError}
+              >
+                ×
+              </button>
             </p>
           ) : null}
           <div ref={bottom} />

@@ -243,8 +243,22 @@ export class LemonadeApi {
     await this.#post("/load", { model_name: modelName }, 30 * 60_000);
   }
 
-  async unloadModel(): Promise<void> {
-    await this.#post("/unload", {});
+  /**
+   * Let go of a model, naming it when the caller has one in mind.
+   *
+   * The daemon holds several at once on separate backends -- chat on one port,
+   * Whisper on another -- so "unload" without a name is ambiguous in a way it
+   * was not when only chat existed.
+   *
+   * `model_name` is the field, and the daemon does read it: asked to unload a
+   * model it is not holding, lemond 11.8.0 answers
+   * `404 {"error":"Model not loaded: Whisper-Base"}` -- naming the model back,
+   * which it could only do by having looked that model up. Measured, because
+   * the alternative was an eject button that might have taken the
+   * conversation's model down with it.
+   */
+  async unloadModel(modelName?: string): Promise<void> {
+    await this.#post("/unload", modelName ? { model_name: modelName } : {});
   }
 
   /**
