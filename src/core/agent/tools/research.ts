@@ -175,6 +175,29 @@ export function setResearchHost(installed: ResearchHost): void {
   host = installed;
 }
 
+/**
+ * The deep run already done in this turn, if there was one.
+ *
+ * A deep run is minutes of work and several dialogs, and the model is free to
+ * call the tool again after reading its own result. It did: reported three
+ * times over on one question, each time from zero -- a fresh run directory, so
+ * the scoping questions came back, then the plan, with only slight edits
+ * between them. The stage-skipping in `ResearchRun` cannot help, because
+ * nothing was being resumed; each call created a new run.
+ *
+ * That also broke the workflow the feature exists for. Everything the pipeline
+ * asks a person happens in its first two stages -- checked, there is no `ui`
+ * call after the plan is approved -- so approving a plan and walking away
+ * should be exactly how this is used. Re-entering the tool put a dialog in
+ * front of an empty chair, where it waited.
+ */
+let doneThisTurn: { question: string; runId: string } | undefined;
+
+/** Called at the start of each turn; a new turn may research again. */
+export function beginResearchTurn(): void {
+  doneThisTurn = undefined;
+}
+
 
 async function deepRun(
   question: string,
@@ -189,7 +212,26 @@ async function deepRun(
   }
   if (!question.trim()) throw new Error("deep_research was given no question");
 
+  /*
+   * One deep run per turn, and the refusal is addressed to the model.
+   *
+   * Returned rather than thrown: a thrown tool error invites a retry, and the
+   * thing to prevent is precisely a retry. This tells it the work is done and
+   * where the answer is, which is what it needed to know to stop.
+   */
+  if (doneThisTurn) {
+    return {
+      content:
+        `A deep research run has already completed in this turn, on: "${doneThisTurn.question}". ` +
+        "Its full report and bibliography are in the earlier tool result. Answer from that " +
+        "report — do not run the research again. If the user wants a different question " +
+        "researched, they will ask in a new message.",
+      detail: { runId: doneThisTurn.runId, reused: true },
+    };
+  }
+
   const run = await ResearchRun.create(question);
+  doneThisTurn = { question: question.trim(), runId: run.id };
   {
     const result = await runPipeline({
       question,

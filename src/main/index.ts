@@ -20,7 +20,8 @@ import { isSecretName, SecretVault, type SecretName } from "./secrets.ts";
 import { ToolRegistry } from "../core/agent/registry.ts";
 import { runTurn, type AgentEvent } from "../core/agent/loop.ts";
 import { decide } from "../core/policy.ts";
-import { RESEARCH_TOOL_DEFS, setResearchHost } from "../core/agent/tools/research.ts";
+import { RESEARCH_TOOL_DEFS, setResearchHost, beginResearchTurn,
+} from "../core/agent/tools/research.ts";
 import {
   DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
 } from "../core/agent/tools/documents.ts";
@@ -525,6 +526,11 @@ async function handleSend(text: string): Promise<void> {
 
   inFlight?.abort();
   inFlight = new AbortController();
+  /* One deep research run per turn. The model is otherwise free to call the
+     tool again after reading its own report, and did -- three times on one
+     question, each from zero, so the scoping questions and the plan came back
+     each time in front of a user who had been told they could walk away. */
+  beginResearchTurn();
 
   try {
     /*
