@@ -20,7 +20,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  explainIfLoadFailure, explainLoadFailure, loadFailureIn,
+  explainIfLoadFailure, explainLoadFailure, loadFailureIn, producedNothing,
 } from "../src/core/models/loadFailure.ts";
 
 /** The body exactly as the daemon sent it. */
@@ -170,5 +170,40 @@ describe("which of the three failures this was", () => {
     });
     assert.match(said, /installed separately/);
     assert.match(said, /failing to start/);
+  });
+});
+
+describe("an engine that answers with nothing", () => {
+  /* The reported body, from the daemon: an sd-cpp server on the CUDA backend
+     that started, passed its readiness check, and returned this in 250 ms. The
+     same request on the Vulkan backend took 33 seconds and returned a PNG, so
+     an instant empty answer is a backend fault, not a slow model. */
+  const REPORTED_IMAGE =
+    'Generating the image failed: 500 Internal Server Error — {"error":{"details":{"backend":' +
+    '"sd-server","response":{"error":"generate_image returned no results"}},"message":' +
+    '"generate_image returned no results","status_code":500,"type":"backend_error"}}';
+
+  it("recognises it, and does not mistake it for a model that would not load", () => {
+    assert.equal(producedNothing(REPORTED_IMAGE), true);
+    assert.equal(loadFailureIn(REPORTED_IMAGE), undefined);
+  });
+
+  it("says the engine is there and points at the backend instead", () => {
+    const said = explainIfLoadFailure(REPORTED_IMAGE, { role: "image", engine: "sd-cpp" });
+    assert.ok(said);
+    assert.match(said, /sd-cpp engine/);
+    assert.match(said, /nothing is missing/);
+    assert.match(said, /Settings → Runtime/);
+    assert.match(said, /Vulkan/);
+    // Nothing to install and nothing to download: neither is the problem here.
+    assert.equal(/did not finish downloading/.test(said), false);
+  });
+
+  it("still leaves unrelated failures alone", () => {
+    assert.equal(producedNothing("Generating the image failed: 401 Unauthorized"), false);
+    assert.equal(
+      explainIfLoadFailure("The image model did not answer in fifteen minutes.", { role: "image" }),
+      undefined,
+    );
   });
 });
