@@ -11,7 +11,7 @@ import { describe, it } from "node:test";
 
 import {
   apiBase, embeddableAsset, embeddableUrl, LEMONADE_VERSION, lemondArgs, lemondName,
-  mergeConfig, openAiBase, parseHealth, pinnedConfig,
+  chatModelOf, mergeConfig, openAiBase, parseHealth, pinnedConfig,
 } from "../src/core/runtime/lemonade.ts";
 
 describe("embeddableAsset", () => {
@@ -146,5 +146,70 @@ describe("mergeConfig", () => {
     assert.equal(t["enabled"], false);
     assert.equal(t["hide_inputs"], true);
     assert.deepEqual(t["otlp"], { endpoint: "http://localhost:4318" });
+  });
+});
+
+describe("which loaded model a conversation goes to", () => {
+  /* The exact payload a daemon holding all three sends, trimmed to the fields
+     that matter. Measured, not invented: `type` is the daemon's own word for
+     what each model is, and `model_loaded` names whichever was touched last --
+     here Kokoro, because it spoke the previous answer. */
+  const health = parseHealth({
+    model_loaded: "kokoro-v1",
+    all_models_loaded: [
+      { model_name: "Whisper-Large-v3-Turbo", recipe: "whispercpp", type: "transcription", status: "ready" },
+      { model_name: "kokoro-v1", recipe: "kokoro", type: "tts", status: "ready" },
+      { model_name: "LFM2.5-2.6B-GGUF", recipe: "llamacpp", type: "llm", status: "ready" },
+    ],
+  });
+
+  it("reads the daemon's own classification of each model", () => {
+    assert.deepEqual(health.models.map((m) => m.type),
+      ["transcription", "tts", "llm"]);
+  });
+
+  it("never hands a conversation to a speech model", () => {
+    /* The report: Whisper and Kokoro appeared in the chat bar as the model in
+       use, because dictating and speaking had each been the last thing to
+       load. Neither can answer a message. */
+    assert.equal(chatModelOf(health)?.id, "LFM2.5-2.6B-GGUF");
+    assert.equal(chatModelOf(health, "Whisper-Large-v3-Turbo")?.id, "LFM2.5-2.6B-GGUF");
+    assert.equal(chatModelOf(health, "kokoro-v1")?.id, "LFM2.5-2.6B-GGUF");
+  });
+
+  it("says nothing rather than naming a model that cannot answer", () => {
+    const speechOnly = parseHealth({
+      all_models_loaded: [
+        { model_name: "Whisper-Tiny", recipe: "whispercpp", type: "transcription", status: "ready" },
+      ],
+    });
+    // Which is what puts "None selected" in the bar instead of "Whisper-Tiny".
+    assert.equal(chatModelOf(speechOnly), undefined);
+  });
+
+  it("keeps the user's choice when it is one that can answer", () => {
+    assert.equal(chatModelOf(health, "LFM2.5-2.6B-GGUF")?.id, "LFM2.5-2.6B-GGUF");
+  });
+
+  it("trusts the type over the recipe, so a new engine needs no list", () => {
+    /* An engine Karen has never heard of, doing speech. The recipe list would
+       have admitted it; the daemon's own word excludes it on day one. */
+    const future = parseHealth({
+      all_models_loaded: [
+        { model_name: "NewVoice-1", recipe: "some-new-engine", type: "tts", status: "ready" },
+        { model_name: "Chatty-7B", recipe: "some-new-engine", type: "llm", status: "ready" },
+      ],
+    });
+    assert.equal(chatModelOf(future)?.id, "Chatty-7B");
+  });
+
+  it("falls back to the recipe when the daemon sends no type", () => {
+    const older = parseHealth({
+      all_models_loaded: [
+        { model_name: "Whisper-Tiny", recipe: "whispercpp", status: "ready" },
+        { model_name: "Qwen3-8B", recipe: "llamacpp", status: "ready" },
+      ],
+    });
+    assert.equal(chatModelOf(older)?.id, "Qwen3-8B");
   });
 });

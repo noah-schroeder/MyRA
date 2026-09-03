@@ -1438,7 +1438,10 @@ async function main(): Promise<void> {
    * different model -- a bug worth not copying into new code.
    */
   setDraftHost({
-    model: () => basename(runtime.config.activeModel ?? "") || config.current.llm.model || "",
+    /* The model that will answer, not the last one loaded: `activeModel` can
+       name a model that was loaded for another job entirely, and this string
+       is written into a document as its provenance. */
+    model: () => basename(runtime.chatModel()?.id ?? "") || config.current.llm.model || "",
     ui: { editor: (title, prefill) => ask("editor", title, prefill) },
     onProgress: (note) => send("karen:research-progress", note),
   });
@@ -1593,7 +1596,7 @@ async function main(): Promise<void> {
         // The file name, not the port. A meeting note recording
         // "http://127.0.0.1:37617/v1" as the model that wrote it says nothing
         // a month later, when the port is long gone.
-        label: basename(runtime.config.activeModel ?? "") || config.current.llm.model || "a local model",
+        label: basename(runtime.chatModel()?.id ?? "") || config.current.llm.model || "a local model",
         /* Keyed by the model that will actually answer, not by whatever
            llm.model holds: tuning follows the model rather than the setting
            that used to name it. */

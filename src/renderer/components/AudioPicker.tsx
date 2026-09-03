@@ -25,14 +25,22 @@ import { choiceIsExternal, parseModelRef } from "../../core/providers.ts";
  * the middle of your first sentence.
  */
 
+/*
+ * `empty` is the same words in every picker, matching the chat bar.
+ *
+ * Four bars sat side by side saying "No model yet", "No speech model yet",
+ * "No voice yet" and "No image model yet", which reads as four different
+ * states rather than one. Each picker's own `title` says which model it is
+ * for, so the empty label does not have to.
+ */
 const ROLE_COPY: Record<AudioRole, { empty: string; none: string; title: string }> = {
   transcription: {
-    empty: "No speech model yet",
+    empty: "None selected",
     none: "Nothing here can turn speech into text yet.",
     title: "Which model turns your voice into text",
   },
   voice: {
-    empty: "No voice yet",
+    empty: "None selected",
     none: "Nothing here can speak yet.",
     title: "Which model reads answers aloud",
   },

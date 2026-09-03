@@ -22,7 +22,9 @@ import {
   CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE,
 } from "../../core/paths.ts";
 import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
-import { chatModelOf, LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
+import {
+  chatModelOf, isChatEngine, isChatModel, LEMONADE_VERSION, type LoadedModel,
+} from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
@@ -44,8 +46,11 @@ export interface RuntimeConfig {
   /** Start the backend when the app opens. Off by default: an 8 GB process
    *  should not appear because someone opened a window. */
   startOnLaunch: boolean;
+  /* `| undefined` for the same reason `defaultModel` has it below: a record
+     naming a speech model has to be expressible as cleared, not merely
+     overwritten. */
   /** The model to load, by the name Lemonade knows it as. */
-  activeModel?: string;
+  activeModel?: string | undefined;
   /**
    * The model to load at startup, chosen deliberately.
    *
@@ -366,7 +371,19 @@ export class RuntimeManager {
       this.#emit();
     }
     await this.#lemonade.refreshHealth();
-    await this.update({ activeModel: name });
+
+    /*
+     * Only a model chat can actually be held with becomes the active one.
+     *
+     * `activeModel` is what the chat bar names and what `startOnLaunch`
+     * reloads, so a speech model recorded here follows the user around: the
+     * bar offered Whisper and Kokoro as the conversation's model, which is the
+     * report this guards against. `loadAuxModel` is the road speech and image
+     * models are supposed to arrive by, and this makes the wrong road safe
+     * rather than merely discouraged.
+     */
+    const loaded = this.#lemonade.status.health?.models.find((m) => m.id === name);
+    if (!loaded || isChatModel(loaded)) await this.update({ activeModel: name });
   }
 
   async unloadModel(model?: string): Promise<void> {
@@ -385,6 +402,19 @@ export class RuntimeManager {
    * Lemonade comes up in a second and holds nothing, so "it is up" says
    * nothing about whether a request would be answered.
    */
+  /**
+   * The model a message would go to, or nothing.
+   *
+   * Shared with `chatEndpoint` so the bar and the request can never disagree
+   * -- if this says nothing, "None selected" is the truth rather than a
+   * placeholder, and no message is quietly going somewhere unnamed.
+   */
+  chatModel(): LoadedModel | undefined {
+    if (!this.#config.useForChat) return undefined;
+    if (this.#lemonade.status.state !== "ready") return undefined;
+    return chatModelOf(this.#lemonade.status.health, this.#config.activeModel);
+  }
+
   chatEndpoint():
     | { baseUrl: string; apiKey: string; model: string; contextTokens?: number }
     | undefined {
@@ -402,7 +432,7 @@ export class RuntimeManager {
      * purpose and will only ever return one whose engine can hold a
      * conversation.
      */
-    const model = chatModelOf(status.health, this.#config.activeModel);
+    const model = this.chatModel();
     if (!model) return undefined;
     /*
      * The model name travels with the address, and must.
@@ -495,6 +525,15 @@ export class RuntimeManager {
     const wanted = this.#config.defaultModel ?? this.#config.activeModel;
     if (!this.#config.startOnLaunch || !wanted) return;
     await this.ensureLemonade();
+    /* A record written before speech models were kept out of `activeModel`
+       can still name one, and loading it at every launch would hold a
+       transcription model open for a conversation it cannot answer. The
+       catalogue knows what each model is without starting anything. */
+    const recipe = (await this.catalog().catch(() => [])).find((e) => e.id === wanted)?.recipe;
+    if (recipe && !isChatEngine(recipe)) {
+      await this.update({ activeModel: undefined });
+      return;
+    }
     await this.#api.loadModel(wanted);
     await this.#lemonade.refreshHealth();
     this.#emit();

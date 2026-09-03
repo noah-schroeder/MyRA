@@ -151,6 +151,12 @@ export interface LoadedModel {
   /** `gpu` or `cpu`, which answers "did the card get used". */
   device?: string | undefined;
   recipe?: string | undefined;
+  /**
+   * What the daemon says this model is for: `llm`, `transcription`, `tts`.
+   *
+   * Its own classification, and the reliable one -- see `isChatModel`.
+   */
+  type?: string | undefined;
   /** The llama-server behind this model, which can be asked what it really did. */
   backendUrl?: string | undefined;
   ready: boolean;
@@ -189,6 +195,30 @@ export function isChatEngine(recipe?: string | undefined): boolean {
 }
 
 /**
+ * The kinds of model a conversation can be held with.
+ *
+ * `type` is the daemon's own classification and beats the recipe list above,
+ * because it needs no maintenance: measured on a daemon holding three models
+ * at once, it reports `llm`, `transcription` and `tts`. A new speech engine
+ * Karen has never heard of is therefore excluded on the day it ships, where
+ * the recipe list would have admitted it until somebody noticed.
+ */
+const CHAT_TYPES = new Set(["llm", "text", "chat"]);
+
+/**
+ * Whether this loaded model could answer a message.
+ *
+ * The recipe is the fallback for a daemon that does not send `type`, and the
+ * final fallback is "yes" -- an unknown engine is offered rather than hidden,
+ * because a chat model wrongly withheld is a broken app while a speech model
+ * wrongly offered is one failed request.
+ */
+export function isChatModel(model: { type?: string | undefined; recipe?: string | undefined }): boolean {
+  if (model.type) return CHAT_TYPES.has(model.type);
+  return isChatEngine(model.recipe);
+}
+
+/**
  * Which loaded model a conversation should go to.
  *
  * `preferred` is the model Karen last loaded on purpose. It wins when it is
@@ -203,8 +233,8 @@ export function chatModelOf(
 ): LoadedModel | undefined {
   const models = health?.models ?? [];
   const chosen = preferred ? models.find((m) => m.id === preferred) : undefined;
-  if (chosen && isChatEngine(chosen.recipe)) return chosen;
-  return models.find((m) => isChatEngine(m.recipe));
+  if (chosen && isChatModel(chosen)) return chosen;
+  return models.find((m) => isChatModel(m));
 }
 
 /**
@@ -243,6 +273,7 @@ export function parseHealth(body: unknown): LemonadeHealth {
       ...(int(options["ctx_size"]) !== undefined ? { contextFrom: "daemon" as const } : {}),
       ...(typeof m["device"] === "string" ? { device: m["device"] } : {}),
       ...(typeof m["recipe"] === "string" ? { recipe: m["recipe"] } : {}),
+      ...(typeof m["type"] === "string" ? { type: m["type"] } : {}),
       ...(typeof m["backend_url"] === "string" ? { backendUrl: m["backend_url"] } : {}),
     });
   }

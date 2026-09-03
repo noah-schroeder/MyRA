@@ -62,6 +62,14 @@ export function installRuntimeIpc(
          and to prove afterwards that it really loaded. */
       loading: runtime.loadingModel,
       active: runtime.lemonade.status.health?.active,
+      /*
+       * The model a message would actually go to, resolved exactly as
+       * `chatEndpoint` resolves it. The bar used to name `activeModel`
+       * directly, which is a record of what was loaded rather than of what
+       * chat uses -- so a dictation left "Whisper-Large-v3-Turbo" sitting in
+       * the conversation's model picker. One answer, computed once.
+       */
+      chat: runtime.chatModel(),
       log: runtime.lemonade.status.log.slice(-40),
     },
   });

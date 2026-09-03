@@ -798,6 +798,8 @@ export interface RuntimeState {
     loading?: string;
     /** Context size and device for the loaded model, straight from the daemon. */
     active?: LoadedModel;
+    /** The model a message would actually go to, resolved by the main process. */
+    chat?: LoadedModel;
     log: string[];
   };
 }

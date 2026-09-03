@@ -114,7 +114,7 @@ export function ImagePicker({
   const named = modelNamer(options.map((o) => o.model), shorten);
   const label = chosen
     ? named(chosenOption?.model ?? parseModelRef(chosen).model)
-    : "No image model yet";
+    : "None selected";
   /*
    * Asked of the settings, not of the fetched options.
    *
