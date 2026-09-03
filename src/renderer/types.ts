@@ -539,6 +539,7 @@ export interface KarenApi {
     runs?: RunSummary[];
   }>;
   onResearchProgress(cb: (note: string) => void): () => void;
+  onResearchStage(cb: (stage: string) => void): () => void;
   answerPrompt(id: string, answer: string | undefined): Promise<void>;
   onPrompt(cb: (request: PromptRequest) => void): () => void;
 

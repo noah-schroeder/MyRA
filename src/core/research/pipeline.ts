@@ -75,6 +75,15 @@ export interface PipelineOptions {
   knownModels?: string[];
   signal?: AbortSignal;
   onProgress?: (note: string) => void;
+  /**
+   * Which stage has just started.
+   *
+   * Separate from `onProgress`, which carries a detail line that changes many
+   * times a second within one stage. This fires once per stage, so the window
+   * can show the run as a sequence with a position in it rather than as a
+   * single line that keeps changing.
+   */
+  onStage?: (stage: string) => void;
 }
 
 export class PausedError extends Error {
@@ -139,9 +148,17 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const cwd = run.path();
 
   /** Called at every stage boundary — the only place a pause can be honoured. */
+  let announced: string | undefined;
   const checkpoint = (stage: string): void => {
     if (opts.signal?.aborted) throw new CancelledError("research cancelled");
     if (run.isPaused()) throw new PausedError(run.id, stage);
+    /* Announced from here because this is the one call every stage already
+       makes, so a new stage cannot be added without the window learning about
+       it. Some stages checkpoint on every item, hence the guard. */
+    if (stage !== announced) {
+      announced = stage;
+      opts.onStage?.(stage);
+    }
   };
 
   /* ---------------- 1. scope ---------------- */

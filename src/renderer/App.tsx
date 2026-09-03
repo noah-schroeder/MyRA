@@ -6,6 +6,7 @@ import { Markdown } from "./components/Markdown.tsx";
 import { ArtifactPanel, useDocuments } from "./components/ArtifactPanel.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
 import { Reasoning } from "./components/Reasoning.tsx";
+import { ResearchProgress } from "./components/ResearchProgress.tsx";
 import { ApiPage } from "./components/ApiPage.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
@@ -56,6 +57,9 @@ export function App() {
   const documents = useDocuments();
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
+  /* Separate from the note above: this changes once per stage, that one many
+     times a second, and the card needs both. */
+  const [stage, setStage] = useState<string | undefined>();
   /*
    * Two drafts, one box.
    *
@@ -100,9 +104,13 @@ export function App() {
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   useEffect(() => window.karen.onResearchProgress(setProgress), []);
+  useEffect(() => window.karen.onResearchStage(setStage), []);
   /* And again when the turn ends, so nothing is left in state to resurface. */
   useEffect(() => {
-    if (!busy) setProgress(undefined);
+    if (!busy) {
+      setProgress(undefined);
+      setStage(undefined);
+    }
   }, [busy]);
 
   // Read through a ref because transcription lands long after the callback was
@@ -497,6 +505,9 @@ export function App() {
               </button>
             </p>
           ) : null}
+          {/* Above the scroll anchor, so the view follows it: a card added
+              below the anchor is a card the thread scrolls away from. */}
+          {busy && stage ? <ResearchProgress stage={stage} note={progress} /> : null}
           <div ref={bottom} />
         </div>
 
@@ -539,7 +550,9 @@ export function App() {
                 ) : null}
               </p>
             ) : null}
-            {progress && busy ? <p className="progress">{progress}</p> : null}
+            {/* A research run draws its own card in the thread above; this line
+                is for everything else that reports progress. */}
+            {progress && busy && !stage ? <p className="progress">{progress}</p> : null}
             <textarea
               className="input"
               placeholder={

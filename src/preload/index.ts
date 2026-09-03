@@ -235,6 +235,7 @@ const api = {
   researchFootprint: (id: string) => ipcRenderer.invoke("karen:research-footprint", id),
   researchDelete: (id: string) => ipcRenderer.invoke("karen:research-delete", id),
   onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
+  onResearchStage: (cb: (stage: string) => void) => on("karen:research-stage", cb),
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>
     ipcRenderer.invoke("karen:answer-prompt", id, answer),
