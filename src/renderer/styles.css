@@ -1979,7 +1979,16 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 /* ---- body ---- */
 
-.runs-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/*
+ * `min-height: 0`, without which the report cannot be scrolled.
+ *
+ * This is a grid item, so its height defaults to `auto` -- meaning "never
+ * shrink below the content". A run longer than the window therefore grew the
+ * body instead of overflowing it, `.runs-pane`'s own `overflow-y: auto` never
+ * had anything to scroll, and `.runs` clipped the surplus with its
+ * `overflow: hidden`. Reported as a report that simply stopped at the fold.
+ */
+.runs-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .runs-head {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 8px 16px 0 22px;
