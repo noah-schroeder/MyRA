@@ -120,6 +120,7 @@ async function copyRuntime(from: string, to: string): Promise<boolean> {
  * nesting one wrapper inside another.
  */
 export async function wrapEngine(dir: string, runtimeFrom: string): Promise<string[]> {
+  await healOrphans(dir);
   const binaries = await engineBinaries(dir);
   if (!binaries.length) return [];
   if (!(await copyRuntime(runtimeFrom, dir))) return [];
@@ -171,6 +172,9 @@ export async function repairEngines(
      * and leaves the renamed originals behind, so a directory that merely
      * CONTAINS one is not necessarily wrapped any more.
      */
+    /* Before deciding there is nothing to do: an interrupted wrap leaves a
+       renamed binary and no shim, which looks like an empty directory. */
+    await healOrphans(engine.path).catch(() => []);
     const binaries = await engineBinaries(engine.path);
     if (!binaries.length) continue;
 
@@ -184,6 +188,29 @@ export async function repairEngines(
     out.push({ recipe: engine.recipe, backend: engine.backend, wrapped, missing: [...missing] });
   }
   return out;
+}
+
+/**
+ * Undo a wrap that was interrupted between its two steps.
+ *
+ * The binary is renamed and then the shim is written, so a crash, a full disk
+ * or a kill in between leaves `whisper-server.karen-real` with nothing at
+ * `whisper-server`. That state is worse than either end of it: the engine is
+ * gone, and because `engineBinaries` skips the renamed file there is nothing
+ * left for the next pass to find, so it would stay gone. Putting the binary
+ * back makes the wrap retryable instead of one-way.
+ */
+export async function healOrphans(dir: string): Promise<string[]> {
+  const names: string[] = await readdir(dir).catch(() => []);
+  const healed: string[] = [];
+  for (const name of names) {
+    if (!name.endsWith(REAL_SUFFIX)) continue;
+    const base = name.slice(0, -REAL_SUFFIX.length);
+    if (names.includes(base)) continue; // The shim is there; nothing to undo.
+    await rename(join(dir, name), join(dir, base));
+    healed.push(base);
+  }
+  return healed;
 }
 
 /** Whether a directory holds one of our shims, for tests and for the pane. */

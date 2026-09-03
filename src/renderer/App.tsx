@@ -104,7 +104,9 @@ export function App() {
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   useEffect(() => window.karen.onResearchProgress(setProgress), []);
-  useEffect(() => window.karen.onResearchStage(setStage), []);
+  /* An empty stage means the run is over: the card comes down, and the plain
+     progress line takes over again for whatever the turn does next. */
+  useEffect(() => window.karen.onResearchStage((s) => setStage(s || undefined)), []);
   /* And again when the turn ends, so nothing is left in state to resurface. */
   useEffect(() => {
     if (!busy) {

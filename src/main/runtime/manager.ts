@@ -435,6 +435,20 @@ export class RuntimeManager {
    * model is loaded" about a model that is chosen and would not load.
    */
   async ensureChatModel(): Promise<string | undefined> {
+    /*
+     * The cheap conditions first, because the catalogue read below is not.
+     *
+     * `catalog()` opens and parses a 70 KB file of 228 entries, and this runs
+     * on EVERY model call -- not only chat turns, but each stage of a research
+     * run, which makes dozens. Asking the disk that many times to answer a
+     * question that is almost always "the model is already loaded, do nothing"
+     * is the kind of cost that never shows up in a test and is felt in a long
+     * run. The rules themselves still live in one place, below.
+     */
+    if (!this.#config.useForChat) return undefined;
+    if (this.#lemonade.status.state !== "ready") return undefined;
+    if (this.chatModel()) return undefined;
+
     const chosen = this.#config.activeModel;
     const recipe = chosen
       ? (await this.catalog().catch(() => [])).find((e) => e.id === chosen)?.recipe
