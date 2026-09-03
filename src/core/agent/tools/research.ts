@@ -234,7 +234,7 @@ async function deepRun(
 
   const run = await ResearchRun.create(question);
   doneThisTurn = { question: question.trim(), runId: run.id };
-  {
+  try {
     const result = await runPipeline({
       question,
       run,
@@ -263,6 +263,12 @@ async function deepRun(
       content: shiftCitations(`${result.report}\n\n${result.bibliography}`, by),
       detail: { runId: run.id, dir: run.dir, sources: result.sources, funnel: result.funnel },
     };
+  } finally {
+    /* Take the progress card down. Without this it sits under the finished
+       report still pulsing on "Revising", which reads as a run that never
+       ended -- and it must happen on the cancelled and failed paths too,
+       where there is no report to explain it. */
+    host?.onStage?.("");
   }
 }
 

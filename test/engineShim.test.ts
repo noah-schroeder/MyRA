@@ -19,7 +19,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,7 +27,7 @@ import {
   couldBeEngine, isShimScript, REAL_SUFFIX, shimScript,
 } from "../src/core/runtime/engineShim.ts";
 import {
-  engineBinaries, engineDirs, isWrapped, repairEngines, wrapEngine,
+  engineBinaries, engineDirs, healOrphans, isWrapped, repairEngines, wrapEngine,
 } from "../src/main/runtime/engineRuntime.ts";
 
 const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]);
@@ -176,6 +176,31 @@ describe("after Lemonade upgrades an engine", () => {
     assert.equal(await isWrapped(dir), false, "the shim is gone");
     assert.deepEqual(await engineBinaries(dir), ["whisper-server"], "so it is seen again");
 
+    assert.deepEqual(await wrapEngine(dir, runtime), ["whisper-server"]);
+    assert.equal(await isWrapped(dir), true);
+  });
+});
+
+describe("a wrap interrupted halfway", () => {
+  it("puts the binary back, so the next pass can try again", async () => {
+    /* The binary is renamed and then the shim is written. A crash, a full
+       disk or a kill between the two leaves the engine with neither -- and
+       because `engineBinaries` skips the renamed file, nothing would ever look
+       at that directory again. One-way is the wrong shape for a repair. */
+    const dir = await engineDir();
+    const runtime = await runtimeDir();
+    await wrapEngine(dir, runtime);
+    await rm(join(dir, "whisper-server")); // the shim never landed
+
+    assert.deepEqual(await engineBinaries(dir), [], "the engine looks absent");
+    assert.deepEqual(await healOrphans(dir), ["whisper-server"]);
+    assert.deepEqual(await engineBinaries(dir), ["whisper-server"], "and is findable again");
+
+    /* And wrapping heals it on the way in, so nothing has to call that first.
+       Wrapped again, then the shim removed again, to rebuild the broken state
+       rather than deleting the binary that was just restored. */
+    await wrapEngine(dir, runtime);
+    await rm(join(dir, "whisper-server"));
     assert.deepEqual(await wrapEngine(dir, runtime), ["whisper-server"]);
     assert.equal(await isWrapped(dir), true);
   });
