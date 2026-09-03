@@ -83,6 +83,15 @@ export interface LoadContext {
    * confusing part of the symptom, and it deserves to be named.
    */
   oldSystem?: boolean | undefined;
+  /**
+   * The models sitting on the graphics card, other than the one being used.
+   *
+   * The list, not a byte count: the daemon reports each loaded model's device
+   * but not the card's free memory, and a number Karen had to estimate would
+   * be a worse thing to put in front of somebody than the names of the models
+   * they can actually unload.
+   */
+  gpuResident?: string[] | undefined;
 }
 
 /**
@@ -169,13 +178,43 @@ export function producedNothing(text: string): boolean {
   return /returned no results|no images? (?:were )?(?:returned|generated)/i.test(text);
 }
 
+/**
+ * Why it produced nothing, in the order the causes actually occur.
+ *
+ * The reported one, run by hand because the daemon discards its engine's
+ * stderr: `cudaMalloc failed: out of memory`, allocating 1411 MiB on an RTX
+ * 4060 that was already holding a 30B chat model, Whisper-Large-v3-Turbo and
+ * Kokoro. The engine, the backend and the driver were all fine. Lemonade's own
+ * `max_loaded_models` is 1 but applies PER TYPE -- measured, seven pools -- so
+ * it will happily hold a model of each kind and never evict one to make room
+ * for another.
+ *
+ * Karen cannot see the card's free bytes, but it does know what is on it, and
+ * that list IS the answer when it is not empty. Naming it beats naming a
+ * backend, because unloading one speech model is a click and reinstalling an
+ * engine is not.
+ */
 function explainEmptyAnswer(opts: LoadContext): string {
   const engine = opts.engine ? `The ${opts.engine} engine` : "The engine";
-  return (
+  const opening =
     `${engine} answered without producing anything. Its server started and reported itself ` +
-    "ready, so nothing is missing — what failed is the hardware backend it was built for, at " +
-    "the point of use. Settings → Runtime lists the other backends this machine can install " +
-    "for that engine; the Vulkan one is slower and asks less of the graphics driver."
+    "ready, so nothing is missing or broken. ";
+
+  const holding = opts.gpuResident ?? [];
+  if (holding.length) {
+    const list = holding.join(", ");
+    return (
+      opening +
+      `The usual cause is the graphics card being full, and it is currently holding ${list}. ` +
+      "Unloading one of those frees room for the picture — the eject button beside each " +
+      "speech model does it, and a smaller one is often enough."
+    );
+  }
+  return (
+    opening +
+    "Nothing else is on the graphics card, so what failed is the hardware backend the engine " +
+    "was built for. Settings → Runtime lists the other backends this machine can install for " +
+    "it."
   );
 }
 
