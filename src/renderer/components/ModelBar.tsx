@@ -163,9 +163,23 @@ export function ModelBar({
 
   const backend = runtime?.lemonade;
   const usingLocal = runtime?.config.useForChat === true;
-  const local = usingLocal && backend?.state === "ready" && Boolean(backend.loaded);
+  /* `chat` rather than `loaded`: the latter is `model_loaded`, the model the
+     daemon touched LAST, which is a speech model for most of a session that
+     uses dictation -- and is empty on a daemon that has never been asked for
+     anything, even while holding a chat model. */
+  const local = usingLocal && backend?.state === "ready" && Boolean(backend.chat);
   const loading = usingLocal && backend?.state === "starting";
-  const activePath = runtime?.config.activeModel;
+  /*
+   * The model chat would actually use, decided by the main process.
+   *
+   * Not `config.activeModel`, which is a record of what was last loaded: a
+   * dictation or a voice reply left Whisper and Kokoro sitting in the
+   * conversation's picker as though they were the model answering. This field
+   * comes from the same call that builds the chat request, so the bar cannot
+   * name one thing while messages go to another -- and when it is empty,
+   * "None selected" is the truth.
+   */
+  const activePath = backend?.chat?.id;
   const active = backend?.active;
 
   let label: string;
@@ -193,7 +207,7 @@ export function ModelBar({
     label = settings.llm.model?.trim() || new URL(settings.llm.baseUrl).host;
     tone = "remote";
   } else {
-    label = "No model yet";
+    label = "None selected";
     tone = "none";
   }
 
