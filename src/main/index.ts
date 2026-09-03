@@ -624,14 +624,22 @@ function ask(
   prefill?: string,
   message?: string,
 ): Promise<string | undefined> {
+  return prompt({ method, title, ...(prefill ? { prefill } : {}), ...(message ? { message } : {}) });
+}
+
+/**
+ * One request to the window, whatever shape it takes.
+ *
+ * `ask` was three fixed arguments, which was enough while the pipeline only
+ * ever wanted a line of text or a document. A choice carries its options and a
+ * model question carries its slots, so the payload is built by the caller and
+ * this only owns the id and the promise.
+ */
+function prompt(request: Record<string, unknown>): Promise<string | undefined> {
   const id = `p${++promptSeq}`;
   return new Promise((resolve) => {
     pending.set(id, resolve);
-    send("karen:prompt", {
-      id, method, title,
-      ...(prefill ? { prefill } : {}),
-      ...(message ? { message } : {}),
-    });
+    send("karen:prompt", { id, ...request });
   });
 }
 
@@ -1270,6 +1278,38 @@ async function main(): Promise<void> {
   setResearchHost({
     fallbackModel: config.current.llm.model ?? "",
     ui: {
+      /* A question with answers to pick from. The renderer adds "Other" and a
+         skip to every one of them; nothing here decides that. */
+      choose: (choice) =>
+        prompt({
+          method: "choice",
+          title: choice.title,
+          ...(choice.message ? { message: choice.message } : {}),
+          options: choice.options,
+          ...(choice.multi ? { multi: true } : {}),
+        }),
+      /* One dropdown per role. The renderer fetches the model catalogue
+         itself -- it already has both halves, and shipping a list of every
+         local and hosted model through a dialog payload would be a copy that
+         goes stale the moment somebody ticks a box in Settings. */
+      models: async (slots, current) => {
+        const answer = await prompt({
+          method: "models",
+          title: slots.length === 1 ? "Which model?" : "Which model does which job?",
+          slots,
+          current,
+        });
+        if (answer === undefined) return undefined;
+        try {
+          const parsed = JSON.parse(answer) as Record<string, string>;
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch {
+          /* The dialog sends JSON; anything else means it was dismissed in a
+             way that produced text. Treat it as "change nothing" rather than
+             as an assignment nobody made. */
+          return {};
+        }
+      },
       input: (title, placeholder) => ask("input", title, placeholder),
       editor: (title, prefill) => ask("editor", title, prefill),
       notify: (message) => send("karen:research-progress", message),
@@ -1349,7 +1389,20 @@ async function main(): Promise<void> {
   const samplingFor = (stored: string, local: boolean): Record<string, number> =>
     samplingForRequest(config.current.sampling[stored] ?? {}, !local);
 
-  const resolveLlm = async (): Promise<EndpointResolution> => {
+  /**
+   * Where to send one model reference.
+   *
+   * `ref` is what the picker stores: "providerId::model" for a hosted model, a
+   * bare name for anything else. Undefined means the conversation's own choice,
+   * which is what chat, meetings and dictation all want.
+   *
+   * A research stage passes its OWN reference, and that is the whole reason
+   * this takes an argument. Before, every stage inherited the chat model's
+   * endpoint and only swapped the model name onto it -- so a screener assigned
+   * a local model while the conversation was on a hosted provider was sent to
+   * that provider, under its key, asking for a model it had never heard of.
+   */
+  const resolveLlm = async (ref?: string): Promise<EndpointResolution> => {
     /*
      * A provider-qualified choice wins over the loaded local model.
      *
@@ -1359,7 +1412,7 @@ async function main(): Promise<void> {
      * more -- a local choice must never be routed outward -- and that direction
      * is guarded by `providerFor` returning nothing for a bare name.
      */
-    const chosen = config.current.llm.model ?? "";
+    const chosen = ref ?? config.current.llm.model ?? "";
     const { providerId } = parseModelRef(chosen);
     const provider = providerFor(config.current.providers, chosen);
     /*
@@ -1420,17 +1473,23 @@ async function main(): Promise<void> {
 
     const managed = runtime.chatEndpoint();
     if (managed) {
+      /* A bare reference names a model on this machine. It is used as given
+         rather than replaced by whatever is currently resident: Lemonade loads
+         a model it is asked for, and a research stage that named one should
+         get that one. With no reference at all, the loaded model is the
+         answer, which is what a chat turn means. */
+      const model = chosen.trim() || managed.model;
       return {
-        endpoint: { ...config.current.llm, baseUrl: managed.baseUrl, model: managed.model },
+        endpoint: { ...config.current.llm, baseUrl: managed.baseUrl, model },
         apiKey: managed.apiKey,
         // The file name, not the port. A meeting note recording
         // "http://127.0.0.1:37617/v1" as the model that wrote it says nothing
         // a month later, when the port is long gone.
         label: basename(runtime.config.activeModel ?? "") || config.current.llm.model || "a local model",
-        /* Keyed by the loaded model's own id, not by whatever llm.model holds:
-           the managed runtime is what is actually answering, and tuning
-           follows the model rather than the setting that used to name it. */
-        sampling: samplingFor(managed.model, true),
+        /* Keyed by the model that will actually answer, not by whatever
+           llm.model holds: tuning follows the model rather than the setting
+           that used to name it. */
+        sampling: samplingFor(model, true),
       };
     }
     /*
@@ -1451,7 +1510,10 @@ async function main(): Promise<void> {
     }
     const key = await vault.get("llmKey");
     return {
-      endpoint: llm,
+      /* A reference still wins over the stored model here: this branch is
+         somebody's own single endpoint, and a stage that named a model on it
+         asked for that model. */
+      endpoint: chosen.trim() ? { ...llm, model: chosen.trim() } : llm,
       ...(key ? { apiKey: key } : {}),
       label: llm.model || llm.baseUrl,
     };

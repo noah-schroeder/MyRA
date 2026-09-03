@@ -334,11 +334,19 @@ export interface DictationState {
 export interface PromptRequest {
   id: string;
   /** v1's `method`, kept under its old name so the dialog reads the same. */
-  method: "input" | "editor" | "confirm";
+  method: "input" | "editor" | "confirm" | "choice" | "models";
   title: string;
   message?: string;
   prefill?: string;
   placeholder?: string;
+  /** choice: the answers to offer. "Other" is added by the dialog, not sent. */
+  options?: string[];
+  /** choice: whether several of them can be picked at once. */
+  multi?: boolean;
+  /** models: one dropdown per entry. */
+  slots?: { key: string; label: string; hint: string }[];
+  /** models: what each slot is set to now. */
+  current?: Record<string, string>;
 }
 
 export interface KarenApi {
