@@ -11,7 +11,7 @@ import { describe, it } from "node:test";
 
 import {
   apiBase, embeddableAsset, embeddableUrl, LEMONADE_VERSION, lemondArgs, lemondName,
-  chatModelOf, mergeConfig, openAiBase, parseHealth, pinnedConfig,
+  chatModelOf, chatModelToReload, mergeConfig, openAiBase, parseHealth, pinnedConfig,
 } from "../src/core/runtime/lemonade.ts";
 
 describe("embeddableAsset", () => {
@@ -211,5 +211,46 @@ describe("which loaded model a conversation goes to", () => {
       ],
     });
     assert.equal(chatModelOf(older)?.id, "Qwen3-8B");
+  });
+});
+
+describe("putting the chat model back when something took it away", () => {
+  const chat = { id: "Qwen3-8B", recipe: "llamacpp", type: "llm", ready: true };
+  const base = { useForChat: true, ready: true, resolved: undefined, activeModel: "Qwen3-8B" };
+
+  it("reloads the chosen model after the daemon evicts it", () => {
+    /* Lemonade does this by itself: "Load failed with non-file-not-found
+       error, evicting all models and retrying" dropped a user's chat model to
+       make room for a Whisper that then failed anyway. Before this, the only
+       way back was to reopen the menu and pick the same model again. */
+    assert.equal(chatModelToReload(base), "Qwen3-8B");
+  });
+
+  it("does nothing when the model is already there", () => {
+    assert.equal(chatModelToReload({ ...base, resolved: chat }), undefined);
+  });
+
+  it("does not start a daemon that is deliberately stopped", () => {
+    /* An 8 GB process should not appear because somebody typed a message --
+       which is the whole meaning of startOnLaunch being off. */
+    assert.equal(chatModelToReload({ ...base, ready: false }), undefined);
+  });
+
+  it("leaves 'None selected' alone when nothing was ever chosen", () => {
+    assert.equal(chatModelToReload({ ...base, activeModel: undefined }), undefined);
+    assert.equal(chatModelToReload({ ...base, activeModel: "   " }), undefined);
+  });
+
+  it("never reloads a speech model into the conversation's slot", () => {
+    /* A record written before speech models were kept out of activeModel can
+       still name one. Reloading it would hold a transcription model open for a
+       conversation it cannot answer. */
+    assert.equal(chatModelToReload({ ...base, activeModel: "Whisper-Large-v3-Turbo",
+      recipe: "whispercpp" }), undefined);
+    assert.equal(chatModelToReload({ ...base, recipe: "llamacpp" }), "Qwen3-8B");
+  });
+
+  it("stays out of it when the local backend is not the one answering", () => {
+    assert.equal(chatModelToReload({ ...base, useForChat: false }), undefined);
   });
 });

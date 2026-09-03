@@ -23,7 +23,8 @@ import {
 } from "../../core/paths.ts";
 import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
 import {
-  chatModelOf, isChatEngine, isChatModel, LEMONADE_VERSION, type LoadedModel,
+  chatModelOf, chatModelToReload, isChatEngine, isChatModel, LEMONADE_VERSION,
+  type LoadedModel,
 } from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
@@ -413,6 +414,46 @@ export class RuntimeManager {
     if (!this.#config.useForChat) return undefined;
     if (this.#lemonade.status.state !== "ready") return undefined;
     return chatModelOf(this.#lemonade.status.health, this.#config.activeModel);
+  }
+
+  /**
+   * Put the chosen chat model back if something took it away.
+   *
+   * Nothing loaded a model because a message was sent, and several things
+   * unload one. Lemonade evicts on its own -- "Load failed with
+   * non-file-not-found error, evicting all models and retrying", seen in a
+   * user's log dropping their chat model to make room for a Whisper that then
+   * failed anyway -- and Karen's own eject button frees a card deliberately.
+   * After either, `chatModel()` is empty, the bar reads "None selected", and
+   * the only way back was to reopen the menu and pick the same model again.
+   *
+   * Ejecting is "give me the memory back", not "I have stopped wanting this
+   * model", which is why the eject button leaves the choice in place. This is
+   * the other half of that sentence.
+   *
+   * Returns why it could not, so the caller can say something better than "no
+   * model is loaded" about a model that is chosen and would not load.
+   */
+  async ensureChatModel(): Promise<string | undefined> {
+    const chosen = this.#config.activeModel;
+    const recipe = chosen
+      ? (await this.catalog().catch(() => [])).find((e) => e.id === chosen)?.recipe
+      : undefined;
+    const wanted = chatModelToReload({
+      useForChat: this.#config.useForChat,
+      ready: this.#lemonade.status.state === "ready",
+      resolved: this.chatModel(),
+      ...(chosen ? { activeModel: chosen } : {}),
+      ...(recipe ? { recipe } : {}),
+    });
+    if (!wanted) return undefined;
+
+    try {
+      await this.loadModel(wanted);
+      return undefined;
+    } catch (err) {
+      return `${wanted} is the chosen model and it would not load: ${(err as Error).message}`;
+    }
   }
 
   chatEndpoint():

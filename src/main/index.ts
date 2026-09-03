@@ -1582,6 +1582,10 @@ async function main(): Promise<void> {
       );
     }
 
+    /* Reload the chosen model first if something unloaded it -- the daemon
+       evicting to make room, or the user freeing the card for an image. The
+       choice survived; only the residency did. */
+    const reloadFailed = await runtime.ensureChatModel();
     const managed = runtime.chatEndpoint();
     if (managed) {
       /* A bare reference names a model on this machine. It is used as given
@@ -1615,8 +1619,12 @@ async function main(): Promise<void> {
     const llm = config.current.llm;
     if (!llm.baseUrl.trim()) {
       throw new Error(
-        "No model is loaded. Open Models and load one, or set your own endpoint in " +
-          "Settings → Providers.",
+        /* When there IS a chosen model and it refused to load, that reason is
+           the whole answer; "open Models and load one" would send somebody to
+           press a button that has just failed. */
+        reloadFailed ??
+          "No model is loaded. Open Models and load one, or set your own endpoint in " +
+            "Settings → Providers.",
       );
     }
     const key = await vault.get("llmKey");
