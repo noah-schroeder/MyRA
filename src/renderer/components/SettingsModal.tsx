@@ -474,6 +474,25 @@ function AudioModelField({
         </select>
       </label>
 
+      {/*
+        * Why the list is short, on the one install where it is empty.
+        *
+        * The catalogue of speech models is a file inside the model runtime, so
+        * on a machine where that has not been installed there is nothing local
+        * to offer -- which is every fresh install. The dropdown said nothing
+        * about it: a new user opened this pane, found one greyed placeholder,
+        * and had no way to tell a feature that needs setting up from one that
+        * is broken. True whatever emptied the list, and it names the two ways
+        * out.
+        */}
+      {local.length === 0 ? (
+        <p className="hint">
+          Nothing on this machine can {role === "transcription" ? "listen" : "speak"} yet. Local
+          speech models come with the model runtime — install it under Settings → Runtime — or
+          choose one from a provider you have added.
+        </p>
+      ) : null}
+
       {needsDownload ? (
         <button type="button" className="ghost" disabled={busy} onClick={() => void download()}>
           {busy ? "Downloading…" : `Download it now (${sizeOf(current)})`}
