@@ -238,6 +238,33 @@ export function chatModelOf(
 }
 
 /**
+ * The model to put back, when something has taken it away.
+ *
+ * Pure, because every one of these conditions is a rule rather than an
+ * operation and each of them was wrong once. Undefined means "leave it": a
+ * conversation with no model chosen is not a fault, a stopped daemon should
+ * stay stopped, and a record naming a speech model must never be reloaded into
+ * the conversation's slot.
+ */
+export function chatModelToReload(opts: {
+  useForChat: boolean;
+  /** Whether the daemon is up. Starting one is a separate decision. */
+  ready: boolean;
+  /** What `chatModelOf` resolves right now; a value means nothing to do. */
+  resolved: LoadedModel | undefined;
+  activeModel?: string | undefined;
+  /** The chosen model's engine, when the catalogue knows it. */
+  recipe?: string | undefined;
+}): string | undefined {
+  if (!opts.useForChat || !opts.ready) return undefined;
+  if (opts.resolved) return undefined;
+  const wanted = opts.activeModel?.trim();
+  if (!wanted) return undefined;
+  if (opts.recipe && !isChatEngine(opts.recipe)) return undefined;
+  return wanted;
+}
+
+/**
  * Read the health payload, tolerating a shape that is not ours to control.
  *
  * Deliberately forgiving: readiness is "it answered 200", and the fields here
