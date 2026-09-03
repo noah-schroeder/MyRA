@@ -755,7 +755,25 @@ function installIpc(): void {
      endpoint someone types a URL into, so there is nothing here to discover. */
   ipcMain.handle("karen:discover-models", async (_e, which: "llm" | "embeddings") => {
     const endpoint = config.current[which];
-    if (!endpoint.baseUrl) return { ok: false, error: "No base URL is set for this endpoint." };
+    /*
+     * The daemon already has these, and asking for an endpoint first was wrong.
+     *
+     * Embedding models run on llama.cpp like any other local model -- the
+     * catalogue lists five, all `recipe: llamacpp`, all labelled `embeddings`
+     * -- so a user who has downloaded one has it available with nothing to
+     * configure. This returned "No base URL is set for this endpoint" instead,
+     * sending somebody to Settings to describe a server they are already
+     * running through Karen.
+     *
+     * Both sources are offered when both exist, local first, because the
+     * question the picker asks is "which model", not "whose server".
+     */
+    const local = which === "embeddings" ? await localEmbeddingModels() : [];
+    if (!endpoint.baseUrl) {
+      return local.length
+        ? { ok: true, models: local }
+        : { ok: false, error: "No base URL is set for this endpoint." };
+    }
     const base = endpoint.baseUrl.replace(/\/+$/, "");
     const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
     const key = await vault.get(which === "llm" ? "llmKey" : "embedKey");
@@ -766,11 +784,37 @@ function installIpc(): void {
       });
       if (!res.ok) return { ok: false, error: `${res.status} ${res.statusText}` };
       const body = (await res.json()) as { data?: { id?: string }[] };
-      return { ok: true, models: (body.data ?? []).map((m) => m.id).filter(Boolean) };
+      const served = (body.data ?? []).map((m) => m.id).filter(Boolean) as string[];
+      return { ok: true, models: [...local, ...served.filter((m) => !local.includes(m))] };
     } catch (err) {
-      return { ok: false, error: (err as Error).message };
+      /* An endpoint that will not answer does not take the local models down
+         with it: they are a separate fact and still a usable answer. */
+      return local.length
+        ? { ok: true, models: local, error: (err as Error).message }
+        : { ok: false, error: (err as Error).message };
     }
   });
+
+  /**
+   * The embedding models this machine can actually run, downloaded first.
+   *
+   * The catalogue is read as well as the installed list so that somebody with
+   * none yet still sees what they could have; `downloaded` is what tells the
+   * two apart and the picker shows the list in that order.
+   */
+  async function localEmbeddingModels(): Promise<string[]> {
+    const wanted = (labels: readonly string[] | undefined): boolean =>
+      (labels ?? []).some((l) => l === "embeddings" || l === "embedding");
+    const installed = runtime.lemonade.status.state === "ready"
+      ? await runtime.installedModels().catch(() => [])
+      : [];
+    const here = installed.filter((m) => wanted(m.labels) && m.downloaded !== false).map((m) => m.id);
+    const catalog = await runtime.catalog().catch(() => []);
+    const rest = catalog
+      .filter((e) => wanted(e.labels) && !here.includes(e.id))
+      .map((e) => e.id);
+    return [...here, ...rest];
+  }
 
   /*
    * List what a provider serves, so the user can tick the ones they want.

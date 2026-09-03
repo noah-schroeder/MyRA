@@ -53,7 +53,12 @@ export const ROLE_LABELS: Record<MediaRole, readonly string[]> = {
  * chat model whose entry is thin than a diffusion model in disguise.
  */
 export const MEDIA_LABELS: ReadonlySet<string> = new Set([
-  ...ROLE_LABELS.transcription, ...ROLE_LABELS.voice, ...ROLE_LABELS.image, "embedding",
+  ...ROLE_LABELS.transcription, ...ROLE_LABELS.voice, ...ROLE_LABELS.image,
+  /* `embeddings`, plural, is what the daemon actually writes -- checked
+     against its own catalogue, where all five entries carry exactly that. The
+     singular was here alone, matched nothing, and left every embedding model
+     in the list of things you could hold a conversation with. */
+  "embeddings", "embedding",
 ]);
 
 export function isForRole(labels: readonly string[] | undefined, role: MediaRole): boolean {
