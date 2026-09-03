@@ -16,7 +16,9 @@
  */
 
 import { backup, DatabaseSync } from "node:sqlite";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -257,22 +259,33 @@ async function snapshot(dataDir: string): Promise<string> {
   if (source) {
     try {
       await backup(source, path);
+      taken = { path, stamp };
+      return path;
+    } catch {
+      /*
+       * Backup is the better read, not the only one.
+       *
+       * It can fail on a library that opens perfectly well -- reported from a
+       * running Zotero, with SQLite raising an error whose code was never set
+       * ("not an error"). Giving up there loses the file route entirely on the
+       * install that has the file, so the copy below is tried instead. It is
+       * second best and the header says why; it is not second best to nothing.
+       */
     } finally {
       source.close();
     }
-    taken = { path, stamp };
-    return path;
   }
 
   /*
-   * The one case backup cannot serve: the source will not open at all.
+   * The cases backup cannot serve: the source will not open at all, or it
+   * opened and the backup itself failed.
    *
    * Opening a WAL database, even read-only, needs the shared-memory file
    * beside it -- so a library on a read-only mount, or restored from a backup,
    * refuses every connection. Copying is second best because a copy of a
-   * database being written to can be torn, but a Zotero that cannot be opened
-   * is a Zotero that is not running, and one that is not running is not
-   * writing.
+   * database being written to can be torn; against that, a WAL frame is
+   * checksummed, so recovery stops at the first torn one and yields a slightly
+   * older library rather than a wrong one.
    *
    * The -wal and -shm files must come too. Without them, content that has not
    * been checkpointed yet is simply absent, and the copy opens as an empty
@@ -353,13 +366,74 @@ async function open(): Promise<{ db: DatabaseSync; dataDir: string }> {
   if (!dataDir) throw new ZoteroError(noLibraryHere(found, { paths: true }));
   try {
     const path = await snapshot(dataDir);
-    return { db: new DatabaseSync(path, { readOnly: true }), dataDir };
+    const db = new DatabaseSync(path, { readOnly: true });
+    /*
+     * Touch it before handing it over.
+     *
+     * `new DatabaseSync` does not read the file, so a snapshot that is not a
+     * database at all constructs happily and throws on the first statement --
+     * outside this try, where the explanation below never runs and the caller
+     * shows SQLite's bare "file is not a database". One cheap query moves the
+     * failure to where it can be explained.
+     */
+    try {
+      db.prepare("SELECT count(*) FROM sqlite_schema").get();
+    } catch (err) {
+      db.close();
+      throw err;
+    }
+    return { db, dataDir };
   } catch (err) {
+    /*
+     * Says what THIS route found and nothing about the other one.
+     *
+     * It used to open with "Zotero's local API did not answer", which is the
+     * caller's business: `inspectLibraryFile` probes both routes side by side
+     * for the Settings panel, so that sentence appeared underneath a green
+     * card reporting the API answering with 20 collections. Two cards, one of
+     * them contradicting the other, in a pane whose entire job is to say which
+     * route is in use.
+     */
     throw new ZoteroError(
-      `Zotero's local API did not answer, and its database at ${join(dataDir, ZOTERO_DB)} could ` +
-        `not be read either: ${(err as Error).message}`,
+      `Zotero's database at ${join(dataDir, ZOTERO_DB)} could not be read: ` +
+        describeOpenFailure(err, dataDir),
     );
   }
+}
+
+/**
+ * A reason, when SQLite gives one, and evidence when it does not.
+ *
+ * Reported from a real library: "could not be read either: not an error".
+ * That is `sqlite3_errstr(SQLITE_OK)` -- a failure raised with no error code
+ * set -- and as a sentence shown to a user it is worse than saying nothing,
+ * because it denies there is a problem while being the problem. So an
+ * unhelpful message is replaced by what can be checked from outside SQLite:
+ * whether the file is there, how big it is, and whether this process may read
+ * it. One of those is wrong in every case that reaches here.
+ */
+function describeOpenFailure(err: unknown, dataDir: string): string {
+  const raw = (err as Error)?.message?.trim() ?? "";
+  const useless = !raw || /^not an error$/i.test(raw) || /^unknown error$/i.test(raw);
+  const path = join(dataDir, ZOTERO_DB);
+  let evidence: string;
+  try {
+    const info = statSync(path);
+    let readable = true;
+    try {
+      accessSync(path, constants.R_OK);
+    } catch {
+      readable = false;
+    }
+    evidence = readable
+      ? `the file is there and is ${Math.round(info.size / 1024)} KB, and Karen can read it, ` +
+        "so SQLite refused it for a reason it did not report — Zotero may have it open " +
+        "exclusively. Closing Zotero and pressing Check again will say whether that is it."
+      : "the file is there but this account does not have permission to read it.";
+  } catch {
+    evidence = "there is no file at that path now, though Zotero's settings point at it.";
+  }
+  return useless ? evidence : raw;
 }
 
 export async function collectionsFromDb(): Promise<ZoteroCollection[]> {

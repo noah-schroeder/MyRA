@@ -215,3 +215,36 @@ describe("end to end, against a library nothing would have guessed", () => {
     }
   });
 });
+
+describe("what the Library panel says when the file cannot be read", () => {
+  it("does not claim the API failed, because the panel says otherwise beside it", async () => {
+    /* Reported with a screenshot: the top card read "Zotero answered on the
+       local API, with 20 collections" and the card under it began "Zotero's
+       local API did not answer". The panel probes both routes independently,
+       so the file route must speak only for itself. */
+    const home = mkdtempSync(join(tmpdir(), "karen-home-"));
+    const data = join(home, "Zotero");
+    mkdirSync(data, { recursive: true });
+    // A file at the right path that SQLite will refuse.
+    writeFileSync(join(data, "zotero.sqlite"), "this is not a database");
+
+    const before = process.env["HOME"];
+    process.env["HOME"] = home;
+    try {
+      const { inspectLibraryFile, setZoteroDataDir, forgetZoteroSnapshot } =
+        await import("../src/main/runtime/zoteroSqlite.ts");
+      forgetZoteroSnapshot();
+      setZoteroDataDir(data);
+      const report = await inspectLibraryFile();
+      assert.equal(report.ok, false);
+      assert.equal(/local API/i.test(report.message), false, report.message);
+      // It still names the file it could not read, which is the actionable part.
+      assert.match(report.message, /zotero\.sqlite could not be read/);
+      setZoteroDataDir("");
+      forgetZoteroSnapshot();
+    } finally {
+      if (before === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = before;
+    }
+  });
+});
