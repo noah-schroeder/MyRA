@@ -1473,6 +1473,7 @@ async function main(): Promise<void> {
       notify: (message) => send("karen:research-progress", message),
     },
     onProgress: (note) => send("karen:research-progress", note),
+    onStage: (stage) => send("karen:research-stage", stage),
   });
 
   /*

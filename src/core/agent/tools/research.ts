@@ -167,6 +167,8 @@ export interface ResearchHost {
   ui: PipelineUi;
   knownModels?: string[];
   onProgress?: (note: string) => void;
+  /** Which stage just started, so the window can draw the run as a sequence. */
+  onStage?: (stage: string) => void;
 }
 
 let host: ResearchHost | undefined;
@@ -247,6 +249,7 @@ async function deepRun(
         ctx.onUpdate?.(note);
         host?.onProgress?.(note);
       },
+      onStage: (stage: string) => host?.onStage?.(stage),
     });
     /* A deep run numbers its report and bibliography together from [1]. Landing
        that in a conversation that has already cited things would put every one
