@@ -26,6 +26,7 @@ import { chatModelOf, LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
+import { bundledLoader } from "./loader.ts";
 import { buildIndex, readIndexSources, type IndexResult } from "./foreignScan.ts";
 import {
   defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
@@ -250,6 +251,26 @@ export class RuntimeManager {
     });
     if (status.state !== "ready") throw new Error(status.error ?? "Lemonade did not start.");
     return this.#api;
+  }
+
+  /**
+   * Whether this machine was too old for the daemon's own build.
+   *
+   * Karen ships a C runtime beside `lemond` when the host's glibc is older
+   * than the GLIBC_2.38 the embeddable needs. That fact is worth far more than
+   * the daemon's startup, because the ENGINES lemond downloads afterwards are
+   * built the same way and get no such help: measured on the released
+   * binaries, `whisper-server` v1.8.4 and kokoro's `koko` b17 both need
+   * GLIBC_2.38, while the llama.cpp build needs only 2.34. So on one of these
+   * machines chat works and every speech model dies on startup with exit code
+   * 1 -- which is exactly the shape of the failure that has to be explained.
+   *
+   * Read off the disk rather than remembered, the same way `launchSpec`
+   * decides how to start the daemon, so the two can never disagree.
+   */
+  async bundledLibc(): Promise<boolean> {
+    const binary = await findLemonade(lemonadeDir(LEMONADE_VERSION));
+    return binary ? bundledLoader(dirname(binary)) !== undefined : false;
   }
 
   /* -------------------------------------------------------------- models -- */

@@ -25,6 +25,7 @@ import {
   isExternal, isUsable, parseModelRef, providerFor, providerSecret, qualify,
 } from "../core/providers.ts";
 import { enabledOnly } from "../core/runtime/catalog.ts";
+import { engineStates, type Runnable } from "../core/runtime/runnable.ts";
 import type { SecretVault } from "./secrets.ts";
 import type { RuntimeManager } from "./runtime/manager.ts";
 
@@ -255,5 +256,38 @@ export async function explainModelFailure(
 ): Promise<string> {
   const message = err instanceof Error ? err.message : String(err);
   const engine = await engineFor(deps, ref).catch(() => undefined);
-  return explainIfLoadFailure(message, { role, ...(engine ? { engine } : {}) }) ?? message;
+  const engineState = engine ? await engineStateOf(deps, engine) : undefined;
+  const oldSystem = engineState === "ready"
+    ? await deps.runtime.bundledLibc().catch(() => false)
+    : false;
+  return (
+    explainIfLoadFailure(message, {
+      role,
+      ...(engine ? { engine } : {}),
+      ...(engineState ? { engineState } : {}),
+      ...(oldSystem ? { oldSystem } : {}),
+    }) ?? message
+  );
+}
+
+/**
+ * Whether this machine has the engine, in the daemon's own words.
+ *
+ * Asked only on the failure path, where one loopback call costs nothing and
+ * getting the advice wrong costs somebody a trip to a settings screen to press
+ * a button that is already pressed -- which is what happened: a user with
+ * whisper.cpp installed was told to install whisper.cpp.
+ *
+ * Undefined when the daemon cannot be asked, and that is a real answer rather
+ * than a fallback: the sentence for "state unknown" hedges deliberately, and
+ * inventing a state here would put the confident wording back.
+ */
+async function engineStateOf(
+  deps: Pick<MediaDeps, "runtime">,
+  engine: string,
+): Promise<Runnable | undefined> {
+  if (deps.runtime.lemonade.status.state !== "ready") return undefined;
+  const info = await deps.runtime.api.systemInfo().catch(() => undefined);
+  if (!info) return undefined;
+  return engineStates(info.engines).get(engine);
 }
