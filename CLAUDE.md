@@ -100,6 +100,15 @@ Stages are assigned to models by role
 ([roles.ts](src/core/research/roles.ts)): screener, analyst, synthesist, reviewer, plus a
 separate embeddings model.
 
+**Everything the pipeline asks a person happens in its first two stages**, and that is a
+promise rather than an accident: a run takes minutes, so approving the plan and walking
+away has to be a supported way to use it. Two rules keep it true. `deep_research` and
+`academic_research` run **once per turn** — the model is otherwise free to call the tool
+again after reading its own report, and did, three times on one question, each time
+creating a new run and so re-asking every scoping question. And the stage list in
+[stages.ts](src/core/research/stages.ts) is pinned by a test to the pipeline's own
+`checkpoint()` calls, because the window draws the run from it.
+
 ### Meetings
 
 The other long-running subsystem, and it earns its rules the same way the pipeline does.
