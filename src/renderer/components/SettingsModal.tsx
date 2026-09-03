@@ -605,9 +605,13 @@ function VoiceField({
       setStatus(result.error ?? "Nothing came back.");
       return;
     }
-    const url = URL.createObjectURL(
-      new Blob([new Uint8Array(result.audio)], { type: result.mime ?? "audio/mpeg" }),
-    );
+    const type = result.mime ?? "audio/mpeg";
+    const url = URL.createObjectURL(new Blob([new Uint8Array(result.audio)], { type }));
+    /* Chromium's own words for a Blob it will not decode are "Failed to load
+       because no supported source was found", which describes the page rather
+       than the sound and sent somebody looking for a broken voice model when
+       the synthesis had worked. The format is the missing half. */
+    const cannotPlay = `That audio could not be played: the voice model returned ${type}.`;
     /* `window.Audio`, not `Audio`: the settings pane below is a component
        called Audio, which shadows the constructor in this module. */
     const audio = new window.Audio(url);
@@ -618,10 +622,13 @@ function VoiceField({
       setPlaying(false);
     };
     audio.onended = done;
-    audio.onerror = done;
-    await audio.play().catch((err: unknown) => {
+    audio.onerror = () => {
       done();
-      setStatus((err as Error).message);
+      setStatus(cannotPlay);
+    };
+    await audio.play().catch(() => {
+      done();
+      setStatus(cannotPlay);
     });
   };
 
