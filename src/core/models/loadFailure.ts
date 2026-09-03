@@ -151,6 +151,35 @@ export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): str
 }
 
 /**
+ * The engine answered, and there was nothing in the answer.
+ *
+ * A different failure from "would not load" and it has to be said differently:
+ * the server started, passed its readiness check and returned 200 to the
+ * daemon, so nothing is missing and nothing needs installing. What is wrong is
+ * the backend it is running on, failing at the point of use.
+ *
+ * Reported as `generate_image returned no results`, in 250 ms, from an sd-cpp
+ * server running the CUDA backend on a laptop with switchable graphics -- the
+ * daemon had just logged `__NV_PRIME_RENDER_OFFLOAD=1`. For comparison, the
+ * identical request against the Vulkan backend took 33 seconds and returned a
+ * PNG, which is what a real generation costs and what makes an instant empty
+ * answer diagnostic rather than ambiguous.
+ */
+export function producedNothing(text: string): boolean {
+  return /returned no results|no images? (?:were )?(?:returned|generated)/i.test(text);
+}
+
+function explainEmptyAnswer(opts: LoadContext): string {
+  const engine = opts.engine ? `The ${opts.engine} engine` : "The engine";
+  return (
+    `${engine} answered without producing anything. Its server started and reported itself ` +
+    "ready, so nothing is missing — what failed is the hardware backend it was built for, at " +
+    "the point of use. Settings → Runtime lists the other backends this machine can install " +
+    "for that engine; the Vulkan one is slower and asks less of the graphics driver."
+  );
+}
+
+/**
  * The whole translation, or nothing when this was a different failure.
  *
  * Returning undefined rather than a vague sentence is the point: a timeout, a
@@ -159,5 +188,6 @@ export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): str
  */
 export function explainIfLoadFailure(text: string, opts: LoadContext): string | undefined {
   const failure = loadFailureIn(text);
-  return failure ? explainLoadFailure(failure, opts) : undefined;
+  if (failure) return explainLoadFailure(failure, opts);
+  return producedNothing(text) ? explainEmptyAnswer(opts) : undefined;
 }
