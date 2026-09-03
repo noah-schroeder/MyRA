@@ -14,7 +14,7 @@ import { test, describe, it } from "node:test";
 import {
   describeVoice, isKokoro, voicesFor, voiceForModel, voiceIsValid, KOKORO_VOICE_IDS, DEFAULT_VOICE,
 } from "../src/core/audio/voices.ts";
-import { modelNamer } from "../src/core/models/roles.ts";
+import { fitsRole, guessRole, modelNamer } from "../src/core/models/roles.ts";
 import { modelOptions } from "../src/main/models.ts";
 import { isForRole, isProviderRef, modelIdOf } from "../src/core/audio/models.ts";
 import { speakable, MAX_SPOKEN_CHARS } from "../src/core/audio/speakable.ts";
@@ -499,5 +499,51 @@ describe("what a model needs to run", () => {
     const whisper = options.find((o) => o.model === "Whisper-Large-v3-Turbo");
     assert.equal(whisper?.downloaded, true);
     assert.equal(whisper?.recipe, "whispercpp");
+  });
+});
+
+/**
+ * Which of a provider's models belongs in which list.
+ *
+ * A provider's /v1/models is ids and nothing else — no labels, no capability
+ * field — so every model was offered for every job: `gpt-4o` as something that
+ * could transcribe a meeting, `whisper-1` as something that could hold a
+ * conversation. The guess below decides what is offered first; the menu keeps
+ * everything else one click away, so being wrong costs a click and not a
+ * model.
+ */
+describe("guessing what a provider's model is for", () => {
+  it("recognises the transcribers", () => {
+    for (const id of ["whisper-1", "gpt-4o-transcribe", "nova-2", "deepgram-nova-3", "canary-1b"]) {
+      assert.equal(guessRole(id), "transcription", id);
+    }
+  });
+
+  it("recognises the voices", () => {
+    for (const id of ["tts-1", "gpt-4o-mini-tts", "eleven-turbo-v2", "kokoro-v1"]) {
+      assert.equal(guessRole(id), "voice", id);
+    }
+  });
+
+  it("recognises the image models", () => {
+    for (const id of ["dall-e-3", "flux-pro", "stable-diffusion-3.5", "imagen-3"]) {
+      assert.equal(guessRole(id), "image", id);
+    }
+  });
+
+  it("leaves a chat model alone, including the ones with a job in the name", () => {
+    /* `gpt-4o-transcribe` and `gpt-4o-mini-tts` both contain a chat model's
+       name, which is why the specific patterns are tested first -- and why
+       plain `gpt-4o` must still come out as chat. */
+    for (const id of ["gpt-4o", "claude-opus-4-5-20251101", "gemini-3.8-flash", "qwen3-30b"]) {
+      assert.equal(guessRole(id), "chat", id);
+    }
+  });
+
+  it("answers the question each picker actually asks", () => {
+    assert.equal(fitsRole("whisper-1", "transcription"), true);
+    assert.equal(fitsRole("whisper-1", "chat"), false);
+    assert.equal(fitsRole("gpt-4o", "chat"), true);
+    assert.equal(fitsRole("gpt-4o", "voice"), false);
   });
 });

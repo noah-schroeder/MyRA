@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type {
   AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, VaultStatus,
 } from "../types.ts";
@@ -450,10 +450,21 @@ function AudioModelField({
   };
 
   const local = options.filter((o) => o.where === "local");
-  const byProvider = new Map<string, AudioOption[]>();
+  /*
+   * A provider's models, split by whether they look like this job.
+   *
+   * A provider publishes ids and no capabilities, so the transcription list
+   * offered `gpt-4o` and the voice list offered `whisper-1`. The rest are not
+   * dropped — they go in a second group under the same provider, because a
+   * guess about a name should never be what puts a model out of reach, and the
+   * one already chosen always shows in the first group.
+   */
+  const byProvider = new Map<string, { fits: AudioOption[]; rest: AudioOption[] }>();
   for (const option of options.filter((o) => o.where === "provider")) {
     const key = option.providerLabel ?? "Provider";
-    byProvider.set(key, [...(byProvider.get(key) ?? []), option]);
+    const group = byProvider.get(key) ?? { fits: [], rest: [] };
+    (option.fits === false && option.ref !== chosen ? group.rest : group.fits).push(option);
+    byProvider.set(key, group);
   }
 
   return (
@@ -482,15 +493,29 @@ function AudioModelField({
               ))}
             </optgroup>
           ) : null}
-          {[...byProvider].map(([provider, models]) => (
-            <optgroup key={provider} label={provider}>
-              {models.map((o) => (
-                <option key={o.ref} value={o.ref}>
-                  {o.model}
-                  {o.external ? " — leaves this machine" : ""}
-                </option>
-              ))}
-            </optgroup>
+          {[...byProvider].map(([provider, group]) => (
+            <Fragment key={provider}>
+              {group.fits.length ? (
+                <optgroup label={provider}>
+                  {group.fits.map((o) => (
+                    <option key={o.ref} value={o.ref}>
+                      {o.model}
+                      {o.external ? " — leaves this machine" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {group.rest.length ? (
+                <optgroup label={`${provider} — other models, probably not for this`}>
+                  {group.rest.map((o) => (
+                    <option key={o.ref} value={o.ref}>
+                      {o.model}
+                      {o.external ? " — leaves this machine" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </Fragment>
           ))}
         </select>
       </label>

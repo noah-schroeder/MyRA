@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { LocalModel, RuntimeState, Settings } from "../types.ts";
+import type { LocalModel, Provider, RuntimeState, Settings } from "../types.ts";
 import {
   displayModelName, filterModels, shortModelName as shorten, SOURCE_LABELS, sourceOfModel,
 } from "../../core/runtime/foreign.ts";
 import { formatTokens } from "../../core/tokens.ts";
+import { fitsRole, MEDIA_LABELS } from "../../core/models/roles.ts";
 import { choiceIsExternal, isExternal, parseModelRef, qualify } from "../../core/providers.ts";
 import { priceLabel, priceTitle } from "../../core/pricing.ts";
 
@@ -67,9 +68,20 @@ export function ModelBar({
   useEffect(() => {
     if (open) {
       void window.karen.lemonadeModels().then((r) =>
-        /* `path` stays the real id -- it is what `load` is called with --
-           while `name` is what a person recognises. */
-        setModels(r.models.map((m) => ({ path: m.id, name: displayModelName(m.id) }))));
+        setModels(
+          r.models
+            /* Chat models only. Karen serves speech, voice and diffusion
+               models through the same daemon and the same /models listing, so
+               without this the conversation picker offered Whisper and Kokoro
+               as things to talk to -- and picking one produces a request the
+               engine answers with an error, if it answers at all. The labels
+               are the daemon's own; MEDIA_LABELS is what they are checked
+               against. */
+            .filter((m) => !(m.labels ?? []).some((label) => MEDIA_LABELS.has(label)))
+            /* `path` stays the real id -- it is what `load` is called with --
+               while `name` is what a person recognises. */
+            .map((m) => ({ path: m.id, name: displayModelName(m.id) })),
+        ));
     }
   }, [open]);
 
@@ -107,6 +119,20 @@ export function ModelBar({
   }, [loadingModel]);
 
   const providers = (settings?.providers ?? []).filter((p) => p.enabled && p.models.length);
+  /* Which of a provider's models are offered as things to talk to, and which
+     wait behind a click. Same guess, same escape hatch, as every other picker:
+     a provider publishes ids and no capabilities, so `whisper-1` and `tts-1`
+     were being offered as models to hold a conversation with. */
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
+  const shownModels = (provider: Provider): string[] =>
+    showAll.has(provider.id)
+      ? provider.models
+      : provider.models.filter(
+          (m) => fitsRole(m, "chat") || settings?.llm.model === qualify(provider.id, m),
+        );
+  const hiddenCount = (provider: Provider): number =>
+    provider.models.length - shownModels(provider).length;
+
   const chosenExternal = choiceIsExternal(settings?.providers ?? [], settings?.llm.model ?? "");
   /*
    * Whether a PROVIDER model is chosen at all, which is not the same question.
@@ -300,7 +326,7 @@ export function ModelBar({
                     {!isExternal(provider) ? <span className="dim"> — on this machine</span> : null}
                   </p>
                   <ul className="modelmenu-list">
-                    {provider.models.map((model) => {
+                    {shownModels(provider).map((model) => {
                       const on = settings?.llm.model === qualify(provider.id, model);
                       return (
                         <li key={model} className="modelmenu-row">
@@ -331,6 +357,15 @@ export function ModelBar({
                       );
                     })}
                   </ul>
+                  {hiddenCount(provider) && !showAll.has(provider.id) ? (
+                    <button
+                      type="button"
+                      className="modelmenu-more"
+                      onClick={() => setShowAll((seen) => new Set(seen).add(provider.id))}
+                    >
+                      Show {hiddenCount(provider)} more from this provider
+                    </button>
+                  ) : null}
                 </div>
               ))}
               <div className="modelmenu-foot">

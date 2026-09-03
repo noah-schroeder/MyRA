@@ -201,7 +201,17 @@ export function useAgent() {
     open.current = undefined;
   }, []);
 
-  return { items, busy, usage, error, sources, send, abort, reset };
+  /**
+   * Put the error away.
+   *
+   * Sending already clears it, but that makes dismissing a message conditional
+   * on having something else to say — and the banner sits above the composer
+   * for the rest of the conversation until you do. An error is a thing that
+   * happened, not a state the app is in.
+   */
+  const dismissError = useCallback(() => setError(undefined), []);
+
+  return { items, busy, usage, error, sources, send, abort, reset, dismissError };
 }
 
 /*

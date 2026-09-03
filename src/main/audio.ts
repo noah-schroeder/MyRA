@@ -114,6 +114,23 @@ export function installAudioIpc(deps: AudioDeps): void {
    * leave a trail of what was said in a feature whose whole point is that it is
    * spoken and gone.
    */
+  /**
+   * Give a speech model back its memory.
+   *
+   * On the machines this is for, a Whisper and a chat model resident together
+   * is most of an 8 GB card — and the transcription model is the one you are
+   * finished with the moment the meeting is written up. Naming the model is
+   * what stops this taking the conversation's model down with it.
+   */
+  ipcMain.handle("karen:audio-unload", async (_e, model: string) => {
+    try {
+      await runtime.unloadModel(model);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle("karen:audio-speak", async (_e, text: string) => {
     try {
       const spoken = await speakText(deps, text);

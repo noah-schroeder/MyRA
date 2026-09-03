@@ -100,6 +100,26 @@ export function AudioPicker({
   }, [open]);
 
   const chosenOption = options.find((o) => o.ref === chosen);
+  /* Anything the daemon is actually holding for this role. Usually the chosen
+     model, but not always: switch from Whisper-Large to Whisper-Base and the
+     large one is still resident until something lets go of it. */
+  const resident = options.filter((o) => o.where === "local" && o.loaded);
+
+  /**
+   * Let go of a loaded model without forgetting the choice.
+   *
+   * Deliberately does not clear the setting: "I want the memory back now" and
+   * "I no longer want this model" are different intentions, and the second is
+   * what the dropdown itself is for. The next dictation loads it again.
+   */
+  const eject = async (option: AudioOption): Promise<void> => {
+    setBusy(option.ref);
+    setError(undefined);
+    const result = await window.karen.audioUnload(option.model);
+    setBusy(undefined);
+    if (!result.ok) setError(result.error);
+    void window.karen.audioModels(role).then((r) => setOptions(r.options));
+  };
 
   /**
    * Choose one, and put it in memory if it is a local one.
@@ -157,6 +177,23 @@ export function AudioPicker({
   const external = choiceIsExternal(settings?.providers ?? [], chosen);
   const tone = !chosen ? "none" : external ? "remote" : "local";
 
+  const ejectRow = resident.length ? (
+    <div className="modelmenu-eject">
+      {resident.map((option) => (
+        <button
+          key={option.ref}
+          type="button"
+          role="menuitem"
+          disabled={Boolean(busy)}
+          onClick={() => void eject(option)}
+        >
+          Eject {option.model}
+          <span className="dim"> — frees the memory it is holding</span>
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <div className="modelbar-wrap audiobar-wrap" ref={wrap}>
       <button
@@ -211,19 +248,24 @@ export function AudioPicker({
           }
           onChoose={(option) => void choose(option)}
           footer={
-            /* The voice itself is chosen in Settings, where it can be
-               previewed. Naming it here is what stops the chat bar looking
-               like it forgot about it. */
-            role === "voice" && chosen ? (
-              <button type="button" role="menuitem" onClick={() => { setOpen(false); onOpenSettings(); }}>
-                Voice: {describeVoice(settings?.audio.voice ?? "").name || "the model's default"}
-                <span className="dim"> — change it in Settings</span>
-              </button>
-            ) : (
-              <button type="button" role="menuitem" onClick={() => { setOpen(false); onOpenSettings(); }}>
-                Audio settings…
-              </button>
-            )
+            <>
+              {/* Above the settings link, because it acts on what is loaded
+                  right now and the link goes somewhere else. */}
+              {ejectRow}
+              {/* The voice itself is chosen in Settings, where it can be
+                  previewed. Naming it here is what stops the chat bar looking
+                  like it forgot about it. */}
+              {role === "voice" && chosen ? (
+                <button type="button" role="menuitem" onClick={() => { setOpen(false); onOpenSettings(); }}>
+                  Voice: {describeVoice(settings?.audio.voice ?? "").name || "the model's default"}
+                  <span className="dim"> — change it in Settings</span>
+                </button>
+              ) : (
+                <button type="button" role="menuitem" onClick={() => { setOpen(false); onOpenSettings(); }}>
+                  Audio settings…
+                </button>
+              )}
+            </>
           }
         />
       ) : null}

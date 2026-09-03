@@ -308,9 +308,9 @@ export class RuntimeManager {
     await this.update({ activeModel: name });
   }
 
-  async unloadModel(): Promise<void> {
+  async unloadModel(model?: string): Promise<void> {
     if (this.#lemonade.status.state !== "ready") return;
-    await this.#api.unloadModel();
+    await this.#api.unloadModel(model);
     await this.#lemonade.refreshHealth();
     this.#emit();
   }
