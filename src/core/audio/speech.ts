@@ -21,7 +21,10 @@
  *     tells the user a download may be happening.
  */
 
-import { audioMime, PREFERRED_FORMAT, refusedTheFormat } from "./container.ts";
+import { audioMime, refusedTheFormat, sniffAudio } from "./container.ts";
+import {
+  DEFAULT_PCM, isRawPcm, PCM_FORMAT, rateFrom, repairWav, wavFromPcm, WAV_FORMAT,
+} from "./wav.ts";
 import type { EndpointSettings } from "../config.ts";
 
 export class SpeechError extends Error {
@@ -97,21 +100,23 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
   let res: Response;
   try {
     /*
-     * WAV is asked for, and asked for first.
+     * Raw samples first, then WAV, then whatever the endpoint likes.
      *
-     * With no format named the local daemon answers MP3 -- measured -- and an
-     * MP3 needs a codec the renderer may not have, which arrives as "Failed to
-     * load because no supported source was found" after a synthesis that
-     * worked perfectly. WAV needs no codec at all. It is five times the bytes
-     * for one sentence and every one of them travels over loopback.
+     * With no format named the local daemon answers MP3, which needs a codec
+     * the renderer may not ship. Asking it for WAV was the obvious fix and was
+     * not one: it returns float32 samples under two 0xFFFFFFFF size fields,
+     * and Chromium refuses that just as firmly -- reported, after the change,
+     * as "That audio could not be played: the voice model returned audio/wav".
      *
-     * An endpoint that does not take the field gets asked again without it,
-     * because being unable to speak at all is a worse failure than a container
-     * that might not play.
+     * `pcm` has nothing left to get wrong. It is 16-bit little-endian at 24 kHz
+     * on both the local daemon and OpenAI, and Karen puts a correct header in
+     * front of it below. The two fallbacks are for an endpoint that will not
+     * produce raw samples; being unable to speak at all is the worse failure.
      */
-    res = await send(PREFERRED_FORMAT);
-    if (!res.ok && refusedTheFormat(res.status, await res.clone().text().catch(() => ""))) {
-      res = await send(undefined);
+    res = await send(PCM_FORMAT);
+    for (const next of [WAV_FORMAT, undefined]) {
+      if (res.ok || !refusedTheFormat(res.status, await res.clone().text().catch(() => ""))) break;
+      res = await send(next);
     }
   } catch (err) {
     const name = (err as Error).name;
@@ -154,14 +159,31 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
     throw new SpeechError(`Speech failed: ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`);
   }
 
-  const audio = Buffer.from(await res.arrayBuffer());
-  if (audio.length === 0) throw new SpeechError("The voice model returned no audio.");
+  const received = Buffer.from(await res.arrayBuffer());
+  if (received.length === 0) throw new SpeechError("The voice model returned no audio.");
+  const header = res.headers.get("content-type") ?? undefined;
+
+  /*
+   * Raw samples get the header they never had; a broken container gets fixed.
+   *
+   * Only when the bytes really are raw: an endpoint that ignored the format
+   * and sent an MP3 anyway must be passed through, not wrapped, or the result
+   * is an MP3 wearing a WAV header and nothing can play THAT either.
+   */
+  if (isRawPcm(header) && !sniffAudio(received)) {
+    const rate = rateFrom(header) ?? DEFAULT_PCM.rate;
+    const wav = wavFromPcm(received, { ...DEFAULT_PCM, rate });
+    return { audio: Buffer.from(wav), mime: "audio/wav" };
+  }
+  const repaired = repairWav(received);
+  if (repaired) return { audio: Buffer.from(repaired), mime: "audio/wav" };
+
   return {
-    audio,
+    audio: received,
     /* The bytes are asked before the header. A server that labels its audio
        `application/octet-stream`, or mislabels it outright, otherwise hands
        the <audio> element a Blob it declines to play -- and the failure looks
        identical to a voice model that answered with silence. */
-    mime: audioMime(audio, res.headers.get("content-type") ?? undefined),
+    mime: audioMime(received, header),
   };
 }
