@@ -33,6 +33,7 @@ import { RegistrySearch } from "./RegistrySearch.tsx";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 
 import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
 import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
 import { fitModel, type Machine, type Verdict } from "../../core/runtime/fit.ts";
@@ -460,6 +461,22 @@ export function LemonadePane({
                 Each kind of model needs its engine installed once. Karen downloads them through
                 Lemonade — nothing is fetched until you press a button here.
               </p>
+              {/*
+                * Said out loud, because its absence reads as a missing feature.
+                *
+                * "How do I update llama.cpp? I don't see a button" -- there is
+                * none, and that is the design: Karen pins one Lemonade version,
+                * and each engine's build comes from that version's own recipe.
+                * Re-installing fetches the identical build. Without this line
+                * the pane shows a tick, no version, and no explanation, which
+                * looks like something left unfinished rather than a decision.
+                */}
+              <p>
+                Each engine's version is fixed by the Lemonade release Karen ships
+ ({LEMONADE_VERSION}), so they change when Karen does
+                and not on their own. That is deliberate: a runtime that updated itself underneath
+                a piece of work could change an answer between one run and the next.
+              </p>
             </header>
 
             <div className="lem-grid">
@@ -478,8 +495,20 @@ export function LemonadePane({
                     <div className="lem-backends">
                       {offer.map((b) =>
                         b.state === "installed" ? (
-                          <span key={b.id} className="lem-chip good" title={b.message}>
+                          <span
+                            key={b.id}
+                            className="lem-chip good"
+                            title={
+                              b.version
+                                ? `${BACKEND_LABELS[b.id] ?? b.id} ${b.version}, the build this ` +
+                                  "version of Karen pins."
+                                : b.message
+                            }
+                          >
                             <span aria-hidden="true">✓</span> {BACKEND_LABELS[b.id] ?? b.id}
+                            {/* The version, because "is mine current" is the
+                                question a tick cannot answer. */}
+                            {b.version ? <span className="lem-chip-ver"> {b.version}</span> : null}
                           </span>
                         ) : (
                           <button
