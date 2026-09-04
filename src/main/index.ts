@@ -39,6 +39,10 @@ import {
 import { samplingForRequest } from "../core/llm/sampling.ts";
 import { pricesFrom } from "../core/pricing.ts";
 import { ASK_FOR_REASONING, describeProbe, probeReasoning } from "../core/llm/reasoningProbe.ts";
+import { dialectById, dialectForHost, reasoningFields } from "../core/llm/reasoningDialect.ts";
+import {
+  cachedLocalDialect, forgetReasoning, hostedCapability, localCapability,
+} from "./llm/reasoning.ts";
 import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
@@ -890,6 +894,68 @@ function installIpc(): void {
    * conversation is sent, and no part of the reply is stored -- the report is
    * field names and character counts.
    */
+  /**
+   * What the model in front of the user can be told about thinking.
+   *
+   * Asked by the composer whenever the model changes. Cheap for a hosted
+   * provider (a lookup) and cheap enough for a local one (two or three
+   * template renders, no inference), and cached per model either way.
+   */
+  ipcMain.handle("karen:reasoning-capability", async () => {
+    try {
+      const chosen = config.current.llm.model ?? "";
+      const provider = providerFor(config.current.providers, chosen);
+      if (provider) {
+        const cap = hostedCapability(provider);
+        return { ok: true, ...cap, value: config.current.reasoning[chosen] ?? "" };
+      }
+      const loaded = runtime.chatModel();
+      if (!loaded) {
+        return {
+          ok: true,
+          reason: "unchecked" as const,
+          note: "No model is loaded, so there is nothing to ask yet.",
+        };
+      }
+      const cap = await localCapability(loaded);
+      /* Keyed by the model that will answer, which is what resolveLlm uses to
+         look the choice back up. A key taken from the picker's setting instead
+         would miss when the two differ. */
+      const key = chosen.trim() || loaded.id;
+      return { ok: true, ...cap, value: config.current.reasoning[key] ?? "" };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  /** Choose a level, or clear it. Stored against the model, never globally. */
+  ipcMain.handle("karen:set-reasoning", async (_e, value?: string | null) => {
+    const chosen = config.current.llm.model ?? "";
+    const key = chosen.trim() || runtime.chatModel()?.id || "";
+    if (!key) return { ok: false, error: "No model is chosen." };
+    const next = { ...config.current.reasoning };
+    if (value) next[key] = String(value);
+    else delete next[key];
+    await config.update({ reasoning: next });
+    return { ok: true };
+  });
+
+  /*
+   * A newly loaded model has its own template, so the previous answer is about
+   * something else.
+   *
+   * Only when the model actually changes. `onChange` also fires on every
+   * health refresh, and clearing the cache on those would make the composer
+   * re-render a template every few seconds to be told what it already knew.
+   */
+  let lastChatModel = runtime.chatModel()?.id;
+  runtime.onChange(() => {
+    const now = runtime.chatModel()?.id;
+    if (now === lastChatModel) return;
+    lastChatModel = now;
+    forgetReasoning();
+  });
+
   ipcMain.handle(
     "karen:provider-reasoning",
     async (_e, opts: { baseUrl?: unknown; id?: unknown; model?: unknown; apiKey?: unknown }) => {
@@ -917,16 +983,57 @@ function installIpc(): void {
       /* Remembered only when asking is what made the difference, and only for
          a provider that exists to remember it against. */
       const helps = Boolean(asked?.ok && found(asked) && !found(plain));
-      if (helps && id && config.current.providers.some((p) => p.id === id)) {
-        await config.update({
-          providers: config.current.providers.map((p) =>
-            p.id === id ? { ...p, askReasoning: true } : p,
-          ),
-        });
+
+      /*
+       * The second question, asked in the same trip: will this endpoint take
+       * the field that says HOW HARD to think?
+       *
+       * Karen knows what each vendor calls it. What it cannot know from the
+       * documentation is whether the address in this box will accept it -- a
+       * proxy, a gateway or an older deployment may not -- and a strict server
+       * refuses the whole request over one unknown field. So it is sent once,
+       * here, where a failure costs a line of text rather than somebody's next
+       * chat, and the control in the composer stays hidden until it comes back
+       * clean.
+       *
+       * The cheapest level is the one used: this is a real request against a
+       * real account, and a probe should not be the most expensive turn of
+       * somebody's day.
+       */
+      const known = dialectForHost(baseUrl);
+      let effort: string | undefined;
+      if (plain.ok && known) {
+        const level = known.levels[0];
+        const trial = level
+          ? await probeReasoning({
+              endpoint,
+              ...(key ? { apiKey: key } : {}),
+              extra: reasoningFields(known, level.value),
+            })
+          : undefined;
+        if (trial?.ok) effort = known.id;
+      }
+      if (id && config.current.providers.some((p) => p.id === id)) {
+        const patch = {
+          ...(helps ? { askReasoning: true } : {}),
+          ...(effort ? { reasoningParam: effort } : {}),
+        };
+        if (Object.keys(patch).length) {
+          await config.update({
+            providers: config.current.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+          });
+        }
       }
       return {
         ok: plain.ok || Boolean(asked?.ok),
-        message: describeProbe(plain, asked),
+        message:
+          describeProbe(plain, asked) +
+          (known
+            ? effort
+              ? ` This endpoint also accepts “${known.param}”, so the thinking control is now ` +
+                "available in the composer."
+              : ` It did not accept “${known.param}”, so there is no thinking control for it.`
+            : ""),
         asking: helps,
       };
     },
@@ -1552,6 +1659,51 @@ async function main(): Promise<void> {
     samplingForRequest(config.current.sampling[stored] ?? {}, !local);
 
   /**
+   * The thinking-effort fields for a stored choice, or nothing.
+   *
+   * Nothing is the normal case, and it has to be: every field here is one a
+   * strict endpoint can refuse the whole request over. A choice is only turned
+   * into a field when it still belongs to a dialect that endpoint speaks, so a
+   * level chosen against OpenAI cannot follow a model reference to a server
+   * where it means nothing.
+   */
+  const reasoningExtra = (
+    dialectId: string | undefined,
+    modelRef: string,
+  ): Record<string, unknown> => {
+    const value = config.current.reasoning[modelRef];
+    if (!dialectId || !value) return {};
+    const dialect = dialectById(dialectId);
+    return dialect ? reasoningFields(dialect, value) : {};
+  };
+
+  /** Hosted: the reasoning ask, plus an effort field if one was verified. */
+  const extrasFor = (
+    provider: Provider,
+    modelRef: string,
+    ask: Record<string, unknown>,
+  ): { extra?: Record<string, unknown> } => {
+    const extra = {
+      ...(provider.askReasoning ? ask : {}),
+      ...reasoningExtra(provider.reasoningParam, modelRef),
+    };
+    return Object.keys(extra).length ? { extra } : {};
+  };
+
+  /**
+   * Local: the template variable this model was found to read.
+   *
+   * Read from the cache the capability check fills, so a request never renders
+   * a template of its own -- the choice cannot exist without that check having
+   * run, because the control that sets it is only drawn when it succeeds.
+   */
+  const localReasoningExtra = (model: string): { extra?: Record<string, unknown> } => {
+    const dialect = cachedLocalDialect(model);
+    const extra = reasoningExtra(dialect?.id, model);
+    return Object.keys(extra).length ? { extra } : {};
+  };
+
+  /**
    * Where to send one model reference.
    *
    * `ref` is what the picker stores: "providerId::model" for a hosted model, a
@@ -1616,7 +1768,7 @@ async function main(): Promise<void> {
         /* Sent only to a provider the reasoning check found needs asking.
            Never speculatively: a server that does not know these fields
            refuses the whole request. */
-        ...(provider.askReasoning ? { extra: ASK_FOR_REASONING } : {}),
+        ...extrasFor(provider, chosen, ASK_FOR_REASONING),
       };
     }
     if (provider && !isUsable(provider)) {
@@ -1656,6 +1808,7 @@ async function main(): Promise<void> {
            llm.model holds: tuning follows the model rather than the setting
            that used to name it. */
         sampling: samplingFor(model, true),
+        ...localReasoningExtra(model),
       };
     }
     /*

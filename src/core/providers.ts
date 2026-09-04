@@ -45,6 +45,21 @@ export interface Provider {
    */
   askReasoning?: boolean;
   /**
+   * The thinking-effort dialect this endpoint has been CHECKED to accept.
+   *
+   * Separate from `askReasoning`, which is about seeing the reasoning; this is
+   * about controlling how much of it there is. Holds a dialect id rather than
+   * a boolean so that a provider checked against one shape does not silently
+   * keep its control if Karen later decides that host speaks a different one.
+   *
+   * Absent until the reasoning check has sent the field and had the request
+   * come back clean. Knowing what OpenAI calls the parameter is not the same
+   * as knowing that the endpoint in this box will take it -- it may be a
+   * proxy, a gateway, or an older deployment -- and a strict server refuses
+   * the whole request over one field it does not know.
+   */
+  reasoningParam?: string;
+  /**
    * What each model costs, as this endpoint reported it when last asked.
    *
    * A cache of somebody else's numbers, not a price list of Karen's own: it is
@@ -203,6 +218,9 @@ export function parseProvider(raw: unknown): Provider | undefined {
     enabled: row["enabled"] !== false,
     // Absent means off, and only an explicit true turns it on.
     ...(row["askReasoning"] === true ? { askReasoning: true } : {}),
+    ...(typeof row["reasoningParam"] === "string" && row["reasoningParam"]
+      ? { reasoningParam: row["reasoningParam"] }
+      : {}),
     ...(row["prices"] ? { prices: parsePrices(row["prices"]) } : {}),
   };
 }

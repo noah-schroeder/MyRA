@@ -1609,6 +1609,37 @@ body:has(.artifact-grip:active) { user-select: none; }
 .mode-ring.web .mode-ring-row { border-color: color-mix(in srgb, var(--amber) 32%, var(--border)); }
 .mode-ring.web .mode-ring-label { color: color-mix(in srgb, var(--amber) 55%, var(--text-faint)); }
 
+/* ---------- thinking effort ---------- */
+
+/*
+ * Built like a mode ring, and deliberately in neither of their colours. Green
+ * and amber up there mean "stays on this machine" and "reaches the internet",
+ * and this control is not about egress at all -- borrowing either hue would
+ * make it look like a privacy boundary that it is not.
+ */
+.reasoning-bar { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-left: 4px; }
+/* Monospace because it is not a label for a field, it IS the field: what is
+   printed here is the key that goes on the wire. */
+.reasoning-param {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.02em;
+  padding-left: 11px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.reasoning-row {
+  display: flex; gap: 2px; padding: 2px;
+  background: var(--bg-inset); border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--blue) 26%, var(--border));
+}
+.reasoning-bar .reasoning-param { color: color-mix(in srgb, var(--blue) 45%, var(--text-faint)); }
+.reasoning-row .mode { font-family: var(--mono); font-size: 11px; padding: 4px 10px; }
+
+/* The absent case. Quiet enough to ignore, present enough to hover. */
+.reasoning-absent {
+  align-self: flex-end;
+  font-size: 10.5px; color: var(--text-faint); opacity: 0.65;
+  padding-bottom: 5px; cursor: help; white-space: nowrap;
+}
+
 .mode {
   font: inherit; font-size: 12px;
   padding: 4px 12px;

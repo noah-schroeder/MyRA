@@ -169,6 +169,10 @@ const api = {
   lemonadeInstallBackend: (recipe: string, backend: string) =>
     ipcRenderer.invoke("karen:lemonade-install-backend", recipe, backend),
   lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
+  /* What the chosen model can be told about thinking, and the choice itself.
+     Both are per model: the vocabulary belongs to the endpoint. */
+  reasoningCapability: () => ipcRenderer.invoke("karen:reasoning-capability"),
+  setReasoning: (value?: string) => ipcRenderer.invoke("karen:set-reasoning", value ?? null),
   /* Engine builds. `engineUpdatesCheck` is the only one of the three that
      leaves the machine, and only when a button is pressed. */
   engineVersions: () => ipcRenderer.invoke("karen:engine-versions"),

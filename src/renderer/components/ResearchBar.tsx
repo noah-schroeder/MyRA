@@ -80,10 +80,20 @@ export function ResearchBar({
   lookup,
   onLookup,
   onLeaveLookup,
+  trailing,
 }: {
   lookup: boolean;
   onLookup: () => void;
   onLeaveLookup: () => void;
+  /**
+   * Another control to sit in the same row as the rings.
+   *
+   * Taken as a child rather than placed beside this component in the composer,
+   * because `mode-rings` is what wraps: anything outside it lands after a
+   * two-row block and reads as belonging to the send button instead of to the
+   * modes. The rings own the row, so what shares the row goes through here.
+   */
+  trailing?: React.ReactNode;
 }) {
   /* Matches DEFAULT_RESEARCH in core/research/config.ts. The real value lands a
      tick later from getResearch(); starting at "off" would light the wrong
@@ -154,6 +164,8 @@ export function ResearchBar({
             </button>
           </div>
         </div>
+
+        {trailing}
       </div>
 
       {/* At the Library rung only.

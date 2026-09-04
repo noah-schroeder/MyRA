@@ -25,6 +25,22 @@ function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
   }
   return out;
 }
+/**
+ * Model -> chosen level, keeping only what could be a level.
+ *
+ * Strings only, and short ones: these end up in a request field, and a
+ * settings file edited by hand should not be a way to put an arbitrary
+ * structure into one.
+ */
+function parseReasoningByModel(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [model, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string" && value && value.length <= 32) out[model] = value;
+  }
+  return out;
+}
+
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "./paths.ts";
 import { isLocalHost } from "./destinations.ts";
 import { DEFAULT_VOICE, voiceForModel } from "./audio/voices.ts";
@@ -213,6 +229,17 @@ export interface Settings {
    * slider would be re-tuned on every switch until it was abandoned.
    */
   sampling: Record<string, Sampling>;
+  /**
+   * How hard each model should think, in that endpoint's own vocabulary.
+   *
+   * Keyed by model for the same reason `sampling` is, and for one more: the
+   * value only means anything inside one dialect. "high" is an OpenAI effort,
+   * "-1" is a Google budget and "false" is a template variable, so a single
+   * global setting would carry a value from one endpoint to another where it
+   * is not a value at all. Anything that no longer matches the model's dialect
+   * is dropped on read rather than sent.
+   */
+  reasoning: Record<string, string>;
 }
 
 export const DEFAULT_AUDIO: AudioSettings = {
@@ -328,6 +355,7 @@ export const DEFAULT_SETTINGS: Settings = {
   setupCompleted: false,
   providers: [],
   sampling: {},
+  reasoning: {},
 };
 
 /**
@@ -408,6 +436,7 @@ export class ConfigStore {
            route. */
         providers: parseProviders(parsed.providers),
         sampling: parseSamplingByModel(parsed.sampling),
+        reasoning: parseReasoningByModel(parsed.reasoning),
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -435,6 +464,9 @@ export class ConfigStore {
       // must be able to do, and a merge cannot express a deletion.
       ...(patch.providers ? { providers: parseProviders(patch.providers) } : {}),
       ...(patch.sampling ? { sampling: parseSamplingByModel(patch.sampling) } : {}),
+      /* Replaced, not merged: un-choosing a level has to be expressible, and
+         a merge cannot say "this model no longer has one". */
+      ...(patch.reasoning ? { reasoning: parseReasoningByModel(patch.reasoning) } : {}),
     };
     await this.save();
     this.#emit();

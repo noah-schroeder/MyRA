@@ -13,6 +13,7 @@ import { RailButton } from "./components/Rail.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
 import { AudioPicker } from "./components/AudioPicker.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
+import { ReasoningBar } from "./components/ReasoningBar.tsx";
 import { MeetingsPage } from "./components/MeetingsPage.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
 import { RunPanel } from "./components/RunPanel.tsx";
@@ -590,6 +591,10 @@ export function App() {
                 lookup={lookup}
                 onLookup={() => setLookup(true)}
                 onLeaveLookup={() => setLookup(false)}
+                /* In the rings' own row, and keyed on the model: the vocabulary
+                   it shows belongs to whatever is answering, so it has to be
+                   re-asked when that changes. */
+                trailing={<ReasoningBar model={settings?.llm.model} />}
               />
               <span className="composer-spacer" />
 
