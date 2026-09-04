@@ -38,7 +38,7 @@ import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/r
 import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
 import { fitModel, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
-  engineStates, partitionByRunnable, runnable, type Runnable,
+  engineStates, engineUsable, partitionByRunnable, runnable, type Runnable,
 } from "../../core/runtime/runnable.ts";
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
 
@@ -142,6 +142,10 @@ const LABEL_WORDS: Record<string, string> = {
 
 const RUN_CHIP: Record<Runnable, { short: string; tone: string }> = {
   ready: { short: "Ready", tone: "good" },
+  /* Deliberately the same chip as `ready`. This column answers "what happens
+     if I press Download", and for a model the answer is the same either way --
+     an engine update pending on the Runtime screen is not this row's news. */
+  "update-pending": { short: "Ready", tone: "good" },
   "needs-engine": { short: "Needs engine", tone: "warn" },
   unsupported: { short: "Cannot run", tone: "bad" },
 };
@@ -170,7 +174,9 @@ const ENGINE_ORDER = [
 
 /** Installed first, then what can be installed, then the rest. */
 function engineRank(engine: EngineInfo): number {
-  if (engine.backends.some((b) => b.state === "installed")) return 0;
+  // `update_required` is an installed engine with a newer build waiting, so it
+  // belongs at the top with the rest of what this machine already has.
+  if (engine.backends.some((b) => b.state === "installed" || b.state === "update_required")) return 0;
   if (engine.backends.some((b) => b.state === "installable")) return 1;
   return 2;
 }
@@ -313,7 +319,7 @@ export function LemonadePane({
   /* Whether anything at all can run a model yet, which is the one fact the
      models half needs from the engines half. */
   const noEngine =
-    info !== undefined && !(info.engines ?? []).some((e) => e.backends.some((b) => b.state === "installed"));
+    info !== undefined && ![...engineStates(info.engines ?? []).values()].some(engineUsable);
 
   const groups = useMemo(() => groupCatalog(catalog), [catalog]);
   /* Models the daemon knows that the catalogue does not -- the user's own
@@ -327,7 +333,7 @@ export function LemonadePane({
   const states = useMemo(() => engineStates(info?.engines ?? []), [info?.engines]);
   /** The engines with a backend installed, named rather than counted. */
   const readyEngines = useMemo(
-    () => [...states].filter(([, v]) => v === "ready").map(([id]) => id),
+    () => [...states].filter(([, v]) => engineUsable(v)).map(([id]) => id),
     [states],
   );
   /* The same set, for the registry rows: a downloaded diffusion model needs

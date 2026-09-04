@@ -25,7 +25,7 @@ import {
   isExternal, isUsable, parseModelRef, providerFor, providerSecret, qualify,
 } from "../core/providers.ts";
 import { enabledOnly } from "../core/runtime/catalog.ts";
-import { engineStates, type Runnable } from "../core/runtime/runnable.ts";
+import { engineStates, engineUsable, type Runnable } from "../core/runtime/runnable.ts";
 import type { SecretVault } from "./secrets.ts";
 import type { RuntimeManager } from "./runtime/manager.ts";
 
@@ -258,7 +258,7 @@ export async function explainModelFailure(
   const engine = await engineFor(deps, ref).catch(() => undefined);
   const engineState = engine ? await engineStateOf(deps, engine) : undefined;
   const gpuResident = gpuHolding(deps, modelIdOf(ref));
-  const oldSystem = engineState === "ready"
+  const oldSystem = engineUsable(engineState)
     ? await deps.runtime.bundledLibc().catch(() => false)
     : false;
   return (
