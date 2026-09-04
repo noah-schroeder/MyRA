@@ -617,7 +617,11 @@ export function App() {
                   settings?.audio.voiceModel
                     ? handsFree
                       ? `Speech to speech — ${loop.phase}. Click to stop.`
-                      : "Talk to Karen: it listens, answers aloud, and listens again"
+                      /* Says that answers get shorter, because they do and
+                         nothing else would explain it. A reply that is suddenly
+                         two sentences long reads as the model having got worse
+                         rather than as the mode doing its job. */
+                      : "Talk to Karen: it listens, answers aloud, and listens again. Answers are kept short, because they are spoken."
                     : "Choose a voice first — opens Settings → Audio"
                 }
                 onClick={() => {
