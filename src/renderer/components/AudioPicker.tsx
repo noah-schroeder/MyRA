@@ -6,6 +6,7 @@ import { describeVoice } from "../../core/audio/voices.ts";
 import { ModelMenu } from "./ModelMenu.tsx";
 import { engineStates, type Runnable } from "../../core/runtime/runnable.ts";
 import { choiceIsExternal, parseModelRef } from "../../core/providers.ts";
+import { modelIdOf } from "../../core/models/roles.ts";
 
 /**
  * Which model listens, and which one speaks.
@@ -49,11 +50,14 @@ const ROLE_COPY: Record<AudioRole, { empty: string; none: string; title: string 
 export function AudioPicker({
   role,
   settings,
+  resident,
   onSettingsChange,
   onOpenSettings,
 }: {
   role: AudioRole;
   settings: Settings | undefined;
+  /** Every model the daemon is holding, so the bar can say whether this is one. */
+  resident: string[];
   onSettingsChange: (s: Settings) => void;
   onOpenSettings: () => void;
 }) {
@@ -111,7 +115,10 @@ export function AudioPicker({
   /* Anything the daemon is actually holding for this role. Usually the chosen
      model, but not always: switch from Whisper-Large to Whisper-Base and the
      large one is still resident until something lets go of it. */
-  const resident = options.filter((o) => o.where === "local" && o.loaded);
+  /* The menu's own view of what is held, which carries each option's ref and
+     name for the eject rows. The `resident` prop is the bare id list the bar
+     itself needs, and is available before the menu has ever been opened. */
+  const held = options.filter((o) => o.where === "local" && o.loaded);
 
   /**
    * Let go of a loaded model without forgetting the choice.
@@ -123,7 +130,7 @@ export function AudioPicker({
   const eject = async (option: AudioOption): Promise<void> => {
     setBusy(option.ref);
     setError(undefined);
-    const result = await window.karen.audioUnload(option.model);
+    const result = await window.karen.unloadModel(option.model);
     setBusy(undefined);
     if (!result.ok) setError(result.error);
     void window.karen.audioModels(role).then((r) => setOptions(r.options));
@@ -168,7 +175,23 @@ export function AudioPicker({
   /* The same naming the menu uses, so the button cannot say "SD-Turbo" while
      the menu behind it shows that name is taken by two different downloads. */
   const named = modelNamer(options.map((o) => o.model), shorten);
-  const label = chosen
+
+  /*
+   * A local model counts as chosen only while it is actually in memory.
+   *
+   * The bar named whatever the setting held, so it read as though Whisper and
+   * Kokoro were running when the daemon had let go of them -- and the daemon
+   * does let go, on its own, to make room. The choice is not lost: it is still
+   * ticked in the menu below, and the next dictation loads it again. What the
+   * bar reports is the state of the machine, which is what the chat bar beside
+   * it has always reported.
+   *
+   * A hosted model has nothing to be resident: there is no memory here to hold
+   * it, so the name always stands.
+   */
+  const external = choiceIsExternal(settings?.providers ?? [], chosen);
+  const loaded = Boolean(chosen) && (external || resident.includes(modelIdOf(chosen)));
+  const label = chosen && loaded
     ? named(chosenOption?.model ?? parseModelRef(chosen).model)
     : ROLE_COPY[role].empty;
   /*
@@ -182,12 +205,11 @@ export function AudioPicker({
    * request, and is the same function the chat bar uses, so the two cannot
    * disagree about the only claim this app really makes.
    */
-  const external = choiceIsExternal(settings?.providers ?? [], chosen);
-  const tone = !chosen ? "none" : external ? "remote" : "local";
+  const tone = !loaded ? "none" : external ? "remote" : "local";
 
-  const ejectRow = resident.length ? (
+  const ejectRow = held.length ? (
     <div className="modelmenu-eject">
-      {resident.map((option) => (
+      {held.map((option) => (
         <button
           key={option.ref}
           type="button"
@@ -212,6 +234,9 @@ export function AudioPicker({
         title={ROLE_COPY[role].title}
         onClick={() => setOpen((v) => !v)}
       >
+        {/* The same dot the chat bar uses, for the same fact: green means the
+            daemon is holding this model right now. */}
+        <span className={`dot dot-${loaded && !external ? "ready" : "idle"}`} />
         <span className="audiobar-icon" aria-hidden="true">
           {role === "transcription" ? (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"

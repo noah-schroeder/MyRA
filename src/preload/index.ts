@@ -70,7 +70,10 @@ const api = {
   audioLoad: (model: string) => ipcRenderer.invoke("karen:audio-load", model),
   /* Naming the model, so ejecting Whisper does not also drop the model the
      conversation is using. */
-  audioUnload: (model: string) => ipcRenderer.invoke("karen:audio-unload", model),
+  /* Any model, not only a speech one: the chat menu ejects through this
+     too, and a name that said "audio" would be a lie the next reader has
+     to check. */
+  unloadModel: (model: string) => ipcRenderer.invoke("karen:model-unload", model),
   onAudioProgress: (cb: (p: unknown) => void) => on("karen:audio-progress", cb),
   /* Returns the audio itself rather than a path. The window is sandboxed and
      has no filesystem, and an utterance written to disk would leave a record of

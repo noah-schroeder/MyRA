@@ -61,6 +61,32 @@ export const MEDIA_LABELS: ReadonlySet<string> = new Set([
   "embeddings", "embedding",
 ]);
 
+/**
+ * The label that means "these labels are defaults, not findings".
+ *
+ * Measured on a running daemon: `embeddinggemma-300M-GGUF-Q8_0` comes back as
+ * `["chat", "custom"]`. It is not a chat model. Anything registered from a
+ * folder rather than found in Lemonade's own catalogue is labelled `custom`
+ * and given `chat` because that is what most GGUFs are -- so for those, and
+ * only those, the id is better evidence than the label.
+ */
+export const CUSTOM_LABEL = "custom";
+
+/**
+ * Whether a LOCAL model can hold a conversation.
+ *
+ * Labels first, because they are the daemon's own; the name only where the
+ * labels are known to be a guess. Both wrong answers were seen in one build:
+ * Whisper offered as a chat model when the labels were not read at all, and
+ * an embedding model offered when they were read too trustingly.
+ */
+export function localFitsChat(id: string, labels: readonly string[] | undefined): boolean {
+  const said = labels ?? [];
+  if (said.some((label) => MEDIA_LABELS.has(label))) return false;
+  if (!said.length || said.includes(CUSTOM_LABEL)) return fitsRole(id, "chat");
+  return true;
+}
+
 export function isForRole(labels: readonly string[] | undefined, role: MediaRole): boolean {
   const wanted = ROLE_LABELS[role];
   return (labels ?? []).some((label) => wanted.includes(label));
@@ -86,14 +112,26 @@ export function isForRole(labels: readonly string[] | undefined, role: MediaRole
  * contain a chat model's name, so the specific patterns are tested before
  * anything is called chat.
  */
-const ROLE_HINTS: readonly (readonly [MediaRole, RegExp])[] = [
+/**
+ * "embeddings" is a job here, though it is not a media role.
+ *
+ * It has no picker of its own in the bar, but it is very much a thing the CHAT
+ * picker has to keep out: `embeddinggemma-300M-GGUF`, indexed out of an LM
+ * Studio folder and so carrying no labels, sat in the list of models to hold a
+ * conversation with. An embedding model asked for a conversation returns
+ * vectors or an error.
+ */
+export type GuessedRole = MediaRole | "chat" | "embeddings";
+
+const ROLE_HINTS: readonly (readonly [GuessedRole, RegExp])[] = [
+  ["embeddings", /embed|(^|[^a-z])bge([^a-z]|$)|gte-|e5-(small|base|large)|nomic-embed|minilm/i],
   ["transcription", /whisper|transcrib|speech[-_ ]?to[-_ ]?text|(^|[^a-z])stt([^a-z]|$)|moonshine|deepgram|nova-\d|scribe|canary|parakeet/i],
   ["voice", /(^|[^a-z])tts([^a-z]|$)|text[-_ ]?to[-_ ]?speech|speech-\d|voice|kokoro|eleven|sonic|orpheus|bark/i],
   ["image", /image|dall[-_ ]?e|diffusion|(^|[^a-z])sd(xl)?([^a-z]|$)|flux|imagen|midjourney|firefly|ideogram|recraft/i],
 ];
 
 /** The job a provider's model id suggests, or "chat" when nothing suggests otherwise. */
-export function guessRole(model: string): MediaRole | "chat" {
+export function guessRole(model: string): GuessedRole {
   for (const [role, pattern] of ROLE_HINTS) if (pattern.test(model)) return role;
   return "chat";
 }
@@ -105,7 +143,7 @@ export function guessRole(model: string): MediaRole | "chat" {
  * the other direction: a provider's whole catalogue was offered as models to
  * hold a conversation with, `tts-1` and `whisper-1` included.
  */
-export function fitsRole(model: string, role: MediaRole | "chat"): boolean {
+export function fitsRole(model: string, role: GuessedRole): boolean {
   return guessRole(model) === role;
 }
 

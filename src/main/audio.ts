@@ -122,7 +122,7 @@ export function installAudioIpc(deps: AudioDeps): void {
    * finished with the moment the meeting is written up. Naming the model is
    * what stops this taking the conversation's model down with it.
    */
-  ipcMain.handle("karen:audio-unload", async (_e, model: string) => {
+  ipcMain.handle("karen:model-unload", async (_e, model: string) => {
     try {
       await runtime.unloadModel(model);
       return { ok: true };

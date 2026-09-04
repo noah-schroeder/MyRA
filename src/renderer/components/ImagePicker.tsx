@@ -3,6 +3,7 @@ import type { AudioProgress, ModelOption, Settings } from "../types.ts";
 import { shortModelName as shorten } from "../../core/runtime/foreign.ts";
 import { modelNamer } from "../../core/models/roles.ts";
 import { choiceIsExternal, parseModelRef } from "../../core/providers.ts";
+import { modelIdOf } from "../../core/models/roles.ts";
 import { ModelMenu } from "./ModelMenu.tsx";
 import { engineStates, type Runnable } from "../../core/runtime/runnable.ts";
 
@@ -28,10 +29,13 @@ export function ImagePicker({
   settings,
   onSettingsChange,
   onOpenHub,
+  resident,
 }: {
   settings: Settings | undefined;
   onSettingsChange: (s: Settings) => void;
   onOpenHub: () => void;
+  /** Every model the daemon is holding, so the bar can say whether this is one. */
+  resident: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<ModelOption[]>([]);
@@ -112,7 +116,13 @@ export function ImagePicker({
   /* The same naming the menu uses, so the button cannot say "SD-Turbo" while
      the menu behind it shows that name is taken by two different downloads. */
   const named = modelNamer(options.map((o) => o.model), shorten);
-  const label = chosen
+  /* Loaded, not merely chosen -- the same rule the chat and speech bars
+     follow. The daemon evicts image models to make room like any other, and a
+     bar that kept naming one would be describing a setting rather than the
+     machine. */
+  const externalChoice = choiceIsExternal(settings?.providers ?? [], chosen);
+  const loaded = Boolean(chosen) && (externalChoice || resident.includes(modelIdOf(chosen)));
+  const label = chosen && loaded
     ? named(chosenOption?.model ?? parseModelRef(chosen).model)
     : "None selected";
   /*
@@ -126,8 +136,7 @@ export function ImagePicker({
    * request, and is the same function the chat bar uses, so the two cannot
    * disagree about the only claim this app really makes.
    */
-  const external = choiceIsExternal(settings?.providers ?? [], chosen);
-  const tone = !chosen ? "none" : external ? "remote" : "local";
+  const tone = !loaded ? "none" : externalChoice ? "remote" : "local";
 
   return (
     <div className="modelbar-wrap audiobar-wrap" ref={wrap}>
@@ -147,6 +156,8 @@ export function ImagePicker({
             <path d="m4 17 5-5 4 4 2.5-2.5L20 17" />
           </svg>
         </span>
+        {/* Green when the daemon is holding it, as on the chat bar. */}
+        <span className={`dot dot-${loaded && !externalChoice ? "ready" : "idle"}`} />
         <span className="modelbar-name">{label}</span>
         {busy ? (
           <span className="modelbar-where">

@@ -30,7 +30,7 @@ import { DictationHud } from "./components/DictationHud.tsx";
 import { ImagePage } from "./components/ImagePage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
-import type { CitedSource, PromptRequest, Settings } from "./types.ts";
+import type { CitedSource, PromptRequest, RuntimeState, Settings } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
 type Page = "chat" | "runs" | "models" | "meetings" | "images" | "api";
@@ -103,6 +103,15 @@ export function App() {
   }, []);
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
+  /* What the daemon is holding, for the three pickers in the bar above: each
+     says "None selected" unless the model it names is actually in memory. */
+  const [resident, setResident] = useState<string[]>([]);
+  useEffect(() => {
+    const take = (r: RuntimeState): void => setResident(r.lemonade.resident ?? []);
+    void window.karen.runtimeState().then(take);
+    return window.karen.onRuntime(take);
+  }, []);
+
   useEffect(() => window.karen.onResearchProgress(setProgress), []);
   /* An empty stage means the run is over: the card comes down, and the plain
      progress line takes over again for whatever the turn does next. */
@@ -345,6 +354,7 @@ export function App() {
           {page === "images" ? (
             <ImagePicker
               settings={settings}
+              resident={resident}
               onSettingsChange={setSettings}
               onOpenHub={() => setPage("models")}
             />
@@ -366,12 +376,14 @@ export function App() {
               <AudioPicker
                 role="transcription"
                 settings={settings}
+                resident={resident}
                 onSettingsChange={setSettings}
                 onOpenSettings={() => setShowSettings(true)}
               />
               <AudioPicker
                 role="voice"
                 settings={settings}
+                resident={resident}
                 onSettingsChange={setSettings}
                 onOpenSettings={() => setShowSettings(true)}
               />
