@@ -27,10 +27,33 @@ export function useSpeech() {
      cancelled from here -- so the result is checked against this instead. */
   const generation = useRef(0);
 
+  /*
+   * Let go of the element, without that letting go being mistaken for a
+   * failure.
+   *
+   * Both halves are load-bearing, and both were reported as "That audio could
+   * not be played" after audio that had just played perfectly well.
+   *
+   * `src = ""` does not clear the source: an empty string resolves against the
+   * page, so the element loads the HTML document as media and fires `error`
+   * with MEDIA_ERR_SRC_NOT_SUPPORTED (code 4, measured). That arrives a task
+   * later, by which time the utterance has ended and the handler below is
+   * still attached -- so a finished reply accused the voice model of returning
+   * something unplayable. Removing the attribute and calling `load()` ends the
+   * resource without inventing a failure.
+   *
+   * The handlers come off first anyway, because releasing is the one thing
+   * that can make an element fire on its way out and nothing a released
+   * element has to say is about the audio.
+   */
   const release = useCallback((): void => {
-    if (audio.current) {
-      audio.current.pause();
-      audio.current.src = "";
+    const element = audio.current;
+    if (element) {
+      element.onended = null;
+      element.onerror = null;
+      element.pause();
+      element.removeAttribute("src");
+      element.load();
       audio.current = undefined;
     }
     if (url.current) {
@@ -97,7 +120,11 @@ export function useSpeech() {
        */
       const cannotPlay = `That audio could not be played: the voice model returned ${type}.`;
       element.onerror = () => done(cannotPlay);
-      element.play().catch(() => done(cannotPlay));
+      /* A rejected `play()` is a failure only while this is still the element
+         being played. Interrupting an answer -- barge-in, or the mode being
+         switched off -- rejects it with AbortError, and an interruption the
+         user performed is not a fault to report back to them. */
+      element.play().catch(() => done(audio.current === element ? cannotPlay : undefined));
     });
   }, [release]);
 
