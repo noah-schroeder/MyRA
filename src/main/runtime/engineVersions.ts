@@ -22,7 +22,7 @@
  * and "put it back the way it came" would have nothing to put back.
  */
 
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { OWNER_ONLY_FILE } from "../../core/paths.ts";
@@ -72,6 +72,8 @@ export async function shippedVersions(
   const live = await readJson(versionsPath(lemondDir));
   if (!live) return undefined;
   await copyFile(versionsPath(lemondDir), shippedPath(lemondDir));
+  // copyFile keeps the archive's own 644; everything Karen writes is 600.
+  await chmod(shippedPath(lemondDir), OWNER_ONLY_FILE).catch(() => undefined);
   return live;
 }
 

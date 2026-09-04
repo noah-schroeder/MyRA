@@ -168,6 +168,10 @@ interface UpdateRow {
   to: string;
   sizeBytes?: number | undefined;
   releaseUrl?: string | undefined;
+  /** Upstream's own label on this build, reported rather than acted on. */
+  prerelease?: boolean | undefined;
+  /** `owner/repo`, so the sentence about that label can name who wrote it. */
+  repo?: string | undefined;
   waiting: boolean;
 }
 
@@ -216,8 +220,11 @@ function EngineUpdateRow({
       <div className="lem-update-head">
         <span className="lem-update-what">
           <span aria-hidden="true">↑</span> {label} {row.from} → <strong>{row.to}</strong>
-          {size ? <span className="lem-update-size"> · {size}</span> : null}
         </span>
+        {/* On the controls' line rather than the versions' one: the cards are
+            250px wide and "Processor b10375 → b10793 · 16 MB" does not fit on
+            one, so the size wrapped alone onto a third line. */}
+        {size ? <span className="lem-update-size">{size}</span> : null}
         {row.releaseUrl ? (
           <a className="lem-update-notes" href={row.releaseUrl} target="_blank" rel="noreferrer">
             What changed ↗
@@ -249,6 +256,18 @@ function EngineUpdateRow({
             your earlier work ran on. If it goes wrong you can put {row.from} back in one press —
             it is downloaded again, so that takes about as long as this will.
           </p>
+          {/* Reported, not acted on. The flag means different things in
+              different projects and changed meaning inside this one --
+              llama.cpp marked every build a pre-release from 21 August 2026,
+              having marked none before it. Filtering on that would decide by
+              which week a project changed its CI. */}
+          {row.prerelease ? (
+            <p>
+              <code>{row.repo ?? "The project"}</code> marks this build a pre-release, as it does
+              for all of its recent builds. That is its own labelling rather than a warning about
+              this one.
+            </p>
+          ) : null}
           <div className="lem-update-go">
             <button type="button" className="lem-install strong" disabled={busy} onClick={onGo}>
               {row.waiting ? `Install ${row.to}` : `Update to ${row.to}`}

@@ -87,13 +87,17 @@ export const fetchJson: FetchJson = async (url) => {
  * exists gives nothing, and `newestBuild` then offers nothing rather than
  * risking a downgrade.
  */
-async function releaseDate(
+async function installedRelease(
   repo: string,
   tag: string,
   get: FetchJson,
-): Promise<string | undefined> {
+): Promise<{ publishedAt?: string | undefined; prerelease?: boolean } | undefined> {
   const release = parseRelease(await get(releaseTagUrl(repo, tag)).catch(() => undefined));
-  return release?.publishedAt;
+  if (!release) return undefined;
+  return {
+    ...(release.publishedAt ? { publishedAt: release.publishedAt } : {}),
+    prerelease: release.prerelease,
+  };
 }
 
 /** Every backend with something on the disk, in a stable order. */
@@ -153,10 +157,15 @@ export async function checkEngineUpdates(deps: CheckDeps): Promise<UpdateCheck> 
        * disagree the backend is `update_required` and is in `pending` above,
        * not here.
        */
-      const installedAt = await releaseDate(dry.repo, dry.version, get);
+      /* Two things come from this one request: when the installed build was
+         released, which is the only way to order it against a page of newer
+         ones, and whether it is itself a prerelease -- which decides whether
+         prereleases are the stream this engine is on. */
+      const installed = await installedRelease(dry.repo, dry.version, get);
       const current: InstalledBuild = {
         recipe, backend, repo: dry.repo, version: dry.version, filename: dry.filename,
-        ...(installedAt ? { publishedAt: installedAt } : {}),
+        ...(installed?.publishedAt ? { publishedAt: installed.publishedAt } : {}),
+        ...(installed?.prerelease !== undefined ? { prerelease: installed.prerelease } : {}),
       };
       const found = newestBuild(current, list);
       if (found) updates.push(found);

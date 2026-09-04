@@ -3332,12 +3332,16 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .lem-update.open { border-color: color-mix(in srgb, var(--amber) 52%, var(--border)); }
 .lem-update-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* A full line of its own rather than `margin-right: auto`. The cards are
+   250px at their narrowest and "b10375 → b10793 · 32 MB" does not fit beside
+   two controls, so letting it share the row put the size on a ragged second
+   line of its own. Deciding the break beats discovering it. */
 .lem-update-what {
+  flex: 1 1 100%;
   font-family: var(--mono); font-size: 11px; color: var(--text-dim);
-  margin-right: auto;
 }
 .lem-update-what strong { color: var(--text); font-weight: 620; }
-.lem-update-size { color: var(--text-faint); }
+.lem-update-size { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); margin-right: auto; }
 .lem-update-notes {
   font-size: 11px; color: var(--text-dim);
   text-decoration: underline; text-decoration-color: var(--border-hover);

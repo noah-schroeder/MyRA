@@ -36,6 +36,22 @@ export interface Release {
   publishedAt?: string | undefined;
   /** The release's page, for someone who wants to read what changed. */
   url?: string | undefined;
+  /**
+   * Upstream's own label, kept for the reader and not used to filter.
+   *
+   * It carries no reliable meaning here. Counted across the last 300
+   * llama.cpp releases: 125 are full releases and 175 are prereleases, and
+   * they do not interleave -- everything up to b10549 on 21 August 2026 is a
+   * full release and everything after it is a prerelease. The project changed
+   * how it publishes, mid-history, while a new `v0.x` scheme appeared
+   * alongside the `bNNNNN` builds. leejet's stable-diffusion.cpp flags none of
+   * its releases at all.
+   *
+   * So a rule built on this flag decides by which week a project happened to
+   * change its CI, which is not a fact about whether a build is fit to run.
+   * It is surfaced to the person deciding instead; see `newestBuild`.
+   */
+  prerelease: boolean;
   assets: ReleaseAsset[];
 }
 
@@ -55,14 +71,15 @@ export function parseRelease(raw: unknown): Release | undefined {
   const r = obj(raw);
   const tag = str(r["tag_name"]);
   if (!tag) return undefined;
-  /* Drafts are not published and prereleases are not what an academic writing
-     a paper wants underneath them. Both are dropped here rather than filtered
-     by the caller, because "offer only what is finished" is a property of this
-     module, not a preference of one screen. */
-  if (r["draft"] === true || r["prerelease"] === true) return undefined;
+  /* Drafts only. A draft is not published: its assets are not reliably
+     downloadable and its tag may never exist. Prereleases are kept and
+     labelled instead -- dropping them here excluded every llama.cpp build
+     there has ever been, including the one already installed. */
+  if (r["draft"] === true) return undefined;
   const assets = Array.isArray(r["assets"]) ? r["assets"] : [];
   return {
     tag,
+    prerelease: r["prerelease"] === true,
     ...(str(r["published_at"]) ? { publishedAt: str(r["published_at"]) } : {}),
     ...(str(r["html_url"]) ? { url: str(r["html_url"]) } : {}),
     assets: assets.flatMap((value) => {
@@ -166,6 +183,8 @@ export interface InstalledBuild {
   /** The exact file the daemon would download for this version. */
   filename: string;
   publishedAt?: string | undefined;
+  /** Whether the build already installed is itself flagged as a prerelease. */
+  prerelease?: boolean | undefined;
 }
 
 export interface EngineUpdate {
@@ -180,6 +199,8 @@ export interface EngineUpdate {
   sizeBytes: number;
   releaseUrl?: string | undefined;
   publishedAt?: string | undefined;
+  /** Upstream's own label on the build being offered, for the reader. */
+  prerelease?: boolean | undefined;
 }
 
 /**
@@ -207,6 +228,12 @@ export function newestBuild(
       to: release.tag,
       asset: asset.name,
       sizeBytes: asset.sizeBytes,
+      /* Passed on so the confirmation can say it. Two rules were tried before
+         this one -- refuse prereleases, then follow whichever stream the
+         installed build is on -- and both silently offered nothing at all for
+         llama.cpp, which is the engine that runs chat. Telling the person
+         deciding beats deciding for them on evidence this weak. */
+      prerelease: release.prerelease,
       ...(release.url ? { releaseUrl: release.url } : {}),
       ...(release.publishedAt ? { publishedAt: release.publishedAt } : {}),
     };
