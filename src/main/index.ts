@@ -39,6 +39,7 @@ import {
 import { samplingForRequest } from "../core/llm/sampling.ts";
 import { pricesFrom } from "../core/pricing.ts";
 import { ASK_FOR_REASONING, describeProbe, probeReasoning } from "../core/llm/reasoningProbe.ts";
+import { spokenGuidance } from "../core/agent/spokenPrompt.ts";
 import { dialectById, dialectForHost, reasoningFields } from "../core/llm/reasoningDialect.ts";
 import {
   cachedLocalDialect, forgetReasoning, hostedCapability, localCapability,
@@ -488,7 +489,15 @@ function systemPrompt(): string {
               "files in the documents folder. Do not go looking for a local document unless the",
               "user named one.",
             ];
-  return [...IDENTITY, ...tools, "", ...SYSTEM_PROMPT, ...(closing.length ? ["", ...closing] : [])].join("\n");
+  /* Last, so it is the nearest thing to the conversation. Hands-free changes
+     what a good answer is -- it will be heard rather than read -- and nothing
+     else in this prompt knows that. */
+  const spoken = spokenGuidance(config.current.audio.speechToSpeech);
+  return [
+    ...IDENTITY, ...tools, "", ...SYSTEM_PROMPT,
+    ...(closing.length ? ["", ...closing] : []),
+    ...(spoken.length ? ["", ...spoken] : []),
+  ].join("\n");
 }
 
 
