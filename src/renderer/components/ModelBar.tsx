@@ -4,7 +4,7 @@ import {
   displayModelName, filterModels, shortModelName as shorten, SOURCE_LABELS, sourceOfModel,
 } from "../../core/runtime/foreign.ts";
 import { formatTokens } from "../../core/tokens.ts";
-import { fitsRole, MEDIA_LABELS } from "../../core/models/roles.ts";
+import { fitsRole, localFitsChat } from "../../core/models/roles.ts";
 import { choiceIsExternal, isExternal, parseModelRef, qualify } from "../../core/providers.ts";
 import { priceLabel, priceTitle } from "../../core/pricing.ts";
 
@@ -77,7 +77,7 @@ export function ModelBar({
                engine answers with an error, if it answers at all. The labels
                are the daemon's own; MEDIA_LABELS is what they are checked
                against. */
-            .filter((m) => !(m.labels ?? []).some((label) => MEDIA_LABELS.has(label)))
+            .filter((m) => localFitsChat(m.id, m.labels))
             /* `path` stays the real id -- it is what `load` is called with --
                while `name` is what a person recognises. */
             .map((m) => ({ path: m.id, name: displayModelName(m.id) })),
@@ -180,6 +180,7 @@ export function ModelBar({
    * "None selected" is the truth.
    */
   const activePath = backend?.chat?.id;
+  const resident = backend?.resident ?? [];
   const active = backend?.active;
 
   let label: string;
@@ -484,19 +485,32 @@ export function ModelBar({
           ) : null}
 
           <div className="modelmenu-foot">
-            {local || loading ? (
+            {/*
+              * One row per model the daemon is holding, each naming what it
+              * frees.
+              *
+              * It was a single "Eject model" that called unload with no
+              * argument -- so on a daemon holding a chat model, a Whisper and
+              * a Kokoro it was a button whose effect you could not predict,
+              * and it disappeared entirely while a hosted model was chosen,
+              * which is exactly when a local one is sitting in memory doing
+              * nothing. Naming each one is the same answer the speech menus
+              * already give.
+              */}
+            {resident.map((model) => (
               <button
+                key={model}
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  void window.karen.lemonadeUnload();
+                  void window.karen.unloadModel(model);
                 }}
               >
-                Eject model
+                Eject {shorten(model)}
                 <span className="dim"> — frees the memory it is holding</span>
               </button>
-            ) : null}
+            ))}
             <button
               type="button"
               role="menuitem"

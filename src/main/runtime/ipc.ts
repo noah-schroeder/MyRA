@@ -70,6 +70,10 @@ export function installRuntimeIpc(
        * the conversation's model picker. One answer, computed once.
        */
       chat: runtime.chatModel(),
+      /* Everything the daemon is holding, not just the one it touched last.
+         The bars use it to say whether the model they name is actually in
+         memory, and the menus to offer each one an eject of its own. */
+      resident: runtime.lemonade.status.health?.loaded ?? [],
       log: runtime.lemonade.status.log.slice(-40),
     },
   });

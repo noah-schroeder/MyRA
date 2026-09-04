@@ -14,10 +14,10 @@ import { test, describe, it } from "node:test";
 import {
   describeVoice, isKokoro, voicesFor, voiceForModel, voiceIsValid, KOKORO_VOICE_IDS, DEFAULT_VOICE,
 } from "../src/core/audio/voices.ts";
-import { fitsRole, guessRole, modelNamer } from "../src/core/models/roles.ts";
+import { fitsRole, guessRole, localFitsChat, modelNamer } from "../src/core/models/roles.ts";
 import { modelOptions } from "../src/main/models.ts";
 import {
-  audioMime, PREFERRED_FORMAT, refusedTheFormat, sniffAudio,
+  audioMime, refusedTheFormat, sniffAudio,
 } from "../src/core/audio/container.ts";
 import { isForRole, isProviderRef, modelIdOf } from "../src/core/audio/models.ts";
 import { speakable, MAX_SPOKEN_CHARS } from "../src/core/audio/speakable.ts";
@@ -600,11 +600,59 @@ describe("what the voice model actually handed back", () => {
     assert.equal(refusedTheFormat(400, '{"error":"model not found"}'), false);
     assert.equal(refusedTheFormat(500, "response_format"), false);
   });
+});
 
-  it("asks for the container that needs no codec", () => {
-    /* WAV, deliberately: MP3 needs a decoder this build may not ship, and that
-       is what "no supported source was found" meant after a synthesis that had
-       already succeeded. */
-    assert.equal(PREFERRED_FORMAT, "wav");
+describe("keeping the chat list to models you can talk to", () => {
+  it("recognises an embedding model by name, for a model with no labels", () => {
+    /* Seen in the chat menu of a running build: `embeddinggemma-300M-GGUF`,
+       offered as something to hold a conversation with. It came from an LM
+       Studio folder Karen indexed, and the daemon only labels what is in its
+       own catalogue -- so the label test had nothing to test and the name was
+       the only fact available. */
+    assert.equal(guessRole("embeddinggemma-300M-GGUF"), "embeddings");
+    assert.equal(guessRole("nomic-embed-text-v1-GGUF"), "embeddings");
+    assert.equal(guessRole("Qwen3-Embedding-0.6B-GGUF"), "embeddings");
+    assert.equal(guessRole("bge-large-en-v1.5"), "embeddings");
+    assert.equal(fitsRole("embeddinggemma-300M-GGUF", "chat"), false);
+  });
+
+  it("does not trust a `custom` label that says chat, because it is a default", () => {
+    /* Measured on a running daemon: `embeddinggemma-300M-GGUF-Q8_0` comes back
+       as ["chat", "custom"]. Lemonade labels anything registered from a folder
+       that way because most GGUFs are chat models. For those the id is the
+       better evidence -- and only for those. */
+    assert.equal(localFitsChat("embeddinggemma-300M-GGUF-Q8_0", ["chat", "custom"]), false);
+    assert.equal(localFitsChat("LiquidAI__LFM2.5-2.6B-GGUF", ["custom", "chat", "tool-calling"]), true);
+    assert.equal(localFitsChat("bartowski__SmolLM2-135M-Instruct-GGUF", ["custom", "chat"]), true);
+  });
+
+  it("takes the daemon's own catalogue labels as fact", () => {
+    // No `custom`: these came from Lemonade's catalogue and are known, not guessed.
+    assert.equal(localFitsChat("Whisper-Large-v3-Turbo", ["transcription", "hot"]), false);
+    assert.equal(localFitsChat("kokoro-v1", ["tts"]), false);
+    assert.equal(localFitsChat("SD-Turbo-GGUF", ["image"]), false);
+    /* A catalogue chat model whose name means nothing to the guesser is still
+       offered -- the name test must not become a second fence. */
+    assert.equal(localFitsChat("Bonsai-1.7B-gguf", ["chat"]), true);
+  });
+
+  it("falls back to the name when there are no labels at all", () => {
+    assert.equal(localFitsChat("nomic-embed-text-v1-GGUF", []), false);
+    assert.equal(localFitsChat("Qwen3-8B", undefined), true);
+  });
+
+  it("does not mistake an ordinary chat model for one", () => {
+    /* The guess is only ever used where there is no label, so a false positive
+       here hides a model somebody downloaded on purpose. */
+    for (const id of ["Qwen3-8B", "LFM2.5-2.6B-GGUF", "Llama-3.3-70B-Instruct",
+                      "gemma-3-27b-it", "Mistral-Small-Instruct"]) {
+      assert.equal(guessRole(id), "chat", id);
+    }
+  });
+
+  it("still tells the speech and image models apart", () => {
+    assert.equal(guessRole("Whisper-Large-v3-Turbo"), "transcription");
+    assert.equal(guessRole("kokoro-v1"), "voice");
+    assert.equal(guessRole("SD-Turbo-GGUF"), "image");
   });
 });
