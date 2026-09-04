@@ -3,10 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Strict CSP: no remote anything. Everything is bundled. -->
+    <!--
+      Strict CSP: no remote anything. Everything is bundled.
+
+      `media-src` is listed even though `img-src` beside it might look like it
+      covers the same ground, and leaving it out is the bug this comment
+      exists for. A page under two policies gets the INTERSECTION of them, and
+      the main process sends its own header allowing `blob:` media -- so with
+      no media-src here, media fell back to `default-src 'self'`, the stricter
+      of the two won, and every spoken reply died with
+
+          MEDIA_ELEMENT_ERROR: Media load rejected by URL safety check
+
+      which reads as a broken audio file rather than as a policy. The voice
+      audio never leaves this process: it is synthesised by the local model,
+      handed over IPC, and wrapped in a Blob by the renderer itself. Keep this
+      list in step with the header in main/index.ts; test/csp.test.ts checks
+      that they agree.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>Karen</title>
   </head>
