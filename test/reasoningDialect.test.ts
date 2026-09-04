@@ -154,3 +154,49 @@ test("a subdomain of a known host still speaks that dialect", () => {
   // But a host that merely ends in the same letters does not.
   assert.equal(dialectForHost("https://notopenrouter.ai/api/v1"), undefined);
 });
+
+/* ------------------------------------------------------- onto the wire -- */
+
+test("the chosen level reaches the request body, and displaces nothing", async () => {
+  // The gap this closes: everything above is about computing fields, and a
+  // field computed correctly into a bag nobody spreads is still a control
+  // that does nothing.
+  const { buildRequest } = await import("../src/core/llm/chat.ts");
+  const openai = dialectForHost("https://api.openai.com/v1");
+  assert.ok(openai);
+
+  const body = buildRequest({
+    model: "gpt-5",
+    messages: [{ role: "user", content: "hi" }],
+    stream: true,
+    extra: reasoningFields(openai, "high"),
+  }) as Record<string, unknown>;
+
+  assert.equal(body["reasoning_effort"], "high");
+  // extras are spread FIRST, so none of these can be rewritten by one.
+  assert.equal(body["model"], "gpt-5");
+  assert.equal(body["stream"], true);
+});
+
+test("a template switch rides in chat_template_kwargs, not at the top level", async () => {
+  // llama.cpp ignores unknown top-level fields silently, so a switch sent
+  // there would look like it worked and change nothing.
+  const { buildRequest } = await import("../src/core/llm/chat.ts");
+  const local = templateDialect("enable_thinking");
+  assert.ok(local);
+  const body = buildRequest({
+    messages: [{ role: "user", content: "hi" }],
+    extra: reasoningFields(local, "false"),
+  }) as Record<string, unknown>;
+
+  assert.deepEqual(body["chat_template_kwargs"], { enable_thinking: false });
+  assert.equal(body["enable_thinking"], undefined);
+});
+
+test("no choice means no field at all", () => {
+  // The default has to be silence: every field here is one a strict endpoint
+  // can refuse the whole request over.
+  const openai = dialectForHost("https://api.openai.com/v1");
+  assert.ok(openai);
+  assert.deepEqual(reasoningFields(openai, ""), {});
+});
