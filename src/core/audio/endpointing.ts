@@ -26,6 +26,19 @@
  * to start hearing speech and a lower one to keep hearing it -- which is what
  * stops the gap between two words ending a sentence.
  *
+ * The margins are narrow because the recording says they must be. In 200 ms
+ * means the room runs 0.14 to 0.26 and the user's own voice runs 0.28 with
+ * peaks at 0.41 -- about a tenth of the scale between a person and their room,
+ * with the voice dipping into the room's range between phrases. Every number
+ * below was measured against that, not chosen.
+ *
+ * **The limit, since it is real.** Where a room's own peaks reach the level of
+ * speech, a voice and a room are the same thing to a level meter; separating
+ * them needs the spectrum, which this does not have. In such a room hands-free
+ * will trigger on noise. What it must never do is latch: speech is entered and
+ * released repeatedly, so the app keeps answering rather than freezing with
+ * the microphone open, which is what was reported.
+ *
  * Every constant is a time, not a per-reading rate. The readings arrive at
  * ~125 a second from the audio worklet but reach this through React state,
  * which coalesces them into far fewer; the previous rates were tuned for the
@@ -78,6 +91,24 @@ const TAU_UP_MS = 4_000;
 const TAU_UP_FAR_MS = 60_000;
 
 /**
+ * A second estimate of the room that never stops learning.
+ *
+ * The one above deliberately refuses to learn from anything that looks like
+ * speech, which is right for a quiet room and wrong for a loud one: a room
+ * whose own noise is above the bar makes every reading look like speech, so
+ * the estimate freezes low and stays there. That is the original bug, and it
+ * survived the first rewrite -- measured on the reporting machine's real
+ * microphone, whose room sits at a steady 0.34 while the estimate settled at
+ * 0.245 and called the room speech.
+ *
+ * So this one is blind to the distinction. It is a slow average of everything
+ * heard, which in a room where nobody is speaking IS the room, and the
+ * threshold is set above whichever of the two is higher. Slow enough (eight
+ * seconds) that a sentence moves it very little, and it decays back afterwards.
+ */
+const TAU_AMBIENT_MS = 30_000;
+
+/**
  * When "speech" has gone on too long to be speech.
  *
  * Sustained noise and a sustained voice are the same thing to a level meter --
@@ -101,7 +132,7 @@ const STUCK_MS = 20_000;
  * estimate starts at zero and takes seconds to catch up, and the whole turn is
  * decided before it does.
  */
-const SETTLE_MS = 700;
+const SETTLE_MS = 1_200;
 /** For a few seconds after that, still learning faster than the steady rate. */
 const SETTLING_UP_MS = 800;
 const SETTLED_AFTER_MS = 3_000;
@@ -118,8 +149,30 @@ const MIN_SPEECH_MS = 200;
 
 /** How far above the room a smoothed level must rise to become speech. */
 const ENTER_MARGIN = 0.14;
-/** And how far it must fall to stop being speech. Lower, so words may have gaps. */
-const EXIT_MARGIN = 0.05;
+/**
+ * And how far it must fall to stop being speech.
+ *
+ * Zero: back to the room's own level, not above it. Measured on the reporting
+ * machine, 200 ms means of the user speaking run 0.28 with peaks at 0.41,
+ * over a room at 0.14 to 0.26 -- so an exit even slightly above the room sits
+ * inside their normal speech and the turn ends between two words. The
+ * separation between a voice and this room is about 0.1, and every threshold
+ * has to fit inside it.
+ */
+const EXIT_MARGIN = 0;
+
+/**
+ * How long speech keeps counting after the level drops.
+ *
+ * The piece that was missing, and the one that makes the rest work. Speech is
+ * not continuous at this resolution: the same recording has 200 to 600 ms gaps
+ * between phrases, and without a hangover each one ends `talking`, so the
+ * end-of-turn timer restarts constantly and the turn is cut off mid-sentence.
+ *
+ * Half a second bridges every gap in that recording and is still far shorter
+ * than the pause that ends a turn, so it costs nothing at the end.
+ */
+const HANGOVER_MS = 500;
 /** The same hysteresis applied to the fixed minimum, for a silent room. */
 const ENTER_EXIT_GAP = 0.07;
 
@@ -138,12 +191,16 @@ const FLOOR_MAX = 0.8;
 export interface TurnState {
   /** Smoothed level. */
   level: number;
-  /** What the room alone seems to be. */
+  /** What the room alone seems to be, learned from what is not speech. */
   floor: number;
+  /** What everything heard averages to, speech included. See TAU_AMBIENT_MS. */
+  ambient: number;
   /** Whether speech is being heard right now. */
   talking: boolean;
   /** When the current run of speech began, for the minimum above. */
   talkingSince: number;
+  /** When the level was last above the exit threshold, for the hangover. */
+  lastAbove: number;
   /** Whether speech has been heard at all this turn. */
   heard: boolean;
   /** When speech was last heard, on the caller's clock. */
@@ -156,7 +213,8 @@ export interface TurnState {
 
 export function startTurn(now: number): TurnState {
   return {
-    level: 0, floor: 0, talking: false, talkingSince: 0, heard: false, lastHeard: 0,
+    level: 0, floor: 0, ambient: 0, talking: false, talkingSince: 0, lastAbove: 0,
+    heard: false, lastHeard: 0,
     startedAt: now, at: now,
   };
 }
@@ -186,19 +244,49 @@ export function observe(state: TurnState, level: number, now: number): TurnState
   const age = now - state.startedAt;
   const smoothed = state.level + (level - state.level) * approach(TAU_LEVEL_MS, dt);
 
+  /* Both estimates converge quickly while the turn is settling, then the slow
+     constants take over. Judging nothing until they have arrived is what stops
+     a noisy room being called speech for the first few seconds of every turn,
+     which was how the false starts got in. */
+  const ambient = state.ambient
+    + (smoothed - state.ambient) * approach(age < SETTLE_MS ? TAU_DOWN_MS : TAU_AMBIENT_MS, dt);
+
   if (age < SETTLE_MS) {
-    /* Learning the room, and deaf while it does. Fast in both directions: the
-       point is to arrive at the room's real level before judging anything. */
     return {
       ...state,
       level: smoothed,
+      ambient,
       floor: state.floor + (smoothed - state.floor) * approach(TAU_DOWN_MS, dt),
       at: now,
     };
   }
 
-  const enter = enterLevel(state.floor);
-  const talking = state.talking ? smoothed > exitLevel(state.floor) : smoothed > enter;
+  /* Whichever estimate says the room is louder. They disagree exactly when one
+     of them is wrong: in a quiet room the ambient average is pulled up by
+     speech and the floor is right, and in a loud one the floor is frozen below
+     the noise and the average is right. */
+  const base = Math.max(state.floor, state.ambient);
+  const enter = enterLevel(base);
+  /* Entering takes a level; staying takes only a recent one. Both halves are
+     needed: the level stops a spike starting a turn, and the hangover stops a
+     breath ending one. */
+  const lastAbove = smoothed > exitLevel(base) ? now : state.lastAbove;
+  /*
+   * The backstop, and it releases rather than merely learning faster.
+   *
+   * A room that hovers around the threshold re-crosses it inside every
+   * hangover, so speech that began on noise never ends on its own -- which is
+   * the reported bug exactly, reached the long way round. Nobody talks for
+   * twenty seconds without a pause, so this is let go of and has to be entered
+   * again from the higher threshold, by which time the estimate has learned
+   * the room and the bar is above it.
+   */
+  const stuck = state.talking && now - state.talkingSince > STUCK_MS;
+  const talking = stuck
+    ? false
+    : state.talking
+      ? now - lastAbove < HANGOVER_MS
+      : smoothed > enter;
   const talkingSince = talking ? (state.talking ? state.talkingSince : now) : 0;
   /* Long enough to be a person, rather than a door closing. `lastHeard` still
      moves on any talking reading -- once a turn is under way, the gap that
@@ -211,7 +299,6 @@ export function observe(state: TurnState, level: number, now: number): TurnState
      cannot work: in a room already above the bar every reading looks like
      speech, so nothing is ever learned and the bug survives its own repair. */
   const up = age < SETTLED_AFTER_MS ? SETTLING_UP_MS : TAU_UP_MS;
-  const stuck = talking && now - talkingSince > STUCK_MS;
   const tau = smoothed < state.floor
     ? TAU_DOWN_MS
     : smoothed > enter && !stuck
@@ -222,7 +309,9 @@ export function observe(state: TurnState, level: number, now: number): TurnState
   return {
     level: smoothed,
     floor,
+    ambient,
     talking,
+    lastAbove,
     talkingSince,
     heard: state.heard || sustained,
     lastHeard: talking ? now : state.lastHeard,
