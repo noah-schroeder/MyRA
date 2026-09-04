@@ -21,6 +21,34 @@ import {
 
 export class LemonadeApiError extends Error {}
 
+/** `/install/dry-run`: where a backend's binaries would come from. */
+export interface DryRun {
+  recipe: string;
+  backend: string;
+  /** The GitHub repository publishing this engine, e.g. `ggml-org/llama.cpp`. */
+  repo: string;
+  /** The pinned version, which is not necessarily the installed one. */
+  version: string;
+  /** The exact asset name, which a tag alone does not determine. */
+  filename: string;
+  url: string;
+  supported: boolean;
+}
+
+function parseDryRun(raw: unknown): DryRun {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const text = (key: string): string => (typeof r[key] === "string" ? (r[key] as string) : "");
+  return {
+    recipe: text("recipe"),
+    backend: text("backend"),
+    repo: text("repo"),
+    version: text("version"),
+    filename: text("filename"),
+    url: text("url"),
+    supported: r["supported"] === true,
+  };
+}
+
 export interface ApiTarget {
   /** The management base, e.g. `http://127.0.0.1:13305/api/v1`. */
   base: string;
@@ -108,6 +136,29 @@ export class LemonadeApi {
    */
   async installBackend(recipe: string, backend: string): Promise<void> {
     await this.#post("/install", { recipe, backend }, 60 * 60_000);
+  }
+
+  /**
+   * What an install of this backend would fetch, without fetching it.
+   *
+   * The only place Karen learns which repository publishes an engine, and it
+   * has to be asked rather than tabulated: llama.cpp's Vulkan build comes from
+   * `ggml-org/llama.cpp` and its CUDA build from the `lemonade-sdk/llama.cpp`
+   * fork, whisper's from `lemonade-sdk/whisper.cpp-rocm` despite the name, and
+   * a second copy of that mapping in Karen would be wrong the first time
+   * upstream moved one.
+   *
+   * `version` is the pin, so this answers "what would happen now" rather than
+   * "what is installed" -- the two differ exactly when an update is waiting.
+   * A `version` in the request is ignored by the daemon; the pin is read from
+   * its resources at startup and nothing else changes it.
+   *
+   * 500 on a machine with no compatible device, carrying a genuinely good
+   * sentence about which cards the backend needs, so the caller should keep
+   * the message rather than replace it.
+   */
+  async installDryRun(recipe: string, backend: string): Promise<DryRun> {
+    return parseDryRun(await this.#post<unknown>("/install/dry-run", { recipe, backend }, 30_000));
   }
 
   async downloads(): Promise<DownloadJob[]> {

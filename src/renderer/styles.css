@@ -3302,6 +3302,70 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .lem-more:hover { color: var(--accent-soft); }
 
+/* ---------- engine updates ---------- */
+
+/*
+ * The check and its one line of consequence, above the grid.
+ *
+ * Wrapping rather than a fixed row: the sentence about what the button sends
+ * is long on purpose, and it must not be the thing that gets clipped.
+ */
+.lem-updatebar {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px;
+  margin-bottom: 2px;
+}
+.lem-updatebar-note { font-size: 11px; line-height: 1.45; color: var(--text-faint); }
+.lem-updatebar-bad { font-size: 11px; line-height: 1.45; color: var(--amber); }
+
+/*
+ * An available build, in the amber Karen already uses for "your attention,
+ * not your alarm" -- the same weight as a backend that needs installing, and
+ * deliberately not the red that means something is broken. Nothing is wrong
+ * with an engine that has a newer build.
+ */
+.lem-update {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--amber) 5%, transparent);
+}
+.lem-update.open { border-color: color-mix(in srgb, var(--amber) 52%, var(--border)); }
+.lem-update-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.lem-update-what {
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  margin-right: auto;
+}
+.lem-update-what strong { color: var(--text); font-weight: 620; }
+.lem-update-size { color: var(--text-faint); }
+.lem-update-notes {
+  font-size: 11px; color: var(--text-dim);
+  text-decoration: underline; text-decoration-color: var(--border-hover);
+  text-underline-offset: 3px; white-space: nowrap;
+}
+.lem-update-notes:hover { color: var(--accent-soft); }
+
+.lem-update-body { display: flex; flex-direction: column; gap: 7px; }
+.lem-update-body p { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }
+.lem-update-body strong { color: var(--text); font-weight: 600; }
+.lem-update-go { display: flex; align-items: center; gap: 10px; margin-top: 1px; }
+.lem-install.strong {
+  color: var(--accent-soft); border-color: var(--accent-dim); background: var(--accent-wash);
+}
+
+/* The way back. Quiet by design: it exists so that agreeing to an update is
+   not a one-way door, not to compete with the update itself. */
+.lem-revert {
+  align-self: flex-start;
+  font: inherit; font-size: 11px;
+  background: none; border: 0; padding: 0;
+  color: var(--text-faint); cursor: pointer; text-align: left;
+  text-decoration: underline; text-decoration-color: var(--border-hover);
+  text-underline-offset: 3px;
+}
+.lem-revert:hover:not(:disabled) { color: var(--accent-soft); }
+.lem-revert:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* ---------- chips ---------- */
 
 .lem-chip {

@@ -169,6 +169,12 @@ const api = {
   lemonadeInstallBackend: (recipe: string, backend: string) =>
     ipcRenderer.invoke("karen:lemonade-install-backend", recipe, backend),
   lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
+  /* Engine builds. `engineUpdatesCheck` is the only one of the three that
+     leaves the machine, and only when a button is pressed. */
+  engineVersions: () => ipcRenderer.invoke("karen:engine-versions"),
+  engineUpdatesCheck: () => ipcRenderer.invoke("karen:engine-updates-check"),
+  engineUpdate: (recipe: string, backend: string, version?: string) =>
+    ipcRenderer.invoke("karen:engine-update", recipe, backend, version ?? null),
   lemonadeCatalog: () => ipcRenderer.invoke("karen:lemonade-catalog"),
   lemonadeModels: () => ipcRenderer.invoke("karen:lemonade-models"),
   lemonadeRescan: () => ipcRenderer.invoke("karen:lemonade-rescan"),

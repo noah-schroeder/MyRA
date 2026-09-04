@@ -22,7 +22,9 @@ import {
   CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE,
 } from "../../core/paths.ts";
 import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
-import type { EnginePins } from "../../core/runtime/enginePins.ts";
+import {
+  pinKey, withoutPin, withPin, type EnginePins,
+} from "../../core/runtime/enginePins.ts";
 import {
   chatModelOf, chatModelToReload, isChatEngine, isChatModel, LEMONADE_VERSION,
   type LoadedModel,
@@ -32,6 +34,8 @@ import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
 import { bundledLoader } from "./loader.ts";
 import { repairEngines } from "./engineRuntime.ts";
+import { shippedVersions } from "./engineVersions.ts";
+import { checkEngineUpdates, type UpdateCheck } from "./engineUpdates.ts";
 import { buildIndex, readIndexSources, type IndexResult } from "./foreignScan.ts";
 import {
   defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
@@ -295,6 +299,86 @@ export class RuntimeManager {
     } catch (err) {
       this.#lemonade.note(`Could not adapt the engines to this system: ${(err as Error).message}`);
     }
+  }
+
+  /* -------------------------------------------------- engine versions -- */
+
+  /**
+   * Which build each installed backend is on, and which Lemonade shipped.
+   *
+   * The installed figure comes from the daemon, which reads it from the
+   * `version.txt` beside the binary -- not from Karen's pin. The two are the
+   * same right up until somebody changes one, which is exactly when showing
+   * the pin instead would start lying about what is on the disk.
+   */
+  async engineVersions(): Promise<{ pins: EnginePins; shipped: Record<string, string> }> {
+    const pins = this.#config.enginePins ?? {};
+    const binary = await findLemonade(lemonadeDir(LEMONADE_VERSION));
+    if (!binary) return { pins, shipped: {} };
+    const table = await shippedVersions(dirname(binary)).catch(() => undefined);
+    const shipped: Record<string, string> = {};
+    for (const [recipe, block] of Object.entries(table ?? {})) {
+      if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+      for (const [backend, version] of Object.entries(block as Record<string, unknown>)) {
+        if (typeof version === "string") shipped[pinKey(recipe, backend)] = version;
+      }
+    }
+    return { pins, shipped };
+  }
+
+  /** Look for newer engine builds. Never called except from a button. */
+  async checkEngineUpdates(): Promise<UpdateCheck> {
+    await this.ensureLemonade();
+    return checkEngineUpdates({ api: this.#api });
+  }
+
+  /**
+   * Move one backend to a different build, or back to the shipped one.
+   *
+   * Three steps in a fixed order, because the daemon reads its version table
+   * only at startup: write the pin, restart, install. The restart is what
+   * makes this worth a confirmation -- it drops every loaded model.
+   *
+   * **A failure puts the pin back.** Leaving a pin that could not be installed
+   * would leave the backend in `update_required`, and the daemon fetches a
+   * pending build silently on the next `/load` -- measured. Somebody who
+   * pressed Update, saw it fail, and went back to work would then have the
+   * download happen anyway, in the middle of a sentence, with nothing on
+   * screen to explain it.
+   */
+  async updateEngine(
+    recipe: string,
+    backend: string,
+    version: string | undefined,
+    opts: { onPhase?: (what: string) => void } = {},
+  ): Promise<{ version?: string | undefined }> {
+    const key = pinKey(recipe, backend);
+    const before = this.#config.enginePins ?? {};
+    const after = version ? withPin(before, key, version) : withoutPin(before, key);
+
+    await this.update({ enginePins: after });
+    try {
+      opts.onPhase?.("Restarting the backend so it reads the new version");
+      await this.stop();
+      await this.ensureLemonade();
+      opts.onPhase?.("Downloading the engine");
+      await this.#api.installBackend(recipe, backend);
+      /* Before reporting success: a newer build can want newer system
+         libraries than this machine has, and Karen's answer to that is to run
+         it through the C runtime it ships. The moment it was installed is the
+         only moment anybody is watching. */
+      await this.repairInstalledEngines();
+    } catch (err) {
+      await this.update({ enginePins: before }).catch(() => undefined);
+      await this.stop().catch(() => undefined);
+      await this.ensureLemonade().catch(() => undefined);
+      throw err;
+    }
+    /* Read back rather than reported: what the screen shows afterwards has to
+       be the build on the disk, not the one that was asked for. */
+    const info = await this.#api.systemInfo().catch(() => undefined);
+    const found = info?.engines.find((e) => e.id === recipe)?.backends.find((b) => b.id === backend);
+    return { version: found?.version };
   }
 
   /**

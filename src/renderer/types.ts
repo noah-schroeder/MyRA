@@ -17,6 +17,10 @@ import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
 import type { BrowseSort, HfModel, RepoFile } from "../core/runtime/hfBrowse.ts";
 import type { PullProgress } from "../core/runtime/systemInfo.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
+import type { UpdateCheck as EngineUpdateCheck } from "../main/runtime/engineUpdates.ts";
+export type { EngineUpdateCheck };
+export type { PendingUpdate } from "../main/runtime/engineUpdates.ts";
+export type { EngineUpdate } from "../core/runtime/engineReleases.ts";
 /**
  * What the renderer renders.
  *
@@ -554,6 +558,21 @@ export interface KarenApi {
     backend: string,
   ): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
   lemonadeDownloads(): Promise<{ ok: boolean; jobs: DownloadJob[] }>;
+  /** The build each backend is on, and the one Lemonade shipped with. */
+  engineVersions(): Promise<{
+    ok: boolean;
+    error?: string;
+    pins: Record<string, string>;
+    shipped: Record<string, string>;
+  }>;
+  /** Asks GitHub what has been released. Called from the button and nowhere else. */
+  engineUpdatesCheck(): Promise<{ ok: boolean; error?: string; check?: EngineUpdateCheck }>;
+  /** Move a backend to a build; no version means back to the shipped one. */
+  engineUpdate(
+    recipe: string,
+    backend: string,
+    version?: string,
+  ): Promise<{ ok: boolean; error?: string; version?: string; info?: MachineInfo }>;
   lemonadeCatalog(): Promise<{ ok: boolean; error?: string; catalog: CatalogEntry[] }>;
   lemonadeModels(): Promise<{
     ok: boolean;

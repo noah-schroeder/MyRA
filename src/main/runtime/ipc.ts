@@ -132,6 +132,54 @@ export function installRuntimeIpc(
     }
   });
 
+  /**
+   * Ask GitHub whether a newer engine build exists.
+   *
+   * Registered as its own channel rather than folded into `lemonade-info`,
+   * because the two have different costs and different consequences:
+   * `lemonade-info` is a loopback call the screen makes on every open, and
+   * this one leaves the machine. Nothing calls it except the button.
+   */
+  ipcMain.handle("karen:engine-updates-check", async () => {
+    try {
+      return { ok: true, check: await runtime.checkEngineUpdates() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  /** Which build each backend is on, and which one Lemonade shipped with. */
+  ipcMain.handle("karen:engine-versions", async () => {
+    try {
+      return { ok: true, ...(await runtime.engineVersions()) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message, pins: {}, shipped: {} };
+    }
+  });
+
+  /**
+   * Move one backend to a build, or -- with no version -- back to the shipped one.
+   *
+   * Returns the daemon's own view afterwards so the screen redraws from what
+   * is on the disk rather than from what was asked for.
+   */
+  ipcMain.handle(
+    "karen:engine-update",
+    async (_e, recipe: string, backend: string, version?: string | null) => {
+      try {
+        const result = await runtime.updateEngine(
+          String(recipe),
+          String(backend),
+          version ? String(version) : undefined,
+          { onPhase: (what) => send("karen:runtime-phase", { what }) },
+        );
+        return { ok: true, ...result, info: await runtime.api.systemInfo() };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
+
   ipcMain.handle("karen:lemonade-downloads", async () => {
     try {
       return { ok: true, jobs: await runtime.api.downloads() };
