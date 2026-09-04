@@ -34,11 +34,30 @@ export interface Device {
 export interface BackendOption {
   /** `cuda`, `vulkan`, `rocm`, `cpu`, `metal`. */
   id: string;
-  /** `installed`, `installable`, `unsupported`. */
+  /** `installed`, `installable`, `update_required`, `unsupported`. */
   state: string;
   /** Upstream's own sentence about this backend. */
   message?: string | undefined;
+  /**
+   * The build in play.
+   *
+   * Which build depends on the state, and the difference matters: once
+   * something is installed this is read from the `version.txt` beside the
+   * binary, so it is what is actually on the disk. Before that it is the
+   * pinned version -- what an install would fetch.
+   */
   version?: string | undefined;
+  /** The release page for the build this backend is heading towards. */
+  releaseUrl?: string | undefined;
+  /**
+   * The build waiting to be installed, when one is.
+   *
+   * Only present on `update_required`, and read out of `release_url` because
+   * that is the only field carrying the target version as a version --
+   * `download_filename` carries it as part of a filename, and for
+   * stable-diffusion.cpp the two are not the same string.
+   */
+  pendingVersion?: string | undefined;
 }
 
 /** One engine and every backend it could run on. */
@@ -175,13 +194,37 @@ export function parseBackends(raw: unknown, recipe = "llamacpp"): BackendOption[
   const backends = obj(obj(obj(obj(raw)["recipes"])[recipe])["backends"]);
   return Object.entries(backends).map(([id, value]) => {
     const entry = obj(value);
+    const state = str(entry["state"]) ?? "unknown";
+    const releaseUrl = str(entry["release_url"]);
+    const pending = state === "update_required" ? tagFromReleaseUrl(releaseUrl) : undefined;
     return {
       id,
-      state: str(entry["state"]) ?? "unknown",
+      state,
       ...(str(entry["message"]) ? { message: str(entry["message"]) } : {}),
       ...(str(entry["version"]) ? { version: str(entry["version"]) } : {}),
+      ...(releaseUrl ? { releaseUrl } : {}),
+      ...(pending ? { pendingVersion: pending } : {}),
     };
   });
+}
+
+/**
+ * The tag out of `https://github.com/owner/repo/releases/tag/<tag>`.
+ *
+ * Decoded, because a tag can contain characters GitHub escapes in a path, and
+ * returned only when the URL really has that shape -- a link to something else
+ * is not a version and should read as absent rather than as the last path
+ * segment of whatever it was.
+ */
+export function tagFromReleaseUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const m = /\/releases\/tag\/([^/?#]+)$/.exec(url);
+  if (!m?.[1]) return undefined;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
 }
 
 /** Backends that could be installed and would actually work here. */

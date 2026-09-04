@@ -41,6 +41,8 @@ import {
   engineStates, engineUsable, partitionByRunnable, runnable, type Runnable,
 } from "../../core/runtime/runnable.ts";
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
+import type { EngineUpdate } from "../../core/runtime/engineReleases.ts";
+import type { PendingUpdate } from "../types.ts";
 
 const BACKEND_LABELS: Record<string, string> = {
   cuda: "NVIDIA (CUDA)",
@@ -150,6 +152,117 @@ const RUN_CHIP: Record<Runnable, { short: string; tone: string }> = {
   unsupported: { short: "Cannot run", tone: "bad" },
 };
 
+/**
+ * One waiting build, whichever way Karen came to know about it.
+ *
+ * The two sources answer the same question for the reader -- "there is a
+ * different build of this and here is what it costs" -- so they share a row
+ * rather than getting a section each. `waiting` is the one thing that changes
+ * what the row has to say, because a chosen build gets downloaded on the next
+ * model load whether or not anybody presses anything.
+ */
+interface UpdateRow {
+  recipe: string;
+  backend: string;
+  from: string;
+  to: string;
+  sizeBytes?: number | undefined;
+  releaseUrl?: string | undefined;
+  waiting: boolean;
+}
+
+function mb(bytes?: number): string {
+  return bytes ? `${Math.round(bytes / 1024 ** 2)} MB` : "";
+}
+
+/**
+ * "today", "yesterday", or a date.
+ *
+ * A timestamp answers "did I already check this?" and nothing finer is
+ * useful: engine releases arrive daily at best, and "3 September" is
+ * something a person can compare against their own memory of the week.
+ */
+function whenChecked(iso: string): string {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "recently";
+  const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return then.toLocaleDateString(undefined, { day: "numeric", month: "long" });
+}
+
+/**
+ * One update, and what agreeing to it does.
+ *
+ * The consequences are behind a press rather than beside every row, because
+ * there is usually one update on the screen and always four things worth
+ * knowing about it; printed inline for every backend they would be wallpaper.
+ * Pressing Update opens them and does nothing else -- the button that acts is
+ * inside, and it is the second press, which is the whole point.
+ */
+function EngineUpdateRow({
+  row, busy, open, onAsk, onGo,
+}: {
+  row: UpdateRow;
+  busy: boolean;
+  open: boolean;
+  onAsk: () => void;
+  onGo: () => void;
+}): React.JSX.Element {
+  const label = BACKEND_LABELS[row.backend] ?? row.backend;
+  const size = mb(row.sizeBytes);
+  return (
+    <div className={open ? "lem-update open" : "lem-update"}>
+      <div className="lem-update-head">
+        <span className="lem-update-what">
+          <span aria-hidden="true">↑</span> {label} {row.from} → <strong>{row.to}</strong>
+          {size ? <span className="lem-update-size"> · {size}</span> : null}
+        </span>
+        {row.releaseUrl ? (
+          <a className="lem-update-notes" href={row.releaseUrl} target="_blank" rel="noreferrer">
+            What changed ↗
+          </a>
+        ) : null}
+        <button type="button" className="lem-install" disabled={busy} onClick={onAsk}>
+          {row.waiting ? "Install now" : "Update"}
+        </button>
+      </div>
+
+      {open ? (
+        <div className="lem-update-body">
+          {/* Written in the order the questions actually arrive: what happens
+              to what I have open, whether it is safe, and how to get out. */}
+          {row.waiting ? (
+            <p>
+              {row.to} is already chosen for this machine and will be downloaded the next time a
+              model loads. Installing it now means that download happens here, where you can see
+              it, rather than in the middle of your next question.
+            </p>
+          ) : null}
+          <p>
+            Downloads {size ? `${size} ` : ""}from the project that publishes this engine, then
+            <strong> restarts the backend, so any model you have loaded will be unloaded</strong>.
+            Your conversations, meetings and research runs are not touched.
+          </p>
+          <p>
+            A newer engine can be faster or fix a bug, and can also behave differently from the one
+            your earlier work ran on. If it goes wrong you can put {row.from} back in one press —
+            it is downloaded again, so that takes about as long as this will.
+          </p>
+          <div className="lem-update-go">
+            <button type="button" className="lem-install strong" disabled={busy} onClick={onGo}>
+              {row.waiting ? `Install ${row.to}` : `Update to ${row.to}`}
+            </button>
+            <button type="button" className="lem-more" disabled={busy} onClick={onAsk}>
+              Not now
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function gb(bytes?: number): string {
   return bytes ? `${(bytes / 1024 ** 3).toFixed(bytes < 1024 ** 3 ? 2 : 1)} GB` : "—";
 }
@@ -240,12 +353,31 @@ export function LemonadePane({
   }, [tuning]);
   const starting = useRef(false);
 
+  /* Engine builds. Kept apart from `info` because they have different
+     lifetimes: `info` is re-read on every refresh, while a check is a thing
+     the user did once and its result should still be on screen afterwards. */
+  const [updates, setUpdates] = useState<EngineUpdate[]>([]);
+  const [pending, setPending] = useState<PendingUpdate[]>([]);
+  const [checkedAt, setCheckedAt] = useState<string | undefined>();
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | undefined>();
+  const [pins, setPins] = useState<Record<string, string>>({});
+  const [shipped, setShipped] = useState<Record<string, string>>({});
+  /* Which update is showing its consequences, if any. One at a time, and
+     closed by pressing the same button again. */
+  const [confirming, setConfirming] = useState<string | undefined>();
+
   const refresh = useCallback(async (): Promise<void> => {
-    const [infoRes, listRes, catRes] = await Promise.all([
+    const [infoRes, listRes, catRes, verRes] = await Promise.all([
       window.karen.lemonadeInfo(),
       window.karen.lemonadeModels(),
       window.karen.lemonadeCatalog(),
+      window.karen.engineVersions(),
     ]);
+    if (verRes.ok) {
+      setPins(verRes.pins);
+      setShipped(verRes.shipped);
+    }
     if (infoRes.ok && infoRes.info) setInfo(infoRes.info);
     else if (infoRes.error) setError(infoRes.error);
     if (listRes.ok) {
@@ -281,6 +413,65 @@ export function LemonadePane({
     }, 1000);
     return () => clearInterval(timer);
   }, [busy]);
+
+  /**
+   * The check, which is the only thing on this screen that reaches GitHub.
+   *
+   * `pending` is refreshed from the same call even though it costs no network:
+   * it is read out of the daemon's own report, and a person who presses Check
+   * expects one answer about engine builds rather than two half-answers from
+   * two places.
+   */
+  const checkUpdates = async (): Promise<void> => {
+    setChecking(true);
+    setCheckError(undefined);
+    const res = await window.karen.engineUpdatesCheck();
+    setChecking(false);
+    if (!res.ok || !res.check) {
+      setCheckError(res.error ?? "Could not reach GitHub to ask.");
+      return;
+    }
+    setUpdates(res.check.updates);
+    setPending(res.check.pending);
+    setCheckedAt(res.check.checkedAt);
+    /* Named rather than counted: "2 engines could not be checked" sends
+       somebody looking for which two. */
+    setCheckError(res.check.unreachable.length
+      ? `Could not read the release list for ${res.check.unreachable.join(", ")}.`
+      : undefined);
+  };
+
+  const pinOf = (recipe: string, backend: string): string => `${recipe}:${backend}`;
+
+  const updateFor = (recipe: string, backend: string): UpdateRow | undefined => {
+    /* A build already chosen wins over one merely found: it is the one the
+       daemon will fetch on the next load whether anybody presses anything. */
+    const waiting = pending.find((u) => u.recipe === recipe && u.backend === backend);
+    if (waiting) return { ...waiting, waiting: true };
+    const found = updates.find((u) => u.recipe === recipe && u.backend === backend);
+    return found ? { ...found, waiting: false } : undefined;
+  };
+
+  const applyBuild = async (
+    recipe: string,
+    backend: string,
+    version: string | undefined,
+  ): Promise<void> => {
+    setConfirming(undefined);
+    const label = BACKEND_LABELS[backend] ?? backend;
+    await run(
+      version
+        ? `Moving ${engineName(recipe)} (${label}) to ${version}`
+        : `Putting ${engineName(recipe)} (${label}) back to the build Karen ships`,
+      () => window.karen.engineUpdate(recipe, backend, version),
+    );
+    /* The row goes whether or not it worked. On success it is done; on
+       failure the pin was rolled back, so the offer no longer describes the
+       machine and leaving it up would invite pressing it again against an
+       error that has not changed. */
+    setUpdates((list) => list.filter((u) => !(u.recipe === recipe && u.backend === backend)));
+    setPending((list) => list.filter((u) => !(u.recipe === recipe && u.backend === backend)));
+  };
 
   const run = async (
     what: string,
@@ -468,28 +659,64 @@ export function LemonadePane({
                 Lemonade — nothing is fetched until you press a button here.
               </p>
               {/*
-                * Said out loud, because its absence reads as a missing feature.
+                * Said out loud, because the absence of automatic updates reads
+                * as a missing feature otherwise -- "how do I update llama.cpp?
+                * I don't see a button" was the report that started this.
                 *
-                * "How do I update llama.cpp? I don't see a button" -- there is
-                * none, and that is the design: Karen pins one Lemonade version,
-                * and each engine's build comes from that version's own recipe.
-                * Re-installing fetches the identical build. Without this line
-                * the pane shows a tick, no version, and no explanation, which
-                * looks like something left unfinished rather than a decision.
+                * The versions still come from the Lemonade release Karen ships
+                * ({LEMONADE_VERSION}); what changed is that moving off one is
+                * now something a person can do, and still nothing that happens
+                * on its own. A runtime that updated itself underneath a piece
+                * of work could change an answer between one run and the next.
                 */}
               <p>
-                Each engine's version is fixed by the Lemonade release Karen ships
- ({LEMONADE_VERSION}), so they change when Karen does
-                and not on their own. That is deliberate: a runtime that updated itself underneath
-                a piece of work could change an answer between one run and the next.
+                Each engine starts on the build the Lemonade release Karen ships
+                ({LEMONADE_VERSION}) names for it. Nothing here changes on its own — Karen has no
+                automatic updates and does not look for any until you ask it to.
               </p>
             </header>
 
+            <div className="lem-updatebar">
+              <button
+                type="button"
+                className="lem-more"
+                disabled={busy || checking}
+                onClick={() => void checkUpdates()}
+              >
+                {checking ? "Asking GitHub…" : "Check for engine updates"}
+              </button>
+              {/* What pressing it costs, before it is pressed. This is the one
+                  control on the screen that reaches the network on its own
+                  behalf rather than to fetch something the user asked for. */}
+              <span className="lem-updatebar-note">
+                {checkedAt
+                  ? `Last checked ${whenChecked(checkedAt)}. Asks GitHub which builds exist; nothing else is sent.`
+                  : "Asks GitHub which builds exist; nothing else is sent."}
+              </span>
+              {checkError ? <span className="lem-updatebar-bad">{checkError}</span> : null}
+              {checkedAt && !checkError && !updates.length && !pending.length ? (
+                <span className="lem-updatebar-note">
+                  Every engine you have installed is on the newest build its source publishes.
+                </span>
+              ) : null}
+            </div>
+
             <div className="lem-grid">
               {engines.map((engine) => {
-                const ready = engine.backends.some((b) => b.state === "installed");
-                const offer = engine.backends.filter((b) => b.state !== "unsupported");
+                /* An engine whose build is behind is still an engine that is
+                   here and working, so it wears the tick and carries its own
+                   version -- the Install button underneath it was the old
+                   rendering of `update_required`, and offering to install
+                   something already installed is its own kind of wrong. */
+                const held = engine.backends.filter(
+                  (b) => b.state === "installed" || b.state === "update_required");
+                const ready = held.length > 0;
+                const offer = engine.backends.filter((b) => b.state === "installable");
                 const blocked = engine.backends.filter((b) => b.state === "unsupported");
+                const news = engine.backends.flatMap((b) => {
+                  const row = updateFor(engine.id, b.id);
+                  return row ? [row] : [];
+                });
                 return (
                   <article key={engine.id} className={ready ? "lem-card ready" : "lem-card"}>
                     <div className="lem-card-head">
@@ -499,45 +726,84 @@ export function LemonadePane({
                       ) : null}
                     </div>
                     <div className="lem-backends">
-                      {offer.map((b) =>
-                        b.state === "installed" ? (
-                          <span
-                            key={b.id}
-                            className="lem-chip good"
-                            title={
-                              b.version
-                                ? `${BACKEND_LABELS[b.id] ?? b.id} ${b.version}, the build this ` +
-                                  "version of Karen pins."
-                                : b.message
-                            }
-                          >
-                            <span aria-hidden="true">✓</span> {BACKEND_LABELS[b.id] ?? b.id}
-                            {/* The version, because "is mine current" is the
-                                question a tick cannot answer. */}
-                            {b.version ? <span className="lem-chip-ver"> {b.version}</span> : null}
-                          </span>
-                        ) : (
-                          <button
-                            key={b.id}
-                            type="button"
-                            className="lem-install"
-                            disabled={busy}
-                            title={b.message}
-                            onClick={() =>
-                              void run(
-                                `Installing ${BACKEND_LABELS[b.id] ?? b.id} for ${engineName(engine.id)}`,
-                                () => window.karen.lemonadeInstallBackend(engine.id, b.id),
-                              )
-                            }
-                          >
-                            Install {BACKEND_LABELS[b.id] ?? b.id}
-                          </button>
-                        ),
-                      )}
-                      {offer.length === 0 ? (
+                      {held.map((b) => (
+                        <span
+                          key={b.id}
+                          className="lem-chip good"
+                          title={
+                            b.version
+                              ? `${BACKEND_LABELS[b.id] ?? b.id} ${b.version}, read from the ` +
+                                "build installed on this machine."
+                              : b.message
+                          }
+                        >
+                          <span aria-hidden="true">✓</span> {BACKEND_LABELS[b.id] ?? b.id}
+                          {/* The version, because "is mine current" is the
+                              question a tick cannot answer. Taken from the
+                              daemon, which reads it off the installed binary
+                              -- showing the pin here would name a build that
+                              is not on the disk the moment one is chosen. */}
+                          {b.version ? <span className="lem-chip-ver"> {b.version}</span> : null}
+                        </span>
+                      ))}
+                      {offer.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          className="lem-install"
+                          disabled={busy}
+                          title={b.message}
+                          onClick={() =>
+                            void run(
+                              `Installing ${BACKEND_LABELS[b.id] ?? b.id} for ${engineName(engine.id)}`,
+                              () => window.karen.lemonadeInstallBackend(engine.id, b.id),
+                            )
+                          }
+                        >
+                          Install {BACKEND_LABELS[b.id] ?? b.id}
+                        </button>
+                      ))}
+                      {offer.length === 0 && held.length === 0 ? (
                         <span className="lem-chip dim">Nothing here runs on this machine</span>
                       ) : null}
                     </div>
+
+                    {/* One row per backend with a build waiting, either found
+                        on GitHub or already chosen and not yet fetched. */}
+                    {news.map((row) => (
+                      <EngineUpdateRow
+                        key={`${row.recipe}:${row.backend}`}
+                        row={row}
+                        busy={busy}
+                        open={confirming === pinOf(row.recipe, row.backend)}
+                        onAsk={() => setConfirming(
+                          confirming === pinOf(row.recipe, row.backend)
+                            ? undefined
+                            : pinOf(row.recipe, row.backend))}
+                        onGo={() => void applyBuild(row.recipe, row.backend, row.to)}
+                      />
+                    ))}
+
+                    {/* Offered only where a version was chosen here, and only
+                        while it differs from the one Lemonade shipped: an
+                        engine still on its original build has nothing to go
+                        back to, and a button that undoes nothing is noise. */}
+                    {held.flatMap((b) => {
+                      const key = pinOf(engine.id, b.id);
+                      const original = shipped[key];
+                      if (!pins[key] || !original || original === b.version) return [];
+                      return [(
+                        <button
+                          key={`revert-${b.id}`}
+                          type="button"
+                          className="lem-revert"
+                          disabled={busy}
+                          onClick={() => void applyBuild(engine.id, b.id, undefined)}
+                        >
+                          Put {BACKEND_LABELS[b.id] ?? b.id} back to {original}, the build Karen ships
+                        </button>
+                      )];
+                    })}
                     {/* Why a backend is greyed out, which is the question the
                         old pane answered and the one people actually asked. */}
                     {showAllEngines && blocked.length ? (
