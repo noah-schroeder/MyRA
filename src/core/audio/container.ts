@@ -12,14 +12,10 @@
  *   - the container is exactly what it claimed and this build cannot decode
  *     it. MP3 needs a codec that not every Chromium ships, and WAV needs none.
  *
- * So the request asks for WAV, and what comes back is identified from its own
- * first bytes rather than from the header. Measured against the local daemon:
- * `response_format` is honoured, `wav` returns `RIFF....WAVE` under
- * `audio/wav`, and the default with no format asked for is MP3.
+ * So what comes back is identified from its own first bytes rather than from
+ * the header. Which container to ask for in the first place is `wav.ts`'s
+ * business, and the answer turned out not to be WAV.
  */
-
-/** The container Karen asks for, and why it is not the smallest one. */
-export const PREFERRED_FORMAT = "wav";
 
 /**
  * The format's own signature, or undefined when the bytes say nothing.
