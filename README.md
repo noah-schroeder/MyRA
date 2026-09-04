@@ -79,6 +79,11 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
 - **Scholarly searches** reach OpenAlex and arXiv. Semantic Scholar is asked only
   whether a paper already found has an open-access PDF.
 - **Pages you ask it to read** see a request from this machine.
+- **Looking for a model** reaches Hugging Face, and only when you press
+  something: Search sends what you typed, opening a result asks for that
+  repository's details and its model card, and Download fetches the files.
+  Typing in the box sends nothing. The registry is named, with its country, on
+  every result and on every model's page.
 - **Checking for engine updates** asks GitHub which builds of llama.cpp,
   whisper.cpp and the rest have been released, and only when you press the
   button in Settings → Runtime. Karen never checks on its own, and installing

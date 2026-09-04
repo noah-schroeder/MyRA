@@ -57,6 +57,14 @@ export interface ApiTarget {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * How the daemon says "that one is yours to delete, not mine".
+ *
+ * Matched on rather than parsed: the message continues with the path, which is
+ * the useful part and is read separately.
+ */
+export const EXTRA_MODEL_REFUSAL = "Cannot delete extra models via API";
+
 export interface InstalledModel {
   id: string;
   /**
@@ -74,6 +82,16 @@ export interface InstalledModel {
   sizeBytes?: number;
   /** `extra_models_dir` for anything found rather than downloaded. */
   source?: string;
+  /**
+   * Where it came from: `org/repo:file.gguf`, or an absolute path.
+   *
+   * The only thing tying an installed model back to a repository, which is what
+   * lets "My models" open the same card as the other two tabs. A local file has
+   * no repository, and `repoOf` says so rather than inventing one.
+   */
+  checkpoint?: string;
+  /** The engine that runs it, needed to describe the repository correctly. */
+  recipe?: string;
 }
 
 export class LemonadeApi {
@@ -90,11 +108,39 @@ export class LemonadeApi {
   async #call<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
     const target = this.#target();
     if (!target) throw new LemonadeApiError("Lemonade is not running.");
+    return this.#send<T>(`${target.base}${path}`, path, target.headers, init, timeoutMs);
+  }
+
+  /**
+   * The daemon's Ollama-compatible routes, which sit beside `/api/v1` and not
+   * under it.
+   *
+   * `lemond` registers `/api/chat`, `/api/tags`, `/api/pull` and `/api/delete`
+   * as well as its own API, and deleting a model exists only there --
+   * `DELETE /api/v1/models/{id}` is a 404, measured. So one call in this file
+   * addresses a different base, and it does it by trimming the version off the
+   * one target rather than by holding a second address that could drift.
+   */
+  async #callOllama<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+    const target = this.#target();
+    if (!target) throw new LemonadeApiError("Lemonade is not running.");
+    return this.#send<T>(
+      `${target.base.replace(/\/v\d+$/, "")}${path}`, `/api${path}`, target.headers, init, timeoutMs,
+    );
+  }
+
+  async #send<T>(
+    url: string,
+    label: string,
+    auth: Record<string, string>,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<T> {
     let res: Response;
     try {
-      res = await fetch(`${target.base}${path}`, {
+      res = await fetch(url, {
         ...init,
-        headers: { ...target.headers, ...(init.headers as Record<string, string>) },
+        headers: { ...auth, ...(init.headers as Record<string, string>) },
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
@@ -104,7 +150,7 @@ export class LemonadeApi {
       /* The body usually says more than the status does, and truncating it
          keeps a stack trace out of a message meant for a person. */
       const detail = (await res.text().catch(() => "")).trim().slice(0, 300);
-      throw new LemonadeApiError(`${path} failed (${res.status})${detail ? `: ${detail}` : ""}`);
+      throw new LemonadeApiError(`${label} failed (${res.status})${detail ? `: ${detail}` : ""}`);
     }
     return (await res.json().catch(() => ({}))) as T;
   }
@@ -168,6 +214,31 @@ export class LemonadeApi {
   /** Register a model without downloading it, for files already on disk. */
   async registerModel(modelName: string, checkpoint: string, recipe = "llamacpp"): Promise<void> {
     await this.#post("/models/register", { model_name: modelName, checkpoint, recipe });
+  }
+
+  /**
+   * Remove a model the daemon downloaded, files and registration together.
+   *
+   * Measured against lemond 11.8.0, because none of it is guessable from the
+   * documentation:
+   *
+   *   - the route is `DELETE /api/delete` with `{"name": …}`, borrowed from
+   *     Ollama. `DELETE /api/v1/models/{id}` answers 404 -- the `.../models/(.+)`
+   *     route it looks like it should hit is the per-model *options* handler;
+   *   - a name it does not know is a 404 naming it back;
+   *   - anything reached through `extra_models_dir` is a **500** carrying
+   *     `Cannot delete extra models via API … Delete the file directly from: <path>`,
+   *     which is not a failure so much as a handover. `EXTRA_MODEL_REFUSAL`
+   *     below is how the caller recognises it.
+   *
+   * The daemon unloads a loaded model before deleting it, so no caller has to.
+   */
+  async deleteModel(modelName: string): Promise<void> {
+    await this.#callOllama("/delete", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: modelName }),
+    }, 60_000);
   }
 
   /**
@@ -321,7 +392,10 @@ export class LemonadeApi {
    * downloaded from one it found in the directory Karen points it at.
    */
   async listModels(): Promise<InstalledModel[]> {
-    type Raw = { id?: string; downloaded?: boolean; size?: number; source?: string; labels?: string[] };
+    type Raw = {
+      id?: string; downloaded?: boolean; size?: number; source?: string; labels?: string[];
+      checkpoint?: string; recipe?: string;
+    };
     const body = await this.#call<{ data?: Raw[] }>("/models");
     return (body.data ?? [])
       .filter((m): m is Raw & { id: string } => typeof m.id === "string")
@@ -333,6 +407,8 @@ export class LemonadeApi {
           ? { sizeBytes: Math.round(m.size * 1024 ** 3) }
           : {}),
         ...(m.source ? { source: m.source } : {}),
+        ...(typeof m.checkpoint === "string" && m.checkpoint ? { checkpoint: m.checkpoint } : {}),
+        ...(typeof m.recipe === "string" && m.recipe ? { recipe: m.recipe } : {}),
       }));
   }
 }

@@ -209,7 +209,10 @@ const api = {
   lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>
     ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
-  hfFiles: (repo: string) => ipcRenderer.invoke("karen:hf-files", repo),
+  hfDetail: (repo: string) => ipcRenderer.invoke("karen:hf-detail", repo),
+  hfCard: (repo: string) => ipcRenderer.invoke("karen:hf-card", repo),
+  lemonadeDeleteModel: (id: string) => ipcRenderer.invoke("karen:lemonade-delete-model", id),
+  modelReveal: (id: string) => ipcRenderer.invoke("karen:model-reveal", id),
   onPullProgress: (fn: (p: unknown) => void) => {
     const handler = (_e: unknown, p: unknown): void => fn(p);
     ipcRenderer.on("karen:pull-progress", handler);

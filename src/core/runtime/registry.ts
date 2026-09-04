@@ -204,11 +204,37 @@ export function modelNameFor(repo: string, variant: RepoVariant): string {
 export function recommendVariant(
   variants: RepoVariant[],
   rank: (name: string) => number,
+  /**
+   * How well a build of this size runs here. Lower is better.
+   *
+   * A tier rather than a yes/no, because "fits" has more than two answers and
+   * the difference between them decides the badge. A machine with a card wants
+   * the best build that fits *on the card*; a machine without one, or one whose
+   * card is too small for anything here, still wants the best build that will
+   * run at all rather than one marked "Too large". Before this the badge was
+   * pinned to `Q4_K_M` by preference order alone, and sat beside "Too large" on
+   * a 30B repository -- the app recommending the choice that will not work.
+   *
+   * Within a tier the order is unchanged and simply filtered: bigger is not
+   * better here, so a machine with room to spare still gets Q4_K_M rather than
+   * being pushed up to Q8_0. With no tier function at all, the fixed order
+   * stands.
+   */
+  tier?: (sizeBytes: number) => number,
 ): RepoVariant | undefined {
   if (!variants.length) return undefined;
-  return [...variants].sort((a, b) => {
+  const byPreference = [...variants].sort((a, b) => {
     const byRank = rank(a.name) - rank(b.name);
     if (byRank !== 0) return byRank;
     return (a.sizeBytes ?? Infinity) - (b.sizeBytes ?? Infinity);
-  })[0];
+  });
+  if (tier) {
+    const sized = byPreference.filter((v) => v.sizeBytes !== undefined);
+    const best = Math.min(...sized.map((v) => tier(v.sizeBytes ?? 0)));
+    if (Number.isFinite(best)) {
+      const runnable = sized.find((v) => tier(v.sizeBytes ?? 0) === best);
+      if (runnable) return runnable;
+    }
+  }
+  return byPreference[0];
 }
