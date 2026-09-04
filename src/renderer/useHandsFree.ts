@@ -27,7 +27,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DictationCapture } from "./capture.ts";
-import { isSpeech, levelFromAmplitude, nextFloor } from "../core/audio/endpointing.ts";
+import {
+  enterLevel, levelFromAmplitude, observe, startTurn, turnEnded, type TurnState,
+} from "../core/audio/endpointing.ts";
 import type { DictationState } from "./types.ts";
 
 export type HandsFreePhase = "off" | "listening" | "thinking" | "speaking";
@@ -121,11 +123,25 @@ export function useHandsFree({
      being set by an unrelated re-render. */
   const sequence = useRef(0);
 
-  const heardSpeech = useRef(false);
-  const lastSound = useRef(0);
-  /* The room, as heard so far. Kept across turns: it is a property of where
-     the user is sitting, not of the sentence they just said. */
-  const floor = useRef(0);
+  /*
+   * The end-of-turn detector's whole state, in one ref.
+   *
+   * A ref rather than React state because it is updated per audio reading and
+   * read by an interval; putting it in state would re-render the tree a
+   * hundred times a second to change a number nothing draws.
+   */
+  const turn = useRef<TurnState>(startTurn(Date.now()));
+  /* What the room sounds like carries across turns -- it is a property of the
+     room, not of the sentence just spoken -- so a new turn keeps the level
+     estimate and resets only what belongs to the turn. */
+  /* The barge-in monitor's own detector: a second microphone, open at a
+     different time, listening past Karen's own voice. */
+  const barge = useRef<TurnState>(startTurn(Date.now()));
+  const newTurn = useCallback((): void => {
+    const now = Date.now();
+    const { level, floor } = turn.current;
+    turn.current = { ...startTurn(now), level, floor };
+  }, []);
   const spokenId = useRef<string | undefined>(undefined);
   const phaseRef = useRef<HandsFreePhase>("off");
   const running = useRef(false);
@@ -144,8 +160,7 @@ export function useHandsFree({
   /** Open the microphone and start a turn. */
   const listen = useCallback(async (): Promise<void> => {
     await stopMonitor();
-    heardSpeech.current = false;
-    lastSound.current = Date.now();
+    newTurn();
     try {
       await dictationRef.current.start();
       to("listening");
@@ -167,6 +182,7 @@ export function useHandsFree({
   const watchForBargeIn = useCallback(async (): Promise<void> => {
     if (monitor.current) return;
     const session = new DictationCapture();
+    barge.current = startTurn(Date.now());
     let loudSince = 0;
     try {
       await session.start({
@@ -174,12 +190,18 @@ export function useHandsFree({
         echoCancellation: true,
         onChunk: () => {},
         onLevel: ({ rms }) => {
-          /* The same learned threshold, on the same scale: a room loud enough
-             to hold a turn open is also loud enough to cut an answer off
-             mid-sentence, and that one cannot be undone. */
+          /* The same detector, on the same scale: a room loud enough to hold a
+             turn open is also loud enough to cut an answer off mid-sentence,
+             and that one cannot be undone.
+
+             Its own state, not the listening turn's. This microphone is open
+             while Karen is talking and the other one is not, so sharing would
+             mean two callbacks writing one estimate at different times about
+             different moments. */
           const level = levelFromAmplitude(rms);
-          if (!isSpeech(level, floor.current)) {
-            floor.current = nextFloor(floor.current, level);
+          const now = Date.now();
+          barge.current = observe(barge.current, level, now);
+          if (!barge.current.talking) {
             loudSince = 0;
             return;
           }
@@ -231,20 +253,14 @@ export function useHandsFree({
      facts the end-of-turn test needs: that speech happened at all, and when it
      was last heard. */
   useEffect(() => {
-    const level = dictation.state.level;
-    if (isSpeech(level, floor.current)) {
-      heardSpeech.current = true;
-      lastSound.current = Date.now();
-    }
-    floor.current = nextFloor(floor.current, level);
+    turn.current = observe(turn.current, dictation.state.level, Date.now());
   }, [dictation.state.level]);
 
   // End of turn: a pause, but only once something has actually been said.
   useEffect(() => {
     if (!enabled || phase !== "listening") return undefined;
     const timer = setInterval(() => {
-      if (!heardSpeech.current) return;
-      if (Date.now() - lastSound.current < END_OF_TURN_MS) return;
+      if (!turnEnded(turn.current, Date.now(), END_OF_TURN_MS)) return;
       clearInterval(timer);
       to("thinking");
       void dictationRef.current.stop();
