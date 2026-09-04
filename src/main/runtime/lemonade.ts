@@ -25,6 +25,8 @@ import {
   type LemonadeHealth,
 } from "../../core/runtime/lemonade.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
+import type { EnginePins } from "../../core/runtime/enginePins.ts";
+import { applyEnginePins } from "./engineVersions.ts";
 import { launchSpec } from "./loader.ts";
 
 /** An unused port, obtained by letting the OS pick one and handing it back. */
@@ -65,6 +67,14 @@ export interface LemonadeStartOptions {
   configDir: string;
   /** Karen's existing model library, which the daemon should also list. */
   modelsDir?: string;
+  /**
+   * Engine builds the user chose, over the ones this Lemonade ships with.
+   *
+   * Applied here rather than at the moment somebody picks one, because the
+   * daemon reads that table only at startup -- so this IS the moment a pin
+   * takes effect. See engineVersions.ts.
+   */
+  enginePins?: EnginePins;
 }
 
 const LOG_LINES = 400;
@@ -126,6 +136,7 @@ export class LemonadeServer {
     await makePrivateDir(opts.cacheDir);
     await makePrivateDir(opts.configDir);
     await this.#pinConfig(opts.configDir, opts.modelsDir);
+    await this.#pinEngineVersions(dirname(opts.binary), opts.enginePins ?? {});
 
     const port = await freePort();
     this.#port = port;
@@ -237,6 +248,25 @@ export class LemonadeServer {
       // Not fatal: --no-broadcast still holds on the command line, and the
       // remaining settings are already the defaults. Worth saying, though.
       this.#log(`could not write Lemonade config: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Put the chosen engine builds into the table the daemon is about to read.
+   *
+   * Not fatal, and deliberately so: the failure mode is that the daemon starts
+   * with the versions Lemonade shipped, which is a working machine and the one
+   * every install had before this existed. Refusing to start the backend
+   * because a version preference could not be written would trade something
+   * that matters for something that does not.
+   */
+  async #pinEngineVersions(lemondDir: string, pins: EnginePins): Promise<void> {
+    try {
+      if (!await applyEnginePins(lemondDir, pins)) {
+        this.#log("could not read Lemonade's engine version table; using its own versions.");
+      }
+    } catch (err) {
+      this.#log(`could not pin engine versions: ${(err as Error).message}`);
     }
   }
 
