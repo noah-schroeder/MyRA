@@ -33,10 +33,41 @@ import type { EngineInfo } from "./systemInfo.ts";
 export type Runnable =
   /** An engine backend is installed. Downloading this gets you a usable model. */
   | "ready"
+  /**
+   * Installed and working, but a different build is pinned.
+   *
+   * The daemon calls this `update_required`, and its message -- "Backend update
+   * is required before use" -- reads worse than it behaves. Measured: with the
+   * llama.cpp pin moved from b10375 to b10793, `/load` still succeeded, because
+   * the daemon quietly fetched the new build first (`Installing llama-server
+   * (version: b10793)` in its own log) and then generated normally.
+   *
+   * So the model runs; what it does not do is warn anyone that loading it is
+   * about to spend 34 MB -- or, on CUDA, several hundred. That is the whole
+   * reason Karen installs updates deliberately instead of letting them ambush
+   * somebody mid-sentence.
+   *
+   * Reachable without anybody touching a pin: a Karen release that bumps
+   * LEMONADE_VERSION ships new recipe versions, and every engine installed
+   * under the old one lands here until it is reinstalled.
+   */
+  | "update-pending"
   /** Supported here, but the engine has to be installed first. */
   | "needs-engine"
   /** No backend on this hardware. Downloading it achieves nothing. */
   | "unsupported";
+
+/**
+ * Whether this engine can run a model right now.
+ *
+ * The distinction `update-pending` draws is about downloads, not capability, so
+ * every gate that asks "can this run" has to accept both -- and asking through
+ * one function is what stops the next such gate from being written as
+ * `=== "ready"` and quietly excluding a working engine.
+ */
+export function engineUsable(state: Runnable | undefined): boolean {
+  return state === "ready" || state === "update-pending";
+}
 
 export interface RunVerdict {
   state: Runnable;
@@ -55,11 +86,22 @@ export interface RunVerdict {
 export function engineStates(engines: EngineInfo[]): Map<string, Runnable> {
   const out = new Map<string, Runnable>();
   for (const engine of engines) {
-    const state = engine.backends.some((b) => b.state === "installed")
+    const has = (want: string): boolean => engine.backends.some((b) => b.state === want);
+    /*
+     * `update_required` is listed BEFORE `installable` and after `installed`,
+     * because it means an engine that is on the disk and works. It used to
+     * fall off the end of this chain into `unsupported`, and the sentence that
+     * produced -- "This machine has no way to run llama.cpp models, the
+     * hardware it needs is not here" -- was false about a machine that had
+     * just been chatting.
+     */
+    const state: Runnable = has("installed")
       ? "ready"
-      : engine.backends.some((b) => b.state === "installable")
-        ? "needs-engine"
-        : "unsupported";
+      : has("update_required")
+        ? "update-pending"
+        : has("installable")
+          ? "needs-engine"
+          : "unsupported";
     out.set(engine.id, state);
   }
   return out;
@@ -81,6 +123,9 @@ export function runnable(recipe: string, states: Map<string, Runnable>): RunVerd
 
 const REASONS: Record<Runnable, (engine: string) => string> = {
   ready: () => "Ready to run — its engine is installed.",
+  "update-pending": (engine) =>
+    `Ready to run. A newer ${engineWords(engine)} build is waiting, and loading a model ` +
+    "would download it first — install it under Settings → Runtime to get that out of the way.",
   "needs-engine": (engine) =>
     `Needs the ${engineWords(engine)} engine, which this machine can install. ` +
     "Install it under Settings → Runtime first.",

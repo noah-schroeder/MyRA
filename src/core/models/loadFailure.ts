@@ -23,7 +23,7 @@
  * daemon's answer about which engines are installed here.
  */
 
-import type { Runnable } from "../runtime/runnable.ts";
+import { engineUsable, type Runnable } from "../runtime/runnable.ts";
 import type { MediaRole } from "./roles.ts";
 
 export interface LoadFailure {
@@ -114,7 +114,7 @@ export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): str
   const engine = opts.engine ? `the ${opts.engine} engine` : "an engine of its own";
   const opening = `${model} would not load, so there was nothing to ${DOES[opts.role]} with. `;
 
-  if (opts.engineState === "ready" && opts.oldSystem) {
+  if (engineUsable(opts.engineState) && opts.oldSystem) {
     return (
       opening +
       `${engine} is installed, so this is not something left undone: its server needs newer ` +
@@ -126,7 +126,7 @@ export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): str
     );
   }
 
-  if (opts.engineState === "ready") {
+  if (engineUsable(opts.engineState)) {
     /* The engine is there and its server exited anyway. Karen cannot see that
        server's own output -- the daemon starts it and keeps its stderr -- so
        this names the two causes that actually produce it rather than
