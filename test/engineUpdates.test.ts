@@ -47,8 +47,13 @@ const DRY: Record<string, { repo: string; version: string; filename: string }> =
  * so it is never on the page of recent releases, and its date is the only
  * thing that can prove b10793 is newer rather than merely different.
  */
-const TAGS: Record<string, { tag_name: string; published_at: string }> = {
-  "ggml-org/llama.cpp:b10375": { tag_name: "b10375", published_at: "2026-05-02T09:00:00Z" },
+const TAGS: Record<string, { tag_name: string; published_at: string; prerelease?: boolean }> = {
+  /* Flagged, because ggml-org flags every llama.cpp build that way -- and a
+     check that treated that as "do not offer" found nothing for the engine
+     that runs chat. */
+  "ggml-org/llama.cpp:b10375": {
+    tag_name: "b10375", published_at: "2026-05-02T09:00:00Z", prerelease: true,
+  },
 };
 
 const RELEASES: Record<string, unknown> = {
@@ -60,6 +65,7 @@ const RELEASES: Record<string, unknown> = {
       { name: "llama-b10793-bin-ubuntu-vulkan-x64.tar.gz", size: 33_802_116 },
       { name: "llama-b10793-bin-ubuntu-x64.tar.gz", size: 28_000_000 },
     ],
+    prerelease: true,
   }],
   "lemonade-sdk/Kokoros": [{
     tag_name: "b17",

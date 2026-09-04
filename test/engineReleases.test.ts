@@ -17,8 +17,11 @@ import {
   type InstalledBuild, type Release,
 } from "../src/core/runtime/engineReleases.ts";
 
-const release = (tag: string, assets: string[], publishedAt?: string): Release => ({
+const release = (
+  tag: string, assets: string[], publishedAt?: string, prerelease = false,
+): Release => ({
   tag,
+  prerelease,
   ...(publishedAt ? { publishedAt } : {}),
   assets: assets.map((name) => ({ name, sizeBytes: 33_802_116 })),
 });
@@ -116,16 +119,47 @@ test("a real build behind a dependency drop is still found", () => {
   assert.equal(found?.asset, "whisper-v1.8.4-linux-vulkan-x86_64.tar.gz");
 });
 
-test("drafts and prereleases never reach the list", () => {
+test("drafts never reach the list, prereleases are kept and labelled", () => {
+  // Dropping prereleases here excluded every llama.cpp build there has ever
+  // been: ggml-org flags all of them, including the b10375 already installed.
   const parsed = parseReleases([
     { tag_name: "b3", draft: true, assets: [] },
     { tag_name: "b2", prerelease: true, assets: [] },
     { tag_name: "b1", assets: [{ name: "x", size: 5 }] },
   ]);
-  assert.deepEqual(parsed.map((r) => r.tag), ["b1"]);
+  assert.deepEqual(parsed.map((r) => r.tag), ["b2", "b1"]);
+  assert.equal(parsed[0]?.prerelease, true);
+  assert.equal(parsed[1]?.prerelease, false);
 });
 
-/* ------------------------------------------------------------- ordering -- */
+/* ---------------------------------------------- upstream's own labelling -- */
+
+const LLAMA: InstalledBuild = {
+  recipe: "llamacpp", backend: "vulkan", repo: "ggml-org/llama.cpp",
+  version: "b10375", filename: "llama-b10375-bin-ubuntu-vulkan-x64.tar.gz",
+  publishedAt: "2026-08-12T12:18:24Z",
+};
+
+test("a prerelease flag does not hide a build, it travels with it", () => {
+  // Real values: b10375 is installed and is a FULL release, while b10793 is
+  // flagged prerelease -- llama.cpp changed how it publishes on 21 August
+  // 2026, mid-history. Two earlier rules keyed on this flag, and both offered
+  // nothing at all for the engine that runs chat.
+  const found = newestBuild(
+    LLAMA,
+    [release("b10793", ["llama-b10793-bin-ubuntu-vulkan-x64.tar.gz"], "2026-09-03T22:18:00Z", true)],
+  );
+  assert.equal(found?.to, "b10793");
+  assert.equal(found?.prerelease, true);
+});
+
+test("a full release says so too, so the label is never merely absent", () => {
+  const found = newestBuild(
+    LLAMA,
+    [release("b10793", ["llama-b10793-bin-ubuntu-vulkan-x64.tar.gz"], "2026-09-03T22:18:00Z", false)],
+  );
+  assert.equal(found?.prerelease, false);
+});
 
 test("the installed tag's position in the list settles what is newer", () => {
   const list = [release("b3", []), release("b2", []), release("b1", [])];
@@ -178,6 +212,7 @@ test("the size offered is the one GitHub reports for that exact file", () => {
   };
   const found = newestBuild(current, [{
     tag: "b10793",
+    prerelease: false,
     publishedAt: "2026-09-03T22:18:00Z",
     url: "https://github.com/ggml-org/llama.cpp/releases/tag/b10793",
     assets: [

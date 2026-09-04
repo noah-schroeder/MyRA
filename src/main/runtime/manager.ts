@@ -320,7 +320,13 @@ export class RuntimeManager {
     for (const [recipe, block] of Object.entries(table ?? {})) {
       if (!block || typeof block !== "object" || Array.isArray(block)) continue;
       for (const [backend, version] of Object.entries(block as Record<string, unknown>)) {
-        if (typeof version === "string") shipped[pinKey(recipe, backend)] = version;
+        /* Every block in that file carries a `comment` explaining itself, and
+           two of them run to several hundred words. They are strings like any
+           version is, and shipping them across the IPC boundary on every
+           refresh of the runtime screen buys nothing. */
+        if (backend !== "comment" && typeof version === "string") {
+          shipped[pinKey(recipe, backend)] = version;
+        }
       }
     }
     return { pins, shipped };
