@@ -17,6 +17,8 @@ import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
 import type { BrowseSort, HfModel, RepoFile } from "../core/runtime/hfBrowse.ts";
 import type { PullProgress } from "../core/runtime/systemInfo.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
+import type { ReasoningDialect } from "../core/llm/reasoningDialect.ts";
+export type { ReasoningDialect, ReasoningLevel } from "../core/llm/reasoningDialect.ts";
 import type { UpdateCheck as EngineUpdateCheck } from "../main/runtime/engineUpdates.ts";
 export type { EngineUpdateCheck };
 export type { PendingUpdate } from "../main/runtime/engineUpdates.ts";
@@ -558,6 +560,24 @@ export interface KarenApi {
     backend: string,
   ): Promise<{ ok: boolean; error?: string; info?: MachineInfo }>;
   lemonadeDownloads(): Promise<{ ok: boolean; jobs: DownloadJob[] }>;
+  /**
+   * Whether this model takes a thinking setting, and what it calls it.
+   *
+   * `note` carries the reason when there is no control, because "no setting"
+   * and "not checked yet" look identical as an absence and only one of them
+   * is something the user can do anything about.
+   */
+  reasoningCapability(): Promise<{
+    ok: boolean;
+    error?: string;
+    dialect?: ReasoningDialect;
+    /** `none` and `always` are findings; `unchecked` and `unknown` are not. */
+    reason?: "none" | "always" | "unchecked" | "unknown";
+    note?: string;
+    value?: string;
+  }>;
+  /** Choose a level for the current model, or clear it by passing nothing. */
+  setReasoning(value?: string): Promise<{ ok: boolean; error?: string }>;
   /** The build each backend is on, and the one Lemonade shipped with. */
   engineVersions(): Promise<{
     ok: boolean;
