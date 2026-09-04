@@ -52,6 +52,29 @@ export interface CatalogEntry {
   suggested: boolean;
   /** The registry it is fetched from; absent in the catalogue means Hugging Face. */
   source: RegistrySource;
+  /**
+   * Where upstream fetches it from: `org/repo`, or `org/repo:file.gguf`.
+   *
+   * Kept because it is the only thing tying a catalogue entry back to a
+   * repository on the registry -- the id is a name Lemonade chose
+   * (`Qwen3-8B-GGUF`), not an address. Without it a curated model cannot be
+   * shown the same card as a searched one, which is two ways of looking at a
+   * model depending on which tab you arrived from.
+   */
+  checkpoint?: string | undefined;
+}
+
+/**
+ * The repository behind a checkpoint, if it names one.
+ *
+ * `org/repo:file.gguf` picks a file out of a repository, and `org/repo` is the
+ * whole thing. A checkpoint that is an absolute path is a local file with no
+ * repository at all, which is exactly what an imported model looks like.
+ */
+export function repoOf(checkpoint: string | undefined): string | undefined {
+  if (!checkpoint || checkpoint.startsWith("/") || /^[A-Za-z]:[\\/]/.test(checkpoint)) return undefined;
+  const repo = checkpoint.split(":")[0] ?? "";
+  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo) ? repo : undefined;
 }
 
 type Obj = Record<string, unknown>;
@@ -89,6 +112,9 @@ export function parseCatalog(raw: unknown): CatalogEntry[] {
       labels,
       suggested: entry["suggested"] === true,
       source: readSource(entry["source"]),
+      ...(typeof entry["checkpoint"] === "string" && entry["checkpoint"]
+        ? { checkpoint: entry["checkpoint"] }
+        : {}),
       ...(typeof size === "number" && size > 0
         ? { sizeBytes: Math.round(size * 1024 ** 3) }
         : {}),

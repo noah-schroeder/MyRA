@@ -197,6 +197,23 @@ export class RuntimeManager {
     return this.#index?.found ?? [];
   }
 
+  /** Karen's own models folder, as configured. */
+  get modelsDir(): string {
+    return this.#config.modelsDir || defaultModelsDir();
+  }
+
+  /**
+   * The directory the daemon was actually pointed at.
+   *
+   * Not always `lemonadeIndexDir()`: when the index cannot be built the models
+   * directory is passed straight through, and anything resolving a model's
+   * files has to follow the same path the daemon did rather than the one it
+   * was meant to.
+   */
+  get indexDir(): string {
+    return this.#index?.dir ?? this.modelsDir;
+  }
+
   /**
    * Rebuild the index and restart the daemon so it rescans.
    *

@@ -30,12 +30,18 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegistrySearch } from "./RegistrySearch.tsx";
+import { ModelCard, type CardTarget } from "./ModelCard.tsx";
+import { DownloadProgress, gb } from "./modelBits.tsx";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 
-import { groupCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import { groupCatalog, repoOf, type CatalogEntry } from "../../core/runtime/catalog.ts";
 import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
-import { ENABLED_SOURCES, REGISTRY_HOST, REGISTRY_LABEL } from "../../core/runtime/registry.ts";
+import {
+  ENABLED_SOURCES, explainRegistryError, REGISTRY_HOST, REGISTRY_LABEL, type RegistrySource,
+} from "../../core/runtime/registry.ts";
+import { deletePrompt, ownerOf } from "../../core/runtime/modelOwner.ts";
+import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import { fitModel, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
   engineStates, engineUsable, partitionByRunnable, runnable, type Runnable,
@@ -282,10 +288,6 @@ function EngineUpdateRow({
   );
 }
 
-function gb(bytes?: number): string {
-  return bytes ? `${(bytes / 1024 ** 3).toFixed(bytes < 1024 ** 3 ? 2 : 1)} GB` : "—";
-}
-
 function engineName(id: string): string {
   return ENGINE_LABELS[id] ?? id;
 }
@@ -333,7 +335,8 @@ export function LemonadePane({
   const [info, setInfo] = useState<MachineInfo | undefined>();
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [installed, setInstalled] = useState<
-    { id: string; downloaded?: boolean; sizeBytes?: number }[]
+    { id: string; downloaded?: boolean; sizeBytes?: number; source?: string;
+      checkpoint?: string; recipe?: string }[]
   >([]);
   /** LM Studio and Ollama models, by the id Lemonade reports them under. */
   const [foreign, setForeign] = useState<Map<string, ForeignModel>>(new Map());
@@ -359,6 +362,19 @@ export function LemonadePane({
      per-model settings and two panels open at once invites editing one and
      saving the other. */
   const [tuning, setTuning] = useState<string | undefined>();
+  /* The model whose card is open. Set from any of the three tabs, so a curated
+     model and a searched one are looked at the same way -- two different pages
+     depending on which tab you arrived from is how a person learns not to
+     trust either. */
+  const [viewing, setViewing] = useState<CardTarget | undefined>();
+  /* The download in flight, by the name it registers under, plus the figures
+     the daemon streams while it runs. */
+  const [pulling, setPulling] = useState<string | undefined>();
+  const [pullError, setPullError] = useState<string | undefined>();
+  const [job, setJob] = useState<PullProgress | undefined>();
+  /* The model whose deletion is being confirmed. One at a time, and closed by
+     pressing anything else. */
+  const [deleting, setDeleting] = useState<string | undefined>();
 
   /* Escape closes it, like every other dialog in the app. A panel that can only
      be dismissed by finding its own close button is one people leave open. */
@@ -400,7 +416,23 @@ export function LemonadePane({
     if (infoRes.ok && infoRes.info) setInfo(infoRes.info);
     else if (infoRes.error) setError(infoRes.error);
     if (listRes.ok) {
-      setInstalled(listRes.models);
+      /*
+       * Only what is actually on the disk.
+       *
+       * `downloaded` is the daemon's own field and it separates a model whose
+       * files are here from one it merely has a definition for -- registering
+       * a model without pulling it (an interrupted download, a checkpoint
+       * registered by hand) leaves exactly that. Measured on this machine the
+       * daemon reports every listed model as downloaded, so the filter changes
+       * nothing today; it is here because "My models" is a promise about the
+       * disk, and a tab that keeps that promise only while nothing has gone
+       * wrong is not keeping it.
+       *
+       * Applied once, before the list is used for anything, because it also
+       * feeds `have` -- and `have` is what decides whether a row on the search
+       * page says Downloaded.
+       */
+      setInstalled(listRes.models.filter((m) => m.downloaded !== false));
       setLoaded(listRes.loaded);
       setForeign(new Map((listRes.foreign ?? []).map((m) => [m.id, m])));
     }
@@ -508,6 +540,69 @@ export function LemonadePane({
   };
 
   const have = useMemo(() => new Set(installed.map((m) => m.id)), [installed]);
+
+  /*
+   * Progress for the download in flight.
+   *
+   * Subscribed once and pushed, not polled. `/api/v1/downloads` was the obvious
+   * source and is the wrong one: it stays empty for the whole of a `/pull`,
+   * because it reports the daemon's own background jobs rather than a transfer
+   * somebody is waiting on. The pull itself streams the figures when asked,
+   * which is what this receives.
+   *
+   * Held here rather than in the card, so a download survives closing the page
+   * it was started from.
+   */
+  useEffect(() => window.karen.onPullProgress((p) => setJob(p)), []);
+
+  /**
+   * Fetch one version of one model.
+   *
+   * Two things here were wrong once and are the reason the button never worked,
+   * so both are settled in `pullName` and `pullCheckpoint` rather than here.
+   * The name needs a `user.` prefix or Lemonade refuses a pull that supplies
+   * its own checkpoint, and the recipe has to come from what the registry says
+   * the model is FOR -- `/pull/variants` reports `llamacpp` for any repository
+   * containing `.gguf` files, diffusion and audio models included.
+   */
+  const download = useCallback(
+    async (
+      source: RegistrySource,
+      choice: { name: string; checkpoint: string; recipe: string },
+    ): Promise<void> => {
+      setPulling(choice.name);
+      setPullError(undefined);
+      setJob(undefined);
+      const res = await window.karen.registryPull(
+        choice.name, choice.checkpoint, source, choice.recipe,
+      );
+      setPulling(undefined);
+      setJob(undefined);
+      if (!res.ok) setPullError(explainRegistryError(res.error ?? "", source));
+      else await refresh();
+    },
+    [refresh],
+  );
+
+  /**
+   * Remove a model from this machine.
+   *
+   * The window asks; the main process decides whose file it is and what that
+   * means. Nothing here computes a path -- see `modelDelete.ts` for why that
+   * matters -- and the warning a person reads before pressing this comes from
+   * `deletePrompt`, which is the same function the main process's behaviour is
+   * keyed to.
+   */
+  const removeModel = useCallback(
+    async (id: string): Promise<void> => {
+      setDeleting(undefined);
+      await run(`Deleting ${displayModelName(id)}`, () => window.karen.lemonadeDeleteModel(id));
+    },
+    // `run` is redefined every render and closing over a stale one is harmless:
+    // it reads no state of its own beyond the setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const machine = {
     ...(info?.devices[0]?.totalBytes ? { vramBytes: info.devices[0].totalBytes } : {}),
     ramBytes: info?.ramBytes ?? 0,
@@ -854,7 +949,25 @@ export function LemonadePane({
         </>
       ) : null}
 
-      {info && section === "models" ? (
+      {/*
+        * One model, as a page, replacing the list rather than sitting beside
+        * it. A split pane would keep the results in view at the cost of giving
+        * a model card half a column, and the card is the thing somebody came
+        * here to read.
+        */}
+      {info && section === "models" && viewing ? (
+        <ModelCard
+          target={viewing}
+          machine={machine}
+          have={have}
+          pulling={pulling}
+          job={job}
+          onDownload={(choice) => void download(viewing.source, choice)}
+          onBack={() => setViewing(undefined)}
+        />
+      ) : null}
+
+      {info && section === "models" && !viewing ? (
         <>
           {/* ---------------- models ---------------- */}
           <section className="lem-section">
@@ -919,6 +1032,9 @@ export function LemonadePane({
                 ) : null}
               </div>
             ) : null}
+
+            {pulling ? <DownloadProgress name={pulling} job={job} /> : null}
+            {pullError ? <p className="reg-line bad">{pullError}</p> : null}
 
             <div className="lem-modes" role="tablist">
               {/* First, and the default: what is already on this machine is
@@ -991,6 +1107,11 @@ export function LemonadePane({
                 }}
                 rescanning={rescanning}
                 onBrowse={() => setMode("search")}
+                deleting={deleting}
+                onAskDelete={(id) => setDeleting(deleting === id ? undefined : id)}
+                onDelete={(id) => void removeModel(id)}
+                onReveal={(id) => void window.karen.modelReveal(id)}
+                onOpen={setViewing}
               />
             ) : mode === "catalog" ? (
               <>
@@ -1092,7 +1213,29 @@ export function LemonadePane({
                         ].filter(Boolean).join(" ")}
                       >
                         <div className="lem-model-id">
-                          <span className="lem-model-name">{m.id}</span>
+                          {/* The same card the search results open. A curated
+                              model and a searched one are the same kind of
+                              thing, and two ways of looking at one depending on
+                              which tab you arrived from is how somebody learns
+                              not to trust either. */}
+                          {repoOf(m.checkpoint) ? (
+                            <button
+                              type="button"
+                              className="lem-model-name link"
+                              title={`What ${m.id} is, on the registry it comes from`}
+                              onClick={() =>
+                                setViewing({
+                                  repo: repoOf(m.checkpoint) ?? "",
+                                  recipe: m.recipe,
+                                  source: m.source,
+                                })
+                              }
+                            >
+                              {m.id}
+                            </button>
+                          ) : (
+                            <span className="lem-model-name">{m.id}</span>
+                          )}
                           <div className="lem-model-meta">
                             {/*
                               * No "Suggested" badge, though the sort still
@@ -1354,19 +1497,60 @@ export function LemonadePane({
             </button>
               </>
             ) : (
-              <RegistrySearch
-                machine={machine}
-                have={have}
-                installedEngines={installedEngines}
-                onDownloaded={async () => {
-                  await refresh();
-                }}
-              />
+              <RegistrySearch installedEngines={installedEngines} onOpen={setViewing} />
             )}
           </section>
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Asking before deleting, in the words that fit this particular file.
+ *
+ * Two shapes, decided by `deletePrompt` rather than here. For Karen's own
+ * models it is one press: the daemon removes what it downloaded, and a person
+ * who pressed Delete meant Delete. For a file belonging to LM Studio or Ollama
+ * the first press only explains -- what the file is, where it is, and what that
+ * other application is likely to do about its disappearance -- and the button
+ * that actually removes it is worded differently and sits beside a Reveal, so
+ * the path can be checked rather than taken on trust.
+ *
+ * The user asked for exactly this shape: keep those models on the list, let
+ * them be deleted, warn properly first.
+ */
+function DeleteConfirm({
+  prompt,
+  busy,
+  onConfirm,
+  onCancel,
+  onReveal,
+}: {
+  prompt: ReturnType<typeof deletePrompt>;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onReveal: () => void;
+}) {
+  return (
+    <li className={prompt.warns ? "lem-confirm warn" : "lem-confirm"}>
+      <p className="lem-confirm-title">{prompt.title}</p>
+      <p className="lem-confirm-body">{prompt.body}</p>
+      <div className="lem-model-acts">
+        <button type="button" className="lem-act" onClick={onCancel}>
+          Keep it
+        </button>
+        {prompt.reveal ? (
+          <button type="button" className="lem-act" onClick={onReveal}>
+            Show me the file
+          </button>
+        ) : null}
+        <button type="button" className="lem-act danger on" disabled={busy} onClick={onConfirm}>
+          {prompt.confirm}
+        </button>
+      </div>
+    </li>
   );
 }
 
@@ -1398,8 +1582,16 @@ function MyModels({
   onRescan,
   rescanning,
   onBrowse,
+  deleting,
+  onAskDelete,
+  onDelete,
+  onReveal,
+  onOpen,
 }: {
-  installed: { id: string; downloaded?: boolean; sizeBytes?: number }[];
+  installed: {
+    id: string; downloaded?: boolean; sizeBytes?: number; source?: string;
+    checkpoint?: string; recipe?: string;
+  }[];
   foreign: Map<string, ForeignModel>;
   catalog: CatalogEntry[];
   loaded: string | undefined;
@@ -1413,6 +1605,13 @@ function MyModels({
   onRescan: () => void;
   rescanning: boolean;
   onBrowse: () => void;
+  /** The row whose delete is being confirmed, if any. */
+  deleting: string | undefined;
+  onAskDelete: (id: string) => void;
+  onDelete: (id: string) => void;
+  onReveal: (id: string) => void;
+  /** Undefined for a model with no repository behind it -- an imported file. */
+  onOpen: (target: CardTarget) => void;
 }) {
   /* Loaded first, then the rest by size. The loaded model is the one every
      other row is compared against, and it is the one whose settings someone
@@ -1470,10 +1669,26 @@ function MyModels({
           const name = from?.label ?? displayModelName(m.id);
           const fit = m.sizeBytes && machine.ramBytes ? fitModel(m.sizeBytes, machine) : undefined;
           const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
+          const repo = repoOf(m.checkpoint);
           return (
-            <li key={m.id} className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
+            <Fragment key={m.id}>
+            <li className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
               <div className="lem-model-id">
-                <span className="lem-model-name" title={from?.path ?? m.id}>{name}</span>
+                {/* A link only where there is something to open. An imported
+                    file has no repository, and a name that is a button on some
+                    rows and text on others is honest about which is which. */}
+                {repo ? (
+                  <button
+                    type="button"
+                    className="lem-model-name link"
+                    title={`What ${name} is, on the registry it came from`}
+                    onClick={() => onOpen({ repo, recipe: m.recipe ?? "llamacpp", source: "huggingface" })}
+                  >
+                    {name}
+                  </button>
+                ) : (
+                  <span className="lem-model-name" title={from?.path ?? m.id}>{name}</span>
+                )}
                 <div className="lem-model-meta">
                   {m.id === loaded ? <span className="lem-tag accent">Loaded</span> : null}
                   {known?.labels
@@ -1482,10 +1697,24 @@ function MyModels({
                     .map((l) => <span key={l} className="lem-tag">{l}</span>)}
                 </div>
               </div>
-              {/* Where the file came from, which for these is a folder on this
-                  machine rather than a registry Karen would fetch from. */}
-              <span className="lem-model-src">
-                {from ? SOURCE_LABELS[from.source] : known ? REGISTRY_LABEL[known.source] : "This machine"}
+              {/*
+                * Where the file came from, and only what is actually known.
+                *
+                * "This machine" was being printed for anything the curated
+                * catalogue did not list -- which included every model Karen had
+                * downloaded from Hugging Face under a name of its own, so a
+                * downloaded model claimed a local provenance it did not have.
+                * The checkpoint is the record: a repository id means a
+                * registry, an absolute path means a file that was already here.
+                */}
+              <span className="lem-model-src" title={repo ?? from?.path ?? m.checkpoint}>
+                {from
+                  ? SOURCE_LABELS[from.source]
+                  : known
+                    ? REGISTRY_LABEL[known.source]
+                    : repo
+                      ? REGISTRY_LABEL.huggingface
+                      : "This machine"}
               </span>
               <span className="lem-model-size">{gb(m.sizeBytes)}</span>
               {chip ? (
@@ -1510,8 +1739,45 @@ function MyModels({
                 >
                   {m.id === loaded ? "Unload" : "Load"}
                 </button>
+                <button
+                  type="button"
+                  className={deleting === m.id ? "lem-act danger on" : "lem-act danger"}
+                  disabled={busy}
+                  aria-expanded={deleting === m.id}
+                  onClick={() => onAskDelete(m.id)}
+                  title={`Remove ${name} from this machine`}
+                >
+                  {deleting === m.id ? "Cancel" : "Delete"}
+                </button>
               </div>
             </li>
+            {/*
+              * The confirmation, in the row rather than in a dialog.
+              *
+              * It has to say different things for different models -- Karen's
+              * own download, a file in Karen's folder, and a file belonging to
+              * LM Studio or Ollama are three different acts wearing one word --
+              * and every one of those sentences comes from `deletePrompt`,
+              * which is the same function the main process's behaviour is keyed
+              * to. A dialog would have been a second place for those words to
+              * live.
+              */}
+            {deleting === m.id ? <DeleteConfirm
+              prompt={deletePrompt({
+                owner: ownerOf({
+                  ...(m.source !== undefined ? { source: m.source } : {}),
+                  ...(from ? { foreign: from.source } : {}),
+                }),
+                name,
+                ...(m.sizeBytes ? { size: gb(m.sizeBytes) } : {}),
+                ...(from?.path ? { path: from.path } : {}),
+              })}
+              busy={busy}
+              onConfirm={() => onDelete(m.id)}
+              onCancel={() => onAskDelete(m.id)}
+              onReveal={() => onReveal(m.id)}
+            /> : null}
+            </Fragment>
           );
         })}
       </ul>

@@ -485,6 +485,26 @@ export function pullCheckpoint(repo: string, file?: string): string {
 }
 
 /**
+ * The id the daemon will LIST a pulled model under, which is not its name.
+ *
+ * A pull has to be named `user.<something>` -- see `pullName` -- and the daemon
+ * then reports it with the namespace removed. Measured: registering
+ * `user.karen-delete-probe` answers
+ * `{"canonical_model_name":"user.karen-delete-probe","model":{"id":"karen-delete-probe",…}}`,
+ * and `embeddinggemma-300M-GGUF-Q8_0` sits in `/models` today under exactly
+ * that shape.
+ *
+ * This existed as a bug before it existed as a function. The search page tested
+ * "have I got this already" against `modelNameFor`, which produces the name
+ * without the prefix and without `pullName`'s flattening, so a repository whose
+ * name contained anything unusual never matched -- and the Download button on a
+ * model already downloaded said Download.
+ */
+export function pulledId(repo: string, variant?: string): string {
+  return pullName(repo, variant).replace(/^user\./, "");
+}
+
+/**
  * A file inside a repository, as something a person could choose to download.
  *
  * Needed because `/pull/variants` only understands GGUF, ONNX RyzenAI and
@@ -567,4 +587,95 @@ function sortKey(m: HfModel, sort: BrowseSort): number {
     default:
       return m.downloads ?? 0;
   }
+}
+
+
+/* ----------------------------------------------------- one repository -- */
+
+/**
+ * Everything worth knowing about one repository, from the call that was
+ * already being made.
+ *
+ * `GET /api/models/{repo}?blobs=true` was fetched only for `siblings`, and the
+ * rest of the body thrown away. Measured on `unsloth/Qwen3-8B-GGUF`, that body
+ * also carries the licence, the base model, and -- for GGUF repositories -- a
+ * `gguf` block with the architecture and the trained context length. Those are
+ * the three facts a person actually chooses on, and all three were being
+ * discarded on the way past.
+ *
+ * The licence in particular is not a nicety. A researcher whose institution
+ * restricts model use needs it before the download, not after.
+ */
+export interface RepoDetail {
+  id: string;
+  files: RepoFile[];
+  /** As the publisher wrote it: `apache-2.0`, `llama3.1`, `other`. */
+  license?: string | undefined;
+  licenseLink?: string | undefined;
+  /** The unquantised model a GGUF build was made from. */
+  baseModel?: string | undefined;
+  task?: string | undefined;
+  tags: string[];
+  downloads?: number | undefined;
+  likes?: number | undefined;
+  lastModified?: string | undefined;
+  createdAt?: string | undefined;
+  gated: boolean;
+  /** `qwen3`, `llama`, … Present only where the registry read the GGUF header. */
+  architecture?: string | undefined;
+  /** The length the model was trained for, which is its ceiling. */
+  contextTokens?: number | undefined;
+}
+
+export function parseRepoDetail(raw: unknown, fallbackId = ""): RepoDetail {
+  const body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const text = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  const number = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) ? v : undefined;
+
+  const card = (body["cardData"] && typeof body["cardData"] === "object"
+    ? body["cardData"]
+    : {}) as Record<string, unknown>;
+  const gguf = (body["gguf"] && typeof body["gguf"] === "object"
+    ? body["gguf"]
+    : {}) as Record<string, unknown>;
+
+  /* `base_model` is a string in most cards and a list in the ones built from
+     several. The first entry is the one that answers "what is this a build
+     of", and joining them would produce a value no link could use. */
+  const base = Array.isArray(card["base_model"])
+    ? text((card["base_model"] as unknown[])[0])
+    : text(card["base_model"]);
+
+  const files: RepoFile[] = [];
+  for (const row of Array.isArray(body["siblings"]) ? body["siblings"] : []) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const path = text(r["rfilename"]);
+    if (!path) continue;
+    const size = number(r["size"]);
+    files.push({ path, ...(size !== undefined ? { sizeBytes: size } : {}) });
+  }
+
+  return {
+    id: text(body["id"]) ?? text(body["modelId"]) ?? fallbackId,
+    files,
+    ...(text(card["license"]) ? { license: text(card["license"]) } : {}),
+    ...(text(card["license_link"]) ? { licenseLink: text(card["license_link"]) } : {}),
+    ...(base ? { baseModel: base } : {}),
+    ...(text(body["pipeline_tag"]) ? { task: text(body["pipeline_tag"]) } : {}),
+    tags: Array.isArray(body["tags"])
+      ? (body["tags"] as unknown[]).filter((t): t is string => typeof t === "string")
+      : [],
+    ...(number(body["downloads"]) !== undefined ? { downloads: number(body["downloads"]) } : {}),
+    ...(number(body["likes"]) !== undefined ? { likes: number(body["likes"]) } : {}),
+    ...(text(body["lastModified"]) ? { lastModified: text(body["lastModified"]) } : {}),
+    ...(text(body["createdAt"]) ? { createdAt: text(body["createdAt"]) } : {}),
+    gated: body["gated"] !== false && body["gated"] !== undefined,
+    ...(text(gguf["architecture"]) ? { architecture: text(gguf["architecture"]) } : {}),
+    ...(number(gguf["context_length"]) !== undefined
+      ? { contextTokens: number(gguf["context_length"]) }
+      : {}),
+  };
 }

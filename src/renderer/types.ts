@@ -14,7 +14,9 @@ import type { ModelOptions } from "../core/runtime/modelOptions.ts";
 export type { RunFootprint } from "../core/research/run.ts";
 import type { RunFootprint } from "../core/research/run.ts";
 import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
-import type { BrowseSort, HfModel, RepoFile } from "../core/runtime/hfBrowse.ts";
+import type { BrowseSort, HfModel, RepoDetail } from "../core/runtime/hfBrowse.ts";
+import type { PreparedCard } from "../core/runtime/modelCard.ts";
+import type { Owner } from "../core/runtime/modelOwner.ts";
 import type { PullProgress } from "../core/runtime/systemInfo.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 import type { ReasoningDialect } from "../core/llm/reasoningDialect.ts";
@@ -616,8 +618,23 @@ export interface KarenApi {
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
   /** Live progress for the download in flight; returns an unsubscribe. */
   onPullProgress(fn: (p: PullProgress & { name: string }) => void): () => void;
-  /** The files in one repository, with sizes. */
-  hfFiles(repo: string): Promise<{ ok: boolean; error?: string; files?: RepoFile[] }>;
+  /** One repository: its files, and the facts a person chooses on. */
+  hfDetail(repo: string): Promise<{ ok: boolean; error?: string; detail?: RepoDetail }>;
+  /**
+   * A repository's model card, prepared for rendering.
+   *
+   * `ok` with no `card` means the repository has no README, which is common
+   * and is not a failure.
+   */
+  hfCard(repo: string): Promise<{ ok: boolean; error?: string; card?: PreparedCard }>;
+  /** Remove a model from this machine; main decides whose file it is. */
+  lemonadeDeleteModel(id: string): Promise<{
+    ok: boolean;
+    error?: string;
+    result?: { owner: Owner; removed: string[]; restarted: boolean };
+  }>;
+  /** Show a model's real file in the desktop's file manager. */
+  modelReveal(id: string): Promise<{ ok: boolean; error?: string }>;
   /** Browse Hugging Face directly: publisher, model kind, sort, full pages. */
   hfBrowse(q: {
     query?: string;

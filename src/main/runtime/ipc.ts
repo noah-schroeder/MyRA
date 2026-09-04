@@ -13,7 +13,7 @@
  */
 
 import type { BrowserWindow } from "electron";
-import { ipcMain } from "electron";
+import { ipcMain, shell } from "electron";
 
 import {
   isEnabled,
@@ -22,8 +22,10 @@ import {
   type RegistrySource,
 } from "../../core/runtime/registry.ts";
 import type { RuntimeManager } from "./manager.ts";
-import { browseHuggingFace, repoFiles } from "./hfClient.ts";
+import { browseHuggingFace, repoCard, repoDetail } from "./hfClient.ts";
 import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
+import { prepareCard } from "../../core/runtime/modelCard.ts";
+import { deleteModel } from "./modelDelete.ts";
 
 /**
  * The daemon's own words, without the plumbing around them.
@@ -283,10 +285,35 @@ export function installRuntimeIpc(
    * known here. `browseParams` decides what the query string says, so no input
    * from the window can reach the URL except as a value in a named field.
    */
-  /** The files in one repository, for the kinds `/pull/variants` cannot describe. */
-  ipcMain.handle("karen:hf-files", async (_e, repo: unknown) => {
+  /**
+   * One repository: its files, and the facts a person chooses on.
+   *
+   * The file list is here because `/pull/variants` cannot describe anything but
+   * GGUF, ONNX RyzenAI and Lemonade's own collections. The licence, the base
+   * model and the context length come from the same response and used to be
+   * thrown away.
+   */
+  ipcMain.handle("karen:hf-detail", async (_e, repo: unknown) => {
     try {
-      return { ok: true, files: await repoFiles(String(repo ?? "")) };
+      return { ok: true, detail: await repoDetail(String(repo ?? "")) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  /**
+   * The model card, prepared for the window.
+   *
+   * Prepared here rather than there because the preparation is the expensive,
+   * fiddly half -- front matter, embedded HTML, a size cap -- and because the
+   * cap has to be applied before the text crosses the bridge to be worth
+   * anything. A repository with no README answers `{ ok: true }` and no card,
+   * which is a fact rather than a failure.
+   */
+  ipcMain.handle("karen:hf-card", async (_e, repo: unknown) => {
+    try {
+      const readme = await repoCard(String(repo ?? ""));
+      return { ok: true, ...(readme === undefined ? {} : { card: prepareCard(readme) }) };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
@@ -409,6 +436,45 @@ export function installRuntimeIpc(
     } catch (err) {
       return { ok: false, error: reasonFrom(err) };
     }
+  });
+
+  /**
+   * Remove a model from this machine.
+   *
+   * The decision about whose file it is happens in the main process, from the
+   * index's own symlinks, and never from the id the window sent -- see
+   * `modelDelete.ts`. The window's part is asking, and showing the warning that
+   * `deletePrompt` wrote for whichever owner it turned out to be.
+   */
+  ipcMain.handle("karen:lemonade-delete-model", async (_e, id: unknown) => {
+    try {
+      await runtime.ensureLemonade();
+      const result = await deleteModel(String(id ?? ""), {
+        deleteViaDaemon: (name) => runtime.api.deleteModel(name),
+        foreign: runtime.foreignModels,
+        modelsDir: runtime.modelsDir,
+        indexDir: runtime.indexDir,
+        rescan: () => runtime.rescanModels(),
+      });
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: reasonFrom(err) };
+    }
+  });
+
+  /**
+   * Show a model's file in the desktop's own file manager.
+   *
+   * Offered beside the delete for a model Karen does not own, because "the file
+   * is at <path>" is a sentence somebody should be able to check rather than
+   * take on trust before agreeing to a deletion.
+   */
+  ipcMain.handle("karen:model-reveal", async (_e, id: unknown) => {
+    const model = runtime.foreignModels.find((m) => m.id === String(id ?? ""));
+    const path = model?.path;
+    if (!path) return { ok: false, error: "Karen has no record of where that file is." };
+    shell.showItemInFolder(path);
+    return { ok: true };
   });
 
   ipcMain.handle("karen:lemonade-stop", async () => {
