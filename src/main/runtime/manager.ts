@@ -22,6 +22,7 @@ import {
   CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE,
 } from "../../core/paths.ts";
 import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import type { EnginePins } from "../../core/runtime/enginePins.ts";
 import {
   chatModelOf, chatModelToReload, isChatEngine, isChatModel, LEMONADE_VERSION,
   type LoadedModel,
@@ -84,6 +85,15 @@ export interface RuntimeConfig {
   importForeignModels: boolean;
   /** Extra directories of GGUF files the user named themselves. */
   extraModelDirs?: string[];
+  /**
+   * Engine builds chosen here, over the ones this Lemonade ships with.
+   *
+   * Keyed `recipe:backend` -- see core/runtime/enginePins.ts for why a pin
+   * cannot be per engine. Absent means "whatever Lemonade shipped", which is
+   * what every install has until somebody presses Update, and deleting a key
+   * is how it goes back.
+   */
+  enginePins?: EnginePins;
 }
 
 const DEFAULTS: Omit<RuntimeConfig, "modelsDir"> = {
@@ -253,6 +263,7 @@ export class RuntimeManager {
       binary,
       cacheDir: lemonadeCacheDir(),
       configDir: lemonadeConfigDir(),
+      ...(this.#config.enginePins ? { enginePins: this.#config.enginePins } : {}),
       // So a library built up under the old runtime is simply there.
       modelsDir: indexDir,
     });
