@@ -16,7 +16,8 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  CARD_LIMIT, prepareCard, readCardMeta, readFrontMatter, splitFrontMatter, unwrapHtml,
+  CARD_LIMIT, prepareCard, readCardMeta, readFrontMatter, splitFrontMatter, tidyMarkdown,
+  unwrapHtml,
 } from "../src/core/runtime/modelCard.ts";
 
 /* The real head of that card, trimmed. Kept verbatim rather than idealised:
@@ -166,6 +167,36 @@ describe("unwrapping HTML", () => {
 
   it("decodes the entities a card actually uses", () => {
     assert.equal(unwrapHtml("a &amp; b &lt;c&gt; &#39;d&#39;").trim(), "a & b <c> 'd'");
+  });
+});
+
+describe("the conventions a card uses that a renderer does not", () => {
+  it("turns a GitHub alert into a word instead of leaving [!NOTE] on screen", () => {
+    /* GitHub and Hugging Face render this as a callout; everything else prints
+       the marker, which is what was on the card for granite-4.1-8b. */
+    assert.equal(tidyMarkdown("> [!NOTE]\n> Includes fixes\n"), "> **Note**\n> Includes fixes\n");
+    assert.equal(tidyMarkdown("> [!WARNING]\n").trim(), "> **Warning**");
+  });
+
+  it("leaves an alert inside fenced code alone", () => {
+    const text = "```md\n> [!NOTE]\n```\n";
+    assert.equal(tidyMarkdown(text), text);
+  });
+
+  it("drops badges, including the link they are usually wrapped in", () => {
+    /* Cards open with rows of shields.io images whose alt text is things like
+       `mof-class3-qualified`. Nothing fetches them, so an image can only become
+       its alt, and a line of decorative alt text is noise. */
+    assert.equal(
+      tidyMarkdown("[![mof-class3](https://img.shields.io/x.svg)](https://example.com) text").trim(),
+      "text",
+    );
+    assert.equal(tidyMarkdown("![logo](https://example.com/l.png)").trim(), "");
+  });
+
+  it("does not eat an image inside fenced code", () => {
+    const text = "```\n![alt](x.png)\n```\n";
+    assert.equal(tidyMarkdown(text), text);
   });
 });
 

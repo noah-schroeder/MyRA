@@ -642,7 +642,11 @@ export interface KarenApi {
     kind?: string;
     sort?: BrowseSort;
     ggufOnly?: boolean;
-  }): Promise<{ ok: boolean; error?: string; result?: { models: HfModel[]; url: string } }>;
+  }): Promise<{
+    ok: boolean;
+    error?: string;
+    result?: { models: HfModel[]; url: string; crossed: boolean; dropped: number };
+  }>;
   registryVariants(
     checkpoint: string,
     source: RegistrySource,

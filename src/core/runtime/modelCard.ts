@@ -181,8 +181,18 @@ function attribute(tag: string, name: string): string | undefined {
  * template must show it, and that is exactly the text this would otherwise eat.
  */
 export function unwrapHtml(markdown: string): string {
-  /* Split on fences first, so nothing below ever sees the inside of one.
-     The delimiter is kept as its own segment by the capture group. */
+  return outsideFences(markdown, unwrapSegment);
+}
+
+/**
+ * Apply a transformation everywhere except inside fenced code.
+ *
+ * Fenced code is the one place a card shows markup on purpose -- a template, a
+ * shell line, a chat format -- and it is exactly the text every rule below
+ * would otherwise eat.
+ */
+function outsideFences(markdown: string, fn: (segment: string) => string): string {
+  /* The delimiter is kept as its own segment by the capture group. */
   const parts = markdown.split(/(^[ \t]*(?:```|~~~)[^\n]*$)/m);
   let inFence = false;
   let out = "";
@@ -193,9 +203,43 @@ export function unwrapHtml(markdown: string): string {
       out += part;
       continue;
     }
-    out += inFence ? part : unwrapSegment(part);
+    out += inFence ? part : fn(part);
   }
   return out;
+}
+
+/**
+ * The two markdown conventions a registry card uses that a renderer does not.
+ *
+ * **GitHub alerts.** `> [!NOTE]` on the first line of a blockquote is rendered
+ * as a callout by GitHub and by Hugging Face, and as the literal text `[!NOTE]`
+ * by everything else -- which is what it looked like here. Turned into a bold
+ * word, so the blockquote keeps its meaning without this file having to invent
+ * a callout element.
+ *
+ * **Badges.** Cards open with rows of shields.io images whose alt text is
+ * things like `mof-class3-qualified`. The window fetches no remote images by
+ * policy, so an image can only ever become its alt -- and a line of decorative
+ * alt text is noise rather than information. They are dropped, and the heading
+ * above the card says the pictures are not shown, so nothing disappears
+ * silently.
+ */
+export function tidyMarkdown(markdown: string): string {
+  return outsideFences(markdown, (segment) =>
+    segment
+      .replace(
+        /^(\s*>\s*)\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/gim,
+        (_whole, quote: string, kind: string) =>
+          `${quote}**${kind.charAt(0)}${kind.slice(1).toLowerCase()}**`,
+      )
+      /* A linked badge first -- `[![alt](img)](href)` is the idiom -- so the
+         link it was wrapped in goes with it rather than being left empty. */
+      .replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, "")
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      /* Lines that held nothing but badges are now blank, and a run of them is
+         a gap markdown does not distinguish from one. */
+      .replace(/^[ \t]+$/gm, ""),
+  );
 }
 
 /**
@@ -289,7 +333,7 @@ function unwrapSegment(text: string): string {
 export function prepareCard(readme: string): PreparedCard {
   const { front, body } = splitFrontMatter(readme);
   const meta = readCardMeta(front);
-  const unwrapped = unwrapHtml(body).trim();
+  const unwrapped = tidyMarkdown(unwrapHtml(body)).replace(/\n{3,}/g, "\n\n").trim();
 
   if (unwrapped.length <= CARD_LIMIT) return { meta, body: unwrapped, truncated: false };
   const cut = unwrapped.slice(0, CARD_LIMIT);

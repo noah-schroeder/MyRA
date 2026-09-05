@@ -26,9 +26,10 @@
 import { useCallback, useMemo, useState } from "react";
 
 import {
-  age, compact, describeDownloads, KINDS, kindById, loadable, LOADABLE_WORDS,
-  ggufIsMeaningful, PUBLISHERS, publisherNote, recipeFor, SORTS,
-  type BrowseSort, type HfModel, type Publisher,
+  age, applyLocalFilter, compact, describeDownloads, describeFiltered, KINDS, kindById,
+  loadable, LOADABLE_WORDS, MIN_DOWNLOADS, ggufIsMeaningful, PUBLISHERS, publisherNote,
+  recipeFor, SORTS, splitPublishers, UPLOADED_WITHIN,
+  type BrowseSort, type HfModel, type LocalFilter, type Publisher,
 } from "../../core/runtime/hfBrowse.ts";
 import {
   REGISTRY_HOST,
@@ -72,6 +73,13 @@ export function RegistrySearch({
   const [sort, setSort] = useState<BrowseSort>("downloads");
   const [ggufOnly, setGgufOnly] = useState(true);
   const [models, setModels] = useState<HfModel[]>([]);
+  /* Applied to what came back rather than asked of the registry, which has no
+     filter for either. `describeFiltered` is what keeps that honest on screen. */
+  const [within, setWithin] = useState("any");
+  const [minPulls, setMinPulls] = useState("any");
+  /** Whether the last browse crossed publishers, and what it could not ask. */
+  const [crossed, setCrossed] = useState(false);
+  const [dropped, setDropped] = useState(0);
   const [browsing, setBrowsing] = useState(false);
   const [browseError, setBrowseError] = useState<string | undefined>();
   const [ranBrowse, setRanBrowse] = useState<string | undefined>();
@@ -80,12 +88,19 @@ export function RegistrySearch({
 
   const chosen = useMemo(() => ENABLED_SOURCES.filter((s) => sources.has(s)), [sources]);
 
-  /** Add or remove one publisher, keeping the rest, and re-run the browse. */
+  /**
+   * Add or remove one publisher, keeping the rest, and re-run the browse.
+   *
+   * The text box is no longer cleared. It used to be, on the reasoning that a
+   * stale query silently narrows a publisher's page to nothing -- but the query
+   * is now part of the same question rather than a competing one, so
+   * "Granite + Unsloth" with `3.3` typed in narrows to Unsloth's Granite 3.3
+   * builds instead of throwing the words away.
+   */
   const toggleAuthor = (who: string): void => {
     const next = authors.includes(who) ? authors.filter((a) => a !== who) : [...authors, who];
     setAuthors(next);
-    setQuery("");
-    void browse({ authors: next, query: "" });
+    void browse({ authors: next });
   };
   const busy = browsing;
 
@@ -142,18 +157,42 @@ export function RegistrySearch({
         return;
       }
       setModels(res.result.models);
+      setCrossed(res.result.crossed);
+      setDropped(res.result.dropped);
       /* Describes the whole selection, not just the last thing pressed.
          Choosing a publisher and then a kind left the line reading "Everything
          published by ibm-granite" over an empty image-model list. */
+      /* Says what was actually asked, including whether the publishers were
+         crossed. "from ibm-granite, unsloth" describes a union, and a union is
+         not what a crossing returns. */
+      const { makers, builders } = splitPublishers(next.authors);
+      const who = makers.length && builders.length
+        ? `${builders.map((b) => b.label).join(" and ")} builds of ${makers.map((mk) => mk.label).join(" or ")}`
+        : next.authors.length
+          ? `from ${[...makers, ...builders].map((p) => p.label).join(", ")}`
+          : undefined;
       const parts = [
         next.kind === "all" ? "Models" : `${kindById(next.kind).title} models`,
-        next.authors.length ? `from ${next.authors.join(", ")}` : undefined,
+        who,
         next.query.trim() ? `matching “${next.query.trim()}”` : undefined,
       ].filter(Boolean);
       setRanBrowse(parts.join(" "));
     },
     [kind, authors, sort, ggufOnly, query],
   );
+
+  /* Applied here, once, so the rows and every count drawn from them agree. */
+  const filter = useMemo<LocalFilter>(() => {
+    const days = UPLOADED_WITHIN.find((o) => o.id === within)?.days;
+    const least = MIN_DOWNLOADS.find((o) => o.id === minPulls)?.n;
+    return {
+      ...(days !== undefined ? { withinDays: days } : {}),
+      ...(least !== undefined ? { minDownloads: least } : {}),
+    };
+  }, [within, minPulls]);
+  const filtered = useMemo(() => applyLocalFilter(models, filter), [models, filter]);
+  const localNote = describeFiltered(filtered, models.length, filter, sort);
+  const rows = filtered.shown;
 
   return (
     <section className="lem-section reg">
@@ -319,6 +358,36 @@ export function RegistrySearch({
             </label>
           ) : null}
 
+          {/* Two filters the registry cannot express, so they narrow the page
+              that came back. Kept beside the sort rather than with the tabs,
+              because the sort is what decides which hundred rows they get to
+              narrow -- and `localNote` says so out loud. */}
+          <label className="reg-control">
+            <span>Uploaded</span>
+            <select
+              value={within}
+              disabled={browsing}
+              onChange={(e) => setWithin(e.target.value)}
+            >
+              {UPLOADED_WITHIN.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="reg-control">
+            <span>Downloads</span>
+            <select
+              value={minPulls}
+              disabled={browsing}
+              onChange={(e) => setMinPulls(e.target.value)}
+            >
+              {MIN_DOWNLOADS.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
           {authors.length ? (
             <button
               type="button"
@@ -349,6 +418,12 @@ export function RegistrySearch({
 
         {showPublishers ? (
           <>
+            {/* Said where the choice is made, because it is not the behaviour
+                a list of tick boxes implies. */}
+            <p className="reg-chips-note">
+              Two makers, or two builders, widen the search. A maker <em>and</em> a builder narrow
+              it: IBM and Unsloth means Unsloth’s builds of Granite, not both publishers’ output.
+            </p>
             <div className="reg-chips">
               <span className="reg-chips-key">Model makers</span>
               {PUBLISHERS.filter((p) => !p.builder).map((p) => (
@@ -381,7 +456,7 @@ export function RegistrySearch({
           <span className={`reg-tag ${chosen[0] ?? "huggingface"}`}>
             {REGISTRY_LABEL[chosen[0] ?? "huggingface"]}
           </span>
-          {ranBrowse} — {models.length} shown
+          {ranBrowse} — {rows.length} shown
           {models.length === 100 ? " (the first page)" : ""}
           {/* What was actually asked, rather than a fixed sentence: the kind's
               own description said "unfiltered" while the GGUF switch was on,
@@ -395,11 +470,38 @@ export function RegistrySearch({
               happens often. */}
           , sorted by {(SORTS.find((o) => o.id === sort)?.label ?? "").toLowerCase()}.
           {kind === "all" ? null : <> {kindById(kind).hint}</>}
+          {/* Crossing is not what a list of tick boxes implies, so the line
+              that describes the search says which of the two it did. */}
+          {crossed ? <> Publishers were crossed, not combined.</> : null}
+          {dropped ? (
+            <> {dropped} publisher {dropped === 1 ? "pairing was" : "pairings were"} not
+              asked for — that many requests to one registry is more than Karen will make at
+              once. Choose fewer publishers.</>
+          ) : null}
         </p>
       ) : null}
 
+      {/* Its own line, and in the app's own voice rather than appended to the
+          sentence above: this one is about what Karen did to the answer after
+          it arrived, which is a different kind of fact from what it asked. */}
+      {localNote && !browsing ? <p className="reg-line local">{localNote}</p> : null}
+
 
       {/* ---------------- results ---------------- */}
+      {/* Filtered to nothing is a different problem from returned nothing, and
+          telling somebody the registry holds no Granite models when it was
+          Karen's own date filter that emptied the list would be a lie. */}
+      {!browsing && ranBrowse && models.length > 0 && !rows.length ? (
+        <div className="lem-callout">
+          <p className="lem-callout-title">
+            Nothing on this page matches those filters.
+          </p>
+          <p className="lem-callout-body">
+            The registry returned {models.length}. {localNote}
+          </p>
+        </div>
+      ) : null}
+
       {!browsing && ranBrowse && !models.length && !browseError ? (
         <div className="lem-callout">
           <p className="lem-callout-title">Nothing here.</p>
@@ -414,7 +516,7 @@ export function RegistrySearch({
         </div>
       ) : null}
 
-      {models.length ? (
+      {rows.length ? (
         <>
         {/* Headings, because the figures are otherwise two glyphs a person has
             to guess at, and one of them is the closest thing a registry gives
@@ -428,7 +530,7 @@ export function RegistrySearch({
           <span />
         </div>
         <ul className="reg-hits">
-          {models.map((model) => {
+          {rows.map((model) => {
             const source: RegistrySource = chosen[0] ?? "huggingface";
             const key = `${source}/${model.id}`;
             /* Decided once per row and used for three things: which list of

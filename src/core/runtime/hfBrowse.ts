@@ -140,12 +140,18 @@ export function kindById(id: string): ModelKind {
 }
 
 /** How results are ordered. `trendingScore` is the registry's own "hot now". */
-export type BrowseSort = "downloads" | "likes" | "trendingScore" | "lastModified";
+export type BrowseSort =
+  | "downloads" | "likes" | "trendingScore" | "lastModified" | "createdAt";
 
 export const SORTS: { id: BrowseSort; label: string }[] = [
   { id: "downloads", label: "Most downloaded" },
   { id: "trendingScore", label: "Trending now" },
   { id: "likes", label: "Most liked" },
+  /* Two different dates, and the difference matters when looking for something
+     new: `createdAt` is when the repository first appeared, `lastModified` is
+     when a file in it last changed -- a three-year-old model whose README was
+     edited yesterday sorts to the top of one and not the other. */
+  { id: "createdAt", label: "Recently uploaded" },
   { id: "lastModified", label: "Recently updated" },
 ];
 
@@ -393,6 +399,17 @@ export interface Publisher {
   /** The registry handle, used verbatim as `author=`. */
   author: string;
   builder?: boolean;
+  /**
+   * What to search for when this publisher is being crossed with another.
+   *
+   * "IBM (Granite) and Unsloth" can only mean one thing -- Unsloth's builds of
+   * Granite -- and the registry expresses it as `author=unsloth&search=granite`
+   * rather than as two authors. So a maker needs a word as well as a handle,
+   * and the word is the family name rather than the handle: `search=ibm-granite`
+   * matches almost nothing, because Unsloth does not put IBM's handle in its
+   * repository names.
+   */
+  term?: string;
   /** Said when a filtered browse of this publisher comes back empty. */
   note?: string;
 }
@@ -403,16 +420,16 @@ const NO_GGUF = (who: string): string =>
   "bartowski or ggml-org for GGUF versions of the same models.";
 
 export const PUBLISHERS: Publisher[] = [
-  { label: "Alibaba (Qwen)", author: "Qwen" },
-  { label: "Google (Gemma)", author: "google" },
-  { label: "Meta (Llama)", author: "meta-llama", note: NO_GGUF("Meta") },
-  { label: "Mistral", author: "mistralai" },
-  { label: "Microsoft (Phi)", author: "microsoft" },
-  { label: "IBM (Granite)", author: "ibm-granite" },
-  { label: "OpenAI (gpt-oss)", author: "openai", note: NO_GGUF("OpenAI") },
-  { label: "Arcee", author: "arcee-ai" },
-  { label: "Poolside", author: "poolside" },
-  { label: "Z.ai (GLM)", author: "zai-org" },
+  { label: "Alibaba (Qwen)", author: "Qwen", term: "qwen" },
+  { label: "Google (Gemma)", author: "google", term: "gemma" },
+  { label: "Meta (Llama)", author: "meta-llama", term: "llama", note: NO_GGUF("Meta") },
+  { label: "Mistral", author: "mistralai", term: "mistral" },
+  { label: "Microsoft (Phi)", author: "microsoft", term: "phi" },
+  { label: "IBM (Granite)", author: "ibm-granite", term: "granite" },
+  { label: "OpenAI (gpt-oss)", author: "openai", term: "gpt-oss", note: NO_GGUF("OpenAI") },
+  { label: "Arcee", author: "arcee-ai", term: "arcee" },
+  { label: "Poolside", author: "poolside", term: "poolside" },
+  { label: "Z.ai (GLM)", author: "zai-org", term: "glm" },
   { label: "Unsloth", author: "unsloth", builder: true },
   { label: "Bartowski", author: "bartowski", builder: true },
   { label: "LM Studio", author: "lmstudio-community", builder: true },
@@ -578,6 +595,8 @@ function sortKey(m: HfModel, sort: BrowseSort): number {
       return m.likes ?? 0;
     case "lastModified":
       return Date.parse(m.lastModified ?? "") || 0;
+    case "createdAt":
+      return Date.parse(m.createdAt ?? "") || 0;
     case "trendingScore":
       /* The API does not return a trending score, only order by it. Across
          merged pages that order is lost, so downloads stands in -- the two
@@ -678,4 +697,214 @@ export function parseRepoDetail(raw: unknown, fallbackId = ""): RepoDetail {
       ? { contextTokens: number(gguf["context_length"]) }
       : {}),
   };
+}
+
+
+/* ------------------------------------------------- what to actually ask -- */
+
+/**
+ * The publishers chosen, split into the two things they mean.
+ *
+ * A maker and a builder are not two values of one filter. "IBM (Granite)" names
+ * who wrote the model; "Unsloth" names who converted it. Choosing both can only
+ * mean one thing -- Unsloth's builds of Granite -- and the union the old code
+ * produced (everything IBM publishes, plus everything Unsloth publishes) is not
+ * a reading anybody wanted.
+ */
+export function splitPublishers(authors: readonly string[]): {
+  makers: Publisher[];
+  builders: Publisher[];
+} {
+  const chosen = authors
+    .map((a) => PUBLISHERS.find((p) => p.author === a))
+    .filter((p): p is Publisher => p !== undefined);
+  return {
+    makers: chosen.filter((p) => !p.builder),
+    builders: chosen.filter((p) => p.builder),
+  };
+}
+
+/**
+ * How many requests one browse may make.
+ *
+ * Crossing makers with builders multiplies, and every request is a round trip
+ * to a service that rate-limits. Four builders by ten makers is forty, which is
+ * both slow and rude; this is generous for any selection a person makes on
+ * purpose and the UI says when it has bitten.
+ */
+export const MAX_REQUESTS = 8;
+
+export interface BrowsePlan {
+  requests: BrowseQuery[];
+  /** Pairs dropped by `MAX_REQUESTS`, so the screen can say so rather than lie. */
+  dropped: number;
+  /** Whether the selection is a crossing rather than a union. */
+  crossed: boolean;
+}
+
+/**
+ * Turn what the controls say into the requests that answer it.
+ *
+ * Three shapes, and the third is the one this exists for:
+ *
+ *   makers only     one request per maker, unioned      (as before)
+ *   builders only   one request per builder, unioned    (as before)
+ *   both            one request per pair, `author=<builder>&search=<maker>`
+ *
+ * The free-text box joins the search term rather than replacing it, so
+ * "Granite + Unsloth" with "3.3" typed in narrows to Unsloth's Granite 3.3
+ * builds instead of starting again.
+ */
+export function browsePlan(sel: {
+  query?: string | undefined;
+  authors?: readonly string[] | undefined;
+  kind?: string | undefined;
+  ggufOnly?: boolean | undefined;
+  sort?: BrowseSort | undefined;
+}): BrowsePlan {
+  const base = {
+    ...(sel.kind ? { kind: sel.kind } : {}),
+    ...(sel.ggufOnly !== undefined ? { ggufOnly: sel.ggufOnly } : {}),
+    ...(sel.sort ? { sort: sel.sort } : {}),
+  };
+  const text = sel.query?.trim() ?? "";
+  const { makers, builders } = splitPublishers(sel.authors ?? []);
+
+  const search = (...parts: (string | undefined)[]): { query?: string } => {
+    const joined = parts.filter((p) => p && p.trim()).join(" ").trim();
+    return joined ? { query: joined } : {};
+  };
+
+  let requests: BrowseQuery[];
+  if (makers.length && builders.length) {
+    requests = builders.flatMap((b) =>
+      makers.map((mk) => ({ ...base, author: b.author, ...search(mk.term ?? mk.author, text) })),
+    );
+  } else {
+    const only = makers.length ? makers : builders;
+    requests = only.length
+      ? only.map((p) => ({ ...base, author: p.author, ...search(text) }))
+      : [{ ...base, ...search(text) }];
+  }
+
+  return {
+    requests: requests.slice(0, MAX_REQUESTS),
+    dropped: Math.max(0, requests.length - MAX_REQUESTS),
+    crossed: makers.length > 0 && builders.length > 0,
+  };
+}
+
+/* ----------------------------------- filters the registry cannot express -- */
+
+/**
+ * "Uploaded recently" and "downloaded a lot" as filters rather than as sorts.
+ *
+ * The registry sorts by both and filters by neither, so unlike every other
+ * control on the page these are applied to the page that came back. That is a
+ * real difference and the screen has to admit it: a filter on a hundred rows
+ * chosen by download count cannot find a new model, however new it is, and
+ * silently showing four results would look like the registry holds four.
+ * `describeFiltered` writes that sentence.
+ */
+export interface LocalFilter {
+  /** Uploaded within this many days, when set. */
+  withinDays?: number | undefined;
+  /** At least this many pulls in the last 30 days, when set. */
+  minDownloads?: number | undefined;
+}
+
+export const UPLOADED_WITHIN: { id: string; label: string; days?: number }[] = [
+  { id: "any", label: "Any time" },
+  { id: "30", label: "Past month", days: 30 },
+  { id: "90", label: "Past 3 months", days: 90 },
+  { id: "180", label: "Past 6 months", days: 180 },
+  { id: "365", label: "Past year", days: 365 },
+];
+
+export const MIN_DOWNLOADS: { id: string; label: string; n?: number }[] = [
+  { id: "any", label: "Any" },
+  { id: "1000", label: "1k+", n: 1_000 },
+  { id: "10000", label: "10k+", n: 10_000 },
+  { id: "100000", label: "100k+", n: 100_000 },
+];
+
+export interface Filtered {
+  shown: HfModel[];
+  /** Dropped for being too old or too little used. */
+  hidden: number;
+  /**
+   * Dropped because the registry did not say when they were uploaded.
+   *
+   * Counted separately and said out loud. Treating "no date" as "too old" is a
+   * guess, and quietly hiding a model because a field was missing is the kind
+   * of thing that makes a list untrustworthy.
+   */
+  undated: number;
+}
+
+export function applyLocalFilter(
+  models: readonly HfModel[],
+  filter: LocalFilter,
+  now = Date.now(),
+): Filtered {
+  if (filter.withinDays === undefined && filter.minDownloads === undefined) {
+    return { shown: [...models], hidden: 0, undated: 0 };
+  }
+  const cutoff = filter.withinDays === undefined
+    ? undefined
+    : now - filter.withinDays * 24 * 60 * 60 * 1000;
+
+  const shown: HfModel[] = [];
+  let hidden = 0;
+  let undated = 0;
+  for (const model of models) {
+    if (filter.minDownloads !== undefined && (model.downloads ?? 0) < filter.minDownloads) {
+      hidden++;
+      continue;
+    }
+    if (cutoff !== undefined) {
+      const at = Date.parse(model.createdAt ?? "");
+      if (!Number.isFinite(at)) {
+        undated++;
+        continue;
+      }
+      if (at < cutoff) {
+        hidden++;
+        continue;
+      }
+    }
+    shown.push(model);
+  }
+  return { shown, hidden, undated };
+}
+
+/**
+ * What the local filters did, in a sentence that does not overstate the page.
+ *
+ * The caveat is the point. Sorted by downloads, a "past month" filter is asking
+ * a question of the hundred most-downloaded repositories, and the honest answer
+ * names the sort that would actually search for new things.
+ */
+export function describeFiltered(
+  result: Filtered,
+  total: number,
+  filter: LocalFilter,
+  sort: BrowseSort,
+): string | undefined {
+  if (filter.withinDays === undefined && filter.minDownloads === undefined) return undefined;
+  const parts: string[] = [
+    `${result.shown.length} of the ${total} the registry returned match.`,
+  ];
+  if (result.undated) {
+    parts.push(
+      `${result.undated} more gave no upload date, so they are not shown.`,
+    );
+  }
+  if (filter.withinDays !== undefined && sort !== "createdAt") {
+    parts.push(
+      "This filters the page that came back rather than the registry, so it is" +
+      " searching within that sort. Choose “Recently uploaded” to look at new models instead.",
+    );
+  }
+  return parts.join(" ");
 }
