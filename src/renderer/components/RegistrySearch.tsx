@@ -25,6 +25,15 @@
 
 import { useCallback, useMemo, useState } from "react";
 
+import type { CatalogEntry } from "../../core/runtime/catalog.ts";
+import { groupCatalog } from "../../core/runtime/catalog.ts";
+import type { Machine } from "../../core/runtime/fit.ts";
+import { parameterLabel, publisherOf, readableName } from "../../core/runtime/modelNames.ts";
+import { partitionByRunnable, type Runnable } from "../../core/runtime/runnable.ts";
+import type { PullProgress } from "../../core/runtime/systemInfo.ts";
+import { repoOf } from "../../core/runtime/catalog.ts";
+import { ModelCard } from "./ModelCard.tsx";
+
 import {
   age, applyLocalFilter, compact, describeDownloads, describeFiltered, KINDS, kindById,
   loadable, LOADABLE_WORDS, MIN_DOWNLOADS, ggufIsMeaningful, PUBLISHERS, publisherNote,
@@ -42,21 +51,38 @@ import type { CardTarget } from "./ModelCard.tsx";
 
 export function RegistrySearch({
   installedEngines,
-  onOpen,
+  machine,
+  have,
+  catalog,
+  states,
+  pulling,
+  job,
+  onDownload,
 }: {
   /** Engines with a backend installed, so a row can say what it still needs. */
   installedEngines?: ReadonlySet<string>;
-  /**
-   * Open one result.
-   *
-   * A row used to expand into a strip of filenames in place. It now opens a
-   * page, because the strip could answer "which file" and nothing else -- not
-   * the licence, not the context length, not what the publisher says the model
-   * is for -- and those are the questions somebody is actually on this screen
-   * to answer.
-   */
-  onOpen: (target: CardTarget) => void;
+  machine: Machine;
+  /** Model ids already on this machine, so the card can say so. */
+  have: Set<string>;
+  /** Karen's own list, for the screen before anything has been searched. */
+  catalog: CatalogEntry[];
+  /** What each engine can do here, so the picks are ones that would run. */
+  states: Map<string, Runnable>;
+  /** The download in flight, and its figures, both owned by the pane above. */
+  pulling: string | undefined;
+  job: PullProgress | undefined;
+  onDownload: (source: RegistrySource, choice: { name: string; checkpoint: string; recipe: string }) => void;
 }) {
+  /*
+   * The selected model lives here, not in the pane above.
+   *
+   * That is the whole point of the split: the results stay on screen while a
+   * model is read, so choosing one must not unmount the list that produced it.
+   * On a narrow window CSS hides the list instead and the card's own back link
+   * appears -- the component tree is the same at both widths, so there is no
+   * breakpoint in the JavaScript to disagree with the one in the stylesheet.
+   */
+  const [selected, setSelected] = useState<CardTarget | undefined>();
   const [query, setQuery] = useState("");
   /* Seeded from the enabled set, never from a stored preference: which
      registries Karen will contact is a property of the build, not something a
@@ -85,6 +111,8 @@ export function RegistrySearch({
   const [ranBrowse, setRanBrowse] = useState<string | undefined>();
   /** Whether the publisher chips are showing. Two rows of them, so: folded. */
   const [showPublishers, setShowPublishers] = useState(false);
+  /** Whether the sort and filters are showing. One line when they are not. */
+  const [refining, setRefining] = useState(false);
 
   const chosen = useMemo(() => ENABLED_SOURCES.filter((s) => sources.has(s)), [sources]);
 
@@ -190,26 +218,41 @@ export function RegistrySearch({
       ...(least !== undefined ? { minDownloads: least } : {}),
     };
   }, [within, minPulls]);
+  /* What the closed refine row shows. Only what differs from the defaults --
+     a summary that always says "Sorted by most downloaded" is a summary nobody
+     reads, and then a real filter hides in it. */
+  const refineSummary = useMemo(() => {
+    const out: string[] = [];
+    if (sort !== "downloads") out.push(SORTS.find((o) => o.id === sort)?.label ?? sort);
+    if (!ggufOnly && ggufIsMeaningful(kindById(kind))) out.push("Every format");
+    const uploaded = UPLOADED_WITHIN.find((o) => o.id === within);
+    if (uploaded?.days) out.push(`Uploaded ${uploaded.label.toLowerCase()}`);
+    const pulls = MIN_DOWNLOADS.find((o) => o.id === minPulls);
+    if (pulls?.n) out.push(`${pulls.label} downloads`);
+    if (authors.length) {
+      const { makers, builders } = splitPublishers(authors);
+      out.push([...makers, ...builders].map((pub) => pub.label).join(" + "));
+    }
+    return out;
+  }, [sort, ggufOnly, kind, within, minPulls, authors]);
+
   const filtered = useMemo(() => applyLocalFilter(models, filter), [models, filter]);
   const localNote = describeFiltered(filtered, models.length, filter, sort);
   const rows = filtered.shown;
 
   return (
-    <section className="lem-section reg">
-      <header className="lem-head">
-        <h3>Search {REGISTRY_LABEL[ENABLED_SOURCES[0] ?? "huggingface"]}</h3>
-        <p>
-          Karen searches one registry, and names it and its country on every result — a download’s
-          origin is a matter of institutional policy for many researchers, not a detail.
-        </p>
-      </header>
-
+    <section className="lem-section reg" data-selected={selected ? "true" : "false"}>
       {/* ---------------- the controls ---------------- */}
       <div className="reg-bar">
         {/* With a single registry this is a statement, not a choice: a lone
             tick box that cannot be unticked is a control that does nothing.
-            It keeps the shape of the badge used on every row below, so the
-            two read as the same fact. */}
+            It keeps the shape of the badge used on every result below, so the
+            two read as the same fact.
+
+            On the header line rather than a row of its own: it was one of seven
+            rows of chrome that pushed the first result six lines below the
+            fold, and it says the same thing there in a quarter of the height. */}
+        <div className="reg-query">
         <div className="reg-sources" role="group" aria-label="Registry being searched">
           {ENABLED_SOURCES.length === 1
             ? ENABLED_SOURCES.map((source) => (
@@ -231,7 +274,6 @@ export function RegistrySearch({
               ))}
         </div>
 
-        <div className="reg-query">
           <input
             type="search"
             className="reg-input"
@@ -319,7 +361,33 @@ export function RegistrySearch({
           ))}
         </div>
 
-        <div className="reg-controls">
+        {/*
+          * Folded, with whatever is set showing on the closed row.
+          *
+          * Four controls sat here whether or not any of them was in use, and
+          * with the tabs above and the publishers below they were most of the
+          * reason the first result began six lines below the fold. Closed, this
+          * is one line; open, it is exactly what it was.
+          */}
+        <div className="reg-refine">
+          <button
+            type="button"
+            className="reg-more"
+            aria-expanded={refining}
+            onClick={() => setRefining((on) => !on)}
+          >
+            {refining ? "Fewer options" : "Sort and filter"}
+          </button>
+          {refining ? null : (
+            <div className="reg-refine-set">
+              {refineSummary.map((what) => (
+                <span key={what} className="reg-set">{what}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={refining ? "reg-controls" : "reg-controls folded"}>
           <label className="reg-control">
             <span>Sort</span>
             <select
@@ -404,19 +472,21 @@ export function RegistrySearch({
         </div>
 
         {/* Folded away, because two rows of chips sat above every result and
-            were read once. The chosen ones stay visible above whatever else is
-            on screen -- an active filter that is hidden is an active filter
-            somebody will blame the registry for. */}
-        <button
-          type="button"
-          className="reg-more"
-          aria-expanded={showPublishers}
-          onClick={() => setShowPublishers((on) => !on)}
-        >
-          {showPublishers ? "Hide publishers" : "Filter by publisher"}
-        </button>
+            were read once. What is chosen shows on the closed refine row above,
+            so an active filter is never hidden -- an active filter somebody
+            cannot see is one they blame the registry for. */}
+        {refining ? (
+          <button
+            type="button"
+            className="reg-more"
+            aria-expanded={showPublishers}
+            onClick={() => setShowPublishers((on) => !on)}
+          >
+            {showPublishers ? "Hide publishers" : "Filter by publisher"}
+          </button>
+        ) : null}
 
-        {showPublishers ? (
+        {refining && showPublishers ? (
           <>
             {/* Said where the choice is made, because it is not the behaviour
                 a list of tick boxes implies. */}
@@ -486,123 +556,277 @@ export function RegistrySearch({
           it arrived, which is a different kind of fact from what it asked. */}
       {localNote && !browsing ? <p className="reg-line local">{localNote}</p> : null}
 
-
-      {/* ---------------- results ---------------- */}
-      {/* Filtered to nothing is a different problem from returned nothing, and
-          telling somebody the registry holds no Granite models when it was
-          Karen's own date filter that emptied the list would be a lie. */}
-      {!browsing && ranBrowse && models.length > 0 && !rows.length ? (
-        <div className="lem-callout">
-          <p className="lem-callout-title">
-            Nothing on this page matches those filters.
-          </p>
-          <p className="lem-callout-body">
-            The registry returned {models.length}. {localNote}
-          </p>
-        </div>
+      {/* Above the columns, where it has the width to be one line. Inside the
+          results column it wrapped to three and pushed the first suggestion
+          further down than the thing it was apologising for. */}
+      {!ranBrowse && !browsing ? (
+        <p className="reg-line">
+          A few Karen suggests, from the list that ships with it — nothing was fetched to show
+          these, and nothing is sent until you search.
+        </p>
       ) : null}
 
-      {!browsing && ranBrowse && !models.length && !browseError ? (
-        <div className="lem-callout">
-          <p className="lem-callout-title">Nothing here.</p>
-          <p className="lem-callout-body">
-            {(authors.length === 1 ? publisherNote(authors[0]) : undefined) ??
-              (authors.length && kind !== "all"
-                ? `${authors.join(", ")} publish${authors.length === 1 ? "es" : ""} no ${kindById(kind).title.toLowerCase()} models. Clear the publishers, or choose another kind.`
-                : ggufOnly
-                  ? "Nothing in this selection is published as GGUF. Turn off “Only models Karen can run” to see what else is there."
-                  : "The registry returned no repositories for this selection.")}
-          </p>
-        </div>
-      ) : null}
 
-      {rows.length ? (
-        <>
-        {/* Headings, because the figures are otherwise two glyphs a person has
-            to guess at, and one of them is the closest thing a registry gives
-            to a quality signal. */}
-        <div className="reg-cols" aria-hidden="true">
-          <span>Repository</span>
-          <span>Registry</span>
-          <span>Runs here</span>
-          <span className="num">Pulls · 30d</span>
-          <span className="num">Likes</span>
-          <span />
-        </div>
-        <ul className="reg-hits">
+      {/* ---------------- results, beside the model ---------------- */}
+      {/*
+        * The list stays put while a model is read.
+        *
+        * Both columns are always rendered and the narrow case is handled in the
+        * stylesheet -- below 1080px the results column is hidden while
+        * something is selected and the card's own back link appears. Doing it
+        * that way means there is no breakpoint in the JavaScript that can
+        * disagree with the one in the CSS, which is the usual way a responsive
+        * layout ends up with two of something or none.
+        */}
+      <div className="reg-split">
+        <div className="reg-results">
+          {/* Filtered to nothing is a different problem from returned nothing,
+              and telling somebody the registry holds no Granite models when it
+              was Karen's own date filter that emptied the list would be a lie. */}
+          {!browsing && ranBrowse && models.length > 0 && !rows.length ? (
+            <div className="lem-callout">
+              <p className="lem-callout-title">Nothing on this page matches those filters.</p>
+              <p className="lem-callout-body">
+                The registry returned {models.length}. {localNote}
+              </p>
+            </div>
+          ) : null}
+
+          {!browsing && ranBrowse && !models.length && !browseError ? (
+            <div className="lem-callout">
+              <p className="lem-callout-title">Nothing here.</p>
+              <p className="lem-callout-body">
+                {(authors.length === 1 ? publisherNote(authors[0]) : undefined) ??
+                  (authors.length && kind !== "all"
+                    ? `${authors.join(", ")} publish${authors.length === 1 ? "es" : ""} no ${kindById(kind).title.toLowerCase()} models. Clear the publishers, or choose another kind.`
+                    : ggufOnly
+                      ? "Nothing in this selection is published as GGUF. Turn off “Only GGUF builds” to see what else is there."
+                      : "The registry returned no repositories for this selection.")}
+              </p>
+            </div>
+          ) : null}
+
+          {/*
+            * Before anything has been searched: Karen's own list.
+            *
+            * An empty box under a screenful of controls is a page that tells a
+            * person who does not already know a model's name that they have
+            * come to the wrong place. This is the catalogue shipped inside the
+            * Lemonade install, filtered to what this machine could actually
+            * run -- so it costs no request, which is why it can be shown
+            * without anybody having pressed anything.
+            */}
+          {!ranBrowse && !browsing ? <Picks
+            catalog={catalog}
+            states={states}
+            have={have}
+            onOpen={setSelected}
+            selected={selected?.repo}
+          /> : null}
+
           {rows.map((model) => {
             const source: RegistrySource = chosen[0] ?? "huggingface";
-            const key = `${source}/${model.id}`;
             /* Decided once per row and used for three things: which list of
                files to fetch, which engine the download registers under, and
                whether that engine is present. They must agree, or a repository
                is described by one engine and installed for another. */
             const recipe = recipeFor(model, kindById(kind));
-            const can = loadable(model, recipe, installedEngines);
-            const words = LOADABLE_WORDS[can];
-            const created = age(model.createdAt);
             return (
-              <li key={key} className="reg-hit">
-                <button
-                  type="button"
-                  className="reg-hit-head"
-                  onClick={() => onOpen({ repo: model.id, recipe, source })}
-                >
-                  <span className="reg-hit-id">
-                    <span className="reg-hit-name">{model.id}</span>
-                    <span className="reg-hit-alt">
-                      {/* What differs between rows: what it is for, how old it
-                          is, and whether the licence has to be accepted first.
-                          Not repeated boilerplate. */}
-                      {[
-                        model.task,
-                        created ? `added ${created}` : undefined,
-                        model.gated ? "licence must be accepted" : undefined,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  </span>
-                  {/*
-                    * The registry, in a column of its own.
-                    *
-                    * It has to be on every row -- an unlabelled row is
-                    * ambiguous to someone checking an institutional policy,
-                    * which is the whole reason this is shown. But as a bright
-                    * pill at the start of every row it was the loudest thing
-                    * on the page while being the same on all of them. In a
-                    * column, identical values read instantly as "all from one
-                    * place", which is the actual question.
-                    */}
-                  <span className={`reg-hit-src ${source}`} title={REGISTRY_NAME[source]}>
-                    {REGISTRY_LABEL[source]}
-                  </span>
-                  {/* Whether Karen can load it, rather than whether it is
-                      GGUF -- a GGUF diffusion model is not runnable here, and
-                      the format alone does not say so. */}
-                  <span className={`lem-chip ${words.tone}`} title={words.why}>
-                    {words.short}
-                  </span>
-                  <span
-                    className="reg-hit-figure"
-                    title={`${describeDownloads(model.downloads)} — the registry counts every pull, automated ones included`}
-                  >
-                    {compact(model.downloads)}
-                  </span>
-                  <span className="reg-hit-figure" title="People who have starred this repository">
-                    {compact(model.likes)}
-                  </span>
-                  <span className="reg-hit-open" aria-hidden="true">Open ›</span>
-                </button>
-              </li>
+              <ResultRow
+                key={`${source}/${model.id}`}
+                model={model}
+                source={source}
+                recipe={recipe}
+                installedEngines={installedEngines}
+                on={selected?.repo === model.id}
+                onOpen={setSelected}
+              />
             );
           })}
-        </ul>
-        </>
-      ) : null}
+        </div>
+
+        <div className="reg-detail">
+          {selected ? (
+            <ModelCard
+              target={selected}
+              machine={machine}
+              have={have}
+              pulling={pulling}
+              job={job}
+              onDownload={(choice) => onDownload(selected.source, choice)}
+              onBack={() => setSelected(undefined)}
+            />
+          ) : (
+            <p className="reg-detail-hint">
+              {rows.length
+                ? "Choose a model to see its licence, its versions and what its author says about it."
+                : "Search for a model, or choose one of Karen’s from the list."}
+            </p>
+          )}
+        </div>
+      </div>
 
     </section>
   );
+}
+
+/**
+ * One result, as a name rather than as a row of a table.
+ *
+ * The old row was six columns of 11px mono: a repository id, a registry, the
+ * word "Ready", "12.7M", "956", "Open ›". Every one of those is a fact, and
+ * together they answered none of the three questions somebody actually has --
+ * what is this, how big is it, and can I run it.
+ *
+ * So the name comes first, at a size a person reads rather than parses, and
+ * everything else becomes one quiet line under it. The raw id stays as the
+ * tooltip and on the card, because it is what somebody checking an
+ * institutional policy needs to see exactly.
+ */
+function ResultRow({
+  model,
+  source,
+  recipe,
+  installedEngines,
+  on,
+  onOpen,
+}: {
+  model: HfModel;
+  source: RegistrySource;
+  recipe: string;
+  installedEngines?: ReadonlySet<string> | undefined;
+  on: boolean;
+  onOpen: (target: CardTarget) => void;
+}) {
+  const can = loadable(model, recipe, installedEngines);
+  const words = LOADABLE_WORDS[can];
+  const size = parameterLabel(model.id);
+  const created = age(model.createdAt);
+
+  return (
+    <button
+      type="button"
+      className={on ? "reg-hit on" : "reg-hit"}
+      title={model.id}
+      aria-current={on}
+      onClick={() => onOpen({ repo: model.id, recipe, source })}
+    >
+      <span className="reg-hit-top">
+        <span className="reg-hit-name">{readableName(model.id)}</span>
+        {/* Only where it says something. "Ready" on every row is noise, and a
+            row that cannot run is the one fact worth interrupting for. */}
+        {can === "ready" ? null : (
+          <span className={`lem-chip ${words.tone}`} title={words.why}>{words.short}</span>
+        )}
+      </span>
+      <span className="reg-hit-sub">
+        {/* Who built it, set apart from what it is: `unsloth` is not part of
+            the model's name and reading it as one is how a list of forty
+            repositories becomes unscannable. */}
+        <span className="reg-hit-by">{publisherOf(model.id) ?? ""}</span>
+        {/* What the repository's own name claims. Never an estimate of the
+            download -- see `modelNames.ts` for why the exact figure waits for
+            the card, where the registry has reported real bytes. */}
+        {size ? <span className="reg-hit-size">{size}</span> : null}
+        {/* On every row, and with its country. An unlabelled row is ambiguous
+            to somebody checking where a download may come from, which is the
+            whole reason it is shown. */}
+        <span className={`reg-hit-src ${source}`} title={REGISTRY_NAME[source]}>
+          {REGISTRY_LABEL[source]}
+        </span>
+        {model.downloads !== undefined ? (
+          <span title={describeDownloads(model.downloads)}>
+            {/* Spelled out. "12.7M" under a column headed "PULLS · 30D" is two
+                pieces of jargon saved eleven characters. */}
+            {compact(model.downloads)} downloads this month
+          </span>
+        ) : null}
+        {created ? <span>added {created}</span> : null}
+        {model.gated ? <span className="reg-hit-gated">licence to accept</span> : null}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Karen's own list, for the screen before anything has been searched.
+ *
+ * Grouped by what a model is FOR rather than by which engine runs it, which is
+ * `LABEL_GROUPS`' whole reason for existing, and filtered to what this machine
+ * could actually run -- offering somebody a model their hardware cannot load is
+ * worse than offering nothing.
+ *
+ * A few per group, not all 228. This is a starting point, not the catalogue;
+ * the Recommended tab is the catalogue.
+ */
+function Picks({
+  catalog,
+  states,
+  have,
+  selected,
+  onOpen,
+}: {
+  catalog: CatalogEntry[];
+  states: Map<string, Runnable>;
+  have: Set<string>;
+  selected: string | undefined;
+  onOpen: (target: CardTarget) => void;
+}) {
+  const groups = useMemo(
+    () =>
+      groupCatalog(catalog)
+        .map((group) => ({
+          ...group,
+          /* Upstream's own shortlist first -- `sortForDisplay` has already put
+             it there -- and only the ones with a repository behind them, since
+             a pick that cannot open a card is a dead row. */
+          entries: partitionByRunnable(group.entries, states)
+            .usable.filter((entry) => repoOf(entry.checkpoint))
+            .slice(0, 4),
+        }))
+        .filter((group) => group.entries.length),
+    [catalog, states],
+  );
+
+  if (!groups.length) return null;
+
+  return (
+    <div className="reg-picks">
+      {groups.map((group) => (
+        <div key={group.id} className="reg-picks-group">
+          <h4 className="reg-picks-title">{group.title}</h4>
+          {group.entries.map((entry) => {
+            const repo = repoOf(entry.checkpoint) ?? "";
+            const size = parameterLabel(entry.id) ?? (entry.sizeBytes ? gbLabel(entry.sizeBytes) : undefined);
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                className={selected === repo ? "reg-hit on" : "reg-hit"}
+                title={entry.checkpoint ?? entry.id}
+                onClick={() => onOpen({ repo, recipe: entry.recipe, source: entry.source })}
+              >
+                <span className="reg-hit-top">
+                  <span className="reg-hit-name">{readableName(entry.id)}</span>
+                  {have.has(entry.id) ? <span className="lem-chip dim">Downloaded</span> : null}
+                </span>
+                <span className="reg-hit-sub">
+                  <span className="reg-hit-by">{publisherOf(repo) ?? ""}</span>
+                  {size ? <span className="reg-hit-size">{size}</span> : null}
+                  <span className={`reg-hit-src ${entry.source}`}>{REGISTRY_LABEL[entry.source]}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The catalogue rounds to whole gigabytes, so this is a fallback, not a figure. */
+function gbLabel(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(bytes < 1024 ** 3 ? 1 : 0)} GB`;
 }
 
 /**
