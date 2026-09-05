@@ -15,7 +15,7 @@
  */
 
 import {
-  browseParams, mergeSorted, parseModels, parseRepoDetail,
+  browseParams, browsePlan, mergeSorted, parseModels, parseRepoDetail,
   type BrowseQuery, type HfModel, type RepoDetail,
 } from "../../core/runtime/hfBrowse.ts";
 import { CARD_LIMIT } from "../../core/runtime/modelCard.ts";
@@ -37,20 +37,34 @@ export interface BrowseResult {
   models: HfModel[];
   /** What was actually asked, so the UI can say it rather than guess. */
   url: string;
+  /** Whether the publishers were crossed rather than unioned. */
+  crossed: boolean;
+  /** Pairs `MAX_REQUESTS` refused to make, so the screen can admit it. */
+  dropped: number;
 }
 
-export async function browseHuggingFace(query: BrowseQuery): Promise<BrowseResult> {
-  /*
-   * One request per publisher, because the registry takes one `author` and
-   * answers `author=a&author=b` with nothing at all. Run together rather than
-   * in turn: four publishers in sequence is four round trips of latency for a
-   * list that arrives all at once anyway.
-   */
-  const authors = query.authors?.length ? query.authors : [undefined];
+/**
+ * Browse, with the fan-out decided here rather than by the window.
+ *
+ * The registry takes one `author` per request and answers `author=a&author=b`
+ * with nothing at all, so several publishers mean several requests. Which
+ * requests is `browsePlan`'s decision, and it is made in this process on
+ * purpose: the window sends a selection, not a list of URLs, so there is no
+ * shape of input from a renderer that turns this into an unbounded fan-out at
+ * somebody else's service.
+ *
+ * Run together rather than in turn: eight requests in sequence is eight round
+ * trips of latency for a list that arrives all at once anyway.
+ */
+export async function browseHuggingFace(selection: BrowseQuery): Promise<BrowseResult> {
+  const plan = browsePlan({
+    ...selection,
+    ...(selection.authors ? { authors: selection.authors } : {}),
+  });
   const pages = await Promise.all(
-    authors.map(async (author) => {
-      const params = browseParams({ ...query, ...(author ? { author } : {}) });
-      return { url: `${HOST}${PATH}?${params.toString()}`, models: await getModels(`${HOST}${PATH}?${params.toString()}`) };
+    plan.requests.map(async (request) => {
+      const url = `${HOST}${PATH}?${browseParams(request).toString()}`;
+      return { url, models: await getModels(url) };
     }),
   );
 
@@ -58,8 +72,10 @@ export async function browseHuggingFace(query: BrowseQuery): Promise<BrowseResul
     models:
       pages.length === 1
         ? (pages[0]?.models ?? [])
-        : mergeSorted(pages.map((p) => p.models), query.sort ?? "downloads"),
+        : mergeSorted(pages.map((p) => p.models), selection.sort ?? "downloads"),
     url: pages.map((p) => p.url).join(" + "),
+    crossed: plan.crossed,
+    dropped: plan.dropped,
   };
 }
 

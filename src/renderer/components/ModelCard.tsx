@@ -201,6 +201,25 @@ export function ModelCard({
     [variants, tier],
   );
 
+  /*
+   * Which version is selected.
+   *
+   * Held as a name rather than an index, and reset by the effect below rather
+   * than by the picker: the list arrives after the page does, and an index into
+   * a list that has not loaded yet selects the wrong thing the moment it has.
+   */
+  const [chosen, setChosen] = useState<string | undefined>();
+  useEffect(() => setChosen(undefined), [repo]);
+
+  /* The recommendation is the default, so the page opens on the answer rather
+     than on "choose one of twenty-six". */
+  const picked = choices.find((c) => c.label === chosen)
+    ?? choices.find((c) => c.label === best?.name)
+    ?? choices[0];
+  const pickedInstalled = picked !== undefined && have.has(picked.installedAs);
+  const pickedFit =
+    picked?.sizeBytes && machine.ramBytes ? fitModel(picked.sizeBytes, machine) : undefined;
+
   const [owner, name] = splitRepo(repo);
   const updated = age(detail?.lastModified);
 
@@ -305,80 +324,91 @@ export function ModelCard({
       {choices.length ? (
         <div className="card-versions">
           <h4 className="card-h">
-            {variants ? "Versions" : "Files"}
+            {variants ? "Version" : "File"}
             <span className="card-h-note">
               {variants
                 ? "The same model at different sizes. Smaller is faster and needs less memory; the cost is quality."
                 : `The files in this repository that the ${recipe} engine can load.`}
             </span>
           </h4>
-          <ul className="card-vlist">
-            {choices.map((choice) => {
-              const quant = quantOf(choice.label);
-              const fit =
-                choice.sizeBytes && machine.ramBytes ? fitModel(choice.sizeBytes, machine) : undefined;
-              const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
-              const installed = have.has(choice.installedAs);
-              const busy = pulling !== undefined;
-              return (
-                <li key={choice.label} className="card-version">
-                  <div className="card-version-id">
-                    {/* The publisher's own name for the file, always. Showing
-                        the family instead collapsed `Q2_K`, `Q2_K_L` and
-                        `Q2_K_XL` into three identical rows at three different
-                        sizes, and the name is also what the download uses. */}
-                    <span className="card-version-name">
-                      {choice.label}
-                      {isDynamic(choice.label) ? (
-                        <span className="card-version-flag" title="Unsloth's dynamic build: the quantisation is chosen per tensor rather than applied uniformly">
-                          dynamic
-                        </span>
-                      ) : null}
-                    </span>
-                    {/* The whole point of the row for somebody who has never
-                        had to know what a quantisation is. */}
-                    <span className="card-version-note">
-                      {quant?.note ?? (choice.files ? `Arrives as ${choice.files} files.` : "")}
-                    </span>
-                  </div>
-                  {best && choice.label === best.name ? (
-                    <span className="lem-chip accent" title="The usual best balance of size and quality that this machine can hold">
-                      Recommended
-                    </span>
-                  ) : (
-                    <span className="reg-variant-pad" />
-                  )}
-                  <span className="card-version-size">{gb(choice.sizeBytes)}</span>
-                  {chip ? (
-                    <span className={`lem-chip ${chip.tone}`} title={fit?.label}>
-                      {chip.short}
-                    </span>
-                  ) : (
-                    <span className="lem-chip dim">—</span>
-                  )}
-                  <button
-                    type="button"
-                    className={installed ? "lem-act" : "lem-act get"}
-                    disabled={installed || busy}
-                    title={`Downloads from ${REGISTRY_HOST[source]}`}
-                    onClick={() =>
-                      onDownload({
-                        name: choice.pullAs,
-                        checkpoint: pullCheckpoint(repo, choice.file),
-                        recipe,
-                      })
-                    }
-                  >
-                    {installed
-                      ? "Downloaded"
-                      : pulling === choice.installedAs
-                        ? "Downloading…"
-                        : "Download"}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+
+          {/*
+            * One picker and one button, not a list of twenty-six rows.
+            *
+            * A repository can offer thirty builds of the same model, and laid
+            * out as rows they push the model card two screens down and present
+            * thirty Download buttons for a decision where only one of them is
+            * wanted. A dropdown makes it what it is: a single choice, with a
+            * default already made and the reason for it on screen.
+            */}
+          <div className="card-pick">
+            <label className="card-pick-choice">
+              <span className="card-pick-label">Which one</span>
+              <select
+                value={picked?.label ?? ""}
+                onChange={(e) => setChosen(e.target.value)}
+                aria-label="Which version to download"
+              >
+                {choices.map((choice) => (
+                  <option key={choice.label} value={choice.label}>
+                    {optionLabel(choice, best?.name, have)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              className={pickedInstalled ? "lem-act" : "lem-act get"}
+              disabled={pickedInstalled || pulling !== undefined || !picked}
+              title={`Downloads from ${REGISTRY_HOST[source]}`}
+              onClick={() =>
+                picked &&
+                onDownload({
+                  name: picked.pullAs,
+                  checkpoint: pullCheckpoint(repo, picked.file),
+                  recipe,
+                })
+              }
+            >
+              {pickedInstalled
+                ? "Downloaded"
+                : pulling === picked?.installedAs
+                  ? "Downloading…"
+                  : "Download"}
+            </button>
+          </div>
+
+          {/* What the choice above actually means, which is the half a
+              filename cannot carry. */}
+          {picked ? (
+            <div className="card-picked">
+              <div className="card-picked-facts">
+                <span className="card-picked-size">{gb(picked.sizeBytes)}</span>
+                {pickedFit ? (
+                  <span className={`lem-chip ${FIT_CHIP[pickedFit.verdict].tone}`} title={pickedFit.label}>
+                    {FIT_CHIP[pickedFit.verdict].short}
+                  </span>
+                ) : null}
+                {best && picked.label === best.name ? (
+                  <span className="lem-chip accent" title="The usual best balance of size and quality that this machine can hold">
+                    Recommended
+                  </span>
+                ) : null}
+                {isDynamic(picked.label) ? (
+                  <span className="lem-chip dim" title="Unsloth's dynamic build: the quantisation is chosen per tensor rather than applied uniformly">
+                    dynamic
+                  </span>
+                ) : null}
+                {picked.files ? (
+                  <span className="lem-chip dim">{picked.files} files</span>
+                ) : null}
+              </div>
+              {quantOf(picked.label)?.note ? (
+                <p className="card-picked-note">{quantOf(picked.label)?.note}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : loading ? null : (
         <p className="reg-line">
@@ -390,7 +420,8 @@ export function ModelCard({
         <h4 className="card-h">
           Model card
           <span className="card-h-note">
-            Written by the publisher, shown as they wrote it. Its pictures are not fetched.
+            Written by the publisher, shown as they wrote it, without its pictures — the window
+            fetches no remote images.
           </span>
         </h4>
         {cardError ? <p className="reg-line bad">{cardError}</p> : null}
@@ -411,6 +442,21 @@ export function ModelCard({
       </div>
     </section>
   );
+}
+
+/**
+ * One line of a dropdown, carrying the three facts the choice turns on.
+ *
+ * A `<select>` cannot hold markup, so the name, the size and whether it is
+ * already here have to fit in a string. Worth it: the alternative was
+ * twenty-six rows of buttons for a single decision.
+ */
+function optionLabel(choice: Choice, best: string | undefined, have: Set<string>): string {
+  const marks = [
+    choice.label === best ? "recommended" : undefined,
+    have.has(choice.installedAs) ? "downloaded" : undefined,
+  ].filter(Boolean);
+  return `${choice.label} — ${gb(choice.sizeBytes)}${marks.length ? ` · ${marks.join(" · ")}` : ""}`;
 }
 
 /** `unsloth` and `Qwen3-8B-GGUF`, so the publisher can be set back visually. */
