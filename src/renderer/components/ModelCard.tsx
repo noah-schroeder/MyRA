@@ -30,6 +30,7 @@ import { fitModel, quantRank, type Machine } from "../../core/runtime/fit.ts";
 import type { RepoDetail } from "../../core/runtime/hfBrowse.ts";
 import { age, loadableFiles, pullCheckpoint, pullName, pulledId } from "../../core/runtime/hfBrowse.ts";
 import type { PreparedCard } from "../../core/runtime/modelCard.ts";
+import { readableName } from "../../core/runtime/modelNames.ts";
 import { isDynamic, quantOf } from "../../core/runtime/quants.ts";
 import {
   explainRegistryError,
@@ -200,6 +201,17 @@ export function ModelCard({
     () => (variants ? recommendVariant(variants.variants, quantRank, tier) : undefined),
     [variants, tier],
   );
+  /*
+   * Whether the recommendation is one this machine could actually run.
+   *
+   * `recommendVariant` always names something, because the picker needs a
+   * default selection -- but where nothing fits, that default is the least-bad
+   * of a set of impossibilities, and badging it "Recommended" beside "Too
+   * large" is the app recommending a choice that will not work. So the badge
+   * is withheld and a sentence says what is actually true instead.
+   */
+  const bestRuns =
+    best?.sizeBytes !== undefined && Number.isFinite(tier(best.sizeBytes));
 
   /*
    * Which version is selected.
@@ -230,10 +242,15 @@ export function ModelCard({
       </button>
 
       <header className="card-head">
-        <h3 className="card-title">
+        {/* The name a person would say, with the exact id under it. Both are
+            needed and they are not the same job: one is what the model is, the
+            other is what somebody checking an institutional policy has to be
+            able to read character by character. */}
+        <h3 className="card-title">{readableName(repo)}</h3>
+        <p className="card-id" title="The repository's exact id on the registry">
           <span className="card-owner">{owner}/</span>
           <span className="card-name">{name}</span>
-        </h3>
+        </p>
         <div className="card-facts">
           {/* First, and never in a tooltip. Someone checking whether they are
               allowed to use this at all should not have to hover to find out. */}
@@ -351,7 +368,7 @@ export function ModelCard({
               >
                 {choices.map((choice) => (
                   <option key={choice.label} value={choice.label}>
-                    {optionLabel(choice, best?.name, have)}
+                    {optionLabel(choice, bestRuns ? best?.name : undefined, have)}
                   </option>
                 ))}
               </select>
@@ -379,6 +396,13 @@ export function ModelCard({
             </button>
           </div>
 
+          {variants && !bestRuns && choices.length ? (
+            <p className="card-none">
+              None of these will run on this machine — the smallest is still larger than its
+              memory. Karen will download one anyway if you want it.
+            </p>
+          ) : null}
+
           {/* What the choice above actually means, which is the half a
               filename cannot carry. */}
           {picked ? (
@@ -390,7 +414,7 @@ export function ModelCard({
                     {FIT_CHIP[pickedFit.verdict].short}
                   </span>
                 ) : null}
-                {best && picked.label === best.name ? (
+                {bestRuns && best && picked.label === best.name ? (
                   <span className="lem-chip accent" title="The usual best balance of size and quality that this machine can hold">
                     Recommended
                   </span>

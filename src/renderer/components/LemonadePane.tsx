@@ -973,11 +973,11 @@ export function LemonadePane({
           <section className="lem-section">
             <header className="lem-head">
               <h3>Models</h3>
-              <p>
-                Grouped by what they do, and filtered to what this machine can actually run.
-                Every row names the registry it would be fetched from — some institutions
-                restrict which of those staff may use.
-              </p>
+              {/* One line. The paragraph that was here described the grouping,
+                  the registry labelling and the machine filter -- three things
+                  the screen below now shows rather than promises, and sixty
+                  pixels of the reason the first model sat below the fold. */}
+              <p>Every model names the registry it comes from, and its country.</p>
             </header>
 
             {/*
@@ -1497,7 +1497,16 @@ export function LemonadePane({
             </button>
               </>
             ) : (
-              <RegistrySearch installedEngines={installedEngines} onOpen={setViewing} />
+              <RegistrySearch
+                installedEngines={installedEngines}
+                machine={machine}
+                have={have}
+                catalog={catalog}
+                states={states}
+                pulling={pulling}
+                job={job}
+                onDownload={(source, choice) => void download(source, choice)}
+              />
             )}
           </section>
         </>
