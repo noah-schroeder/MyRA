@@ -12,8 +12,8 @@ import assert from "node:assert/strict";
 
 import {
   choiceIsExternal, effectiveKind, isExternal, kindWasOverridden, newProviderId,
-  isUsable, orphanedSecrets, parseModelRef, parseProviders, providerFor, providerSecret,
-  qualify, urlIsLocal,
+  isUsable, orphanedSecrets, parseModelRef, parseProviders, providerFor, providerIsStarted,
+  providerName, providerSecret, qualify, urlIsLocal,
   type Provider,
   standsDownForLocal,
 } from "../src/core/providers.ts";
@@ -259,4 +259,46 @@ test("loading a local model stands down a hosted choice, and nothing else", () =
   assert.equal(standsDownForLocal(""), false);
   // A model id with one colon in it is a name, not a qualified reference.
   assert.equal(standsDownForLocal("library/model:7b"), false);
+});
+
+/* ------------------------------------------------------------------ *
+ * What a provider is called, and when it is ready to be offered       *
+ * ------------------------------------------------------------------ */
+
+test("a provider is called what the user called it", () => {
+  assert.equal(providerName(provider({ label: "Lab GPU box" })), "Lab GPU box");
+  // Even when the name looks nothing like the address. It is their setup.
+  assert.equal(
+    providerName(provider({ label: "Work account", baseUrl: "https://openrouter.ai/api/v1" })),
+    "Work account",
+  );
+});
+
+test("an unnamed provider falls back to its host, never to its internal id", () => {
+  assert.equal(
+    providerName(provider({ label: "", baseUrl: "https://api.anthropic.com/v1" })),
+    "api.anthropic.com",
+  );
+  assert.equal(
+    providerName(provider({ label: "   ", baseUrl: "http://127.0.0.1:1234/v1" })),
+    "127.0.0.1:1234",
+  );
+  // Half-typed, or not a URL at all: a word, not an exception and not "p1".
+  assert.equal(providerName(provider({ label: "", baseUrl: "api.example" })), "Provider");
+  assert.equal(providerName(provider({ label: "", baseUrl: "" })), "Provider");
+});
+
+test("a provider is offered as soon as it is named or addressed", () => {
+  /* The picker used to require that models had been fetched and ticked, so a
+     provider somebody had just added and named was absent from it with nothing
+     to say why. Having no models yet is a thing to say, not a thing to hide. */
+  assert.equal(providerIsStarted(provider({ label: "OpenRouter", models: [] })), true);
+  assert.equal(providerIsStarted(provider({ label: "", baseUrl: "https://x.test/v1", models: [] })), true);
+});
+
+test("a provider that is switched off, or is only a blank row, is not offered", () => {
+  // `enabled` exists to mean exactly this, so the picker honours it.
+  assert.equal(providerIsStarted(provider({ label: "OpenRouter", enabled: false })), false);
+  // "+ Add provider", and nothing typed yet.
+  assert.equal(providerIsStarted(provider({ label: "", baseUrl: "" })), false);
 });

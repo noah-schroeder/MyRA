@@ -5,7 +5,9 @@ import {
 } from "../../core/runtime/foreign.ts";
 import { formatTokens } from "../../core/tokens.ts";
 import { fitsRole, localFitsChat } from "../../core/models/roles.ts";
-import { choiceIsExternal, isExternal, parseModelRef, qualify } from "../../core/providers.ts";
+import {
+  choiceIsExternal, isExternal, parseModelRef, providerIsStarted, providerName, qualify,
+} from "../../core/providers.ts";
 import { priceLabel, priceTitle } from "../../core/pricing.ts";
 
 /**
@@ -142,7 +144,16 @@ export function ModelBar({
     return () => clearInterval(timer);
   }, [loadingModel]);
 
-  const providers = (settings?.providers ?? []).filter((p) => p.enabled && p.models.length);
+  /*
+   * Every provider the user has actually set up, named as they named it.
+   *
+   * It used to also require `p.models.length`, which meant a provider somebody
+   * had just added and named was missing from this menu entirely -- models are
+   * fetched and ticked in Settings as a separate step, and until that happened
+   * the picker gave no sign the provider existed. A provider with nothing
+   * chosen yet gets a tab that says so; being absent said nothing at all.
+   */
+  const providers = (settings?.providers ?? []).filter(providerIsStarted);
   /* Which of a provider's models are offered as things to talk to, and which
      wait behind a click. Same guess, same escape hatch, as every other picker:
      a provider publishes ids and no capabilities, so `whisper-1` and `tts-1`
@@ -365,7 +376,7 @@ export function ModelBar({
                   title={provider.baseUrl}
                   onClick={() => setPane(provider.id)}
                 >
-                  {provider.label || provider.id}
+                  {providerName(provider)}
                 </button>
               ))}
             </div>
@@ -379,13 +390,13 @@ export function ModelBar({
                   people to ignore the warning that matters. */}
               {isExternal(shownProvider) ? (
                 <p className="modelmenu-warn" role="note">
-                  Anything you send to {shownProvider.label || "this provider"} leaves your
-                  computer, including whatever is already in the conversation.
+                  Anything you send to {providerName(shownProvider)} leaves your computer,
+                  including whatever is already in the conversation.
                 </p>
               ) : (
                 <p className="modelmenu-here" role="note">
-                  {shownProvider.label || "This provider"} is served from this machine, so nothing
-                  you send it leaves.
+                  {providerName(shownProvider)} is served from this machine, so nothing you send
+                  it leaves.
                 </p>
               )}
               <ul className="modelmenu-list">
@@ -420,10 +431,14 @@ export function ModelBar({
                   );
                 })}
               </ul>
-              {shownModels(shownProvider).length === 0 && !hiddenCount(shownProvider) ? (
+              {/* The state a newly added provider is in, said rather than shown
+                  as an empty panel: the models are fetched and ticked in
+                  Settings, which is a step somebody who has just typed an
+                  address and a key has no reason to expect. */}
+              {shownProvider.models.length === 0 ? (
                 <p className="modelmenu-empty">
-                  This provider published no models the last time it was asked. Check it under
-                  Settings → Providers.
+                  No models chosen for {providerName(shownProvider)} yet. Open
+                  {" "}Settings → Providers, fetch its models, and tick the ones you want here.
                 </p>
               ) : null}
               {hiddenCount(shownProvider) && !showAll.has(shownProvider.id) ? (

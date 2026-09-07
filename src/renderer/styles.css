@@ -4645,21 +4645,25 @@ button.lem-model-name:hover {
 
 /* ---------- local / external in the picker ---------- */
 
-/* One tab per place a model can come from, so several providers stay legible.
-   Scrolls rather than wraps: a wrapped row changes height as providers are
-   added, and the menu below it would jump under the cursor. */
+/* One tab per place a model can come from. Wraps rather than scrolls: the menu
+   is 360px wide and four providers already overflow it, and a provider hidden
+   off the right-hand edge behind a hairline scrollbar is a provider somebody
+   does not know they have. The row is only ever a few items, and the menu is
+   drawn fresh each time it opens, so growing a line costs nothing. */
 .modelmenu-tabs {
-  display: flex; gap: 2px; padding: 6px 8px 0;
-  overflow-x: auto; scrollbar-width: thin; flex: none;
+  display: flex; flex-wrap: wrap; gap: 2px 0; padding: 6px 8px 0; flex: none;
+  border-bottom: 1px solid var(--border);
 }
-.modelmenu-tabs::-webkit-scrollbar { height: 4px; }
-.modelmenu-tabs::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 .modelmenu-tab {
-  flex: none; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  font: inherit; font-size: 12px; padding: 4px 12px;
+  flex: none; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font: inherit; font-size: 12px; padding: 4px 10px;
+  /* Sits on the row's own rule, so a wrapped second line does not draw a
+     second underline across the menu. */
   border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  margin-bottom: -1px;
   background: none; color: var(--text-faint); cursor: pointer;
 }
+.modelmenu-tab:hover { color: var(--text-dim); }
 .modelmenu-tab.on { color: var(--text); border-bottom-color: var(--accent); }
 .modelmenu-external { display: flex; flex-direction: column; }
 /* The reassuring counterpart of .modelmenu-warn, in the same place and the same
