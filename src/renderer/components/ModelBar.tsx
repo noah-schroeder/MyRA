@@ -49,9 +49,16 @@ export function ModelBar({
   /* Cleared every time the menu opens. A filter left over from last time would
      hide most of the list with no obvious reason why. */
   const [query, setQuery] = useState("");
-  /* Which half of the menu is showing. Local first, always: it is the default
-     answer and the one that needs no warning. */
-  const [pane, setPane] = useState<"local" | "external">("local");
+  /*
+   * Which tab is showing: "local", or a provider's id.
+   *
+   * It was "local" or "external", which put OpenRouter and Anthropic behind one
+   * word that names neither of them. Somebody who has connected two providers
+   * is choosing between those two providers, not between here and away -- and
+   * "External" also has to cover a provider on 127.0.0.1, which is not external
+   * at all. One tab per place answers the question actually being asked.
+   */
+  const [pane, setPane] = useState<string>("local");
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,6 +71,23 @@ export function ModelBar({
   useEffect(() => {
     if (!open) setQuery("");
   }, [open]);
+
+  /*
+   * Open on the tab the current model actually came from.
+   *
+   * Always opening on "local" meant that someone using Claude opened the picker
+   * onto a list their choice was not in, with no indication that the row saying
+   * "in use" was one tab across. Reading it from the stored ref rather than from
+   * a remembered tab is what keeps it right after the model is changed from
+   * somewhere else -- Settings, or the first-run flow.
+   */
+  useEffect(() => {
+    if (!open) return;
+    /* `||`, not `??`: parseModelRef returns an empty string for an unqualified
+       ref rather than undefined, and `?? "local"` left the pane set to "" --
+       which matches no tab, so the menu opened with none of them lit. */
+    setPane(parseModelRef(settings?.llm.model ?? "").providerId || "local");
+  }, [open, settings?.llm.model]);
 
   useEffect(() => {
     if (open) {
@@ -132,6 +156,11 @@ export function ModelBar({
         );
   const hiddenCount = (provider: Provider): number =>
     provider.models.length - shownModels(provider).length;
+
+  /* The provider whose tab is open, if it is still there. A provider removed or
+     switched off while the menu was up leaves the pane naming nothing, and
+     falling back to the local list is better than an empty panel. */
+  const shownProvider = providers.find((p) => p.id === pane);
 
   const chosenExternal = choiceIsExternal(settings?.providers ?? [], settings?.llm.model ?? "");
   /*
@@ -313,76 +342,101 @@ export function ModelBar({
               user nothing and costs a row of the menu. */}
           {providers.length ? (
             <div className="modelmenu-tabs" role="tablist" aria-label="Where models come from">
-              {(["local", "external"] as const).map((which) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pane === "local"}
+                className={pane === "local" ? "modelmenu-tab on" : "modelmenu-tab"}
+                onClick={() => setPane("local")}
+              >
+                Local
+              </button>
+              {/* Named, one each. A person who has connected OpenRouter and
+                  Anthropic picks between OpenRouter and Anthropic; "External"
+                  was a word for neither of them, and one they would have had to
+                  open to find out which was behind it. */}
+              {providers.map((provider) => (
                 <button
-                  key={which}
+                  key={provider.id}
                   type="button"
                   role="tab"
-                  aria-selected={pane === which}
-                  className={pane === which ? "modelmenu-tab on" : "modelmenu-tab"}
-                  onClick={() => setPane(which)}
+                  aria-selected={pane === provider.id}
+                  className={pane === provider.id ? "modelmenu-tab on" : "modelmenu-tab"}
+                  title={provider.baseUrl}
+                  onClick={() => setPane(provider.id)}
                 >
-                  {which === "local" ? "Local" : "External"}
+                  {provider.label || provider.id}
                 </button>
               ))}
             </div>
           ) : null}
 
-          {pane === "external" && providers.length ? (
+          {shownProvider ? (
             <div className="modelmenu-external">
-              <p className="modelmenu-warn" role="note">
-                Anything you send to these leaves your computer, including whatever is already in
-                the conversation.
-              </p>
-              {providers.map((provider) => (
-                <div key={provider.id}>
-                  <p className="modelmenu-head">
-                    {provider.label}
-                    {!isExternal(provider) ? <span className="dim"> — on this machine</span> : null}
-                  </p>
-                  <ul className="modelmenu-list">
-                    {shownModels(provider).map((model) => {
-                      const on = settings?.llm.model === qualify(provider.id, model);
-                      return (
-                        <li key={model} className="modelmenu-row">
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className={on ? "modelmenu-item active" : "modelmenu-item"}
-                            onClick={() => void pick(provider.id, model)}
-                          >
-                            <span className="modelmenu-name">{model}</span>
-                            <span className="modelmenu-meta">
-                              {/* The provider's own figure, from the last time
-                                  its models were fetched. Absent for the many
-                                  endpoints that publish no prices, because the
-                                  alternative would be a number Karen made up. */}
-                              {provider.prices?.[model] ? (
-                                <span
-                                  className="modelmenu-price"
-                                  title={priceTitle(provider.prices[model])}
-                                >
-                                  {priceLabel(provider.prices[model])}
-                                </span>
-                              ) : null}
-                              {on ? <span className="pill on">in use</span> : null}
+              {/* Said for this provider, not for all of them at once: a
+                  provider on 127.0.0.1 -- somebody's own llama.cpp or LM Studio
+                  -- sends nothing anywhere, and warning about it would teach
+                  people to ignore the warning that matters. */}
+              {isExternal(shownProvider) ? (
+                <p className="modelmenu-warn" role="note">
+                  Anything you send to {shownProvider.label || "this provider"} leaves your
+                  computer, including whatever is already in the conversation.
+                </p>
+              ) : (
+                <p className="modelmenu-here" role="note">
+                  {shownProvider.label || "This provider"} is served from this machine, so nothing
+                  you send it leaves.
+                </p>
+              )}
+              <ul className="modelmenu-list">
+                {shownModels(shownProvider).map((model) => {
+                  const on = settings?.llm.model === qualify(shownProvider.id, model);
+                  return (
+                    <li key={model} className="modelmenu-row">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={on ? "modelmenu-item active" : "modelmenu-item"}
+                        onClick={() => void pick(shownProvider.id, model)}
+                      >
+                        <span className="modelmenu-name">{model}</span>
+                        <span className="modelmenu-meta">
+                          {/* The provider's own figure, from the last time
+                              its models were fetched. Absent for the many
+                              endpoints that publish no prices, because the
+                              alternative would be a number Karen made up. */}
+                          {shownProvider.prices?.[model] ? (
+                            <span
+                              className="modelmenu-price"
+                              title={priceTitle(shownProvider.prices[model])}
+                            >
+                              {priceLabel(shownProvider.prices[model])}
                             </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {hiddenCount(provider) && !showAll.has(provider.id) ? (
-                    <button
-                      type="button"
-                      className="modelmenu-more"
-                      onClick={() => setShowAll((seen) => new Set(seen).add(provider.id))}
-                    >
-                      Show {hiddenCount(provider)} more from this provider
-                    </button>
-                  ) : null}
-                </div>
-              ))}
+                          ) : null}
+                          {on ? <span className="pill on">in use</span> : null}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {shownModels(shownProvider).length === 0 && !hiddenCount(shownProvider) ? (
+                <p className="modelmenu-empty">
+                  This provider published no models the last time it was asked. Check it under
+                  Settings → Providers.
+                </p>
+              ) : null}
+              {hiddenCount(shownProvider) && !showAll.has(shownProvider.id) ? (
+                <button
+                  type="button"
+                  className="modelmenu-more"
+                  onClick={() => setShowAll((seen) => new Set(seen).add(shownProvider.id))}
+                >
+                  {shownModels(shownProvider).length
+                    ? `Show ${hiddenCount(shownProvider)} more from this provider`
+                    : `Nothing here looks right for a conversation — show all ${hiddenCount(shownProvider)}`}
+                </button>
+              ) : null}
               <div className="modelmenu-foot">
                 <button
                   type="button"

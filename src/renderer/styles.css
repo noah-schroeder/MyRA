@@ -4645,14 +4645,33 @@ button.lem-model-name:hover {
 
 /* ---------- local / external in the picker ---------- */
 
-.modelmenu-tabs { display: flex; gap: 2px; padding: 6px 8px 0; }
+/* One tab per place a model can come from, so several providers stay legible.
+   Scrolls rather than wraps: a wrapped row changes height as providers are
+   added, and the menu below it would jump under the cursor. */
+.modelmenu-tabs {
+  display: flex; gap: 2px; padding: 6px 8px 0;
+  overflow-x: auto; scrollbar-width: thin; flex: none;
+}
+.modelmenu-tabs::-webkit-scrollbar { height: 4px; }
+.modelmenu-tabs::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 .modelmenu-tab {
+  flex: none; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font: inherit; font-size: 12px; padding: 4px 12px;
   border: 0; border-bottom: 2px solid transparent; border-radius: 0;
   background: none; color: var(--text-faint); cursor: pointer;
 }
 .modelmenu-tab.on { color: var(--text); border-bottom-color: var(--accent); }
 .modelmenu-external { display: flex; flex-direction: column; }
+/* The reassuring counterpart of .modelmenu-warn, in the same place and the same
+   shape so the two read as one slot that always says where this goes. */
+.modelmenu-here {
+  margin: 8px 10px 2px; padding: 7px 9px;
+  font-size: 11.5px; line-height: 1.45; text-wrap: pretty;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 .modelmenu-warn {
   margin: 8px 10px 2px; padding: 7px 9px;
   font-size: 11.5px; line-height: 1.45; text-wrap: pretty;
