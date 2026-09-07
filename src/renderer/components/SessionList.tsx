@@ -12,14 +12,36 @@ export function SessionList({
   onOpen,
   onNew,
   refreshKey,
+  filter,
+  onChanged,
 }: {
   currentId?: string;
   onOpen: (id: string) => void;
   onNew: () => void;
   refreshKey: number;
+  /**
+   * Show only this project's conversations, under its name.
+   *
+   * The payoff of having projects at all: while you are working in one, the
+   * history beside you is that project's history. It is a filter and never a
+   * hiding place -- "All conversations" is always one click away, and the
+   * heading names what is being filtered so the missing rows are explained
+   * rather than merely absent.
+   */
+  filter?: { name: string; refs: Set<string> } | undefined;
+  /**
+   * A conversation was deleted here.
+   *
+   * Projects prune on read, so a deleted chat cannot leave a row that opens
+   * nothing -- but the count beside a project's name is drawn from a listing
+   * that nothing had asked for again, so it sat one too high until something
+   * else happened to refresh it. This is that something.
+   */
+  onChanged?: () => void;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [confirming, setConfirming] = useState(false);
+  const [all, setAll] = useState(false);
 
   const load = (): void => {
     void window.karen.listSessions().then(setSessions);
@@ -27,26 +49,36 @@ export function SessionList({
 
   useEffect(load, [refreshKey]);
 
+  /* Back to the project's own list whenever the project changes. "Show all" is
+     a peek, not a preference: left latched, opening a second project would
+     silently show every conversation under its name. */
+  useEffect(() => setAll(false), [filter?.name]);
+
   const remove = async (id: string): Promise<void> => {
     await window.karen.deleteSession(id);
     load();
+    onChanged?.();
   };
 
   const removeAll = async (): Promise<void> => {
     await window.karen.deleteAllSessions();
     setConfirming(false);
     load();
+    onChanged?.();
     onNew();
   };
+
+  const filtering = Boolean(filter) && !all;
+  const shown = filtering ? sessions.filter((s) => filter!.refs.has(s.id)) : sessions;
 
   return (
     <nav className="sessions" aria-label="Conversations">
       {/* "New conversation" lives in the rail's nav block now, beside the other
           destinations, rather than being repeated here. */}
-      <h2 className="rail-heading">Recent</h2>
+      <h2 className="rail-heading">{filtering ? filter!.name : "Recent"}</h2>
 
       <ul className="session-items">
-        {sessions.map((s) => (
+        {shown.map((s) => (
           <li key={s.id} className={s.id === currentId ? "session current" : "session"}>
             <button type="button" className="session-open" onClick={() => onOpen(s.id)}>
               <span className="session-title">{s.title}</span>
@@ -64,10 +96,20 @@ export function SessionList({
             </button>
           </li>
         ))}
-        {sessions.length === 0 ? <li className="session-empty">Nothing saved yet.</li> : null}
+        {shown.length === 0 ? (
+          <li className="session-empty">
+            {filtering ? "No conversations in this project yet." : "Nothing saved yet."}
+          </li>
+        ) : null}
       </ul>
 
-      {sessions.length > 0 ? (
+      {filter ? (
+        <button type="button" className="session-scope" onClick={() => setAll((v) => !v)}>
+          {all ? `Only ${filter.name}` : "All conversations →"}
+        </button>
+      ) : null}
+
+      {sessions.length > 0 && !filtering ? (
         confirming ? (
           <div className="session-confirm">
             <span>Delete all {sessions.length}?</span>

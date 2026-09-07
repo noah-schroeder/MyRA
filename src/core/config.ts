@@ -175,6 +175,15 @@ export interface Settings {
   imagesRoot: string;
   /** On the host: where the paper drafter keeps one JSON per paper. */
   papersRoot: string;
+  /**
+   * The project new work files itself into. Empty means none.
+   *
+   * A setting rather than window state because the main process is what has to
+   * read it: a conversation, a paper, a meeting, an image and a research run
+   * are all created down here, and each has to know where it belongs at the
+   * moment it comes into existence.
+   */
+  activeProject: string;
   /** Vault-relative directory the meeting notes are filed in. */
   meetingReportDir: string;
   /**
@@ -351,6 +360,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
   imagesRoot: join(homedir(), "Documents", "karen", "images"),
   papersRoot: join(homedir(), "Documents", "karen", "papers"),
+  activeProject: "",
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
   meetingInstructions: "",

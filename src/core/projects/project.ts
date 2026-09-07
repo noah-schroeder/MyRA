@@ -1,0 +1,291 @@
+/**
+ * A project: everything about one piece of work, in one place.
+ *
+ * Karen makes five kinds of thing and keeps each in its own store — a
+ * conversation in `~/.config/karen/sessions`, a meeting in its own directory
+ * under the meetings root, a research run under the research root, a paper and
+ * an image each as a record under theirs. Nobody works in those five
+ * categories. They work on *the NSF concept note*, which is three
+ * conversations, a kickoff meeting, a literature run, a draft and two figures,
+ * and until this existed nothing in the app said those six things had anything
+ * to do with each other.
+ *
+ * ## Why this is an index and not a folder
+ *
+ * A project lists what belongs to it. The files never move.
+ *
+ * The obvious alternative — a real directory per project, everything inside it
+ * — was costed and rejected, and the reason is worth keeping because it will be
+ * proposed again. As soon as items live in different directories, every "open
+ * this by id" call has to first discover *which* directory holds it, so that
+ * design needs an index anyway; on top of it, the research run root would have
+ * to be threaded through the pipeline and its resume logic, the meetings jail
+ * widened past `meetingsRoot`, and conversations moved out of `~/.config` into
+ * `~/Documents`, where a file manager and any cloud sync can read them. Five
+ * subsystems, two of them long-running and resumable, to arrive somewhere that
+ * still needs this file.
+ *
+ * "All of it together on disk" is a real want, and it is answered by exporting
+ * a folder rather than by living in one. See [render.ts](./render.ts).
+ *
+ * Pure: no disk, no Electron. [main/projects.ts](../../main/projects.ts) owns
+ * the files and resolves members against the five stores.
+ */
+
+/** The five kinds of thing that have a page listing them. */
+export type MemberKind = "chat" | "meeting" | "run" | "paper" | "image";
+
+export const MEMBER_KINDS: readonly MemberKind[] = [
+  "chat",
+  "meeting",
+  "run",
+  "paper",
+  "image",
+];
+
+/**
+ * One thing in a project.
+ *
+ * `ref` is whatever that store addresses an item by, and for four of the five
+ * that is an id. Meetings are addressed by directory, and what is stored here
+ * is the directory's **name**, not its path: an absolute path would break the
+ * moment somebody moved their meetings folder in Settings, which is a thing the
+ * app invites them to do.
+ */
+export interface Member {
+  kind: MemberKind;
+  ref: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  members: Member[];
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  items: number;
+}
+
+/** Singular and plural, for a confirm dialog that has to name what it removes. */
+const KIND_WORDS: Record<MemberKind, [string, string]> = {
+  chat: ["conversation", "conversations"],
+  meeting: ["meeting", "meetings"],
+  run: ["research run", "research runs"],
+  paper: ["paper", "papers"],
+  image: ["image", "images"],
+};
+
+export function kindLabel(kind: MemberKind, count: number): string {
+  const [one, many] = KIND_WORDS[kind];
+  return count === 1 ? one : many;
+}
+
+function randomSalt(): string {
+  return globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 4);
+}
+
+/**
+ * A short, legible, filesystem-safe id: date, time, and a slug of the name.
+ *
+ * The same shape images, papers and research runs use. The salt is real
+ * entropy rather than a counter, because two projects created in the same
+ * minute would otherwise collide on the filename and the second would
+ * overwrite the first.
+ */
+export function projectId(name: string, now = new Date(), salt = randomSalt()): string {
+  const two = (n: number): string => String(n).padStart(2, "0");
+  const stamp =
+    `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}` +
+    `-${two(now.getHours())}${two(now.getMinutes())}`;
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 6)
+    .join("-")
+    .slice(0, 60);
+  return `${stamp}-${slug || "project"}${salt ? `-${salt}` : ""}`;
+}
+
+/**
+ * A project id, refused if it is anything but one.
+ *
+ * The same guard `assertImageId`, `assertRunId` and `assertPaperId` are, for
+ * the same reason: this comes back from a sandboxed window to be joined onto
+ * the projects directory and then read, written and deleted.
+ */
+export function assertProjectId(id: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(id) || id === "." || id === "..") {
+    throw new Error(`no project named ${JSON.stringify(id)}`);
+  }
+  return id;
+}
+
+export function newProject(opts: { name: string; id?: string; now?: Date }): Project {
+  const now = opts.now ?? new Date();
+  const name = opts.name.trim() || "Untitled project";
+  const at = now.toISOString();
+  return {
+    id: opts.id ?? projectId(name, now),
+    name,
+    createdAt: at,
+    updatedAt: at,
+    members: [],
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Membership                                                          *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Two members are the same only when both halves match.
+ *
+ * Compared on the pair, never on the ref alone. The five stores mint their ids
+ * independently and four of them start with the same date stamp, so
+ * `20260907-1405-kickoff` is a plausible id in more than one of them —
+ * and a project that removed a paper because a meeting shared its name would
+ * be a bug nobody could reproduce on demand.
+ */
+export function sameMember(a: Member, b: Member): boolean {
+  return a.kind === b.kind && a.ref === b.ref;
+}
+
+export function hasMember(project: Project, member: Member): boolean {
+  return project.members.some((m) => sameMember(m, member));
+}
+
+/** Which project holds this, if any. */
+export function ownerOf(projects: readonly Project[], member: Member): Project | undefined {
+  return projects.find((p) => hasMember(p, member));
+}
+
+/**
+ * Put these in that project, and take them out of any other.
+ *
+ * Every project comes in and every project goes out, because membership is
+ * **exclusive** and moving something into one is therefore an edit to two. A
+ * folder that could hold a conversation another folder also held would make
+ * "delete this project and everything in it" a question with no answer.
+ *
+ * `updatedAt` moves only on the projects that actually changed, so a list
+ * ordered by it is not reshuffled by an operation that touched nothing.
+ */
+export function addMembers(
+  projects: readonly Project[],
+  projectId: string,
+  members: readonly Member[],
+  now = new Date(),
+): Project[] {
+  const at = now.toISOString();
+  return projects.map((project) => {
+    if (project.id === projectId) {
+      const added = members.filter((m) => !hasMember(project, m));
+      if (!added.length) return project;
+      return { ...project, members: [...project.members, ...added], updatedAt: at };
+    }
+    const kept = project.members.filter((m) => !members.some((x) => sameMember(m, x)));
+    if (kept.length === project.members.length) return project;
+    return { ...project, members: kept, updatedAt: at };
+  });
+}
+
+/** Take these out of this project. The items themselves are untouched. */
+export function removeMembers(
+  project: Project,
+  members: readonly Member[],
+  now = new Date(),
+): Project {
+  const kept = project.members.filter((m) => !members.some((x) => sameMember(m, x)));
+  if (kept.length === project.members.length) return project;
+  return { ...project, members: kept, updatedAt: now.toISOString() };
+}
+
+/**
+ * Drop members whose item is no longer there.
+ *
+ * Called on every read rather than on deletion, because the five stores each
+ * have their own delete on their own page and none of them has ever heard of
+ * projects. A conversation removed from the rail must not leave a row in a
+ * project that opens nothing — and asking "is it still there?" at read time is
+ * cheaper and more honest than trying to keep five deletes in step.
+ *
+ * `updatedAt` deliberately does NOT move: pruning is Karen noticing something,
+ * not the user doing something, and a project that reordered itself in the list
+ * because a chat was deleted elsewhere would be reporting the wrong event.
+ */
+export function pruneMembers(project: Project, alive: (member: Member) => boolean): Project {
+  const kept = project.members.filter(alive);
+  return kept.length === project.members.length ? project : { ...project, members: kept };
+}
+
+/** How many of each kind, for a dialog that has to say what it is about to do. */
+export function countsOf(members: readonly Member[]): Record<MemberKind, number> {
+  const counts = { chat: 0, meeting: 0, run: 0, paper: 0, image: 0 };
+  for (const member of members) counts[member.kind] += 1;
+  return counts;
+}
+
+export function summaryOf(project: Project): ProjectSummary {
+  return {
+    id: project.id,
+    name: project.name,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    items: project.members.length,
+  };
+}
+
+/** Most recently worked in first, which is the order the rail reads them. */
+export function byNewest(a: ProjectSummary, b: ProjectSummary): number {
+  return b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id);
+}
+
+/**
+ * A record read back off disk, rebuilt field by field.
+ *
+ * The same discipline the other stores get. This one is not in a folder the
+ * user is invited to open, so a hand edit is unlikely — but a truncated write
+ * or a half-synced file is not, and a rail that throws on the third of five
+ * projects is worse than one that skips it.
+ */
+export function parseProject(raw: unknown, id: string): Project | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  const text = (key: string, fallback = ""): string =>
+    typeof row[key] === "string" ? (row[key] as string) : fallback;
+
+  const members: Member[] = [];
+  const seen = new Set<string>();
+  for (const entry of Array.isArray(row["members"]) ? row["members"] : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const m = entry as Record<string, unknown>;
+    const kind = m["kind"];
+    const ref = m["ref"];
+    if (typeof ref !== "string" || !ref) continue;
+    if (!MEMBER_KINDS.includes(kind as MemberKind)) continue;
+    /* Deduplicated on the way in. A record written by a build with a bug in it
+       is not a reason to count the same meeting twice in the delete dialog. */
+    const key = `${String(kind)} ${ref}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    members.push({ kind: kind as MemberKind, ref });
+  }
+
+  const createdAt = text("createdAt");
+  return {
+    id,
+    name: text("name") || "Untitled project",
+    createdAt,
+    updatedAt: text("updatedAt", createdAt),
+    members,
+  };
+}

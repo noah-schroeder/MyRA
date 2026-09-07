@@ -27,7 +27,11 @@ import {
   explainModelFailure, modelOptions, resolveMediaModel, type MediaDeps, type ResolvedModel,
 } from "./models.ts";
 
-export type ImageDeps = MediaDeps;
+export type ImageDeps = MediaDeps & {
+  /** A picture has just been filed, and here is its id. Injected, not imported:
+   *  the module that files it into a project also reads images. */
+  onCreated?: (ref: string) => void;
+};
 
 /** What the page sends when the Generate button is pressed. */
 export interface GenerateRequest {
@@ -162,7 +166,25 @@ export async function listImages(deps: Pick<ImageDeps, "config">): Promise<Image
   return out.sort(byNewest);
 }
 
-async function recordFor(deps: Pick<ImageDeps, "config">, id: string): Promise<ImageRecord> {
+/**
+ * Remove one image and the sidecar that lists it.
+ *
+ * Exported because a project delete has to be able to do exactly what the
+ * gallery's own delete does. Two copies of "which of these two files goes
+ * first" is how one of them ends up wrong.
+ */
+export async function deleteImage(deps: Pick<ImageDeps, "config">, id: string): Promise<void> {
+  const record = await recordFor(deps, id);
+  const root = rootOf(deps);
+  /* The sidecar goes first. It is the done-marker, so removing it is what makes
+     the image gone as far as the app is concerned -- and if the second unlink
+     fails, what is left is an orphan file rather than a row pointing at
+     nothing. */
+  await rm(join(root, sidecarName(id)), { force: true });
+  await rm(join(root, record.file), { force: true });
+}
+
+export async function recordFor(deps: Pick<ImageDeps, "config">, id: string): Promise<ImageRecord> {
   const root = rootOf(deps);
   const raw = JSON.parse(await readFile(join(root, sidecarName(assertImageId(id))), "utf8"));
   const record = parseRecord(raw, id);
@@ -208,6 +230,7 @@ export function installImageIpc(deps: ImageDeps): void {
     running = new AbortController();
     try {
       const record = await generateAndSave(deps, request, running.signal);
+      deps.onCreated?.(record.id);
       const bytes = await readFile(join(rootOf(deps), record.file));
       /* A plain Uint8Array: a Node Buffer crosses the bridge as an object with
          a `data` array, which is structurally cloneable and useless to
@@ -249,14 +272,7 @@ export function installImageIpc(deps: ImageDeps): void {
 
   ipcMain.handle("karen:image-delete", async (_e, id: string) => {
     try {
-      const record = await recordFor(deps, id);
-      const root = rootOf(deps);
-      /* The sidecar goes first. It is the done-marker, so removing it is what
-         makes the image gone as far as the app is concerned -- and if the
-         second unlink fails, what is left is an orphan file rather than a row
-         pointing at nothing. */
-      await rm(join(root, sidecarName(id)), { force: true });
-      await rm(join(root, record.file), { force: true });
+      await deleteImage(deps, String(id));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };

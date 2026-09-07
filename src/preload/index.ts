@@ -97,6 +97,28 @@ const api = {
   imageReveal: (id: string) => ipcRenderer.invoke("karen:image-reveal", id),
   imageSaveCopy: (id: string) => ipcRenderer.invoke("karen:image-save-copy", id),
   imageFolder: () => ipcRenderer.invoke("karen:image-folder"),
+  /* ---- projects ----
+   * A project is an index over the other five stores, not a sixth store: the
+   * files never move, and "all of it together" is what Export writes. */
+  projectList: () => ipcRenderer.invoke("karen:project-list"),
+  projectCreate: (name: string) => ipcRenderer.invoke("karen:project-create", name),
+  projectRename: (id: string, name: string) =>
+    ipcRenderer.invoke("karen:project-rename", id, name),
+  projectOpen: (id: string) => ipcRenderer.invoke("karen:project-open", id),
+  /** Everything in every store, each row naming the project it is already in. */
+  projectItems: () => ipcRenderer.invoke("karen:project-items"),
+  projectAdd: (id: string, members: unknown) =>
+    ipcRenderer.invoke("karen:project-add", id, members),
+  projectRemove: (id: string, members: unknown) =>
+    ipcRenderer.invoke("karen:project-remove", id, members),
+  /** `contents` true deletes the items as well; false keeps them where they are. */
+  projectDelete: (id: string, contents: boolean) =>
+    ipcRenderer.invoke("karen:project-delete", id, contents),
+  projectSetActive: (id: string) => ipcRenderer.invoke("karen:project-active", id),
+  projectExport: (id: string) => ipcRenderer.invoke("karen:project-export", id),
+  projectReveal: (path: string) => ipcRenderer.invoke("karen:project-reveal", path),
+  onProjects: (cb: (list: unknown) => void) => on("karen:projects", cb),
+
   /* ---- paper drafter ----
    * Notes in, first-draft prose out, one section at a time. No endpoint and no
    * key of its own: it writes with whatever model the bar names. */

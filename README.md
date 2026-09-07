@@ -17,6 +17,13 @@ text through Semantic Scholar,
 resolves open-access PDFs, and can run a full plan → search → read → verify →
 synthesise pipeline that produces a cited report.
 
+**Projects.** A folder for one piece of work: put conversations, meetings,
+research runs, papers and images in it, and while it is open everything new
+files itself there. Delete it and its contents in one action — itemised first,
+with the option to keep them. Nothing moves on disk; **Export** writes the whole
+project out as one real folder, conversations rendered readable, which is also
+what you would send a co-author.
+
 **Paper drafter.** Turns raw, half-formed notes into first-draft academic prose
 in **your own voice**: paste a sample of your writing, jot or dictate what you
 want to say under each heading, and each section is written on its own. It does

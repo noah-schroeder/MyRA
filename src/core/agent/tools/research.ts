@@ -169,6 +169,15 @@ export interface ResearchHost {
   onProgress?: (note: string) => void;
   /** Which stage just started, so the window can draw the run as a sequence. */
   onStage?: (stage: string) => void;
+  /**
+   * A run directory has just been created, and here is its id.
+   *
+   * The one moment a run can be filed into a project. Everything else about a
+   * run is addressed by id, and this is where the id first exists -- waiting
+   * for the run to finish would file nothing when it is cancelled, and a run
+   * abandoned halfway is still part of the work it was abandoned during.
+   */
+  onRunCreated?: (id: string) => void;
 }
 
 let host: ResearchHost | undefined;
@@ -234,6 +243,7 @@ async function deepRun(
 
   const run = await ResearchRun.create(question);
   doneThisTurn = { question: question.trim(), runId: run.id };
+  host?.onRunCreated?.(run.id);
   try {
     const result = await runPipeline({
       question,

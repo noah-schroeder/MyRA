@@ -14,7 +14,7 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { ipcMain, shell } from "electron";
 
 import type { ConfigStore, EndpointSettings } from "../core/config.ts";
@@ -55,6 +55,15 @@ export interface MeetingDeps {
    */
   explainTranscription?: (err: unknown) => Promise<string>;
   send: (channel: string, payload?: unknown) => void;
+  /**
+   * A meeting has just finished recording, and here is its directory name.
+   *
+   * The name rather than the path, because that is what a project stores: an
+   * absolute path would break the moment somebody moved their meetings folder,
+   * which Settings invites them to do. Injected rather than imported, since the
+   * module that files it also lists meetings.
+   */
+  onCreated?: (ref: string) => void;
 }
 
 /**
@@ -327,6 +336,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
    */
   ipcMain.handle("karen:meeting-stop", async () => {
     const record = await recorderFor().stop();
+    if (record?.dir) deps.onCreated?.(basename(record.dir));
     publish({ phase: "idle", title: undefined, tracks: undefined });
     await refresh();
     return record;
