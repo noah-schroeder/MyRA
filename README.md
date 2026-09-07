@@ -17,6 +17,13 @@ text through Semantic Scholar,
 resolves open-access PDFs, and can run a full plan → search → read → verify →
 synthesise pipeline that produces a cited report.
 
+**Paper drafter.** Turns raw, half-formed notes into first-draft academic prose
+in **your own voice**: paste a sample of your writing, jot or dictate what you
+want to say under each heading, and each section is written on its own. It does
+not search and it **never cites** — the prompt forbids references, placeholders
+and invented sources outright, and anything citation-shaped that appears anyway
+is flagged rather than quietly removed. Work on a whole paper or on one section.
+
 **Documents.** Drafts in Markdown and converts to Word, OpenDocument, HTML or
 PDF, jailed to a folder you choose.
 
@@ -76,6 +83,10 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   on this machine and the prompt stays here; one from a provider you added means
   the prompt is sent to that provider. The picker says which, and warns above the
   hosted ones.
+- **Drafting a paper** sends the section you asked for — your writing sample,
+  your notes and your instructions — to whichever model the bar names, and
+  nothing else. A local model means it stays here. The prompt preview shows
+  exactly what would be sent, and showing it sends nothing.
 - **Scholarly searches** reach OpenAlex and arXiv. Semantic Scholar is asked only
   whether a paper already found has an open-access PDF.
 - **Pages you ask it to read** see a request from this machine.

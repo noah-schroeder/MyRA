@@ -788,7 +788,13 @@ export async function runSubagent(opts: SubagentOptions): Promise<SubagentResult
          */
         ...(resolved.sampling ? { sampling: withoutTemperature(resolved.sampling) } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
-        ...(opts.onDelta ? { onDelta: (d: string) => opts.onDelta!(d, "text") } : {}),
+        /* The real kind, not a flattened "text". `chat` already separates the
+           model's reasoning from its answer -- both spellings of it -- and
+           relabelling every delta as prose on the way out threw that away, so
+           no caller of runSubagent could tell the two apart while streaming.
+           draft.ts has branched on `kind === "thinking"` since it was written
+           and could never once have taken it. */
+        ...(opts.onDelta ? { onDelta: opts.onDelta } : {}),
       });
       return {
         text: result.text,

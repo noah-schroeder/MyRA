@@ -29,12 +29,13 @@ import { useSpeech } from "./useSpeech.ts";
 import { useHandsFree } from "./useHandsFree.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
 import { ImagePage } from "./components/ImagePage.tsx";
+import { PaperDrafter } from "./components/PaperDrafter.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import type { CitedSource, PromptRequest, RuntimeState, Settings } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings" | "images" | "api";
+type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "api";
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
@@ -132,6 +133,17 @@ export function App() {
     lookupRef.current = lookup;
   }, [lookup]);
 
+  /*
+   * A page that claims the microphone while it is open.
+   *
+   * The paper drafter dictates into a notes box, not into the composer. It
+   * cannot call useDictation itself: that hook subscribes to the transcript
+   * channel, and a second subscriber means every transcript arrives twice. So
+   * there is one dictation for the app and pages borrow it, exactly as the
+   * composer and the literature search box already do.
+   */
+  const dictationSink = useRef<((text: string) => void) | undefined>(undefined);
+
   const speech = useSpeech();
   /* Read through a ref for the same reason the lookup box is: the transcript
      lands a second or two after the callback was built, and by then the mode
@@ -151,6 +163,10 @@ export function App() {
     useCallback((text: string) => {
       if (handsFreeRef.current) {
         void send(text);
+        return;
+      }
+      if (dictationSink.current) {
+        dictationSink.current(text);
         return;
       }
       const set = lookupRef.current ? setQueryDraft : setDraft;
@@ -304,6 +320,15 @@ export function App() {
             active={page === "images"}
             onClick={() => setPage((p) => (p === "images" ? "chat" : "images"))}
           />
+          {/* Beside Images, because it is the third thing you make here. Its
+              own page rather than a mode of the conversation: a paper has a
+              past, and its notes and drafts have to still be there next week. */}
+          <RailButton
+            icon="paper"
+            label="Paper drafter"
+            active={page === "papers"}
+            onClick={() => setPage((p) => (p === "papers" ? "chat" : "papers"))}
+          />
           {/* The audit trail. Every run already wrote its search log, screening
               reasons, source hashes and verification table; until this existed
               none of it was reachable from anywhere in the app. */}
@@ -419,6 +444,9 @@ export function App() {
         ) : null}
         {page === "images" && settings ? (
           <ImagePage settings={settings} onSettingsChange={setSettings} onClose={toChat} />
+        ) : null}
+        {page === "papers" ? (
+          <PaperDrafter onClose={toChat} dictation={dictation} sink={dictationSink} />
         ) : null}
         {page === "runs" ? <RunPanel onClose={toChat} /> : null}
         {/* Its own scroll region at full width: the models page is a browser

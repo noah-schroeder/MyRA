@@ -283,6 +283,7 @@ const FOLDERS = [
      folder you are told to treat as yours that can only be moved by editing
      settings.json is not one. */
   { key: "imagesRoot", label: "Images", hint: "Where generated figures are filed, beside a note of what was asked for." },
+  { key: "papersRoot", label: "Papers", hint: "Where the paper drafter keeps your notes and drafts, one file per paper." },
 ] as const;
 
 function Folders({
