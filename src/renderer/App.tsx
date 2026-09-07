@@ -10,6 +10,7 @@ import { ResearchProgress } from "./components/ResearchProgress.tsx";
 import { ApiPage } from "./components/ApiPage.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
+import { RailSection, useRailSection } from "./components/RailSection.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
 import { AudioPicker } from "./components/AudioPicker.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
@@ -91,6 +92,7 @@ export function App() {
    * only decides what is drawn.
    */
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const { open: projectsOpen, toggle: toggleProjects } = useRailSection("projects");
   const [openProject, setOpenProject] = useState<string | undefined>();
   /* The active project's conversations, so the rail can show its history
      rather than everything. Re-read whenever it or the session list changes. */
@@ -440,34 +442,43 @@ export function App() {
           * looking at is the project your next conversation lands in.
           */}
         <nav className="rail-projects" aria-label="Projects">
-          <h2 className="rail-heading">Projects</h2>
-          <ul className="project-items">
-            <li>
-              <button
-                type="button"
-                className={activeProject ? "project-item" : "project-item current"}
-                onClick={() => void chooseProject("")}
-              >
-                <span className="project-item-name">No project</span>
+          <RailSection
+            label="Projects"
+            open={projectsOpen}
+            count={projects.length}
+            onToggle={toggleProjects}
+          />
+          {!projectsOpen ? null : (
+            <>
+              <ul className="project-items">
+                <li>
+                  <button
+                    type="button"
+                    className={activeProject ? "project-item" : "project-item current"}
+                    onClick={() => void chooseProject("")}
+                  >
+                    <span className="project-item-name">No project</span>
+                  </button>
+                </li>
+                {projects.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className={p.id === activeProject ? "project-item current" : "project-item"}
+                      onClick={() => void chooseProject(p.id)}
+                      title={`${p.items} ${p.items === 1 ? "item" : "items"}`}
+                    >
+                      <span className="project-item-name">{p.name}</span>
+                      <span className="project-item-count">{p.items}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" className="project-new" onClick={() => void makeProject()}>
+                + New project
               </button>
-            </li>
-            {projects.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  className={p.id === activeProject ? "project-item current" : "project-item"}
-                  onClick={() => void chooseProject(p.id)}
-                  title={`${p.items} ${p.items === 1 ? "item" : "items"}`}
-                >
-                  <span className="project-item-name">{p.name}</span>
-                  <span className="project-item-count">{p.items}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button type="button" className="project-new" onClick={() => void makeProject()}>
-            + New project
-          </button>
+            </>
+          )}
         </nav>
 
         <SessionList

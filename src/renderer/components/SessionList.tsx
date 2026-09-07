@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SessionSummary } from "../types.ts";
+import { RailSection, useRailSection } from "./RailSection.tsx";
 
 /**
  * Past conversations.
@@ -40,6 +41,7 @@ export function SessionList({
   onChanged?: () => void;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const { open, toggle } = useRailSection("recent");
   const [confirming, setConfirming] = useState(false);
   const [all, setAll] = useState(false);
 
@@ -72,60 +74,72 @@ export function SessionList({
   const shown = filtering ? sessions.filter((s) => filter!.refs.has(s.id)) : sessions;
 
   return (
-    <nav className="sessions" aria-label="Conversations">
+    /* Folded, the list must stop claiming the space it is no longer using --
+       this is the flex child that grows, so without `flex: none` collapsing it
+       would leave the same gap with nothing in it. */
+    <nav className={open ? "sessions" : "sessions folded"} aria-label="Conversations">
       {/* "New conversation" lives in the rail's nav block now, beside the other
           destinations, rather than being repeated here. */}
-      <h2 className="rail-heading">{filtering ? filter!.name : "Recent"}</h2>
+      <RailSection
+        label={filtering ? filter!.name : "Recent"}
+        open={open}
+        count={shown.length}
+        onToggle={toggle}
+      />
 
-      <ul className="session-items">
-        {shown.map((s) => (
-          <li key={s.id} className={s.id === currentId ? "session current" : "session"}>
-            <button type="button" className="session-open" onClick={() => onOpen(s.id)}>
-              <span className="session-title">{s.title}</span>
-              <span className="session-meta">
-                {when(s.updatedAt)} · {s.messages} message{s.messages === 1 ? "" : "s"}
-              </span>
-            </button>
-            <button
-              type="button"
-              className="session-delete"
-              aria-label={`Delete ${s.title}`}
-              onClick={() => void remove(s.id)}
-            >
-              ×
-            </button>
-          </li>
-        ))}
-        {shown.length === 0 ? (
-          <li className="session-empty">
-            {filtering ? "No conversations in this project yet." : "Nothing saved yet."}
-          </li>
-        ) : null}
-      </ul>
+      {!open ? null : (
+        <>
+          <ul className="session-items">
+            {shown.map((s) => (
+              <li key={s.id} className={s.id === currentId ? "session current" : "session"}>
+                <button type="button" className="session-open" onClick={() => onOpen(s.id)}>
+                  <span className="session-title">{s.title}</span>
+                  <span className="session-meta">
+                    {when(s.updatedAt)} · {s.messages} message{s.messages === 1 ? "" : "s"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="session-delete"
+                  aria-label={`Delete ${s.title}`}
+                  onClick={() => void remove(s.id)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+            {shown.length === 0 ? (
+              <li className="session-empty">
+                {filtering ? "No conversations in this project yet." : "Nothing saved yet."}
+              </li>
+            ) : null}
+          </ul>
 
-      {filter ? (
-        <button type="button" className="session-scope" onClick={() => setAll((v) => !v)}>
-          {all ? `Only ${filter.name}` : "All conversations →"}
-        </button>
-      ) : null}
+          {filter ? (
+            <button type="button" className="session-scope" onClick={() => setAll((v) => !v)}>
+              {all ? `Only ${filter.name}` : "All conversations →"}
+            </button>
+          ) : null}
 
-      {sessions.length > 0 && !filtering ? (
-        confirming ? (
-          <div className="session-confirm">
-            <span>Delete all {sessions.length}?</span>
-            <button type="button" onClick={() => void removeAll()}>
-              Delete
-            </button>
-            <button type="button" onClick={() => setConfirming(false)}>
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <button type="button" className="session-delete-all" onClick={() => setConfirming(true)}>
-            Delete all
-          </button>
-        )
-      ) : null}
+          {sessions.length > 0 && !filtering ? (
+            confirming ? (
+              <div className="session-confirm">
+                <span>Delete all {sessions.length}?</span>
+                <button type="button" onClick={() => void removeAll()}>
+                  Delete
+                </button>
+                <button type="button" onClick={() => setConfirming(false)}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="session-delete-all" onClick={() => setConfirming(true)}>
+                Delete all
+              </button>
+            )
+          ) : null}
+        </>
+      )}
     </nav>
   );
 }
