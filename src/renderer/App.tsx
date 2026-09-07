@@ -447,6 +447,8 @@ export function App() {
             open={projectsOpen}
             count={projects.length}
             onToggle={toggleProjects}
+            onAdd={() => void makeProject()}
+            addLabel="New project"
           />
           {!projectsOpen ? null : (
             <>

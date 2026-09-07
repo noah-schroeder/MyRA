@@ -85,6 +85,8 @@ export function SessionList({
         open={open}
         count={shown.length}
         onToggle={toggle}
+        onAdd={onNew}
+        addLabel="New conversation"
       />
 
       {!open ? null : (
