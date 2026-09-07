@@ -155,6 +155,48 @@ export function parseModelRef(stored: string): ModelRef {
   return { providerId: stored.slice(0, at), model: stored.slice(at + QUALIFIER.length) };
 }
 
+/**
+ * What to call a provider on screen.
+ *
+ * The label the user typed wins whenever there is one. That is the whole reason
+ * the field exists: somebody who called their endpoint "Lab GPU box" should see
+ * "Lab GPU box", and a picker that quietly replaced it with `api.example.com`
+ * would be overruling them about their own setup.
+ *
+ * The host is the fallback for a provider that has an address but has not been
+ * named yet -- it is at least a true fact about where it points. The last
+ * resort is a plain word rather than the internal id, which is a slug Karen
+ * generated and nobody chose.
+ */
+export function providerName(provider: Pick<Provider, "label" | "baseUrl">): string {
+  const label = provider.label.trim();
+  if (label) return label;
+  try {
+    return new URL(provider.baseUrl).host || "Provider";
+  } catch {
+    /* Half-typed, or not a URL at all. Neither is worth an exception in a
+       function whose only job is to put a word on a tab. */
+    return "Provider";
+  }
+}
+
+/**
+ * Whether this provider is far enough along to offer in a picker.
+ *
+ * Named or addressed, and switched on. The bar used to require that models had
+ * already been fetched AND ticked, so a provider somebody had just added and
+ * named was simply absent from the picker with nothing to say why -- the one
+ * moment they are most likely to go looking for it. A provider with no models
+ * chosen is a provider that needs finishing, which the pane can say; a provider
+ * that is not there at all says nothing.
+ *
+ * The `enabled` switch is still honoured, because that switch exists to mean
+ * exactly this.
+ */
+export function providerIsStarted(provider: Provider): boolean {
+  return provider.enabled && Boolean(provider.label.trim() || provider.baseUrl.trim());
+}
+
 export function providerFor(providers: Provider[], stored: string): Provider | undefined {
   const { providerId } = parseModelRef(stored);
   if (!providerId) return undefined;
