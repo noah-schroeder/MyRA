@@ -1208,6 +1208,7 @@ body:has(.artifact-grip:active) { user-select: none; }
 .rail-nav-item.active svg { opacity: 1; }
 
 .rail-heading {
+  display: flex; align-items: center; gap: 2px;
   font-size: 10.5px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.07em; color: var(--text-faint);
   padding: 14px 4px 6px; margin: 0;
@@ -1216,7 +1217,7 @@ body:has(.artifact-grip:active) { user-select: none; }
 /* The heading is the fold control, so it has to look like something you press:
    the whole row, not just the triangle, which is a 9px target. */
 .rail-disclosure {
-  width: 100%; display: flex; align-items: center; gap: 6px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
   font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left;
   color: inherit; background: none; border: 0; cursor: pointer;
   padding: 3px 6px; border-radius: var(--radius-sm);
@@ -1231,6 +1232,18 @@ body:has(.artifact-grip:active) { user-select: none; }
   flex: none; font-size: 10px; font-weight: 500; letter-spacing: 0;
   color: var(--text-faint); font-variant-numeric: tabular-nums;
 }
+
+/* The folded section's "new" action. Sized to the heading rather than to a
+   toolbar: it is a 16px glyph sitting in a 10.5px row, so it needs its own
+   line-height or the row grows by three pixels when a section is folded. */
+.rail-add {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; line-height: 1;
+  font: inherit; font-size: 15px; font-weight: 400;
+  background: none; border: 0; border-radius: var(--radius-sm);
+  color: var(--text-faint); cursor: pointer;
+}
+.rail-add:hover { color: var(--accent-soft); background: color-mix(in srgb, var(--text) 6%, transparent); }
 
 /* Pushed to the bottom, outside the scrolling list above it.
    `flex: none` is not decoration: without it a long history shrinks this to

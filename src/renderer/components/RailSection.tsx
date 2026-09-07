@@ -12,18 +12,28 @@ import { useCallback, useState } from "react";
  *
  * A folded section shows its count. Otherwise collapsing hides work with no
  * sign that anything is there, which is how a fold turns into a lost file.
+ *
+ * It also keeps the section's one creating action, moved up beside the title:
+ * folding Projects away otherwise took "+ New project" with it, so starting a
+ * project meant unfolding the very list you had just decided you did not want
+ * to look at.
  */
 export function RailSection({
   label,
   open,
   count,
   onToggle,
+  onAdd,
+  addLabel,
 }: {
   label: string;
   open: boolean;
   /** Shown while folded, so nothing disappears silently. */
   count?: number;
   onToggle: () => void;
+  /** The section's own "new" action, offered inline while it is folded. */
+  onAdd?: () => void;
+  addLabel?: string;
 }) {
   return (
     <h2 className="rail-heading">
@@ -36,6 +46,20 @@ export function RailSection({
           <span className="rail-disclosure-count">{count}</span>
         ) : null}
       </button>
+      {/* A sibling of the disclosure, never a child of it: a button inside a
+          button is invalid, and the browser's repair puts the inner one
+          outside, which lands it in a different row entirely. */}
+      {!open && onAdd ? (
+        <button
+          type="button"
+          className="rail-add"
+          title={addLabel ?? "New"}
+          aria-label={addLabel ?? "New"}
+          onClick={onAdd}
+        >
+          +
+        </button>
+      ) : null}
     </h2>
   );
 }
