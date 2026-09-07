@@ -46,6 +46,14 @@ export interface PaperDeps {
    */
   llm: () => Promise<{ endpoint: EndpointSettings; apiKey?: string; label?: string }>;
   send: (channel: string, payload?: unknown) => void;
+  /**
+   * A paper has just been created, and here is its id.
+   *
+   * Injected rather than imported, because the module that files it also reads
+   * papers -- importing it here would be a cycle, and this module has
+   * deliberately never known that projects exist.
+   */
+  onCreated?: (ref: string) => void;
 }
 
 /** One frame of a draft in flight, as the page receives it. */
@@ -113,6 +121,21 @@ export async function listPapers(root: string): Promise<ReturnType<typeof summar
   return out.sort(byNewest);
 }
 
+/**
+ * Read one paper, or nothing if it cannot be read.
+ *
+ * Exported alongside the delete because a project needs both: it assembles a
+ * paper into the export folder and removes it when the project goes.
+ */
+export async function readPaperRecord(root: string, id: string): Promise<Paper | undefined> {
+  return await readPaper(root, id);
+}
+
+/** Remove one paper. The same call the page's own Delete makes. */
+export async function deletePaper(root: string, id: string): Promise<void> {
+  await rm(join(root, paperFileName(assertPaperId(id))), { force: true });
+}
+
 export function installPaperIpc(deps: PaperDeps): void {
   const { send } = deps;
   /* One draft at a time, deliberately. Two sections drafting at once on a local
@@ -131,7 +154,9 @@ export function installPaperIpc(deps: PaperDeps): void {
       kind: kind === "section" ? "section" : "paper",
       title: typeof title === "string" ? title : "",
     });
-    return { ok: true, paper: await savePaper(rootOf(deps), paper) };
+    const stored = await savePaper(rootOf(deps), paper);
+    deps.onCreated?.(stored.id);
+    return { ok: true, paper: stored };
   });
 
   ipcMain.handle("karen:paper-open", async (_e, id: unknown) => {
@@ -153,7 +178,7 @@ export function installPaperIpc(deps: PaperDeps): void {
   });
 
   ipcMain.handle("karen:paper-delete", async (_e, id: unknown) => {
-    await rm(join(rootOf(deps), paperFileName(assertPaperId(String(id)))), { force: true });
+    await deletePaper(rootOf(deps), String(id));
     return { ok: true, papers: await listPapers(rootOf(deps)) };
   });
 

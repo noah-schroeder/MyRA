@@ -18,6 +18,10 @@ import type { BrowseSort, HfModel, RepoDetail } from "../core/runtime/hfBrowse.t
 import type { PreparedCard } from "../core/runtime/modelCard.ts";
 import type { Owner } from "../core/runtime/modelOwner.ts";
 import type { Paper, PaperKind, PaperSummary } from "../core/papers/paper.ts";
+import type { Member, MemberKind, Project, ProjectSummary } from "../core/projects/project.ts";
+export type { Member, MemberKind, Project, ProjectSummary } from "../core/projects/project.ts";
+import type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
+export type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
 import type { DraftRequest } from "../core/papers/prompt.ts";
 export type { Paper, PaperKind, PaperSection, PaperSummary } from "../core/papers/paper.ts";
 export type { DraftRequest } from "../core/papers/prompt.ts";
@@ -178,6 +182,8 @@ export interface Settings {
   imagesRoot: string;
   /** Where the paper drafter keeps one file per paper. */
   papersRoot: string;
+  /** The project new work files itself into. Empty means none. */
+  activeProject: string;
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
   meetingInstructions: string;
@@ -685,6 +691,39 @@ export interface KarenApi {
   apiClearLog(): Promise<{ ok: boolean; entries: RequestRecord[] }>;
   onApi(cb: (state: ApiState) => void): () => void;
   onApiLog(cb: (entries: RequestRecord[]) => void): () => void;
+  /* ---- projects ---- */
+  projectList(): Promise<{ ok: boolean; projects: ProjectSummary[] }>;
+  projectCreate(name: string): Promise<{ ok: boolean; project?: Project }>;
+  projectRename(id: string, name: string): Promise<{ ok: boolean; error?: string }>;
+  projectOpen(id: string): Promise<{ ok: boolean; error?: string; detail?: ProjectDetail }>;
+  /** Everything in every store, each row naming the project it is already in. */
+  projectItems(): Promise<{
+    ok: boolean;
+    items: (ItemRow & { kind: MemberKind; project: string })[];
+  }>;
+  projectAdd(id: string, members: Member[]): Promise<{ ok: boolean; error?: string }>;
+  projectRemove(id: string, members: Member[]): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Delete a project. `contents` true takes the items with it.
+   *
+   * `report.failed` is not an error: one member can refuse — a research run
+   * written to seconds ago declines, because it looks like it is still going —
+   * without abandoning the rest.
+   */
+  projectDelete(
+    id: string,
+    contents: boolean,
+  ): Promise<{ ok: boolean; error?: string; report?: DeleteReport }>;
+  projectSetActive(id: string): Promise<{ ok: boolean; settings: Settings }>;
+  projectExport(id: string): Promise<{
+    ok: boolean;
+    error?: string;
+    path?: string;
+    counts?: { kind: MemberKind; count: number }[];
+  }>;
+  projectReveal(path: string): Promise<{ ok: boolean }>;
+  onProjects(cb: (projects: ProjectSummary[]) => void): () => void;
+
   /* ---- paper drafter ---- */
   paperList(): Promise<{ ok: boolean; papers: PaperSummary[] }>;
   paperCreate(kind: PaperKind, title: string): Promise<{ ok: boolean; paper?: Paper }>;

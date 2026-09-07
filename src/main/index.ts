@@ -56,6 +56,8 @@ import { installDictationIpc } from "./dictation.ts";
 import { installAudioIpc, resolveAudio } from "./audio.ts";
 import { installImageIpc } from "./images.ts";
 import { installPaperIpc } from "./papers.ts";
+import { defaultStores, installProjectIpc } from "./projects.ts";
+import { fileInActiveProject } from "./projectStore.ts";
 import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -627,6 +629,16 @@ async function handleSend(text: string): Promise<void> {
   } finally {
     conversation.messages = conversation.messages_.length;
     await saveSession(conversation).catch(() => {});
+    /*
+     * Filed here rather than when the session id was minted.
+     *
+     * A conversation with no messages has no file on disk, so a project filing
+     * one at creation held a member that the next read -- correctly -- pruned
+     * as deleted. This is the first moment the conversation exists as anything
+     * a project could contain. Repeating on every turn is free: adding a member
+     * that is already there changes nothing and writes nothing.
+     */
+    void fileInActiveProject(config, "chat", conversation.id);
     inFlight = undefined;
   }
 }
@@ -1591,6 +1603,7 @@ async function main(): Promise<void> {
     },
     onProgress: (note) => send("karen:research-progress", note),
     onStage: (stage) => send("karen:research-stage", stage),
+    onRunCreated: (id) => void fileInActiveProject(config, "run", id),
   });
 
   /*
@@ -1862,6 +1875,7 @@ async function main(): Promise<void> {
     config,
     send,
     llm: resolveLlm,
+    onCreated: (ref) => void fileInActiveProject(config, "meeting", ref),
     /* Not started for a meeting stage. Transcribing is background work, and an
        inference engine coming up because a stage ran is a surprise; dictation
        makes the opposite call because somebody is holding the microphone. */
@@ -1880,11 +1894,20 @@ async function main(): Promise<void> {
   });
   installDictationIpc({ config, vault, runtime, send });
   installAudioIpc({ config, vault, runtime, send });
-  installImageIpc({ config, vault, runtime, send });
+  installImageIpc({
+    config, vault, runtime, send,
+    onCreated: (ref) => void fileInActiveProject(config, "image", ref),
+  });
   /* The same resolver chat and meetings take, so the paper drafter always
      writes with whatever the model bar names and configures nothing of its
      own. */
-  installPaperIpc({ config, send, llm: resolveLlm });
+  installPaperIpc({
+    config, send, llm: resolveLlm,
+    onCreated: (ref) => void fileInActiveProject(config, "paper", ref),
+  });
+  /* Last of the five, because it reads all of them: a project is an index over
+     the other stores rather than a store of its own. */
+  installProjectIpc({ config, send, stores: defaultStores(config) });
 
   createWindow();
   setPdfRenderer(installPdfRenderer());

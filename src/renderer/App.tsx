@@ -30,12 +30,15 @@ import { useHandsFree } from "./useHandsFree.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
 import { ImagePage } from "./components/ImagePage.tsx";
 import { PaperDrafter } from "./components/PaperDrafter.tsx";
+import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
-import type { CitedSource, PromptRequest, RuntimeState, Settings } from "./types.ts";
+import type {
+  CitedSource, MemberKind, ProjectSummary, PromptRequest, RuntimeState, Settings,
+} from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "api";
+type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "projects" | "api";
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
@@ -79,6 +82,19 @@ export function App() {
   const [lookup, setLookup] = useState(false);
   const search = useLookup();
   const [sessionsKey, setSessionsKey] = useState(0);
+  /*
+   * Projects: the rail's list, and which one is open on screen.
+   *
+   * Which one is ACTIVE is a setting rather than state here, because the main
+   * process is what acts on it -- a conversation, a paper, a meeting, an image
+   * and a research run are all created down there and each files itself. This
+   * only decides what is drawn.
+   */
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [openProject, setOpenProject] = useState<string | undefined>();
+  /* The active project's conversations, so the rail can show its history
+     rather than everything. Re-read whenever it or the session list changes. */
+  const [projectChats, setProjectChats] = useState<Set<string>>(new Set());
   const bottom = useRef<HTMLDivElement>(null);
 
   /*
@@ -103,6 +119,36 @@ export function App() {
     void enumerate().catch(() => undefined);
     return stop;
   }, []);
+
+  const activeProject = settings?.activeProject ?? "";
+
+  const refreshProjects = useCallback(() => {
+    void window.karen.projectList().then((r) => setProjects(r.projects ?? []));
+  }, []);
+
+  useEffect(() => {
+    refreshProjects();
+    return window.karen.onProjects(setProjects);
+  }, [refreshProjects]);
+
+  /* Which conversations belong to the project being worked in. Keyed on the
+     session list too: a conversation started a moment ago files itself in the
+     main process, and the rail has to hear about it without being told. */
+  useEffect(() => {
+    if (!activeProject) {
+      setProjectChats(new Set());
+      return;
+    }
+    void window.karen.projectOpen(activeProject).then((r) => {
+      setProjectChats(
+        new Set(
+          (r.detail?.project.members ?? [])
+            .filter((m) => m.kind === "chat")
+            .map((m) => m.ref),
+        ),
+      );
+    });
+  }, [activeProject, sessionsKey, projects]);
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   /* What the daemon is holding, for the three pickers in the bar above: each
@@ -260,6 +306,35 @@ export function App() {
     startFresh();
   };
 
+  const projectName = projects.find((p) => p.id === activeProject)?.name ?? "";
+
+  /**
+   * Open a project, and work in it.
+   *
+   * Deliberately one action. Two -- "look at this" and "work in this" -- would
+   * be a checkbox nobody ticks, and then the automatic filing would fire for a
+   * project the user does not think they are in, which is worse than not
+   * filing at all.
+   */
+  const chooseProject = async (id: string): Promise<void> => {
+    setSettings((await window.karen.projectSetActive(id)).settings);
+    if (!id) {
+      setOpenProject(undefined);
+      toChat();
+      return;
+    }
+    setOpenProject(id);
+    setPage("projects");
+    setLookup(false);
+  };
+
+  const makeProject = async (): Promise<void> => {
+    const result = await window.karen.projectCreate("Untitled project");
+    if (!result.project) return;
+    refreshProjects();
+    await chooseProject(result.project.id);
+  };
+
   /** Whatever page you were on, a conversation is what you asked for. */
   const toChat = (): void => {
     setPage("chat");
@@ -356,11 +431,54 @@ export function App() {
           />
         </nav>
 
+        {/*
+          * Projects sit above the conversations, because they contain them.
+          *
+          * Opening one makes it active. That is one concept rather than two --
+          * you are IN the folder, the way a file manager means it -- and it is
+          * what makes the automatic filing predictable: the project you are
+          * looking at is the project your next conversation lands in.
+          */}
+        <nav className="rail-projects" aria-label="Projects">
+          <h2 className="rail-heading">Projects</h2>
+          <ul className="project-items">
+            <li>
+              <button
+                type="button"
+                className={activeProject ? "project-item" : "project-item current"}
+                onClick={() => void chooseProject("")}
+              >
+                <span className="project-item-name">No project</span>
+              </button>
+            </li>
+            {projects.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className={p.id === activeProject ? "project-item current" : "project-item"}
+                  onClick={() => void chooseProject(p.id)}
+                  title={`${p.items} ${p.items === 1 ? "item" : "items"}`}
+                >
+                  <span className="project-item-name">{p.name}</span>
+                  <span className="project-item-count">{p.items}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="project-new" onClick={() => void makeProject()}>
+            + New project
+          </button>
+        </nav>
+
         <SessionList
           {...(sessionId ? { currentId: sessionId } : {})}
           onOpen={(id) => void openSession(id)}
           onNew={() => void newSession()}
           refreshKey={sessionsKey}
+          onChanged={refreshProjects}
+          {...(activeProject && projectName
+            ? { filter: { name: projectName, refs: projectChats } }
+            : {})}
         />
 
         <div className="rail-foot">
@@ -444,6 +562,18 @@ export function App() {
         ) : null}
         {page === "images" && settings ? (
           <ImagePage settings={settings} onSettingsChange={setSettings} onClose={toChat} />
+        ) : null}
+        {page === "projects" && openProject ? (
+          <ProjectsPage
+            id={openProject}
+            active={openProject === activeProject}
+            onClose={toChat}
+            onOpenChat={(ref) => void openSession(ref)}
+            onGoTo={(kind: MemberKind) =>
+              setPage(kind === "meeting" ? "meetings" : kind === "run" ? "runs" : kind === "paper" ? "papers" : "images")
+            }
+            onChanged={refreshProjects}
+          />
         ) : null}
         {page === "papers" ? (
           <PaperDrafter onClose={toChat} dictation={dictation} sink={dictationSink} />
