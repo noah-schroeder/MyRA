@@ -17,6 +17,12 @@ import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
 import type { BrowseSort, HfModel, RepoDetail } from "../core/runtime/hfBrowse.ts";
 import type { PreparedCard } from "../core/runtime/modelCard.ts";
 import type { Owner } from "../core/runtime/modelOwner.ts";
+import type { Paper, PaperKind, PaperSummary } from "../core/papers/paper.ts";
+import type { DraftRequest } from "../core/papers/prompt.ts";
+export type { Paper, PaperKind, PaperSection, PaperSummary } from "../core/papers/paper.ts";
+export type { DraftRequest } from "../core/papers/prompt.ts";
+import type { PaperDelta } from "../main/papers.ts";
+export type { PaperDelta } from "../main/papers.ts";
 import type { PullProgress } from "../core/runtime/systemInfo.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 import type { ReasoningDialect } from "../core/llm/reasoningDialect.ts";
@@ -170,6 +176,8 @@ export interface Settings {
   meetingsRoot: string;
   /** Where generated images and their sidecars are kept. */
   imagesRoot: string;
+  /** Where the paper drafter keeps one file per paper. */
+  papersRoot: string;
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
   meetingInstructions: string;
@@ -677,6 +685,27 @@ export interface KarenApi {
   apiClearLog(): Promise<{ ok: boolean; entries: RequestRecord[] }>;
   onApi(cb: (state: ApiState) => void): () => void;
   onApiLog(cb: (entries: RequestRecord[]) => void): () => void;
+  /* ---- paper drafter ---- */
+  paperList(): Promise<{ ok: boolean; papers: PaperSummary[] }>;
+  paperCreate(kind: PaperKind, title: string): Promise<{ ok: boolean; paper?: Paper }>;
+  paperOpen(id: string): Promise<{ ok: boolean; error?: string; paper?: Paper }>;
+  paperSave(paper: Paper): Promise<{ ok: boolean; error?: string; updatedAt?: string }>;
+  paperDelete(id: string): Promise<{ ok: boolean; papers?: PaperSummary[] }>;
+  /**
+   * Draft or refine one section.
+   *
+   * `invented` is citation-shaped text the model produced despite being told it
+   * has no sources. Reported, never removed: a stripped marker leaves the
+   * sentence reading as the author's own established fact.
+   */
+  paperDraft(
+    sectionId: string,
+    request: DraftRequest,
+  ): Promise<{ ok: boolean; error?: string; text?: string; invented?: string[] }>;
+  paperCancel(): Promise<{ ok: boolean }>;
+  paperExport(id: string, format: string): Promise<{ ok: boolean; error?: string; path?: string }>;
+  paperReveal(path: string): Promise<{ ok: boolean }>;
+  onPaperDelta(cb: (d: PaperDelta) => void): () => void;
   onRuntime(cb: (state: RuntimeState) => void): () => void;
   onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
 

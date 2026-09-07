@@ -55,6 +55,7 @@ import { installMeetingIpc } from "./meetings.ts";
 import { installDictationIpc } from "./dictation.ts";
 import { installAudioIpc, resolveAudio } from "./audio.ts";
 import { installImageIpc } from "./images.ts";
+import { installPaperIpc } from "./papers.ts";
 import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -1880,6 +1881,10 @@ async function main(): Promise<void> {
   installDictationIpc({ config, vault, runtime, send });
   installAudioIpc({ config, vault, runtime, send });
   installImageIpc({ config, vault, runtime, send });
+  /* The same resolver chat and meetings take, so the paper drafter always
+     writes with whatever the model bar names and configures nothing of its
+     own. */
+  installPaperIpc({ config, send, llm: resolveLlm });
 
   createWindow();
   setPdfRenderer(installPdfRenderer());

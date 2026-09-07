@@ -173,6 +173,8 @@ export interface Settings {
   meetingsRoot: string;
   /** On the host: where generated images and their sidecars are kept. */
   imagesRoot: string;
+  /** On the host: where the paper drafter keeps one JSON per paper. */
+  papersRoot: string;
   /** Vault-relative directory the meeting notes are filed in. */
   meetingReportDir: string;
   /**
@@ -348,6 +350,7 @@ export const DEFAULT_SETTINGS: Settings = {
   deleteRawAudioAfterTranscription: false,
   meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
   imagesRoot: join(homedir(), "Documents", "karen", "images"),
+  papersRoot: join(homedir(), "Documents", "karen", "papers"),
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
   meetingInstructions: "",

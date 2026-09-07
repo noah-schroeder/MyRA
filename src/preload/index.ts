@@ -97,6 +97,26 @@ const api = {
   imageReveal: (id: string) => ipcRenderer.invoke("karen:image-reveal", id),
   imageSaveCopy: (id: string) => ipcRenderer.invoke("karen:image-save-copy", id),
   imageFolder: () => ipcRenderer.invoke("karen:image-folder"),
+  /* ---- paper drafter ----
+   * Notes in, first-draft prose out, one section at a time. No endpoint and no
+   * key of its own: it writes with whatever model the bar names. */
+  paperList: () => ipcRenderer.invoke("karen:paper-list"),
+  paperCreate: (kind: "paper" | "section", title: string) =>
+    ipcRenderer.invoke("karen:paper-create", kind, title),
+  paperOpen: (id: string) => ipcRenderer.invoke("karen:paper-open", id),
+  paperSave: (paper: unknown) => ipcRenderer.invoke("karen:paper-save", paper),
+  paperDelete: (id: string) => ipcRenderer.invoke("karen:paper-delete", id),
+  /* The request is built in the window and sent whole, so the preview dialog
+     renders the very object that goes to the model rather than a copy of the
+     rules it was built from. */
+  paperDraft: (sectionId: string, request: unknown) =>
+    ipcRenderer.invoke("karen:paper-draft", sectionId, request),
+  paperCancel: () => ipcRenderer.invoke("karen:paper-cancel"),
+  paperExport: (id: string, format: string) =>
+    ipcRenderer.invoke("karen:paper-export", id, format),
+  paperReveal: (path: string) => ipcRenderer.invoke("karen:paper-reveal", path),
+  onPaperDelta: (cb: (d: unknown) => void) => on("karen:paper-delta", cb),
+
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
     ipcRenderer.invoke("karen:provider-models", opts),
   providerReasoning: (opts: { baseUrl: string; id?: string; model: string; apiKey?: string }) =>
