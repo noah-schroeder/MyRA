@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "./Markdown.tsx";
 import { CopyButton } from "./CopyButton.tsx";
+import { Reasoning } from "./Reasoning.tsx";
 import {
   buildSystem, buildUser, requestsFor, studyTypeById, type ReviewRequest,
 } from "../../core/review/prompt.ts";
@@ -60,6 +61,17 @@ export function PeerReview({
      "working" for the whole of it is a page that looks stuck. */
   const [live, setLive] = useState<{ label: string; index: number; total: number } | undefined>();
   const [draft, setDraft] = useState("");
+  /*
+   * The model's reasoning, kept apart from its report.
+   *
+   * Shown while it happens, never saved: the review that is assembled and
+   * copied is built in main from the answer alone, which is the rule the whole
+   * app follows about reasoning. Dropping it on the floor, which is what this
+   * page used to do, left a heading above an empty box for as long as the
+   * model thought -- and on a local model that is most of the wait, so the
+   * page was indistinguishable from a run that had died.
+   */
+  const [thinking, setThinking] = useState("");
   const [running, setRunning] = useState(false);
   const [contextTokens, setContextTokens] = useState<number | undefined>();
   const [showPrompt, setShowPrompt] = useState(false);
@@ -89,13 +101,21 @@ export function PeerReview({
       window.karen.onReviewDelta((d) => {
         if (d.kind === "reviewer") {
           setLive({ label: d.label ?? "", index: d.index, total: d.total ?? 0 });
+          /* Both, because the next reviewer starts from nothing: leaving the
+             previous one's reasoning on screen would attribute it to this one. */
           setDraft("");
+          setThinking("");
           return;
         }
-        /* Only the answer. A model that thinks out loud is doing so about
-           somebody else's paper, and its reasoning is not the review. */
-        if (d.kind !== "text") return;
-        setDraft((prev) => (d.reset ? "" : prev + d.text));
+        /* A retry has already streamed part of a report into the page; its
+           second attempt starts over rather than appending to the first. */
+        if (d.reset) {
+          setDraft("");
+          setThinking("");
+          return;
+        }
+        if (d.kind === "thinking") setThinking((prev) => prev + d.text);
+        else if (d.kind === "text") setDraft((prev) => prev + d.text);
       }),
     [],
   );
@@ -154,11 +174,13 @@ export function PeerReview({
     setReview("");
     setInvented([]);
     setDraft("");
+    setThinking("");
     setRunning(true);
     const result = await window.karen.reviewRun(requests, title);
     setRunning(false);
     setLive(undefined);
     setDraft("");
+    setThinking("");
     if (!result.ok) setError(result.error ?? "The review failed.");
     else if (result.text) {
       setReview(result.text);
@@ -355,9 +377,15 @@ export function PeerReview({
             <p className="review-live-head">
               Writing {live.index + 1} of {live.total} · {live.label}
             </p>
+            {/* Collapsed, with a live tail in its header until the report
+                starts. `streaming` is tied to the report rather than to the
+                run: once prose is arriving the thinking is finished, and the
+                block settles into a word count instead of a moving tail
+                competing with the text below it. */}
+            {thinking ? <Reasoning text={thinking} streaming={!draft} /> : null}
             {/* The text as it arrives, so a long report is visibly progressing
                 rather than a spinner with nothing behind it. */}
-            <pre className="review-live-text">{draft.slice(-1400)}</pre>
+            {draft ? <pre className="review-live-text">{draft.slice(-1400)}</pre> : null}
           </section>
         ) : null}
 
