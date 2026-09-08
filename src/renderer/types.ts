@@ -661,7 +661,8 @@ export interface KarenApi {
     title?: string;
     words?: number;
   }>;
-  reviewContext(): Promise<{ ok: boolean; error?: string; contextTokens?: number; label?: string }>;
+  /** The window of the model that would answer. Asking never loads one. */
+  reviewContext(): Promise<{ ok: boolean; error?: string; contextTokens?: number }>;
   reviewRun(
     requests: ReviewRequest[],
     title: string,

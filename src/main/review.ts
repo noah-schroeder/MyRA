@@ -28,7 +28,9 @@ import { citationsIn } from "../core/documents/draft.ts";
 import { pdfToText } from "../core/research/pdf.ts";
 import { engines, readAsText } from "../core/documents/office.ts";
 import { OWNER_ONLY_FILE } from "../core/paths.ts";
-import { titleFromFileName, titleOf, wordCount } from "../core/review/manuscript.ts";
+import {
+  fitsContext, titleFromFileName, titleOf, tooLongMessage, wordCount,
+} from "../core/review/manuscript.ts";
 import {
   assembleReview, buildSystem, buildUser, type ReviewRequest,
 } from "../core/review/prompt.ts";
@@ -165,19 +167,22 @@ export function installReviewIpc(deps: ReviewDeps): void {
    * Asked separately rather than folded into the review call, because the
    * answer decides whether the button is a button at all -- and it changes when
    * the user loads a different model, without the manuscript changing.
+   *
+   * A QUESTION, and it must not behave like a request. It used to resolve the
+   * endpoint the way a real turn does, and resolving calls `ensureChatModel`,
+   * which loads the chosen model back in when nothing is resident. The page
+   * re-asks whenever the runtime changes, and a model going away IS a runtime
+   * change -- so unloading the model while this page was open loaded it
+   * straight back, about a second later, and the model it brought back was
+   * then loaded everywhere else too. The card was never actually freed.
+   *
+   * The window is read off the runtime instead, which is where the
+   * conversation's own context meter reads it, so the two cannot disagree
+   * about whether a manuscript fits. Nothing here starts anything.
    */
-  ipcMain.handle("karen:review-context", async () => {
-    try {
-      const resolved = await deps.llm();
-      const limit = deps.contextTokens();
-      return {
-        ok: true,
-        ...(limit ? { contextTokens: limit } : {}),
-        label: resolved.label ?? "",
-      };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
+  ipcMain.handle("karen:review-context", () => {
+    const limit = deps.contextTokens();
+    return { ok: true, ...(limit ? { contextTokens: limit } : {}) };
   });
 
   /**
@@ -239,6 +244,21 @@ export function installReviewIpc(deps: ReviewDeps): void {
     const reports: { label: string; text: string }[] = [];
     try {
       const resolved = await deps.llm();
+      /*
+       * The fit, checked again here, because THIS is the first moment the
+       * window is known.
+       *
+       * The page checks too, and that check is the one that greys the button
+       * -- but it can only measure against a model that is already loaded, and
+       * with nothing loaded there is no number to measure against until the
+       * resolver above has loaded one. Without this, a manuscript dropped onto
+       * a page with no model resident would be sent whole to a window it does
+       * not fit, and come back as a review that is fluent about the
+       * introduction and silent on the results. Refusing is the entire point
+       * of measuring; the message is the same one the page shows.
+       */
+      const fit = fitsContext(requests, deps.contextTokens());
+      if (!fit.fits) return { ok: false, error: tooLongMessage(fit) };
       for (const [index, request] of requests.entries()) {
         /* Announced before the call rather than after it: a reviewer that takes
            four minutes is four minutes of nothing happening, and the panel is
