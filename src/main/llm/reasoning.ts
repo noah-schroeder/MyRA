@@ -24,7 +24,7 @@
 
 import { dialectForHost, type ReasoningDialect } from "../../core/llm/reasoningDialect.ts";
 import {
-  alwaysThinks, applyTemplateUrl, findTemplateSwitch, PROBE_MESSAGES,
+  alwaysThinks, applyTemplateUrl, findTemplateSwitches, PROBE_MESSAGES,
 } from "../../core/llm/templateProbe.ts";
 import type { LoadedModel } from "../../core/runtime/lemonade.ts";
 import type { Provider } from "../../core/providers.ts";
@@ -49,8 +49,15 @@ export type NoControl =
   | "unknown";
 
 export interface ReasoningCapability {
-  /** The control to draw, or nothing when there is none to draw. */
-  dialect?: ReasoningDialect | undefined;
+  /**
+   * The controls to draw, in the order they should appear.
+   *
+   * A list because a model can answer two questions at once: a Qwen3 template
+   * reads `enable_thinking` and `reasoning_effort` both, and reporting one
+   * dialect meant the effort control never appeared on the models that have
+   * one. Empty is the ordinary "nothing to draw" case, and `reason` says why.
+   */
+  dialects: ReasoningDialect[];
   reason?: NoControl | undefined;
   /**
    * Why there is no control, when there is none.
@@ -102,6 +109,7 @@ export async function localCapability(loaded: LoadedModel): Promise<ReasoningCap
   const url = loaded.backendUrl ? applyTemplateUrl(loaded.backendUrl) : undefined;
   if (!url) {
     return {
+      dialects: [],
       reason: "unknown",
       note: "Karen cannot see this model's template, so it cannot say what it accepts.",
     };
@@ -112,20 +120,26 @@ export async function localCapability(loaded: LoadedModel): Promise<ReasoningCap
     /* Not cached. The server may simply not be up yet, and remembering "no"
        from a moment when nothing could answer would outlive the reason. */
     return {
+      dialects: [],
       reason: "unchecked",
       note: "The model's engine did not answer, so this could not be checked.",
     };
   }
 
-  const dialect = await findTemplateSwitch((body) => renderWith(url, body));
-  const answer: ReasoningCapability = dialect
-    ? { dialect }
+  const dialects = await findTemplateSwitches((body) => renderWith(url, body));
+  const answer: ReasoningCapability = dialects.length
+    ? { dialects }
     : alwaysThinks(baseline)
       ? {
+          dialects: [],
           reason: "always",
           note: "This model thinks on every turn and its template has no setting to stop it.",
         }
-      : { reason: "none", note: "This model's template has no setting for thinking." };
+      : {
+          dialects: [],
+          reason: "none",
+          note: "This model's template has no setting for thinking.",
+        };
   cache.set(loaded.id, answer);
   return answer;
 }
@@ -142,12 +156,14 @@ export function hostedCapability(provider: Provider): ReasoningCapability {
   const dialect = dialectForHost(provider.baseUrl);
   if (!dialect) {
     return {
+      dialects: [],
       reason: "unknown",
       note: "Karen does not know what this endpoint calls its thinking setting.",
     };
   }
   if (provider.reasoningParam !== dialect.id) {
     return {
+      dialects: [],
       reason: "unchecked",
       note:
         `${provider.label} documents a “${dialect.param}” setting. Karen has not checked that ` +
@@ -155,7 +171,7 @@ export function hostedCapability(provider: Provider): ReasoningCapability {
         "control appears here if it does.",
     };
   }
-  return { dialect };
+  return { dialects: [dialect] };
 }
 
 /**
@@ -167,6 +183,6 @@ export function hostedCapability(provider: Provider): ReasoningCapability {
  * `localCapability` has answered, so a choice cannot exist for a model whose
  * capability was never cached.
  */
-export function cachedLocalDialect(model: string): ReasoningDialect | undefined {
-  return cache.get(model)?.dialect;
+export function cachedLocalDialects(model: string): ReasoningDialect[] {
+  return cache.get(model)?.dialects ?? [];
 }

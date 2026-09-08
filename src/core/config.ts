@@ -33,11 +33,37 @@ function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
  * settings file edited by hand should not be a way to put an arbitrary
  * structure into one.
  */
-function parseReasoningByModel(raw: unknown): Record<string, string> {
+/**
+ * Where a choice made before dialects were plural is kept.
+ *
+ * An older build stored one level per model, because a model was found to read
+ * one switch. Such a value is filed under this key and read as a fallback for
+ * every dialect the model turns out to have, which cannot land on the wrong
+ * one: `reasoningFields` drops a value its dialect does not list, and no two
+ * dialects Karen knows share a value. The first time the control is touched an
+ * ordinary entry is written and this stops being consulted.
+ */
+export const LEGACY_REASONING = "";
+
+function parseReasoningByModel(raw: unknown): Record<string, Record<string, string>> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out: Record<string, string> = {};
+  const out: Record<string, Record<string, string>> = {};
   for (const [model, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string" && value && value.length <= 32) out[model] = value;
+    if (typeof value === "string") {
+      if (value && value.length <= 32) out[model] = { [LEGACY_REASONING]: value };
+      continue;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const levels: Record<string, string> = {};
+    for (const [dialect, level] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof level === "string" && level && level.length <= 32 && dialect.length <= 64) {
+        levels[dialect] = level;
+      }
+    }
+    /* A model with nothing left chosen loses its entry rather than keeping an
+       empty one, so clearing every level is expressible and does not leave a
+       row behind that a later reader has to interpret. */
+    if (Object.keys(levels).length) out[model] = levels;
   }
   return out;
 }
@@ -261,8 +287,12 @@ export interface Settings {
    * global setting would carry a value from one endpoint to another where it
    * is not a value at all. Anything that no longer matches the model's dialect
    * is dropped on read rather than sent.
+   *
+   * Keyed by dialect underneath, because one model can read two switches at
+   * once -- whether to think, and how hard -- and a single value per model
+   * could only ever record whichever of them was touched last.
    */
-  reasoning: Record<string, string>;
+  reasoning: Record<string, Record<string, string>>;
 }
 
 export const DEFAULT_AUDIO: AudioSettings = {

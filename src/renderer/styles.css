@@ -1702,6 +1702,12 @@ body:has(.artifact-grip:active) { user-select: none; }
  * and this control is not about egress at all -- borrowing either hue would
  * make it look like a privacy boundary that it is not.
  */
+/* Side by side, not stacked. A model that reads both switches would otherwise
+   double the composer's height for a control most models do not have; wrapping
+   is the fallback on a narrow window rather than the layout. */
+.reasoning-stack {
+  display: flex; align-items: flex-end; flex-wrap: wrap; gap: 4px 8px; min-width: 0;
+}
 .reasoning-bar { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-left: 4px; }
 /* Monospace because it is not a label for a field, it IS the field: what is
    printed here is the key that goes on the wire. */
