@@ -13,6 +13,22 @@ asarUnpack:
   - "**/*.node"
 linux:
   target: [deb]
+  # poppler-utils supplies `pdftotext`, which is how Karen reads a PDF -- the
+  # research pipeline's full texts and, now, a manuscript dropped on the peer
+  # review page. It was never declared, so on a machine without it the failure
+  # was a PDF that produced nothing, with a message about installing a package
+  # the user had no reason to have heard of.
+  deb:
+    depends:
+      - libgtk-3-0
+      - libnotify4
+      - libnss3
+      - libxss1
+      - libxtst6
+      - xdg-utils
+      - libatspi2.0-0
+      - libsecret-1-0
+      - poppler-utils
   icon: build/icons
   # Semicolon-separated: electron-builder writes this straight into
   # Categories=, and the desktop.entry override does not reach that field.

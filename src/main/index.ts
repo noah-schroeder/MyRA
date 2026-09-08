@@ -56,6 +56,7 @@ import { installDictationIpc } from "./dictation.ts";
 import { installAudioIpc, resolveAudio } from "./audio.ts";
 import { installImageIpc } from "./images.ts";
 import { installPaperIpc } from "./papers.ts";
+import { installReviewIpc } from "./review.ts";
 import { defaultStores, installProjectIpc } from "./projects.ts";
 import { fileInActiveProject } from "./projectStore.ts";
 import { explainModelFailure } from "./models.ts";
@@ -1960,6 +1961,13 @@ async function main(): Promise<void> {
   installPaperIpc({
     config, send, llm: resolveLlm,
     onCreated: (ref) => void fileInActiveProject(config, "paper", ref),
+  });
+  installReviewIpc({
+    config, send, llm: resolveLlm,
+    /* The window the daemon actually loaded the model with, which is the same
+       figure the conversation's context meter reads. A hosted model reports
+       none, and the reviewer then does not refuse on a number it does not have. */
+    contextTokens: () => runtime.chatEndpoint()?.contextTokens,
   });
   /* Last of the five, because it reads all of them: a project is an index over
      the other stores rather than a store of its own. */

@@ -9,6 +9,7 @@ import { EndpointField } from "./EndpointField.tsx";
 import { voicesFor } from "../../core/audio/voices.ts";
 import { engineStates, runnable, type Runnable } from "../../core/runtime/runnable.ts";
 import { modelIdOf } from "../../core/audio/models.ts";
+import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES } from "../../core/review/prompt.ts";
 
 /**
  * Everything configurable, in one place.
@@ -21,7 +22,7 @@ import { modelIdOf } from "../../core/audio/models.ts";
 
 type Tab =
   | "providers" | "runtime" | "library" | "storage" | "audio" | "appearance"
-  | "permissions" | "about";
+  | "permissions" | "review" | "about";
 
 /*
  * There was an "Endpoints" tab here, and Providers replaced it.
@@ -44,6 +45,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "audio", label: "Audio" },
   { id: "appearance", label: "Appearance" },
   { id: "permissions", label: "Permissions" },
+  { id: "review", label: "Peer review" },
   { id: "about", label: "About" },
 ];
 
@@ -113,9 +115,89 @@ export function SettingsModal({
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}
           {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
+          {tab === "review" ? <Review settings={settings} patch={patch} /> : null}
           {tab === "about" ? <About /> : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- peer review */
+
+/**
+ * The reviewer's own standards, set up once.
+ *
+ * Editable in full, unlike the paper drafter's prompt, and that is a deliberate
+ * difference rather than an inconsistency. The drafter's rules protect a reader
+ * from a fabricated citation in a document that will carry the author's name;
+ * they are not the author's to relax. A review is the reviewer's own writing
+ * and their own judgement, journals ask for different things, and a reviewer
+ * who cannot change the wording will paste it into something else instead.
+ *
+ * What the defaults still carry is the rule about not inventing literature,
+ * stated in the text where it can be read rather than hidden where it cannot be
+ * removed.
+ */
+function Review({
+  settings,
+  patch,
+}: {
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  const types = settings.reviewStudyTypes ?? [];
+
+  const setType = (id: string, guidance: string): void => {
+    void patch({
+      reviewStudyTypes: types.map((t) => (t.id === id ? { ...t, guidance } : t)),
+    });
+  };
+
+  return (
+    <div className="pane">
+      <p className="pane-note">
+        What Karen tells the model when it reviews a manuscript. The base instructions are sent
+        every time; the block for the study design you pick on the Peer review page is added to
+        them, and anything you type into that page is added after both.
+      </p>
+
+      <label className="field">
+        <span className="field-label">Base instructions</span>
+        <textarea
+          rows={14}
+          value={settings.reviewPrompt}
+          onChange={(e) => void patch({ reviewPrompt: e.target.value })}
+        />
+      </label>
+      <p className="pane-note">
+        Karen has not searched for anything at this point, so any reference the model produces
+        here would be invented. The default text says so; if you rewrite it, keep that.
+      </p>
+
+      {types.map((t) => (
+        <label className="field" key={t.id}>
+          <span className="field-label">{t.label}</span>
+          <textarea
+            rows={8}
+            value={t.guidance}
+            onChange={(e) => setType(t.id, e.target.value)}
+          />
+        </label>
+      ))}
+
+      <button
+        type="button"
+        className="ghost"
+        onClick={() =>
+          void patch({
+            reviewPrompt: DEFAULT_REVIEW_PROMPT,
+            reviewStudyTypes: DEFAULT_STUDY_TYPES.map((t) => ({ ...t })),
+          })
+        }
+      >
+        Restore the defaults
+      </button>
     </div>
   );
 }

@@ -184,6 +184,9 @@ export interface Settings {
   papersRoot: string;
   /** The project new work files itself into. Empty means none. */
   activeProject: string;
+  /** The peer reviewer's instructions, and one block per study design. */
+  reviewPrompt: string;
+  reviewStudyTypes: StudyType[];
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
   meetingInstructions: string;
@@ -414,6 +417,8 @@ export interface PromptRequest {
 
 export type { Download } from "../core/downloads/download.ts";
 import type { Download } from "../core/downloads/download.ts";
+export type { ReviewRequest, StudyType } from "../core/review/prompt.ts";
+import type { ReviewRequest, StudyType } from "../core/review/prompt.ts";
 
 /** The research run executing right now, reported whatever page is showing. */
 export interface ActiveRun {
@@ -643,6 +648,29 @@ export interface KarenApi {
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
   /** Live progress for the download in flight; returns an unsubscribe. */
   onPullProgress(fn: (p: PullProgress & { name: string }) => void): () => void;
+  reviewExtract(
+    name: string,
+    bytes: ArrayBuffer,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    needsPandoc?: boolean;
+    text?: string;
+    title?: string;
+    words?: number;
+  }>;
+  reviewContext(): Promise<{ ok: boolean; error?: string; contextTokens?: number; label?: string }>;
+  reviewRun(
+    request: ReviewRequest,
+  ): Promise<{ ok: boolean; error?: string; text?: string; invented?: string[] }>;
+  reviewCancel(): Promise<{ ok: boolean }>;
+  reviewSave(
+    name: string,
+    text: string,
+  ): Promise<{ ok: boolean; error?: string; saved?: boolean; path?: string }>;
+  onReviewDelta(
+    fn: (d: { kind: "text" | "thinking"; text: string; reset?: boolean }) => void,
+  ): () => void;
   downloadsList(): Promise<Download[]>;
   downloadPause(id: string): Promise<{ ok: boolean }>;
   downloadResume(id: string): Promise<{ ok: boolean }>;

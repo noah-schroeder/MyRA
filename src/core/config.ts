@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import type { PermissionMode } from "./policy.ts";
 import { effectiveKind, parseProviders, type Provider } from "./providers.ts";
 import { parseSampling, type Sampling } from "./llm/sampling.ts";
+import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES, type StudyType } from "./review/prompt.ts";
 
 /** Per-model sampler settings, each rebuilt field by field on the way in. */
 function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
@@ -184,6 +185,17 @@ export interface Settings {
    * moment it comes into existence.
    */
   activeProject: string;
+  /**
+   * The peer reviewer's own instructions, and one block per study design.
+   *
+   * Editable, unlike the paper drafter's prompt, and deliberately: a reviewer's
+   * standards are their own, journals differ in what they ask for, and the
+   * thing being protected here -- not inventing literature -- is stated in the
+   * default text rather than enforced by hiding it. Set up once in Settings,
+   * with a per-review note in the tab itself.
+   */
+  reviewPrompt: string;
+  reviewStudyTypes: StudyType[];
   /** Vault-relative directory the meeting notes are filed in. */
   meetingReportDir: string;
   /**
@@ -361,6 +373,11 @@ export const DEFAULT_SETTINGS: Settings = {
   imagesRoot: join(homedir(), "Documents", "karen", "images"),
   papersRoot: join(homedir(), "Documents", "karen", "papers"),
   activeProject: "",
+  reviewPrompt: DEFAULT_REVIEW_PROMPT,
+  /* Copied, not shared: these are edited in place by the settings pane, and a
+     default array handed out by reference would be edited for every future
+     reader of the module too. */
+  reviewStudyTypes: DEFAULT_STUDY_TYPES.map((t) => ({ ...t })),
   meetingReportDir: "Meetings",
   meetingCaptureSystemAudio: true,
   meetingInstructions: "",

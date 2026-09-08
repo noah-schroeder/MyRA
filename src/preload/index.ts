@@ -255,6 +255,25 @@ const api = {
   hfCard: (repo: string) => ipcRenderer.invoke("karen:hf-card", repo),
   lemonadeDeleteModel: (id: string) => ipcRenderer.invoke("karen:lemonade-delete-model", id),
   modelReveal: (id: string) => ipcRenderer.invoke("karen:model-reveal", id),
+  /*
+   * A manuscript, as bytes.
+   *
+   * The dropped file's CONTENT crosses, never its path: the renderer reads it
+   * with the standard `arrayBuffer()`, so nothing here needs filesystem access
+   * and Karen never learns where a confidential manuscript is stored.
+   */
+  reviewExtract: (name: string, bytes: ArrayBuffer) =>
+    ipcRenderer.invoke("karen:review-extract", name, bytes),
+  reviewContext: () => ipcRenderer.invoke("karen:review-context"),
+  reviewRun: (request: unknown) => ipcRenderer.invoke("karen:review-run", request),
+  reviewCancel: () => ipcRenderer.invoke("karen:review-cancel"),
+  reviewSave: (name: string, text: string) => ipcRenderer.invoke("karen:review-save", name, text),
+  onReviewDelta: (fn: (d: unknown) => void) => {
+    const handler = (_e: unknown, d: unknown): void => fn(d);
+    ipcRenderer.on("karen:review-delta", handler);
+    return () => ipcRenderer.removeListener("karen:review-delta", handler);
+  },
+
   /* Every transfer, pushed whenever the list changes. Independent of any
      page: the registry lives in main precisely so a download outlives the
      screen it was started from. */

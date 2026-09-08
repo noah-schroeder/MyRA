@@ -56,6 +56,17 @@ const ICONS: Record<string, ReactNode> = {
       <path d="m9 17 .8-2.6L14 10.2l1.8 1.8-4.2 4.2Z" />
     </>
   ),
+  /* A page with a magnifier over it: reading somebody else's document rather
+     than writing one, which is the distinction from `paper` above it. */
+  review: (
+    <>
+      <path d="M5 3.5h9l5 5v4" />
+      <path d="M14 3.5V8a1 1 0 0 0 1 1h4" />
+      <path d="M5 3.5V20A1.5 1.5 0 0 0 6.5 21.5H12" />
+      <circle cx="16.5" cy="16.5" r="3.5" />
+      <path d="m19.2 19.2 2.3 2.3" />
+    </>
+  ),
   /* A stack of layers: what a quantised model is, and distinct at 16px from
      the list icon above it. */
   models: (

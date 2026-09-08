@@ -33,6 +33,7 @@ import { useHandsFree } from "./useHandsFree.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
 import { ImagePage } from "./components/ImagePage.tsx";
 import { PaperDrafter } from "./components/PaperDrafter.tsx";
+import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
@@ -41,14 +42,14 @@ import type {
 } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "projects" | "api";
+type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "review" | "projects" | "api";
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   /* Which tab Settings opens on, when something sent you there for a reason. */
-  const [settingsTab, setSettingsTab] = useState<"runtime" | undefined>();
+  const [settingsTab, setSettingsTab] = useState<"runtime" | "review" | undefined>();
   /*
    * One page at a time, held in one variable.
    *
@@ -416,6 +417,15 @@ export function App() {
             active={page === "papers"}
             onClick={() => setPage((p) => (p === "papers" ? "chat" : "papers"))}
           />
+          {/* Beside the drafter, because they are the two halves of the same
+              job: this app's users write papers and are asked to review them,
+              usually in the same week. */}
+          <RailButton
+            icon="review"
+            label="Peer review"
+            active={page === "review"}
+            onClick={() => setPage((p) => (p === "review" ? "chat" : "review"))}
+          />
           {/* The audit trail. Every run already wrote its search log, screening
               reasons, source hashes and verification table; until this existed
               none of it was reachable from anywhere in the app. */}
@@ -618,6 +628,17 @@ export function App() {
         ) : null}
         {page === "papers" ? (
           <PaperDrafter onClose={toChat} dictation={dictation} sink={dictationSink} />
+        ) : null}
+        {page === "review" ? (
+          <PeerReview
+            settings={settings}
+            onClose={toChat}
+            onOpenSettings={() => {
+              setSettingsTab("review");
+              setShowSettings(true);
+            }}
+            onOpenModels={() => setPage("models")}
+          />
         ) : null}
         {page === "runs" ? <RunPanel onClose={toChat} active={activeRun} /> : null}
         {/* Its own scroll region at full width: the models page is a browser
