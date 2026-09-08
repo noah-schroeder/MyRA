@@ -6,6 +6,12 @@
  * whose target is outside, a symlink to a directory outside, and a NUL. All six
  * must be refused, and a legitimate path must still work -- a jail that refuses
  * everything is not evidence of anything.
+ *
+ * The seventh came later and is the one the first six missed: a symlink whose
+ * target does NOT exist yet. realpath cannot resolve those either, so the walk
+ * up to the nearest existing ancestor stepped over the link and handed back its
+ * own path as a file waiting to be created -- which writeFile then followed out
+ * of the jail.
  */
 
 import { test } from "node:test";
@@ -76,6 +82,44 @@ test("a legitimate path still resolves, including one not yet created", async ()
     await symlink(join(jail, "real"), join(jail, "alias"));
     const viaLink = await resolveInJail(jail, "alias/paper.md");
     assert.equal(await readFile(viaLink, "utf8"), "inside");
+  });
+});
+
+test("a broken symlink is an escape too, and is refused", async () => {
+  await withJail(async (jail, outside) => {
+    /* Nothing the model can call creates a symlink, so these arrive another
+       way: a link to a drive that is not mounted, or one a sync client
+       restored before its target. The target's absence is the whole point --
+       with it present, realpath resolves the link and the fifth vector above
+       already covers it. */
+    const missing = join(outside, "planted.md");
+    await symlink(missing, join(jail, "notes.md"));
+    await assert.rejects(() => resolveInJail(jail, "notes.md"), /outside/);
+
+    // The directory form: a link to a folder that does not exist yet, with a
+    // perfectly ordinary filename under it.
+    await symlink(join(outside, "not-mounted"), join(jail, "usb"));
+    await assert.rejects(() => resolveInJail(jail, "usb/report.md"), /outside/);
+
+    // Not through a chain of them either.
+    await symlink(join(jail, "notes.md"), join(jail, "latest.md"));
+    await assert.rejects(() => resolveInJail(jail, "latest.md"), /outside/);
+  });
+});
+
+test("a broken symlink that stays inside still resolves, and a loop does not hang", async () => {
+  await withJail(async (jail) => {
+    /* The legitimate use of the same thing: a `latest.md` pointing at the file
+       this run is about to write. Refusing it would break writing through any
+       link the user keeps in their own folder. */
+    await mkdir(join(jail, "reports"), { recursive: true });
+    await symlink(join(jail, "reports", "q3.md"), join(jail, "latest.md"));
+    const abs = await resolveInJail(jail, "latest.md");
+    assert.equal(abs, join(jail, "reports", "q3.md"), "the link's destination, not the link");
+
+    await symlink(join(jail, "a.md"), join(jail, "b.md"));
+    await symlink(join(jail, "b.md"), join(jail, "a.md"));
+    await assert.rejects(() => resolveInJail(jail, "a.md"), /too many symlinks/);
   });
 });
 

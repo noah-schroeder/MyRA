@@ -12,6 +12,7 @@ import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
 import { RailSection, useRailSection } from "./components/RailSection.tsx";
 import { WorkingBar } from "./components/WorkingBar.tsx";
+import { DownloadsButton, DownloadToast, useDownloads } from "./components/Downloads.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
 import { AudioPicker } from "./components/AudioPicker.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
@@ -172,6 +173,9 @@ export function App() {
      the rail and the Research runs list wherever the user happens to be. */
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   useEffect(() => window.karen.onResearchActive(setActiveRun), []);
+  /* Subscribed here, at the top, because the counter is in the bar above every
+     page and the toast floats over all of them. */
+  const downloads = useDownloads();
   /* And again when the turn ends, so nothing is left in state to resurface. */
   useEffect(() => {
     if (!busy) {
@@ -579,6 +583,11 @@ export function App() {
                 : `${documents.docs.length} documents`}
             </button>
           ) : null}
+          {/* Last in the bar, and on every page including Images: a download
+              started from the models page carries on regardless of where you
+              go next, so the place that reports it has to be somewhere that
+              does not change. */}
+          <DownloadsButton list={downloads} />
         </header>
 
         {/*
@@ -908,6 +917,10 @@ export function App() {
           onClose={() => documents.setOpen(false)}
         />
       ) : null}
+
+      {/* Bottom right, over everything, dismissable per download. Closing one
+          does not stop it -- it moves to the counter in the bar above. */}
+      <DownloadToast list={downloads} />
 
       <DictationHud
         state={dictation.state}

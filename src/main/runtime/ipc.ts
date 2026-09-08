@@ -26,6 +26,7 @@ import { browseHuggingFace, repoCard, repoDetail } from "./hfClient.ts";
 import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
 import { prepareCard } from "../../core/runtime/modelCard.ts";
 import { deleteModel } from "./modelDelete.ts";
+import { Downloads } from "../downloads.ts";
 
 /**
  * The daemon's own words, without the plumbing around them.
@@ -54,6 +55,29 @@ export function installRuntimeIpc(
    */
   onModelLoaded: () => Promise<void> = async () => {},
 ): void {
+  /*
+   * The download registry, owned here because this is where the daemon is.
+   *
+   * Every transfer used to be an awaited IPC reply, so it existed only for as
+   * long as the page that asked for it. Now the page asks for one and returns
+   * immediately; the record lives here and is pushed to whatever is on screen.
+   */
+  const downloads = new Downloads({
+    pull: ({ name, checkpoint, source, recipe, signal, onProgress }) =>
+      runtime.api.pullModel(
+        name,
+        checkpoint,
+        recipe,
+        source as RegistrySource,
+        onProgress,
+        signal,
+      ),
+    remove: (name) => runtime.api.deleteModel(name),
+    publish: (list) => send("karen:downloads", list),
+    /* A finished download is a new entry in the model list, and the page
+       showing that list has no other way to learn it arrived. */
+    onFinished: () => send("karen:models-changed"),
+  });
   const state = (): unknown => ({
     config: runtime.config,
     lemonade: {
@@ -378,22 +402,55 @@ export function installRuntimeIpc(
       if (!isEnabled(readSource(source))) return refuse(readSource(source));
       try {
         await runtime.ensureLemonade();
-        await runtime.api.pullModel(
-          String(name),
-          String(checkpoint),
-          recipe ? String(recipe) : "llamacpp",
-          readSource(source),
-          /* Pushed rather than returned: the promise resolves when the
-             transfer finishes, which is exactly when progress stops being
-             useful. */
-          (p) => send("karen:pull-progress", { name: String(name), ...p }),
-        );
-        return { ok: true, models: await runtime.api.listModels() };
+        /* Returns as soon as the transfer is registered, not when it finishes.
+           Awaiting a 30 GB pull here is what tied a download to the lifetime
+           of one screen: the reply never came, so the only record of it was
+           the React state waiting for it. */
+        const installed = await runtime.api.listModels().catch(() => []);
+        const record = downloads.start({
+          name: String(name),
+          checkpoint: String(checkpoint),
+          source: readSource(source),
+          recipe: recipe ? String(recipe) : "llamacpp",
+          /* So cancelling can tell "throw away what I just fetched" from
+             "delete the copy I already had". */
+          replacing: installed.some((m) => m.id === String(name)),
+        });
+        return { ok: true, id: record.id };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
     },
   );
+
+  /* --------------------------------------------------------- downloads -- */
+
+  /**
+   * The controls on a transfer.
+   *
+   * Pause and cancel are the same abort underneath -- lemond stops the moment
+   * the client goes away -- and differ in what happens to the bytes: a pause
+   * keeps the partial file so the next attempt resumes from it, a cancel asks
+   * the daemon to delete what it fetched.
+   */
+  ipcMain.handle("karen:downloads-list", () => downloads.list());
+  ipcMain.handle("karen:download-pause", (_e, id: string) => {
+    downloads.pause(String(id));
+    return { ok: true };
+  });
+  ipcMain.handle("karen:download-resume", (_e, id: string) => {
+    downloads.resume(String(id));
+    return { ok: true };
+  });
+  ipcMain.handle("karen:download-cancel", async (_e, id: string) => {
+    await downloads.cancel(String(id));
+    return { ok: true };
+  });
+  ipcMain.handle("karen:download-dismiss", (_e, id: string) => {
+    if (id) downloads.dismiss(String(id));
+    else downloads.dismissSettled();
+    return { ok: true };
+  });
 
   /* ---------------------------------------------- per-model load options -- */
 

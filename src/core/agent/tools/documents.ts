@@ -9,7 +9,7 @@
  * after symlinks, never before.
  */
 
-import { realpath } from "node:fs/promises";
+import { readlink, realpath } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
   FORMAT_NAMES, isReadable, resolveFormat, safeRelativePath, slugName, withExtension,
@@ -40,6 +40,19 @@ function available(): boolean {
   return readsDocuments(readResearchConfig().mode);
 }
 
+/** A path that is the jail itself, or somewhere below it. */
+function insideJail(candidate: string, jail: string): boolean {
+  return candidate === jail || candidate.startsWith(jail + sep);
+}
+
+/**
+ * How many symlinks one name may pass through before it is refused.
+ *
+ * A link pointing at a link is ordinary; eight of them is either a loop or
+ * something nobody meant, and either way the answer is no rather than a hang.
+ */
+const MAX_LINK_HOPS = 8;
+
 /**
  * Resolve a model-supplied name inside the jail.
  *
@@ -50,6 +63,18 @@ function available(): boolean {
  *
  * The realpath is taken of the nearest EXISTING ancestor, because the file
  * being written usually does not exist yet and realpath would fail on it.
+ *
+ * That last rule is what makes the readlink branch below necessary. realpath
+ * cannot resolve a BROKEN symlink either, so a link whose target does not exist
+ * yet was walked straight past as though it were a file waiting to be created,
+ * and the link's own path handed back as safe -- after which writeFile and
+ * readFile follow it wherever it points. Demonstrated: a
+ * `documents/notes.md -> ../sensitive/planted.md` whose target was absent wrote
+ * outside the jail, read back a file created there afterwards, and overwrote
+ * it. Nothing the model can call creates a symlink, so this needs one already
+ * in the folder -- a link to an unmounted drive, or one a sync client restored
+ * before its target. The same link is refused while the drive is mounted, which
+ * is exactly the kind of state-dependent hole a jail must not have.
  */
 export async function resolveInJail(root: string, name: string): Promise<string> {
   // Refused rather than reinterpreted. safeRelativePath strips a leading slash,
@@ -65,21 +90,39 @@ export async function resolveInJail(root: string, name: string): Promise<string>
   if (!rel) throw new DocsError(`${JSON.stringify(name)} is not a name inside the documents folder`);
 
   const jail = await realpath(root).catch(() => resolve(root));
-  const target = resolve(jail, rel);
+  let target = resolve(jail, rel);
 
-  let probe = target;
-  for (;;) {
-    const real = await realpath(probe).catch(() => undefined);
-    if (real !== undefined) {
-      const realTarget = probe === target ? real : join(real, target.slice(probe.length + 1));
-      if (realTarget !== jail && !realTarget.startsWith(jail + sep)) {
-        throw new DocsError(`${name} resolves outside the documents folder`);
-      }
-      return realTarget;
+  for (let hop = 0; ; hop++) {
+    if (hop > MAX_LINK_HOPS) {
+      throw new DocsError(`${name} passes through too many symlinks`);
     }
-    const parent = dirname(probe);
-    if (parent === probe) throw new DocsError(`${name} cannot be resolved`);
-    probe = parent;
+
+    let probe = target;
+    let broken: string | undefined;
+    for (;;) {
+      const real = await realpath(probe).catch(() => undefined);
+      if (real !== undefined) {
+        const realTarget = probe === target ? real : join(real, target.slice(probe.length + 1));
+        if (!insideJail(realTarget, jail)) {
+          throw new DocsError(`${name} resolves outside the documents folder`);
+        }
+        return realTarget;
+      }
+      // Not resolvable, so either it does not exist or it is a broken link.
+      // readlink is what tells those apart, and only the second one is a way out.
+      broken = await readlink(probe).catch(() => undefined);
+      if (broken !== undefined) break;
+      const parent = dirname(probe);
+      if (parent === probe) throw new DocsError(`${name} cannot be resolved`);
+      probe = parent;
+    }
+
+    /* Expand the broken link and go round again, rather than judging it here:
+       its destination may be another broken link, and the loop already knows
+       how to resolve one of those. A destination outside the jail is caught on
+       the next pass, where its nearest existing ancestor is outside too. */
+    const dest = resolve(dirname(probe), broken);
+    target = probe === target ? dest : join(dest, target.slice(probe.length + 1));
   }
 }
 

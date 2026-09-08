@@ -287,6 +287,11 @@ export class LemonadeApi {
     recipe = "llamacpp",
     source?: RegistrySource,
     onProgress?: (p: PullProgress) => void,
+    /* Aborting really does stop the transfer, rather than only stopping us
+       listening to it: lemond logs "Client disconnected, cancelling download"
+       and drops the job. Measured against 11.8.0 -- its own
+       /api/v1/jobs/{id}/pause never sees a streamed pull at all. */
+    signal?: AbortSignal,
   ): Promise<void> {
     const target = this.#target();
     if (!target) throw new LemonadeApiError("Lemonade is not running.");
@@ -307,6 +312,7 @@ export class LemonadeApi {
         method: "POST",
         headers: { ...target.headers, "content-type": "application/json" },
         body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
         /* No overall timeout: a 30 GB model on a hotel connection is a
            legitimate several hours, and the stream itself is the liveness
            signal -- if it stops arriving, the fetch fails on its own. */
@@ -325,7 +331,7 @@ export class LemonadeApi {
       return;
     }
 
-    await readProgressStream(res.body, onProgress);
+    await readProgressStream(res.body, onProgress, signal);
   }
 
   /* ------------------------------------------------- per-model options -- */
@@ -428,14 +434,22 @@ export class LemonadeApi {
 export async function readProgressStream(
   body: ReadableStream<Uint8Array>,
   onProgress: (p: PullProgress) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const reader = body.getReader();
+  /* Cancelling the reader as well as the request. `fetch`'s own abort ends the
+     socket, but a reader left mid-read can settle late and swallow the
+     rejection, so the pull would look finished rather than stopped. */
+  const stop = (): void => void reader.cancel().catch(() => undefined);
+  signal?.addEventListener("abort", stop, { once: true });
   const decoder = new TextDecoder();
   let buffer = "";
 
+  try {
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    if (signal?.aborted) throw new DOMException("pull stopped", "AbortError");
     buffer += decoder.decode(value, { stream: true });
 
     // Complete frames only; whatever follows the last blank line waits.
@@ -464,5 +478,8 @@ export async function readProgressStream(
         /* A frame that is not JSON is not worth failing a download over. */
       }
     }
+  }
+  } finally {
+    signal?.removeEventListener("abort", stop);
   }
 }

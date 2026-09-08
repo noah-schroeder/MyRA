@@ -44,7 +44,7 @@ import { dialectById, dialectForHost, reasoningFields } from "../core/llm/reason
 import {
   cachedLocalDialect, forgetReasoning, hostedCapability, localCapability,
 } from "./llm/reasoning.ts";
-import { setPdfRenderer, engines, documentsDir } from "../core/documents/office.ts";
+import { setPdfRenderer, engines, documentsDir, setWorkspaceRoot } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
 import {
@@ -754,6 +754,10 @@ function installIpc(): void {
      press the button and not at the next launch. */
   setZoteroDataDir(config.current.zoteroDataDir);
 
+  /* The documents folder, handed to the module that jails against it, on the
+     same terms and for the same reason. */
+  setWorkspaceRoot(config.current.workspaceRoot);
+
   /* Whether this desktop actually shows a tray icon, which decides whether
      "keep running when closed" can do anything at all. Linux answers this
      differently per desktop, so it is reported rather than assumed. */
@@ -775,6 +779,7 @@ function installIpc(): void {
       await vault.set(name as SecretName, "").catch(() => undefined);
     }
     setZoteroDataDir(next.zoteroDataDir);
+    setWorkspaceRoot(next.workspaceRoot);
     /* A different folder is a different library, so the snapshot taken from
        the old one must not answer the next search. */
     if (next.zoteroDataDir !== beforeDir) forgetZoteroSnapshot();
