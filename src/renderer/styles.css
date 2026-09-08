@@ -5468,3 +5468,115 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
 .dl-toast-close:hover { color: var(--text); }
 /* Room for the close button, so a long model name never runs under it. */
 .dl-toast-item .dl-name { padding-right: 18px; }
+
+/* ------------------------------------------------------------------ *
+ * Peer review                                                         *
+ *                                                                     *
+ * Arranged around one gesture: drop the manuscript here. See           *
+ * components/PeerReview.tsx.                                           *
+ * ------------------------------------------------------------------ */
+
+.review {
+  max-width: 860px; margin: 0 auto; padding: 26px 30px 60px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.review-head { display: flex; align-items: flex-start; gap: 16px; }
+.review-head h1 { font-size: 21px; font-weight: 600; }
+.review-sub { margin-top: 5px; font-size: 12.5px; color: var(--text-dim); max-width: 62ch; }
+.review-head-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
+
+/* The target. Large on purpose: it is the one instruction on the page, and a
+   drop target you have to aim at is one people use the file chooser for. */
+.review-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 44px 24px;
+  border: 2px dashed var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-raised);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.review-drop.over { border-color: var(--accent-soft); background: var(--accent-wash); }
+/* Once a manuscript is loaded the target stops being the headline, but stays
+   on the page: reviewing a second paper should not mean hunting for it. */
+.review-drop-small { padding: 16px; }
+.review-drop-small .review-drop-title { font-size: 12.5px; }
+.review-drop-small .review-drop-note { display: none; }
+.review-drop-title { font-size: 15px; font-weight: 560; }
+.review-drop-note { font-size: 12px; color: var(--text-faint); }
+
+.review-file-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-raised); border: 1px solid var(--border);
+}
+.review-file-name {
+  flex: 1; min-width: 0; font-size: 13px; font-weight: 540;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.review-file-meta { flex: none; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.review-error {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  font-size: 12.5px; color: var(--text);
+}
+.review-error button {
+  flex: none; font: inherit; font-size: 12px; padding: 4px 11px;
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--text); cursor: pointer;
+}
+
+.review-types { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
+.review-type {
+  font: inherit; font-size: 12.5px; padding: 6px 12px;
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  border-radius: 999px; color: var(--text-dim); cursor: pointer;
+}
+.review-type:hover { color: var(--text); border-color: var(--border-hover); }
+.review-type.on {
+  background: var(--accent-wash); border-color: var(--accent-dim); color: var(--accent-soft);
+}
+
+/* The refusal. Deliberately not a disabled button with a tooltip: the numbers
+   and the fix are the whole content, and both have to be readable. */
+.review-toolong {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 15px; border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-dim); background: var(--accent-wash);
+  font-size: 12.5px; line-height: 1.5;
+}
+.review-toolong button {
+  flex: none; font: inherit; font-size: 12px; padding: 5px 12px;
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--text); cursor: pointer;
+}
+
+.review-actions { display: flex; align-items: center; gap: 10px; }
+.review-actions .primary, .review-actions .stop { margin-left: auto; }
+
+.review-out {
+  display: flex; flex-direction: column; gap: 12px;
+  padding-top: 18px; border-top: 1px solid var(--border);
+}
+.review-out-head { display: flex; align-items: center; gap: 10px; }
+.review-out-head h2 { font-size: 15px; font-weight: 600; }
+.review-out-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* Wraps, because the manuscript is quoted whole inside the user message and a
+   preview that scrolls sideways forever cannot be read. */
+.review-preview { max-height: 56vh; overflow-y: auto; margin-top: 10px; }
+.review-preview pre {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
+  padding: 11px 13px; margin: 6px 0 14px;
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+
+/* A reference the model invented, named rather than silently removed. */
+.review-invented {
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  font-size: 12.5px; line-height: 1.5;
+}
