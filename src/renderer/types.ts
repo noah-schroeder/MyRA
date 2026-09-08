@@ -412,6 +412,9 @@ export interface PromptRequest {
   current?: Record<string, string>;
 }
 
+export type { Download } from "../core/downloads/download.ts";
+import type { Download } from "../core/downloads/download.ts";
+
 /** The research run executing right now, reported whatever page is showing. */
 export interface ActiveRun {
   id: string;
@@ -640,6 +643,13 @@ export interface KarenApi {
   ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
   /** Live progress for the download in flight; returns an unsubscribe. */
   onPullProgress(fn: (p: PullProgress & { name: string }) => void): () => void;
+  downloadsList(): Promise<Download[]>;
+  downloadPause(id: string): Promise<{ ok: boolean }>;
+  downloadResume(id: string): Promise<{ ok: boolean }>;
+  downloadCancel(id: string): Promise<{ ok: boolean }>;
+  downloadDismiss(id?: string): Promise<{ ok: boolean }>;
+  onDownloads(fn: (list: Download[]) => void): () => void;
+  onModelsChanged(fn: () => void): () => void;
   /** One repository: its files, and the facts a person chooses on. */
   hfDetail(repo: string): Promise<{ ok: boolean; error?: string; detail?: RepoDetail }>;
   /**
@@ -678,7 +688,10 @@ export interface KarenApi {
     checkpoint: string,
     source: RegistrySource,
     recipe?: string,
-  ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
+    /* Resolves once the transfer has STARTED, carrying its id. It used to
+       resolve when the bytes finished arriving, which is why a download could
+       not outlive the component awaiting it. */
+  ): Promise<{ ok: boolean; error?: string; id?: string }>;
   modelOptions(name: string): Promise<{ ok: boolean; error?: string; options?: ModelOptions }>;
   modelOptionsSet(
     name: string,

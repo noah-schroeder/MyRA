@@ -58,9 +58,33 @@ export function pandocPath(): string {
   return "pandoc";
 }
 
-/** Where the agent may read and write. */
+/**
+ * The folder the user named in Settings, if they named one.
+ *
+ * Held here rather than read from the config store, for the reason
+ * zoteroSqlite.ts holds its own: this module is on the path of every document
+ * tool and must not acquire a dependency on settings having loaded first. The
+ * main process sets it at startup and on every change, which is the same
+ * lifetime the setting has.
+ */
+let chosenRoot = "";
+
+export function setWorkspaceRoot(dir: string | undefined): void {
+  chosenRoot = (dir ?? "").trim();
+}
+
+/**
+ * Where the agent may read and write.
+ *
+ * The setting was written, shown in Settings as "Documents", and then not read
+ * by anything on this path: the jail was whatever `KAREN_WORKSPACE` said or the
+ * hardcoded default, so pointing Documents somewhere else moved the project
+ * export and left the agent writing to the old folder. The env var still wins,
+ * because it is how the tests and a developer's launcher say where to work, and
+ * a stored setting must not silently override the thing that started the app.
+ */
 export function workspaceRoot(): string {
-  return process.env["KAREN_WORKSPACE"] ?? join(homedir(), "Documents", "karen");
+  return process.env["KAREN_WORKSPACE"] ?? (chosenRoot || join(homedir(), "Documents", "karen"));
 }
 
 /**

@@ -72,6 +72,13 @@ that no permission mode lowers. The agent loop
 ([loop.ts](src/core/agent/loop.ts)) knows nothing about modes or risk — it takes a
 yes/no from `approve`.
 
+Compaction lives beside it in [compact.ts](src/core/agent/compact.ts), under two rules.
+**Compact the request, never the transcript** — the session file and the thread on screen
+keep every message as it happened, so a longer window later can still use the full history.
+And **never orphan a tool result**: a `tool` message without the `assistant` message
+carrying its `tool_call_id` is a protocol error most servers reject wholesale, so the split
+point is found by walking backwards to a boundary where no result is left without its call.
+
 ### The research ladder
 
 [ladder.ts](src/core/research/ladder.ts) defines one ordered ladder —
@@ -140,6 +147,64 @@ believed. Unsourced claims are filed under `## Unverified` rather than stated.
 [store.ts](src/core/meetings/store.ts) reads a directory to decide which buttons to offer.
 Re-running notes with a different prompt must not re-run transcription, and a meeting whose
 transcription failed must not vanish while its audio sits on disk.
+
+### Projects
+
+A project is an **index, not a folder** ([project.ts](src/core/projects/project.ts)): it
+lists the five kinds of thing Karen makes — `chat | meeting | run | paper | image` — and
+the files never move. A real directory per project was costed and rejected, and will be
+proposed again: as soon as items live in different directories every "open this by id"
+call has to first discover *which* directory holds it, so that design needs this index
+anyway — and on top of it the research root would have to be threaded through the
+pipeline and its resume logic, the meetings jail widened past `meetingsRoot`, and
+conversations moved out of `~/.config` into a directory a file manager and any cloud sync
+can read.
+
+"All of it together on disk" is a real want, and it is answered by **exporting** a folder
+rather than by living in one. [render.ts](src/core/projects/render.ts) decides what goes
+where and returns a list of `ExportOp`s; [projects.ts](src/main/projects.ts) performs
+them — so the layout, the naming and the collision handling are testable with no disk and
+no Electron. The destructive half is split into
+[projectStore.ts](src/main/projectStore.ts) for the reason `modelDelete.ts` is split from
+its own IPC: a module that imports `electron` cannot be loaded by the test runner at all,
+and deleting is exactly the path that has to be tested. A store joins by satisfying
+`KindStore` — `list`, `remove`, `payload` — which is the only thing a project may assume
+about one.
+
+### The paper drafter
+
+Ported in substance from Braindump5000, which was tuned against real use before it got
+here: paste a sample of your own academic prose, jot or dictate raw notes under each
+heading, and each section is written on its own in that voice
+([prompt.ts](src/core/papers/prompt.ts)). Two things about that prompt are not decoration.
+**The writing sample is the point** — the outline, the preceding section and the notes are
+all context for it. And **citations are forbidden outright and unconditionally**: nothing
+in this flow searches, so every reference a model produces here is invented by
+construction. The original tool's "power-user mode" replaced the whole prompt, guardrails
+included, and is deliberately not carried over — this would be the one place in the app
+where a fabricated authority is allowed. The author's own instructions, for the paper and
+for one section, are **appended** to that prompt, never substituted for it.
+
+Pure, so the preview dialog renders exactly what is sent, character for character, and
+showing it sends nothing. "A whole paper" and "one section" are one record and one shape
+([paper.ts](src/core/papers/paper.ts)), differing only in how many sections there are;
+two shapes would be two save paths and two sets of bugs, and the second would be the one
+nobody remembered to fix. A paper is a flat `<id>.json` beside the others rather than a
+directory holding one file, and [store.ts](src/core/papers/store.ts) parses forgivingly
+the way images/store.ts does — a list that throws on the fifth of twenty papers is worse
+than one that skips it, and skipping is visible.
+
+### Drafting a document
+
+[draft.ts](src/core/documents/draft.ts) is outline, approve, then one section at a time,
+and **the orchestration is code rather than the model's discretion**. A tool that merely
+*invites* a model to plan first is a suggestion a 2.6B is free to decline, and it declines
+by writing the whole document in one call — the failure this exists to prevent. Three
+things fall out of the split: each request is small, which is where the quality win on a
+local model comes from; context stays bounded however long the document gets, because a
+section sees the outline and the tail of what came before rather than the whole draft; and
+the file is saved after every section, so a run that dies at section eight leaves seven
+sections on disk instead of nothing.
 
 ### The Zotero library
 
@@ -211,6 +276,29 @@ that is not on this machine is external whatever the label says
 ([destinations.ts](src/core/destinations.ts) owns that rule, and the privacy report reads
 the same function).
 
+### The model catalogue
+
+Lemonade's `/models` lists only what is registered or already downloaded — three things on
+a fresh machine — so the catalogue proper is read from `resources/server_models.json`
+inside the install ([catalog.ts](src/core/runtime/catalog.ts)): it needs no network, and it
+carries the two fields the daemon's API does not return. `size`, without which "will this
+fit in your VRAM" has no input; and `labels`, which is the only thing separating a chat
+model from a speech or image one, since Lemonade serves all of them through one API.
+
+Whether it fits is [fit.ts](src/core/runtime/fit.ts), and the naive version — file size
+against VRAM — is wrong exactly on the machines people care about, because **the KV cache
+is not in the file size**: over 3 GB for a 48-layer model at 32k context, more than the gap
+between two quantisations, so the list confidently recommends a model that then fails to
+load. [registry.ts](src/core/runtime/registry.ts) owns identity and provenance for both the
+catalogue and the search UI, which must never disagree: **the country is part of the name**
+(`Hugging Face [US]`, not a tooltip or an icon), and every result carries its origin even
+now that they all share one — a badge shown only on exceptions makes an unlabelled row mean
+either "the usual one" or "nobody checked". [foreign.ts](src/core/runtime/foreign.ts)
+offers the GGUFs the user already downloaded with LM Studio or Ollama, as a directory of
+symlinked **files**: Lemonade takes one hint about models it did not fetch itself
+(`extra_models_dir`), it names a model after the leaf directory, and it skips symlinked
+*directories* silently — so pointing it at `~/.lmstudio` does not work.
+
 ### Images
 
 The third model role, and the one with files. [main/images.ts](src/main/images.ts) owns the
@@ -238,9 +326,12 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `karen:*`, registered in [main/index.ts](src/main/index.ts) and the
-`install*Ipc` modules, and exposed one-by-one in the preload. Adding a capability means
-touching all three layers plus `src/renderer/types.ts`.
+IPC channels are all `karen:*` — around 150 of them, registered in
+[main/index.ts](src/main/index.ts)'s `installIpc` and in the eight `install*Ipc` modules it
+calls (meetings, dictation, audio, images, papers, projects, runtime, api), and exposed
+one-by-one in the preload. Adding a capability means touching all three layers plus
+`src/renderer/types.ts`, and at that scale a channel wired in only three of the four is a
+`window.karen` call that is `undefined` at runtime.
 
 Directories Karen creates are `0700` and files `0600` (`makePrivateDir` / `makeOwnDir` in
 paths.ts) — transcripts and drafts must not be readable by another local account. A

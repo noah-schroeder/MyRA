@@ -255,6 +255,24 @@ const api = {
   hfCard: (repo: string) => ipcRenderer.invoke("karen:hf-card", repo),
   lemonadeDeleteModel: (id: string) => ipcRenderer.invoke("karen:lemonade-delete-model", id),
   modelReveal: (id: string) => ipcRenderer.invoke("karen:model-reveal", id),
+  /* Every transfer, pushed whenever the list changes. Independent of any
+     page: the registry lives in main precisely so a download outlives the
+     screen it was started from. */
+  downloadsList: () => ipcRenderer.invoke("karen:downloads-list"),
+  downloadPause: (id: string) => ipcRenderer.invoke("karen:download-pause", id),
+  downloadResume: (id: string) => ipcRenderer.invoke("karen:download-resume", id),
+  downloadCancel: (id: string) => ipcRenderer.invoke("karen:download-cancel", id),
+  downloadDismiss: (id?: string) => ipcRenderer.invoke("karen:download-dismiss", id ?? ""),
+  onDownloads: (fn: (list: unknown) => void) => {
+    const handler = (_e: unknown, list: unknown): void => fn(list);
+    ipcRenderer.on("karen:downloads", handler);
+    return () => ipcRenderer.removeListener("karen:downloads", handler);
+  },
+  onModelsChanged: (fn: () => void) => {
+    const handler = (): void => fn();
+    ipcRenderer.on("karen:models-changed", handler);
+    return () => ipcRenderer.removeListener("karen:models-changed", handler);
+  },
   onPullProgress: (fn: (p: unknown) => void) => {
     const handler = (_e: unknown, p: unknown): void => fn(p);
     ipcRenderer.on("karen:pull-progress", handler);

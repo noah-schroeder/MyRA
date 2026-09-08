@@ -5368,3 +5368,103 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
 }
 .picker-note { flex: none; font-size: 11px; color: var(--text-faint); }
 .picker-owned { color: var(--amber); }
+
+/* ------------------------------------------------------------------ *
+ * Model downloads                                                     *
+ *                                                                     *
+ * A counter in the top bar, a panel under it, and a toast bottom       *
+ * right — three views of the one list, which is held in main so that   *
+ * changing page cannot lose a transfer. See components/Downloads.tsx.  *
+ * ------------------------------------------------------------------ */
+
+.dl-button-box { position: relative; margin-left: auto; }
+.dl-button {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 8px; font: inherit; font-size: 11.5px;
+  background: var(--bg-float); border: 1px solid var(--border);
+  border-radius: 999px; color: var(--text-dim); cursor: pointer;
+}
+.dl-button:hover { color: var(--text); border-color: var(--border-strong); }
+.dl-button[aria-expanded="true"] { color: var(--accent-soft); border-color: var(--accent-dim); }
+/* Failure is the one state worth colouring: everything else is progress. */
+.dl-button-warn { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+.dl-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.dl-panel {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  width: 340px; max-height: 62vh; overflow-y: auto;
+  padding: 10px; border-radius: var(--radius);
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+}
+.dl-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-faint);
+  padding: 2px 2px 8px;
+}
+.dl-foot {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-faint); line-height: 1.45;
+}
+
+.dl-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dl-row {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 10px; border-radius: var(--radius-sm);
+  background: var(--bg-raised); border: 1px solid var(--border);
+}
+.dl-failed { border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.dl-done { opacity: 0.75; }
+
+.dl-head { display: flex; align-items: baseline; gap: 8px; }
+.dl-name {
+  flex: 1; min-width: 0; font-size: 12.5px; font-weight: 560;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dl-pct { flex: none; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.dl-bar { height: 4px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
+.dl-fill { display: block; height: 100%; background: var(--accent-soft); border-radius: 999px; }
+/* Before the daemon has reported a size. A bar frozen at zero for the first
+   seconds of a pull reads as a stall; this reads as "starting". */
+.dl-bar-wait .dl-fill { width: 35%; animation: dl-slide 1.4s ease-in-out infinite; }
+@keyframes dl-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .dl-bar-wait .dl-fill { animation: none; width: 100%; opacity: 0.4; }
+}
+
+.dl-status { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.dl-failed .dl-status { color: var(--red); }
+
+.dl-actions, .dl-confirm { display: flex; align-items: center; gap: 6px; }
+.dl-confirm { font-size: 11px; color: var(--text-dim); flex-wrap: wrap; }
+.dl-actions button, .dl-confirm button {
+  font: inherit; font-size: 11px; padding: 3px 9px;
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--text); cursor: pointer;
+}
+.dl-actions button:hover, .dl-confirm button:hover { border-color: var(--accent-dim); }
+.dl-quiet { color: var(--text-faint) !important; border-color: transparent !important; background: none !important; }
+.dl-quiet:hover { color: var(--text-dim) !important; }
+.dl-danger { color: var(--red) !important; }
+.dl-danger:hover { border-color: var(--red) !important; }
+
+/* Over the page, out of the way of the composer's right-hand controls. */
+.dl-toast {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  width: 320px; max-height: 60vh; overflow-y: auto;
+  padding: 10px; border-radius: var(--radius);
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+.dl-toast-item { position: relative; }
+.dl-toast-close {
+  position: absolute; top: 4px; right: 4px; z-index: 1;
+  width: 20px; height: 20px; padding: 0; line-height: 1;
+  font: inherit; font-size: 15px;
+  background: none; border: 0; color: var(--text-faint); cursor: pointer;
+}
+.dl-toast-close:hover { color: var(--text); }
+/* Room for the close button, so a long model name never runs under it. */
+.dl-toast-item .dl-name { padding-right: 18px; }

@@ -32,6 +32,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { RegistrySearch } from "./RegistrySearch.tsx";
 import { ModelCard, type CardTarget } from "./ModelCard.tsx";
 import { DownloadProgress, gb } from "./modelBits.tsx";
+import { useDownloads } from "./Downloads.tsx";
+import { fraction } from "../../core/downloads/download.ts";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 
 import { groupCatalog, repoOf, type CatalogEntry } from "../../core/runtime/catalog.ts";
@@ -367,11 +369,27 @@ export function LemonadePane({
      depending on which tab you arrived from is how a person learns not to
      trust either. */
   const [viewing, setViewing] = useState<CardTarget | undefined>();
-  /* The download in flight, by the name it registers under, plus the figures
-     the daemon streams while it runs. */
-  const [pulling, setPulling] = useState<string | undefined>();
+  /*
+   * The downloads in flight, read from main rather than kept here.
+   *
+   * This page used to own them, which is why leaving it looked like the
+   * download stopping: the bytes carried on arriving, and the only record of
+   * them was the state that had just been unmounted. See components/Downloads.
+   */
+  const downloads = useDownloads();
   const [pullError, setPullError] = useState<string | undefined>();
-  const [job, setJob] = useState<PullProgress | undefined>();
+  const inFlight = downloads.find((d) => d.state === "running" || d.state === "paused");
+  const pulling = inFlight?.name;
+  const job: PullProgress | undefined = inFlight
+    ? {
+        file: inFlight.file,
+        fileIndex: inFlight.fileIndex,
+        totalFiles: inFlight.totalFiles,
+        bytesDone: inFlight.bytesDone,
+        bytesTotal: inFlight.bytesTotal,
+        percent: Math.round((fraction(inFlight) ?? 0) * 100),
+      }
+    : undefined;
   /* The model whose deletion is being confirmed. One at a time, and closed by
      pressing anything else. */
   const [deleting, setDeleting] = useState<string | undefined>();
@@ -553,7 +571,9 @@ export function LemonadePane({
    * Held here rather than in the card, so a download survives closing the page
    * it was started from.
    */
-  useEffect(() => window.karen.onPullProgress((p) => setJob(p)), []);
+  /* A download that finished added a model, and this page is the one showing
+     the list it was added to. */
+  useEffect(() => window.karen.onModelsChanged(() => void refresh()), [refresh]);
 
   /**
    * Fetch one version of one model.
@@ -570,18 +590,17 @@ export function LemonadePane({
       source: RegistrySource,
       choice: { name: string; checkpoint: string; recipe: string },
     ): Promise<void> => {
-      setPulling(choice.name);
       setPullError(undefined);
-      setJob(undefined);
+      /* Resolves once the transfer has started, not when it has finished.
+         Everything after that point -- progress, pausing, cancelling, and
+         noticing it arrived -- belongs to the registry in main, which is what
+         lets it outlive this page. */
       const res = await window.karen.registryPull(
         choice.name, choice.checkpoint, source, choice.recipe,
       );
-      setPulling(undefined);
-      setJob(undefined);
       if (!res.ok) setPullError(explainRegistryError(res.error ?? "", source));
-      else await refresh();
     },
-    [refresh],
+    [],
   );
 
   /**
