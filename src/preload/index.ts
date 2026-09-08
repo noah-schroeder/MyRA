@@ -265,7 +265,8 @@ const api = {
   reviewExtract: (name: string, bytes: ArrayBuffer) =>
     ipcRenderer.invoke("karen:review-extract", name, bytes),
   reviewContext: () => ipcRenderer.invoke("karen:review-context"),
-  reviewRun: (request: unknown) => ipcRenderer.invoke("karen:review-run", request),
+  reviewRun: (requests: unknown, title: string) =>
+    ipcRenderer.invoke("karen:review-run", requests, title),
   reviewCancel: () => ipcRenderer.invoke("karen:review-cancel"),
   reviewSave: (name: string, text: string) => ipcRenderer.invoke("karen:review-save", name, text),
   onReviewDelta: (fn: (d: unknown) => void) => {

@@ -29,7 +29,9 @@ import { pdfToText } from "../core/research/pdf.ts";
 import { engines, readAsText } from "../core/documents/office.ts";
 import { OWNER_ONLY_FILE } from "../core/paths.ts";
 import { titleFromFileName, titleOf, wordCount } from "../core/review/manuscript.ts";
-import { buildSystem, buildUser, type ReviewRequest } from "../core/review/prompt.ts";
+import {
+  assembleReview, buildSystem, buildUser, type ReviewRequest,
+} from "../core/review/prompt.ts";
 
 export interface ReviewDeps {
   config: ConfigStore;
@@ -209,69 +211,106 @@ export function installReviewIpc(deps: ReviewDeps): void {
   });
 
   /**
-   * Write the review.
+   * Write the reviews: one request per reviewer on the panel.
    *
-   * The request is built by the page and sent whole, which is what makes the
-   * preview honest: it renders these same two functions over the same object,
+   * Not one request for all three. Three reports of up to 2,000 words each is
+   * six thousand words of output, which on a local model is where quality
+   * collapses and where the context ceiling is met from the wrong side. It is
+   * also the more faithful arrangement -- three reviewers who have not read
+   * each other is what a journal sends an editor.
+   *
+   * The requests are built by the page and sent whole, which is what makes the
+   * preview honest: it renders these same two functions over the same objects,
    * so "exactly what will be sent" is the thing that is sent rather than a
    * reconstruction of it.
    */
-  ipcMain.handle("karen:review-run", async (_e, raw: unknown) => {
+  ipcMain.handle("karen:review-run", async (_e, raw: unknown, title: unknown) => {
     if (running) return { ok: false, error: "Karen is already writing a review." };
-    const request = raw as ReviewRequest;
-    if (!request || typeof request !== "object" || !request.manuscript?.trim()) {
+    const requests = raw as ReviewRequest[];
+    if (!Array.isArray(requests) || requests.length === 0) {
+      return { ok: false, error: "Choose what kind of paper this is first." };
+    }
+    if (!requests[0]?.manuscript?.trim()) {
       return { ok: false, error: "There is no manuscript to review." };
     }
 
     const controller = new AbortController();
     running = controller;
+    const reports: { label: string; text: string }[] = [];
     try {
       const resolved = await deps.llm();
-      const result = await runSubagent({
-        model: resolved.endpoint.model ?? "",
-        endpoint: resolved.endpoint,
-        ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
-        system: buildSystem(request),
-        prompt: buildUser(request),
-        signal: controller.signal,
-        onDelta: (text, kind) => send("karen:review-delta", { kind, text }),
-        onProgress: (note) => {
-          /* A retry has already streamed half a review into the page. Without
-             this the second attempt appends to the first and the reviewer
-             watches their summary written twice -- the same failure the paper
-             drafter hit, and the same fix. */
-          if (note.startsWith("retrying")) {
-            send("karen:review-delta", { kind: "text", text: "", reset: true });
-          }
-        },
-      });
-      const text = result.text.trim();
-      if (!text) {
-        return {
-          ok: false,
-          error:
-            "The model returned nothing usable — only its own reasoning, or an empty reply. " +
-            "Try again, or choose a different model on the Models page.",
-        };
+      for (const [index, request] of requests.entries()) {
+        /* Announced before the call rather than after it: a reviewer that takes
+           four minutes is four minutes of nothing happening, and the panel is
+           the only thing on screen that explains the wait. */
+        send("karen:review-delta", {
+          kind: "reviewer",
+          index,
+          total: requests.length,
+          label: request.reviewerLabel,
+          text: "",
+        });
+
+        const result = await runSubagent({
+          model: resolved.endpoint.model ?? "",
+          endpoint: resolved.endpoint,
+          ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
+          system: buildSystem(request),
+          prompt: buildUser(request),
+          signal: controller.signal,
+          onDelta: (text, kind) => send("karen:review-delta", { kind, index, text }),
+          onProgress: (note) => {
+            /* A retry has already streamed half a report into the page. Without
+               this the second attempt appends to the first and the reviewer
+               watches their summary written twice -- the same failure the paper
+               drafter hit, and the same fix. */
+            if (note.startsWith("retrying")) {
+              send("karen:review-delta", { kind: "text", index, text: "", reset: true });
+            }
+          },
+        });
+
+        const text = result.text.trim();
+        /* One silent reviewer does not lose the other two. The panel is filed
+           as it stands, with that reviewer's failure recorded in its place --
+           dropping the heading would leave a two-reviewer report with no sign
+           that a third had been asked for. */
+        reports.push({
+          label: request.reviewerLabel,
+          text:
+            text ||
+            "*(This reviewer returned nothing usable — only its own reasoning, or an empty " +
+              "reply. Try again, or choose a different model on the Models page.)*",
+        });
       }
+
+      const assembled = assembleReview(String(title ?? ""), reports);
       /*
        * Reported, never repaired.
        *
-       * The prompt forbids citing literature because nothing in this flow has
-       * searched, so any reference here is invented -- and a fabricated
-       * citation inside a review goes to an editor, under the reviewer's name,
-       * as a reason to reject somebody's work. Removing the marker would leave
-       * the sentence it supported reading as the reviewer's own established
-       * fact, which is the more dangerous of the two states. The paper drafter
-       * made the same call for the same reason.
+       * The house rules forbid citing outside literature because nothing here
+       * has searched, so any reference is invented -- and a fabricated citation
+       * in a review goes to an editor, under the reviewer's name, as a reason
+       * to reject somebody's work. Removing the marker would leave the sentence
+       * it supported reading as the reviewer's own established fact, which is
+       * the more dangerous of the two states. The paper drafter made the same
+       * call for the same reason.
        *
-       * Not theoretical: a small model under test produced a References
-       * section of empty numbered markers on its first run.
+       * Not theoretical: a small model under test produced a References section
+       * of empty numbered markers on its first run.
        */
-      return { ok: true, text, invented: citationsIn(text) };
+      return { ok: true, text: assembled, invented: citationsIn(assembled) };
     } catch (err) {
       const message = (err as Error).message || "The review failed.";
-      return { ok: false, error: controller.signal.aborted ? "Stopped." : message };
+      if (controller.signal.aborted) {
+        /* Stopped after two of three: what was written is kept, because the
+           alternative is discarding twenty minutes of work as the price of
+           changing your mind about the third. */
+        return reports.length
+          ? { ok: true, text: assembleReview(String(title ?? ""), reports), stopped: true }
+          : { ok: false, error: "Stopped." };
+      }
+      return { ok: false, error: message };
     } finally {
       running = undefined;
     }

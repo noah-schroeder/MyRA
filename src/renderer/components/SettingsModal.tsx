@@ -147,19 +147,30 @@ function Review({
   patch: (p: Partial<Settings>) => Promise<void>;
 }) {
   const types = settings.reviewStudyTypes ?? [];
+  const [open, setOpen] = useState(types[0]?.id ?? "");
 
-  const setType = (id: string, guidance: string): void => {
+  const setReviewer = (typeId: string, reviewerId: string, instructions: string): void => {
     void patch({
-      reviewStudyTypes: types.map((t) => (t.id === id ? { ...t, guidance } : t)),
+      reviewStudyTypes: types.map((t) =>
+        t.id === typeId
+          ? {
+              ...t,
+              reviewers: t.reviewers.map((r) =>
+                r.id === reviewerId ? { ...r, instructions } : r,
+              ),
+            }
+          : t,
+      ),
     });
   };
 
   return (
     <div className="pane">
       <p className="pane-note">
-        What Karen tells the model when it reviews a manuscript. The base instructions are sent
-        every time; the block for the study design you pick on the Peer review page is added to
-        them, and anything you type into that page is added after both.
+        What Karen tells the model when it reviews a manuscript. Each study design has a panel of
+        reviewers, and each reviewer is a separate request: the base instructions below are sent
+        every time, that reviewer's own brief is added to them, and anything you type into the
+        Peer review page is added after both.
       </p>
 
       <label className="field">
@@ -175,16 +186,42 @@ function Review({
         here would be invented. The default text says so; if you rewrite it, keep that.
       </p>
 
-      {types.map((t) => (
-        <label className="field" key={t.id}>
-          <span className="field-label">{t.label}</span>
-          <textarea
-            rows={8}
-            value={t.guidance}
-            onChange={(e) => setType(t.id, e.target.value)}
-          />
-        </label>
-      ))}
+      {/* One design at a time: five panels of three reviewers is fifteen
+          thousand-word boxes, and a pane that opens on all of them is one
+          nobody scrolls to the bottom of. */}
+      <div className="review-types">
+        {types.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={t.id === open ? "review-type on" : "review-type"}
+            onClick={() => setOpen(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {types
+        .filter((t) => t.id === open)
+        .map((t) => (
+          <Fragment key={t.id}>
+            <p className="pane-note">
+              {t.label} manuscripts are sent to these {t.reviewers.length} reviewers, each as a
+              separate request carrying the whole manuscript.
+            </p>
+            {t.reviewers.map((r) => (
+              <label className="field" key={r.id}>
+                <span className="field-label">{r.label}</span>
+                <textarea
+                  rows={10}
+                  value={r.instructions}
+                  onChange={(e) => setReviewer(t.id, r.id, e.target.value)}
+                />
+              </label>
+            ))}
+          </Fragment>
+        ))}
 
       <button
         type="button"

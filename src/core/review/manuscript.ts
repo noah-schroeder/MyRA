@@ -22,13 +22,16 @@ export function wordCount(text: string): number {
 }
 
 /**
- * How much room the answer needs.
+ * How much room one reviewer's report needs.
  *
- * A review is long -- summary, strengths, numbered concerns, recommendation --
- * and the context window has to hold it alongside the manuscript. Counting only
- * the input is how a request that "fits" gets cut off mid-review.
+ * The house rules ask each reviewer for 1,000-2,000 words, and the PRISMA
+ * persona additionally produces a 27-row table, so the top of that range is
+ * around 3,000 words -- call it 4,000 tokens with the table. Counting only the
+ * input is how a request that "fits" gets cut off mid-recommendation, and the
+ * one thing worse than a refusal is a review that stops halfway through the
+ * major concerns and does not say so.
  */
-export const REPLY_TOKENS = 1_500;
+export const REPLY_TOKENS = 4_000;
 
 export interface Fit {
   fits: boolean;
@@ -40,19 +43,32 @@ export interface Fit {
 }
 
 /**
- * Whether this review can be sent to a model with this window.
+ * Whether the panel can be sent to a model with this window.
  *
- * An unknown limit is not a refusal. A hosted provider does not tell Karen its
+ * Measured against the LARGEST reviewer, not the sum: each persona is a
+ * separate request carrying the same manuscript, so what has to fit is one of
+ * them, and the biggest is the one that decides. Summing them would refuse
+ * manuscripts that would have reviewed perfectly well three times over.
+ *
+ * An unknown limit is not a refusal. A hosted provider does not report its
  * context length, and refusing on "we could not measure it" would block the
  * models most able to do this -- so the check applies where the number is real,
  * which is the local daemon, where it comes from the loaded model's `ctx_size`.
  */
-export function fitsContext(request: ReviewRequest, limit: number | undefined): Fit {
-  const tokens = estimateTokens([
-    { role: "system", content: buildSystem(request) },
-    { role: "user", content: buildUser(request) },
-  ]);
-  const words = wordCount(request.manuscript);
+export function fitsContext(requests: ReviewRequest[], limit: number | undefined): Fit {
+  const first = requests[0];
+  const words = first ? wordCount(first.manuscript) : 0;
+  const tokens = requests.reduce(
+    (most, request) =>
+      Math.max(
+        most,
+        estimateTokens([
+          { role: "system", content: buildSystem(request) },
+          { role: "user", content: buildUser(request) },
+        ]),
+      ),
+    0,
+  );
   if (!limit || limit <= 0) return { fits: true, tokens, words };
   return { fits: tokens + REPLY_TOKENS <= limit, tokens, words, limit };
 }
@@ -65,9 +81,10 @@ export function fitsContext(request: ReviewRequest, limit: number | undefined): 
  */
 export function tooLongMessage(fit: Fit): string {
   return (
-    `This manuscript is about ${fit.words.toLocaleString()} words, which needs roughly ` +
-    `${(fit.tokens + REPLY_TOKENS).toLocaleString()} tokens of context including room for the ` +
-    `review itself. The model you have loaded holds ${(fit.limit ?? 0).toLocaleString()}. ` +
+    `This manuscript is about ${fit.words.toLocaleString()} words. Each reviewer reads all of ` +
+    `it, so one report needs roughly ${(fit.tokens + REPLY_TOKENS).toLocaleString()} tokens of ` +
+    `context including room to write. The model you have loaded holds ` +
+    `${(fit.limit ?? 0).toLocaleString()}. ` +
     `Load a model with a longer context from the Models page, raise this model's context length ` +
     `in its load settings if its architecture allows it, or choose a hosted model in the bar above.`
   );
