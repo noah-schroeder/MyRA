@@ -2020,7 +2020,14 @@ async function main(): Promise<void> {
     /* The window the daemon actually loaded the model with, which is the same
        figure the conversation's context meter reads. A hosted model reports
        none, and the reviewer then does not refuse on a number it does not have. */
-    contextTokens: () => runtime.chatEndpoint()?.contextTokens,
+    contextTokens: () => {
+      /* Nothing for a hosted choice, and specifically not the local model that
+         happens to be resident beside it: the review would go to the provider,
+         so refusing a manuscript against a window belonging to some other
+         model is a refusal about the wrong thing. */
+      if (providerFor(config.current.providers, config.current.llm.model ?? "")) return undefined;
+      return runtime.chatEndpoint()?.contextTokens;
+    },
   });
   /* Last of the five, because it reads all of them: a project is an index over
      the other stores rather than a store of its own. */
