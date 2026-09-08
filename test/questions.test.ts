@@ -12,7 +12,7 @@ import { describe, it } from "node:test";
 import {
   applyRoleAnswer, cleanOptions, DEPTH_PRESETS, DEFAULT_DEPTH, depthFromLabel, depthFromText,
   depthLabel, embedderChoice, EMBEDDER_SLOT, joinAnswers, NO_EMBEDDER, ROLE_SLOTS,
-  SAME_MODEL_QUESTION, wantsSeparateModels,
+  SAME_MODEL_QUESTION, SINGLE_SLOT, slotAnswers, wantsSeparateModels,
 } from "../src/core/research/questions.ts";
 
 describe("options a model proposed", () => {
@@ -147,5 +147,60 @@ describe("the embedder slot", () => {
       screener: "big", analyst: "big", synthesist: "big", reviewer: "big",
     });
     assert.equal(Object.keys(roles).includes("embedder"), false);
+  });
+});
+
+describe("what the model dialog sends back", () => {
+  /* The dialog opens on defaults for every slot it might show -- one per role
+     AND "all" -- because which layout is drawn is decided a moment later. The
+     bug was that it returned that whole map: on the per-stage layout "all"
+     came back populated from a dropdown that was never on screen, and it
+     outranked all four deliberate choices. */
+  const defaults = {
+    screener: "qwen3-4b", analyst: "qwen3-30b", synthesist: "qwen3-30b",
+    reviewer: "qwen3-30b", all: "qwen3-30b", embedder: "bge-m3",
+  };
+
+  it("answers for the slots that were shown, and no others", () => {
+    const shown = [...ROLE_SLOTS, EMBEDDER_SLOT];
+    const answer = slotAnswers(shown, { ...defaults, reviewer: "gpt-oss-120b" });
+    assert.deepEqual(Object.keys(answer).sort(), [
+      "analyst", "embedder", "reviewer", "screener", "synthesist",
+    ]);
+    assert.equal("all" in answer, false);
+  });
+
+  it("carries the one-model answer when that is the layout drawn", () => {
+    const answer = slotAnswers([SINGLE_SLOT, EMBEDDER_SLOT], { ...defaults, all: "big" });
+    assert.deepEqual(answer, { all: "big", embedder: "bge-m3" });
+  });
+
+  it("sends an untouched slot as empty rather than omitting it", () => {
+    // Which is how "None" clears an embedder that was configured before.
+    assert.deepEqual(slotAnswers([EMBEDDER_SLOT], {}), { embedder: "" });
+  });
+});
+
+describe("per-stage choices beat a stale one-model default", () => {
+  const current = { screener: "d", analyst: "d", synthesist: "d", reviewer: "d" };
+
+  it("honours four different models, end to end from the dialog", () => {
+    const chosen = {
+      ...current, all: "d",
+      screener: "qwen3-4b", analyst: "qwen3-30b", synthesist: "gpt-oss-120b", reviewer: "claude",
+    };
+    const roles = applyRoleAnswer(current, slotAnswers([...ROLE_SLOTS, EMBEDDER_SLOT], chosen));
+    assert.deepEqual(roles, {
+      screener: "qwen3-4b", analyst: "qwen3-30b", synthesist: "gpt-oss-120b", reviewer: "claude",
+    });
+  });
+
+  it("ignores \"all\" when any role was named, whatever sent it", () => {
+    /* Belt and braces on the same failure: a run costs an hour, and getting
+       four roles silently collapsed onto one model is not something the plan
+       document makes obvious at a glance. */
+    const roles = applyRoleAnswer(current, { all: "d", reviewer: "claude" });
+    assert.equal(roles.reviewer, "claude");
+    assert.equal(roles.synthesist, "d");
   });
 });

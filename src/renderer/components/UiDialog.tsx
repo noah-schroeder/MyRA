@@ -3,7 +3,7 @@ import type { PromptRequest, Provider, Settings } from "../types.ts";
 import type { InstalledModel } from "../../main/runtime/lemonadeApi.ts";
 import { qualify } from "../../core/providers.ts";
 import { priceLabel } from "../../core/pricing.ts";
-import { JOIN, NO_EMBEDDER, OTHER } from "../../core/research/questions.ts";
+import { JOIN, NO_EMBEDDER, OTHER, slotAnswers } from "../../core/research/questions.ts";
 
 /**
  * The research pipeline asking the user something mid-run.
@@ -352,7 +352,7 @@ function ModelsDialog({
           <button
             type="button"
             className="primary"
-            onClick={() => onAnswer(request.id, JSON.stringify(chosen))}
+            onClick={() => onAnswer(request.id, JSON.stringify(slotAnswers(slots, chosen)))}
           >
             Use these
           </button>
