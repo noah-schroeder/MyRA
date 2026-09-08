@@ -294,6 +294,10 @@ const api = {
   researchDelete: (id: string) => ipcRenderer.invoke("karen:research-delete", id),
   onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
   onResearchStage: (cb: (stage: string) => void) => on("karen:research-stage", cb),
+  /** The research run executing right now, or null. Independent of the page. */
+  onResearchActive: (
+    cb: (run: { id: string; stage?: string; note?: string } | null) => void,
+  ) => on("karen:research-active", cb),
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>
     ipcRenderer.invoke("karen:answer-prompt", id, answer),

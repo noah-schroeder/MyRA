@@ -11,6 +11,7 @@ import { ApiPage } from "./components/ApiPage.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { RailButton } from "./components/Rail.tsx";
 import { RailSection, useRailSection } from "./components/RailSection.tsx";
+import { WorkingBar } from "./components/WorkingBar.tsx";
 import { ModelBar } from "./components/ModelBar.tsx";
 import { AudioPicker } from "./components/AudioPicker.tsx";
 import { ResearchBar } from "./components/ResearchBar.tsx";
@@ -35,7 +36,7 @@ import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import type {
-  CitedSource, MemberKind, ProjectSummary, PromptRequest, RuntimeState, Settings,
+  ActiveRun, CitedSource, MemberKind, ProjectSummary, PromptRequest, RuntimeState, Settings,
 } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
@@ -166,6 +167,11 @@ export function App() {
   /* An empty stage means the run is over: the card comes down, and the plain
      progress line takes over again for whatever the turn does next. */
   useEffect(() => window.karen.onResearchStage((s) => setStage(s || undefined)), []);
+  /* Reported on its own channel because the two above are consumed inside the
+     conversation, which is hidden on every other page. This one has to reach
+     the rail and the Research runs list wherever the user happens to be. */
+  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
+  useEffect(() => window.karen.onResearchActive(setActiveRun), []);
   /* And again when the turn ends, so nothing is left in state to resurface. */
   useEffect(() => {
     if (!busy) {
@@ -494,6 +500,19 @@ export function App() {
             : {})}
         />
 
+        {/* Above Settings and outside the scrolling history, so it is on screen
+            on every page and at every length of conversation list. Only off the
+            chat page: there the composer already shows both, and two stop
+            buttons on one screen is a question about which one is real. */}
+        {busy && page !== "chat" ? (
+          <WorkingBar
+            stage={activeRun?.stage ?? stage}
+            note={activeRun?.note ?? progress}
+            onOpen={toChat}
+            onStop={abort}
+          />
+        ) : null}
+
         <div className="rail-foot">
           <RailButton icon="settings" label="Settings" onClick={() => setShowSettings(true)} />
         </div>
@@ -591,7 +610,7 @@ export function App() {
         {page === "papers" ? (
           <PaperDrafter onClose={toChat} dictation={dictation} sink={dictationSink} />
         ) : null}
-        {page === "runs" ? <RunPanel onClose={toChat} /> : null}
+        {page === "runs" ? <RunPanel onClose={toChat} active={activeRun} /> : null}
         {/* Its own scroll region at full width: the models page is a browser
             over 228 entries, and `.pane`'s 62ch reading measure -- right for a
             settings form -- turns the catalogue into a single squeezed column

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RunDetail, RunFootprint, RunSource, RunSummary } from "../types.ts";
+import type { ActiveRun, RunDetail, RunFootprint, RunSource, RunSummary } from "../types.ts";
 import { Markdown } from "./Markdown.tsx";
 
 /**
@@ -43,7 +43,20 @@ function when(iso: string | undefined): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString();
 }
 
-export function RunPanel({ onClose }: { onClose: () => void }) {
+export function RunPanel({
+  onClose,
+  active,
+}: {
+  onClose: () => void;
+  /**
+   * The run executing right now, if any.
+   *
+   * Without it this page called a run in progress "unfinished at screen" --
+   * the same words it uses for one that died halfway -- so the obvious place
+   * to go and check on a long run was the place that said it had stopped.
+   */
+  active?: ActiveRun | null | undefined;
+}) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selected, setSelected] = useState<string | undefined>();
   const [detail, setDetail] = useState<RunDetail | undefined>();
@@ -96,8 +109,14 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
               <span className="run-q">{r.question}</span>
               <span className="run-meta">
                 {when(r.startedAt) || r.id}
-                {r.nextStage ? ` · unfinished at ${r.nextStage}` : ""}
-                {r.paused ? " · paused" : ""}
+                {r.id === active?.id ? (
+                  <span className="run-live"> · running{active.stage ? ` — ${active.stage}` : ""}</span>
+                ) : (
+                  <>
+                    {r.nextStage ? ` · unfinished at ${r.nextStage}` : ""}
+                    {r.paused ? " · paused" : ""}
+                  </>
+                )}
               </span>
             </button>
           ))}
@@ -209,7 +228,7 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
                 {selected ? "Reading the run…" : runs.length ? "Select a run." : "No runs left."}
               </p>
             ) : (
-              <RunTab tab={tab} detail={detail} />
+              <RunTab tab={tab} detail={detail} live={detail.id === active?.id ? active : null} />
             )}
           </div>
         </div>
@@ -217,8 +236,8 @@ export function RunPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RunTab({ tab, detail }: { tab: Tab; detail: RunDetail }) {
-  if (tab === "funnel") return <Overview detail={detail} />;
+function RunTab({ tab, detail, live }: { tab: Tab; detail: RunDetail; live?: ActiveRun | null | undefined }) {
+  if (tab === "funnel") return <Overview detail={detail} live={live} />;
   if (tab === "searches") return <Searches detail={detail} />;
   if (tab === "screening") return <Screening detail={detail} />;
   if (tab === "sources") return <Sources detail={detail} />;
@@ -228,7 +247,7 @@ function RunTab({ tab, detail }: { tab: Tab; detail: RunDetail }) {
 
 /* ------------------------------------------------------------------ overview */
 
-function Overview({ detail }: { detail: RunDetail }) {
+function Overview({ detail, live }: { detail: RunDetail; live?: ActiveRun | null | undefined }) {
   const c = detail.counts;
   const steps = [
     { label: "found", n: c.found },
@@ -244,7 +263,13 @@ function Overview({ detail }: { detail: RunDetail }) {
       <h3>{detail.question}</h3>
       <p className="run-sub">
         {when(detail.startedAt)}
-        {detail.nextStage ? ` · did not finish — would resume at ${detail.nextStage}` : " · complete"}
+        {live ? (
+          <span className="run-live"> · running now{live.stage ? ` — ${live.stage}` : ""}</span>
+        ) : detail.nextStage ? (
+          ` · did not finish — would resume at ${detail.nextStage}`
+        ) : (
+          " · complete"
+        )}
       </p>
 
       {/* PRISMA-lite. Every number is the length of a file the run wrote, so

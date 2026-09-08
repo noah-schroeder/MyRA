@@ -1245,6 +1245,54 @@ body:has(.artifact-grip:active) { user-select: none; }
 }
 .rail-add:hover { color: var(--accent-soft); background: color-mix(in srgb, var(--text) 6%, transparent); }
 
+/*
+ * What Karen is doing, when the composer that usually says so is off screen.
+ *
+ * `flex: none` for the same reason .rail-foot has it: a long history must not
+ * squeeze the one control that stops a forty-minute run down to nothing.
+ */
+.rail-working {
+  flex: none;
+  display: flex; align-items: flex-start; gap: 4px;
+  margin: 8px 6px 0; padding: 7px 8px;
+  border: 1px solid var(--accent-dim); border-radius: var(--radius-sm);
+  background: var(--accent-wash);
+}
+.rail-working-open {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  font: inherit; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text);
+}
+.rail-working-head { display: flex; align-items: center; gap: 6px; }
+.rail-working-dot {
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-soft); animation: pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .rail-working-dot { animation: none; } }
+.rail-working-title {
+  flex: 1; min-width: 0; font-size: 12px; font-weight: 560;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail-working-step {
+  flex: none; font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums;
+}
+/* Two lines at most: the progress line is a live sentence that grows, and a
+   rail that reflows on every token is harder to read than one that clips. */
+.rail-working-note {
+  font-size: 11px; color: var(--text-dim); line-height: 1.35;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.rail-working-stop {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--red); cursor: pointer;
+}
+.rail-working-stop:hover { border-color: var(--red); }
+
+/* A run that is going right now, as opposed to one that stopped part-way. */
+.run-live { color: var(--accent-soft); }
+
 /* Pushed to the bottom, outside the scrolling list above it.
    `flex: none` is not decoration: without it a long history shrinks this to
    nothing before the list ever scrolls, and Settings goes off the bottom of
