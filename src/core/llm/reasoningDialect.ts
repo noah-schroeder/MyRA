@@ -49,6 +49,16 @@ export interface ReasoningDialect {
   source: string;
   levels: ReasoningLevel[];
   /**
+   * The level Karen sends when the user has not chosen one.
+   *
+   * Only ever set where sending the field is free and known-safe, which today
+   * means a local template variable Karen has watched change that model's own
+   * rendered prompt. A hosted dialect never carries one: an effort nobody
+   * asked for is billed to somebody's account, and on a strict gateway it is
+   * the unknown parameter that fails the whole request.
+   */
+  preferred?: string | undefined;
+  /**
    * Whether Karen has seen this work, as opposed to read that it should.
    *
    * `measured` dialects are discovered by rendering the model's own template
@@ -183,9 +193,21 @@ export function dialectById(id: string): ReasoningDialect | undefined {
  * and has no switch at all, which is the case the UI has to be able to state:
  * some models cannot be told not to think.
  */
-export const THINKING_KWARGS: { name: string; values: ReasoningLevel[] }[] = [
+export const THINKING_KWARGS: {
+  name: string;
+  values: ReasoningLevel[];
+  /** Sent when the user has not chosen; see `preferred` on the dialect. */
+  preferred?: string;
+}[] = [
   {
     name: "enable_thinking",
+    /* On unless the user turns it off. A model whose template reads this is a
+       reasoning model and the reasoning is what it was chosen for, while
+       sending nothing hands the decision to whatever that particular template
+       happens to default to -- which differs between models that spell the
+       switch identically, so "I did not touch it" produced thinking on one
+       model and none on the next. */
+    preferred: "true",
     values: [
       { value: "false", label: "false", hint: "Ask the template to skip the thinking block." },
       { value: "true", label: "true", hint: "Let the model think before answering." },
@@ -216,6 +238,7 @@ export function templateDialect(name: string): ReasoningDialect | undefined {
     source: "this model's chat template",
     evidence: "measured",
     levels: known.values,
+    ...(known.preferred ? { preferred: known.preferred } : {}),
   };
 }
 
@@ -256,4 +279,49 @@ export function reasoningFields(
     return { chat_template_kwargs: { [name]: raw } };
   }
   return {};
+}
+
+/**
+ * The level in force for a dialect, given whatever the user stored.
+ *
+ * One function so the control and the request cannot disagree. They did while
+ * the default lived in two places: the composer drew `enable_thinking` as
+ * unset while every request carried `true`, so the button showing what was
+ * being sent was the one that was not lit.
+ *
+ * A stored value the dialect does not list falls back to the preferred level
+ * rather than through: values are the endpoint's vocabulary, and one left over
+ * from a different dialect is not a level here whatever it reads as.
+ */
+export function effectiveLevel(dialect: ReasoningDialect, stored: string | undefined): string {
+  if (stored && dialect.levels.some((l) => l.value === stored)) return stored;
+  return dialect.preferred ?? "";
+}
+
+/**
+ * Several dialects' fields as one request body fragment.
+ *
+ * A plain spread is wrong here and quietly so: two template switches each
+ * return a `chat_template_kwargs` object, and the second would replace the
+ * first -- so a model told `reasoning_effort: high` would silently stop being
+ * told `enable_thinking: true`. That one key is merged; everything else is a
+ * distinct top-level field belonging to a distinct vendor, and those cannot
+ * collide because no endpoint speaks two of these dialects.
+ */
+export function mergeReasoningFields(
+  parts: readonly Record<string, unknown>[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const kwargs: Record<string, unknown> = {};
+  for (const part of parts) {
+    for (const [key, value] of Object.entries(part)) {
+      if (key === "chat_template_kwargs" && value && typeof value === "object") {
+        Object.assign(kwargs, value as Record<string, unknown>);
+      } else {
+        out[key] = value;
+      }
+    }
+  }
+  if (Object.keys(kwargs).length) out["chat_template_kwargs"] = kwargs;
+  return out;
 }

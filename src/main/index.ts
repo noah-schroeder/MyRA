@@ -13,7 +13,8 @@ import { app, BrowserWindow, Notification, clipboard, desktopCapturer, dialog, i
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import {
-  ConfigStore, configuredEndpoints, DEFAULT_SETTINGS, type EndpointSettings,
+  ConfigStore, configuredEndpoints, DEFAULT_SETTINGS, LEGACY_REASONING,
+  type EndpointSettings,
 } from "../core/config.ts";
 import { DESTINATIONS } from "../core/destinations.ts";
 import { isSecretName, SecretVault, type SecretName } from "./secrets.ts";
@@ -40,9 +41,12 @@ import { samplingForRequest } from "../core/llm/sampling.ts";
 import { pricesFrom } from "../core/pricing.ts";
 import { ASK_FOR_REASONING, describeProbe, probeReasoning } from "../core/llm/reasoningProbe.ts";
 import { spokenGuidance } from "../core/agent/spokenPrompt.ts";
-import { dialectById, dialectForHost, reasoningFields } from "../core/llm/reasoningDialect.ts";
 import {
-  cachedLocalDialect, forgetReasoning, hostedCapability, localCapability,
+  dialectById, dialectForHost, effectiveLevel, mergeReasoningFields, reasoningFields,
+  type ReasoningDialect,
+} from "../core/llm/reasoningDialect.ts";
+import {
+  cachedLocalDialects, forgetReasoning, hostedCapability, localCapability,
 } from "./llm/reasoning.ts";
 import { setPdfRenderer, engines, documentsDir, setWorkspaceRoot } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
@@ -705,6 +709,30 @@ function prompt(request: Record<string, unknown>): Promise<string | undefined> {
 
 /* ------------------------------------------------------------------ ipc --- */
 
+/**
+ * What each thinking control should show as chosen.
+ *
+ * The defaults live here rather than in the control, because the control is
+ * not the only reader: `reasoningExtra` builds the request from the same rule,
+ * and while the two were written separately the composer drew
+ * `enable_thinking` as unset on every model whose requests were carrying
+ * `true`. One function, both readers, no way for the lit button and the wire
+ * to disagree.
+ */
+function levelsFor(
+  dialects: readonly ReasoningDialect[],
+  stored: Record<string, string> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const dialect of dialects) {
+    out[dialect.id] = effectiveLevel(
+      dialect,
+      stored?.[dialect.id] ?? stored?.[LEGACY_REASONING],
+    );
+  }
+  return out;
+}
+
 function installIpc(): void {
   ipcMain.handle("karen:send", async (_e, text: string) => {
     void handleSend(String(text ?? ""));
@@ -957,12 +985,17 @@ function installIpc(): void {
       const provider = providerFor(config.current.providers, chosen);
       if (provider) {
         const cap = hostedCapability(provider);
-        return { ok: true, ...cap, value: config.current.reasoning[chosen] ?? "" };
+        return {
+          ok: true,
+          ...cap,
+          values: levelsFor(cap.dialects, config.current.reasoning[chosen]),
+        };
       }
       const loaded = runtime.chatModel();
       if (!loaded) {
         return {
           ok: true,
+          dialects: [],
           reason: "unchecked" as const,
           note: "No model is loaded, so there is nothing to ask yet.",
         };
@@ -972,23 +1005,40 @@ function installIpc(): void {
          look the choice back up. A key taken from the picker's setting instead
          would miss when the two differ. */
       const key = chosen.trim() || loaded.id;
-      return { ok: true, ...cap, value: config.current.reasoning[key] ?? "" };
+      return {
+        ok: true,
+        ...cap,
+        values: levelsFor(cap.dialects, config.current.reasoning[key]),
+      };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
   });
 
-  /** Choose a level, or clear it. Stored against the model, never globally. */
-  ipcMain.handle("karen:set-reasoning", async (_e, value?: string | null) => {
-    const chosen = config.current.llm.model ?? "";
-    const key = chosen.trim() || runtime.chatModel()?.id || "";
-    if (!key) return { ok: false, error: "No model is chosen." };
-    const next = { ...config.current.reasoning };
-    if (value) next[key] = String(value);
-    else delete next[key];
-    await config.update({ reasoning: next });
-    return { ok: true };
-  });
+  /**
+   * Choose a level for one dialect, or clear it. Against the model, never
+   * globally, and never across dialects: a model reading two switches has two
+   * independent answers, and writing one of them must not disturb the other.
+   */
+  ipcMain.handle(
+    "karen:set-reasoning",
+    async (_e, dialectId: unknown, value?: string | null) => {
+      const chosen = config.current.llm.model ?? "";
+      const key = chosen.trim() || runtime.chatModel()?.id || "";
+      if (!key) return { ok: false, error: "No model is chosen." };
+      const dialect = String(dialectId ?? "");
+      if (!dialect) return { ok: false, error: "No thinking setting was named." };
+      const levels = { ...(config.current.reasoning[key] ?? {}) };
+      if (value) levels[dialect] = String(value);
+      else delete levels[dialect];
+      /* The legacy single-value entry goes as soon as anything explicit is
+         written, so it cannot outlive the model it was migrated from and turn
+         up later against a dialect that happens to list the same word. */
+      delete levels[LEGACY_REASONING];
+      await config.update({ reasoning: { ...config.current.reasoning, [key]: levels } });
+      return { ok: true };
+    },
+  );
 
   /*
    * A newly loaded model has its own template, so the previous answer is about
@@ -1736,13 +1786,16 @@ async function main(): Promise<void> {
    * where it means nothing.
    */
   const reasoningExtra = (
-    dialectId: string | undefined,
+    dialects: readonly ReasoningDialect[],
     modelRef: string,
   ): Record<string, unknown> => {
-    const value = config.current.reasoning[modelRef];
-    if (!dialectId || !value) return {};
-    const dialect = dialectById(dialectId);
-    return dialect ? reasoningFields(dialect, value) : {};
+    const stored = config.current.reasoning[modelRef] ?? {};
+    return mergeReasoningFields(
+      dialects.map((dialect) => {
+        const level = effectiveLevel(dialect, stored[dialect.id] ?? stored[LEGACY_REASONING]);
+        return level ? reasoningFields(dialect, level) : {};
+      }),
+    );
   };
 
   /** Hosted: the reasoning ask, plus an effort field if one was verified. */
@@ -1751,9 +1804,10 @@ async function main(): Promise<void> {
     modelRef: string,
     ask: Record<string, unknown>,
   ): { extra?: Record<string, unknown> } => {
+    const known = provider.reasoningParam ? dialectById(provider.reasoningParam) : undefined;
     const extra = {
       ...(provider.askReasoning ? ask : {}),
-      ...reasoningExtra(provider.reasoningParam, modelRef),
+      ...reasoningExtra(known ? [known] : [], modelRef),
     };
     return Object.keys(extra).length ? { extra } : {};
   };
@@ -1766,8 +1820,7 @@ async function main(): Promise<void> {
    * run, because the control that sets it is only drawn when it succeeds.
    */
   const localReasoningExtra = (model: string): { extra?: Record<string, unknown> } => {
-    const dialect = cachedLocalDialect(model);
-    const extra = reasoningExtra(dialect?.id, model);
+    const extra = reasoningExtra(cachedLocalDialects(model), model);
     return Object.keys(extra).length ? { extra } : {};
   };
 

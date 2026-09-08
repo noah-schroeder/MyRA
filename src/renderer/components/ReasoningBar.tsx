@@ -42,8 +42,11 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
     return window.karen.onRuntime((s) => setLoaded(s.lemonade.chat?.id));
   }, []);
 
-  const [dialect, setDialect] = useState<ReasoningDialect | undefined>();
-  const [value, setValue] = useState("");
+  const [dialects, setDialects] = useState<ReasoningDialect[]>([]);
+  /* Keyed by dialect, because a model can carry two of these at once: whether
+     to think, and how hard. One value would have made the second control set
+     the first, which is worse than not offering it. */
+  const [values, setValues] = useState<Record<string, string>>({});
   const [note, setNote] = useState<string | undefined>();
   /* Whether the absence is a finding or merely an absence. Only a finding is
      worth printing: see `NoControl` in main/llm/reasoning.ts. */
@@ -55,20 +58,20 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
      the composer drives this instead of a second one. */
   useEffect(() => {
     let live = true;
-    setDialect(undefined);
+    setDialects([]);
     setNote(undefined);
     setReason(undefined);
     void window.karen.reasoningCapability().then((r) => {
       if (!live) return;
-      setDialect(r.dialect);
+      setDialects(r.dialects ?? []);
       setNote(r.note);
       setReason(r.reason);
-      setValue(r.value ?? "");
+      setValues(r.values ?? {});
     });
     return () => { live = false; };
   }, [model, loaded]);
 
-  if (!dialect) {
+  if (!dialects.length) {
     /* Small, muted, and still real text, because an empty element cannot be
        hovered and the reason is the whole value here: "this model thinks on
        every turn and cannot be stopped" and "Karen has not checked this
@@ -88,47 +91,56 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
     ) : null;
   }
 
-  const choose = (next: string): void => {
-    const wanted = next === value ? "" : next;
-    setValue(wanted);
-    void window.karen.setReasoning(wanted || undefined);
+  const choose = (dialect: ReasoningDialect, next: string): void => {
+    const wanted = next === values[dialect.id] ? "" : next;
+    /* What is stored and what is shown are not the same thing when the dialect
+       has a preferred level: clearing `enable_thinking` returns it to `true`
+       rather than to nothing, because `true` is what the request will carry.
+       Showing it as unset would be the button lying about the wire. */
+    setValues((prev) => ({ ...prev, [dialect.id]: wanted || dialect.preferred || "" }));
+    void window.karen.setReasoning(dialect.id, wanted || undefined);
   };
 
   return (
-    <div
-      className="reasoning-bar"
-      role="group"
-      aria-label={`${dialect.param}, sent to ${dialect.source}`}
-    >
-      <span
-        className="reasoning-param"
-        title={
-          `The request field this sends, exactly as ${dialect.source} names it. ` +
-          (dialect.evidence === "measured"
-            ? "Karen read this model's own chat template and confirmed it reads this setting."
-            : "Karen checked that this endpoint accepts this field before offering it here.")
-        }
-      >
-        {dialect.param}
-      </span>
-      <div className="reasoning-row">
-        {dialect.levels.map((level) => (
-          <button
-            key={level.value}
-            type="button"
-            title={level.hint}
-            aria-pressed={value === level.value}
-            className={value === level.value ? "mode active" : "mode"}
-            /* Pressing the chosen one again clears it, which is the only way
-               to get back to the model's own default -- there is no value
-               meaning "unset", and inventing one would send a field where the
-               user wants none sent. */
-            onClick={() => choose(level.value)}
+    <div className="reasoning-stack">
+      {dialects.map((dialect) => (
+        <div
+          key={dialect.id}
+          className="reasoning-bar"
+          role="group"
+          aria-label={`${dialect.param}, sent to ${dialect.source}`}
+        >
+          <span
+            className="reasoning-param"
+            title={
+              `The request field this sends, exactly as ${dialect.source} names it. ` +
+              (dialect.evidence === "measured"
+                ? "Karen read this model's own chat template and confirmed it reads this setting."
+                : "Karen checked that this endpoint accepts this field before offering it here.")
+            }
           >
-            {level.label}
-          </button>
-        ))}
-      </div>
+            {dialect.param}
+          </span>
+          <div className="reasoning-row">
+            {dialect.levels.map((level) => (
+              <button
+                key={level.value}
+                type="button"
+                title={level.hint}
+                aria-pressed={values[dialect.id] === level.value}
+                className={values[dialect.id] === level.value ? "mode active" : "mode"}
+                /* Pressing the chosen one again clears it, which is the only
+                   way back to the level Karen would send on its own -- there
+                   is no value meaning "unset", and inventing one would send a
+                   field where the user wants none sent. */
+                onClick={() => choose(dialect, level.value)}
+              >
+                {level.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

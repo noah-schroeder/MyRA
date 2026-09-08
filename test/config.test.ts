@@ -14,7 +14,9 @@ import test from "node:test";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ConfigStore, DEFAULT_SETTINGS, type Settings } from "../src/core/config.ts";
+import {
+  ConfigStore, DEFAULT_SETTINGS, LEGACY_REASONING, type Settings,
+} from "../src/core/config.ts";
 import { CONFIG_DIR } from "../src/core/paths.ts";
 
 const SETTINGS = join(CONFIG_DIR, "settings.json");
@@ -91,5 +93,36 @@ test("changing the image model does not send the size back with it", async () =>
     await store.update({ image: { model: "b" } } as Partial<Settings>);
     assert.equal(store.current.image.model, "b");
     assert.equal(store.current.image.size, "1024x1024");
+  });
+});
+
+test("a thinking level stored before dialects were plural is kept", async () => {
+  // An older build wrote one level per model, because a model was found to
+  // read one switch. Dropping those on upgrade would silently un-choose a
+  // setting the user made, with nothing on screen saying so.
+  await withSettings({ reasoning: { "qwen3:8b": "high", junk: 5 } }, async (store) => {
+    assert.deepEqual(store.current.reasoning["qwen3:8b"], { [LEGACY_REASONING]: "high" });
+    assert.equal(store.current.reasoning["junk"], undefined);
+  });
+});
+
+test("two switches on one model are stored apart", async () => {
+  // The reason for the nesting: a model reading both `enable_thinking` and
+  // `reasoning_effort` has two independent answers, and one value per model
+  // could only ever record whichever was touched last.
+  const stored = {
+    reasoning: {
+      "qwen3:8b": { "template:enable_thinking": "true", "template:reasoning_effort": "high" },
+    },
+  };
+  await withSettings(stored, async (store) => {
+    assert.deepEqual(store.current.reasoning["qwen3:8b"], {
+      "template:enable_thinking": "true",
+      "template:reasoning_effort": "high",
+    });
+    // Un-choosing everything removes the model rather than leaving an empty
+    // row a later reader would have to interpret.
+    await store.update({ reasoning: { "qwen3:8b": {} } });
+    assert.equal(store.current.reasoning["qwen3:8b"], undefined);
   });
 });

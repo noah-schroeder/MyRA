@@ -48,24 +48,29 @@ export function applyTemplateUrl(backendUrl: string): string | undefined {
 export type RenderPrompt = (body: Record<string, unknown>) => Promise<string | undefined>;
 
 /**
- * The switch this model's template actually reads, if it reads one.
+ * Every switch this model's template actually reads.
  *
- * Tries the known thinking variables in order and stops at the first whose
- * presence changes the prompt. Order matters only in the sense that a template
- * reading two of them is already doing something unusual; the first is the one
- * reported, and both would send the same request field anyway.
+ * All of them, not the first: a template that reads both `enable_thinking` and
+ * `reasoning_effort` is answering two different questions -- whether to think
+ * at all, and how hard -- and stopping at the first match offered the on/off
+ * switch and hid the effort control on exactly the models that have one. They
+ * are returned in THINKING_KWARGS order, so the coarse switch is drawn above
+ * the fine one.
+ *
+ * Each variable stops at its own first difference. One level proving the
+ * template reads the name is the whole finding; rendering the rest would be
+ * three more round trips to learn nothing.
  *
  * A baseline that will not render means the answer is "unknown", not "no": an
  * endpoint that cannot be asked has told us nothing, and reporting that as an
  * absence of support would put a confident sentence in front of a failed
  * request.
  */
-export async function findTemplateSwitch(
-  render: RenderPrompt,
-): Promise<ReasoningDialect | undefined> {
+export async function findTemplateSwitches(render: RenderPrompt): Promise<ReasoningDialect[]> {
   const baseline = await render({ messages: PROBE_MESSAGES });
-  if (baseline === undefined) return undefined;
+  if (baseline === undefined) return [];
 
+  const found: ReasoningDialect[] = [];
   for (const kwarg of THINKING_KWARGS) {
     for (const level of kwarg.values) {
       const raw: unknown =
@@ -74,10 +79,14 @@ export async function findTemplateSwitch(
         messages: PROBE_MESSAGES,
         chat_template_kwargs: { [kwarg.name]: raw },
       });
-      if (rendered !== undefined && rendered !== baseline) return templateDialect(kwarg.name);
+      if (rendered !== undefined && rendered !== baseline) {
+        const dialect = templateDialect(kwarg.name);
+        if (dialect) found.push(dialect);
+        break;
+      }
     }
   }
-  return undefined;
+  return found;
 }
 
 /**

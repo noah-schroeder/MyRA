@@ -602,14 +602,16 @@ export interface KarenApi {
   reasoningCapability(): Promise<{
     ok: boolean;
     error?: string;
-    dialect?: ReasoningDialect;
+    /** One control each, in the order they should be drawn. */
+    dialects?: ReasoningDialect[];
     /** `none` and `always` are findings; `unchecked` and `unknown` are not. */
     reason?: "none" | "always" | "unchecked" | "unknown";
     note?: string;
-    value?: string;
+    /** The level in force per dialect id, defaults already applied. */
+    values?: Record<string, string>;
   }>;
-  /** Choose a level for the current model, or clear it by passing nothing. */
-  setReasoning(value?: string): Promise<{ ok: boolean; error?: string }>;
+  /** Choose a level for one dialect, or clear it by passing nothing. */
+  setReasoning(dialectId: string, value?: string): Promise<{ ok: boolean; error?: string }>;
   /** The build each backend is on, and the one Lemonade shipped with. */
   engineVersions(): Promise<{
     ok: boolean;

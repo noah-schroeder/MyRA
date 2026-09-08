@@ -11,9 +11,12 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  dialectById, dialectForHost, reasoningFields, templateDialect, THINKING_KWARGS,
+  dialectById, dialectForHost, effectiveLevel, mergeReasoningFields, reasoningFields,
+  templateDialect, THINKING_KWARGS,
 } from "../src/core/llm/reasoningDialect.ts";
-import { alwaysThinks, findTemplateSwitch, PROBE_MESSAGES } from "../src/core/llm/templateProbe.ts";
+import {
+  alwaysThinks, findTemplateSwitches, PROBE_MESSAGES,
+} from "../src/core/llm/templateProbe.ts";
 
 test("an unrecognised host gets no control at all", () => {
   // The safe direction, and the common one. A guess here costs somebody's
@@ -98,18 +101,88 @@ function server(reads: string[]): (b: Record<string, unknown>) => Promise<string
 }
 
 test("a template that reads the switch is found", async () => {
-  const found = await findTemplateSwitch(server(["enable_thinking"]));
-  assert.equal(found?.param, "enable_thinking");
-  assert.equal(found?.evidence, "measured");
+  const found = await findTemplateSwitches(server(["enable_thinking"]));
+  assert.deepEqual(found.map((d) => d.param), ["enable_thinking"]);
+  assert.equal(found[0]?.evidence, "measured");
+});
+
+test("a template that reads both switches gets both controls", async () => {
+  // The bug: the probe stopped at the first match, so a model answering both
+  // "should you think" and "how hard" offered only the on/off switch -- and
+  // the effort control was hidden on exactly the models that have one.
+  const found = await findTemplateSwitches(server(["enable_thinking", "reasoning_effort"]));
+  assert.deepEqual(found.map((d) => d.param), ["enable_thinking", "reasoning_effort"]);
+});
+
+test("a template reading only the effort switch still gets it", async () => {
+  const found = await findTemplateSwitches(server(["reasoning_effort"]));
+  assert.deepEqual(found.map((d) => d.param), ["reasoning_effort"]);
 });
 
 test("a template that ignores every switch offers no control", async () => {
   // LFM2.5: kwargs reach the template, and none of these is one it reads.
-  assert.equal(await findTemplateSwitch(server(["preserve_thinking"])), undefined);
+  assert.deepEqual(await findTemplateSwitches(server(["preserve_thinking"])), []);
 });
 
 test("an endpoint that cannot be asked is unknown, not unsupported", async () => {
-  assert.equal(await findTemplateSwitch(async () => undefined), undefined);
+  assert.deepEqual(await findTemplateSwitches(async () => undefined), []);
+});
+
+/* ------------------------------------------------------- the default -- */
+
+test("a model that can think is asked to, unless the user says otherwise", () => {
+  // Sending nothing hands the decision to whatever that template happens to
+  // default to, which differs between models spelling the switch identically.
+  const think = templateDialect("enable_thinking");
+  assert.ok(think);
+  assert.equal(effectiveLevel(think, undefined), "true");
+  assert.equal(effectiveLevel(think, "false"), "false");
+});
+
+test("nothing is sent by default where sending costs money", () => {
+  // A hosted effort nobody asked for is billed to somebody's account, and on
+  // a strict gateway it is the unknown field that fails the whole request.
+  for (const url of [
+    "https://api.openai.com/v1",
+    "https://openrouter.ai/api/v1",
+    "https://api.anthropic.com/v1",
+    "https://generativelanguage.googleapis.com/v1beta/openai",
+  ]) {
+    const found = dialectForHost(url);
+    assert.ok(found);
+    assert.equal(effectiveLevel(found, undefined), "");
+  }
+  // Nor for the local effort switch: how hard is the template's call to make,
+  // and Karen has no basis for overruling it.
+  const effort = templateDialect("reasoning_effort");
+  assert.ok(effort);
+  assert.equal(effectiveLevel(effort, undefined), "");
+});
+
+test("a level left over from another dialect falls back, never through", () => {
+  // A choice stored under one endpoint's vocabulary is not a level under
+  // another's, whatever it reads as.
+  const think = templateDialect("enable_thinking");
+  assert.ok(think);
+  assert.equal(effectiveLevel(think, "high"), "true");
+  const openai = dialectForHost("https://api.openai.com/v1");
+  assert.ok(openai);
+  assert.equal(effectiveLevel(openai, "-1"), "");
+});
+
+test("two template switches both survive being merged", () => {
+  // A plain spread loses one: each returns a chat_template_kwargs object, so
+  // the second silently replaced the first and a model told how hard to think
+  // stopped being told to think at all.
+  const think = templateDialect("enable_thinking");
+  const effort = templateDialect("reasoning_effort");
+  assert.ok(think && effort);
+  assert.deepEqual(
+    mergeReasoningFields([reasoningFields(think, "true"), reasoningFields(effort, "high")]),
+    { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "high" } },
+  );
+  // And a merge of nothing stays nothing, so no field is sent at all.
+  assert.deepEqual(mergeReasoningFields([{}, {}]), {});
 });
 
 test("the probe sends a prior assistant turn, so replay-only switches show up", () => {
