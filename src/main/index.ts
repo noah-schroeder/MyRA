@@ -155,6 +155,19 @@ let quitting = false;
 let tray: KarenTray | undefined;
 let session_: Session | undefined;
 let inFlight: AbortController | undefined;
+/*
+ * Which research run is executing right now.
+ *
+ * The pipeline runs in this process and is entirely indifferent to which page
+ * the window is showing, but every sign of it -- the stage card, the progress
+ * line -- lived inside the conversation, which is hidden on every other page.
+ * So leaving the chat mid-run looked exactly like the run stopping, and the
+ * Research runs page, the obvious place to go and check, listed it as
+ * "unfinished at screen": the same words it uses for a run that died.
+ *
+ * Naming the live run is what lets both places say "still going" instead.
+ */
+let activeRun: { id: string; stage?: string; note?: string } | undefined;
 
 /**
  * Requests the window tried to make and was not allowed to make.
@@ -167,6 +180,11 @@ const blocked: { url: string; at: string }[] = [];
 
 function send(channel: string, payload?: unknown): void {
   if (window_ && !window_.isDestroyed()) window_.webContents.send(channel, payload);
+}
+
+/** The live run, or null for "nothing is running", on one channel. */
+function publishActiveRun(): void {
+  send("karen:research-active", activeRun ?? null);
 }
 
 /**
@@ -640,6 +658,10 @@ async function handleSend(text: string): Promise<void> {
      */
     void fileInActiveProject(config, "chat", conversation.id);
     inFlight = undefined;
+    /* Whatever the turn was doing, it is not doing it any more -- including a
+       run that threw rather than reaching its last stage. */
+    activeRun = undefined;
+    publishActiveRun();
   }
 }
 
@@ -1601,9 +1623,26 @@ async function main(): Promise<void> {
       editor: (title, prefill) => ask("editor", title, prefill),
       notify: (message) => send("karen:research-progress", message),
     },
-    onProgress: (note) => send("karen:research-progress", note),
-    onStage: (stage) => send("karen:research-stage", stage),
-    onRunCreated: (id) => void fileInActiveProject(config, "run", id),
+    onProgress: (note) => {
+      send("karen:research-progress", note);
+      if (activeRun) {
+        activeRun.note = note;
+        publishActiveRun();
+      }
+    },
+    onStage: (stage) => {
+      send("karen:research-stage", stage);
+      /* The pipeline sends an empty stage when it is finished, which is the
+         one signal that the run is over while the turn carries on writing. */
+      if (!stage) activeRun = undefined;
+      else if (activeRun) activeRun.stage = stage;
+      publishActiveRun();
+    },
+    onRunCreated: (id) => {
+      activeRun = { id };
+      publishActiveRun();
+      void fileInActiveProject(config, "run", id);
+    },
   });
 
   /*
@@ -1893,7 +1932,19 @@ async function main(): Promise<void> {
       ),
   });
   installDictationIpc({ config, vault, runtime, send });
-  installAudioIpc({ config, vault, runtime, send });
+  installAudioIpc({
+    config, vault, runtime, send,
+    /*
+     * Unloading is "stop using the card now", so it stops the work first.
+     *
+     * Without this the click was undone a second later: resolveLlm calls
+     * ensureChatModel on every request, so the next stage of a running sweep
+     * loaded the model straight back in and the run carried on. Freeing the
+     * card while forty minutes of screening keeps refilling it is not a
+     * control, it is a suggestion.
+     */
+    stopWork: () => inFlight?.abort(),
+  });
   installImageIpc({
     config, vault, runtime, send,
     onCreated: (ref) => void fileInActiveProject(config, "image", ref),

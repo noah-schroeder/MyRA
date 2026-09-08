@@ -412,6 +412,13 @@ export interface PromptRequest {
   current?: Record<string, string>;
 }
 
+/** The research run executing right now, reported whatever page is showing. */
+export interface ActiveRun {
+  id: string;
+  stage?: string;
+  note?: string;
+}
+
 export interface KarenApi {
   send(text: string): Promise<void>;
   abort(): Promise<void>;
@@ -562,6 +569,7 @@ export interface KarenApi {
   }>;
   onResearchProgress(cb: (note: string) => void): () => void;
   onResearchStage(cb: (stage: string) => void): () => void;
+  onResearchActive(cb: (run: ActiveRun | null) => void): () => void;
   answerPrompt(id: string, answer: string | undefined): Promise<void>;
   onPrompt(cb: (request: PromptRequest) => void): () => void;
 

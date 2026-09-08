@@ -79,7 +79,18 @@ export async function audioOptions(
   return modelOptions(deps, role);
 }
 
-export function installAudioIpc(deps: AudioDeps): void {
+export function installAudioIpc(
+  deps: AudioDeps & {
+    /**
+     * Stop whatever is currently generating, before taking its model away.
+     *
+     * Injected rather than imported: this module is the audio IPC, and the
+     * conversation's abort controller belongs to the process that owns the
+     * turn. See modelDelete.ts for the same shape.
+     */
+    stopWork?: () => void;
+  },
+): void {
   const { runtime, send } = deps;
 
   ipcMain.handle("karen:audio-models", async (_e, role: AudioRole) => {
@@ -124,6 +135,11 @@ export function installAudioIpc(deps: AudioDeps): void {
    */
   ipcMain.handle("karen:model-unload", async (_e, model: string) => {
     try {
+      /* First, and unconditionally. A generation in flight holds the model
+         open, and the request that follows it reloads what was just unloaded
+         -- so mid-run the button did nothing at all except briefly. Asking for
+         the memory back is asking for the work to stop. */
+      deps.stopWork?.();
       await runtime.unloadModel(model);
       return { ok: true };
     } catch (err) {
