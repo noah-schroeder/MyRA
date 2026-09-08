@@ -13,8 +13,8 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES, buildSystem, buildUser, requestFor,
-  studyTypeById, type ReviewRequest,
+  DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES, assembleReview, buildSystem, buildUser,
+  requestsFor, studyTypeById, type ReviewRequest,
 } from "../src/core/review/prompt.ts";
 import {
   REPLY_TOKENS, fitsContext, titleFromFileName, titleOf, tooLongMessage, wordCount,
@@ -22,7 +22,8 @@ import {
 
 const base = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   prompt: DEFAULT_REVIEW_PROMPT,
-  studyGuidance: "",
+  reviewerInstructions: "",
+  reviewerLabel: "Reviewer 1 — Theory and contribution",
   studyLabel: "",
   note: "",
   title: "Working memory training and fluid intelligence",
@@ -30,12 +31,24 @@ const base = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   ...over,
 });
 
+/** The panel for one design, as the page would build it. */
+const panel = (studyTypeId: string, over: { manuscript?: string; note?: string } = {}) =>
+  requestsFor({
+    prompt: DEFAULT_REVIEW_PROMPT,
+    types: DEFAULT_STUDY_TYPES,
+    studyTypeId,
+    note: over.note ?? "",
+    title: "Working memory training and fluid intelligence",
+    manuscript: over.manuscript ?? "We ran three experiments.",
+  });
+
 describe("assembling the prompt", () => {
-  it("sends the base instructions, and the study guidance under them", () => {
+  it("sends the house rules, and this persona under them", () => {
     const type = studyTypeById(DEFAULT_STUDY_TYPES, "experimental")!;
-    const system = buildSystem(base({ studyGuidance: type.guidance }));
+    const methods = type.reviewers.find((r) => r.id === "methods")!;
+    const system = buildSystem(base({ reviewerInstructions: methods.instructions }));
     assert.ok(system.startsWith(DEFAULT_REVIEW_PROMPT));
-    assert.match(system, /FOR THIS KIND OF PAPER/);
+    assert.match(system, /YOU ARE THIS REVIEWER/);
     assert.match(system, /Randomisation and allocation/);
   });
 
@@ -50,16 +63,25 @@ describe("assembling the prompt", () => {
     assert.match(system, /do NOT override the rule against citing literature/i);
   });
 
-  it("forbids inventing literature, in the shipped default", () => {
-    // Nothing in this flow searches, so any reference produced here is invented.
-    assert.match(DEFAULT_REVIEW_PROMPT, /DO NOT cite literature/);
-    assert.match(DEFAULT_REVIEW_PROMPT, /never name a paper, author or year/i);
+  it("forbids inventing literature while still asking about the manuscript's own", () => {
+    /* Both halves matter. Nothing here searched, so a reference the model adds
+       is invented -- but "proper citations and references" is one of the
+       criteria the manuscript is judged on, and a rule that banned the topic
+       outright would have removed it. */
+    assert.match(DEFAULT_REVIEW_PROMPT, /Do not cite outside literature/);
+    assert.match(DEFAULT_REVIEW_PROMPT, /comment on the manuscript's OWN references/);
   });
 
-  it("says nothing about a study type when none was chosen", () => {
-    const system = buildSystem(base());
-    assert.equal(system.includes("FOR THIS KIND OF PAPER"), false);
-    assert.equal(buildUser(base()).includes("classified this as"), false);
+  it("asks for the format and the scores the reviewer asked for", () => {
+    for (const heading of [
+      "Summary", "Major Strengths", "Major Concerns", "Minor Issues",
+      "Specific Recommendations for Improvement", "Overall Verdict",
+    ]) {
+      assert.ok(DEFAULT_REVIEW_PROMPT.includes(heading), `missing ${heading}`);
+    }
+    assert.match(DEFAULT_REVIEW_PROMPT, /Originality, Technical Quality, Methodology, Presentation and Scientific Impact/);
+    assert.match(DEFAULT_REVIEW_PROMPT, /1 = Poor.*5 = Excellent/);
+    assert.match(DEFAULT_REVIEW_PROMPT, /1,000-2,000 words/);
   });
 
   it("carries the manuscript whole, and warns about the extraction", () => {
@@ -71,11 +93,11 @@ describe("assembling the prompt", () => {
     assert.match(user, /headings, tables and figure captions may be imperfectly laid out/);
   });
 
-  it("honours a rewritten base prompt rather than the default", () => {
+  it("honours a rewritten house prompt rather than the default", () => {
     // The whole point of it being editable.
     const system = buildSystem(base({ prompt: "Be brief." }));
     assert.ok(system.startsWith("Be brief."));
-    assert.equal(system.includes("ABSOLUTE RULES"), false);
+    assert.equal(system.includes("REVIEW FORMAT"), false);
   });
 
   it("falls back to the default when the prompt has been emptied", () => {
@@ -86,77 +108,134 @@ describe("assembling the prompt", () => {
   });
 });
 
-describe("choosing a study type", () => {
-  it("resolves the guidance and the label together", () => {
-    const request = requestFor({
-      prompt: "P",
-      types: DEFAULT_STUDY_TYPES,
-      studyTypeId: "meta-analysis",
-      note: "",
-      title: "T",
-      manuscript: "M",
-    });
-    assert.equal(request.studyLabel, "Meta-analysis");
-    assert.match(request.studyGuidance, /Publication bias/);
+describe("the panel", () => {
+  it("is one request per reviewer, each carrying the whole manuscript", () => {
+    /* Not one request for three reports. Six thousand words of output is where
+       a local model degrades, and three reviewers who have not read each other
+       is what a journal actually sends an editor. */
+    const requests = panel("experimental", { manuscript: "The whole paper." });
+    assert.equal(requests.length, 3);
+    for (const r of requests) assert.equal(r.manuscript, "The whole paper.");
+    assert.deepEqual(
+      requests.map((r) => r.reviewerLabel),
+      [
+        "Reviewer 1 — Theory and contribution",
+        "Reviewer 2 — Methods and statistics",
+        "Reviewer 3 — Concepts, flow and language",
+      ],
+    );
+  });
+
+  it("gives every design a theory, a methods and a language reviewer", () => {
+    for (const type of DEFAULT_STUDY_TYPES) {
+      assert.deepEqual(
+        type.reviewers.map((r) => r.id).sort(),
+        ["language", "methods", "theory"],
+        `${type.id} panel is wrong`,
+      );
+    }
+  });
+
+  it("sends a systematic review through the PRISMA checklist", () => {
+    const methods = panel("systematic-review").find((r) => /PRISMA/.test(r.reviewerLabel))!;
+    assert.match(methods.reviewerInstructions, /PRISMA 2020 expanded checklist/);
+    // All 27 items, not a summary of them: 27 is the number the table has rows for.
+    for (const item of ["1. Title", "13f.", "20d.", "24c.", "27."]) {
+      assert.ok(methods.reviewerInstructions.includes(item), `missing item ${item}`);
+    }
+    assert.match(methods.reviewerInstructions, /Assessment \(Present \/ Partially present \/ Absent\)/);
+  });
+
+  it("adds the meta-analysis questions on top of PRISMA, not instead of it", () => {
+    const methods = panel("meta-analysis").find((r) => /PRISMA/.test(r.reviewerLabel))!;
+    assert.match(methods.reviewerInstructions, /PRISMA 2020 expanded checklist/);
+    assert.match(methods.reviewerInstructions, /fixed or random effects/);
+    assert.match(methods.reviewerInstructions, /Publication bias/);
+    assert.match(methods.reviewerInstructions, /dependencies in the data/);
   });
 
   it("asks an editorial nothing about randomisation", () => {
-    /* The reason the chooser exists: one checklist applied to everything asks
-       a position paper for its sample size. */
-    const position = studyTypeById(DEFAULT_STUDY_TYPES, "position")!;
-    assert.match(position.guidance, /Do not criticise it for lacking methods/);
-    assert.equal(/randomisation/i.test(position.guidance), false);
+    /* The reason the chooser exists: one panel applied to everything asks a
+       position paper for its sample size. */
+    const requests = panel("position");
+    const all = requests.map((r) => r.reviewerInstructions).join("\n");
+    assert.match(all, /Do not criticise the manuscript for lacking randomisation/);
+    assert.equal(/PRISMA/.test(all), false);
   });
 
-  it("adds nothing at all for an id that no longer exists", () => {
-    // A type deleted in Settings must not resurrect as a stale guidance block.
-    const request = requestFor({
-      prompt: "P", types: DEFAULT_STUDY_TYPES, studyTypeId: "gone",
-      note: "", title: "T", manuscript: "M",
-    });
-    assert.equal(request.studyGuidance, "");
-    assert.equal(request.studyLabel, "");
+  it("sends nothing at all for a design that no longer exists", () => {
+    /* A type deleted in Settings must not fall through to some generic review:
+       the panel IS the prompt here, so there is nothing sensible to send. */
+    assert.deepEqual(panel("gone"), []);
+  });
+
+  it("tells every reviewer which design the handling reviewer chose", () => {
+    const user = buildUser(panel("meta-analysis")[0]!);
+    assert.match(user, /classified this as: Meta-analysis/);
+  });
+});
+
+describe("assembling the finished panel", () => {
+  it("files each report under its own heading", () => {
+    const out = assembleReview("A paper", [
+      { label: "Reviewer 1 — Theory", text: "Theory report." },
+      { label: "Reviewer 2 — Methods", text: "Methods report." },
+    ]);
+    assert.match(out, /^# Review of “A paper”/);
+    assert.match(out, /## Reviewer 1 — Theory\n\nTheory report\./);
+    assert.match(out, /## Reviewer 2 — Methods\n\nMethods report\./);
+  });
+
+  it("names the manuscript even when the title box was left empty", () => {
+    assert.match(assembleReview("  ", []), /untitled manuscript/);
   });
 });
 
 describe("whether it fits", () => {
   const long = (words: number): string => "word ".repeat(words);
 
-  it("refuses when the manuscript and the review together exceed the window", () => {
-    const fit = fitsContext(base({ manuscript: long(9_000) }), 8_192);
+  it("refuses when one reviewer's request and its report exceed the window", () => {
+    const fit = fitsContext(panel("experimental", { manuscript: long(9_000) }), 8_192);
     assert.equal(fit.fits, false);
     assert.equal(fit.words, 9_000);
     assert.equal(fit.limit, 8_192);
   });
 
-  it("leaves room for the review itself", () => {
+  it("measures the largest reviewer, not the sum of them", () => {
+    /* Each persona is a separate request carrying the same manuscript, so what
+       has to fit is one of them. Summing the panel would refuse manuscripts
+       that would have reviewed perfectly well three times over. */
+    const requests = panel("systematic-review", { manuscript: long(400) });
+    const each = requests.map((r) => fitsContext([r], 0).tokens);
+    assert.equal(fitsContext(requests, 0).tokens, Math.max(...each));
+    assert.ok(fitsContext(requests, 0).tokens < each.reduce((a, b) => a + b, 0));
+  });
+
+  it("leaves room for the report itself", () => {
     /* Counting only the input is how a request that "fits" gets cut off
        mid-recommendation. A request just under the window must still refuse. */
-    const request = base({ manuscript: long(200) });
-    const fit = fitsContext(request, 0);
-    const justUnder = fitsContext(request, fit.tokens + Math.floor(REPLY_TOKENS / 2));
-    assert.equal(justUnder.fits, false);
-    assert.equal(fitsContext(request, fit.tokens + REPLY_TOKENS).fits, true);
+    const requests = panel("experimental", { manuscript: long(200) });
+    const fit = fitsContext(requests, 0);
+    assert.equal(fitsContext(requests, fit.tokens + Math.floor(REPLY_TOKENS / 2)).fits, false);
+    assert.equal(fitsContext(requests, fit.tokens + REPLY_TOKENS).fits, true);
   });
 
   it("does not refuse when the window is unknown", () => {
     /* A hosted provider reports no context length. Refusing on "we could not
        measure it" would block the models most able to do this. */
-    assert.equal(fitsContext(base({ manuscript: long(50_000) }), undefined).fits, true);
-    assert.equal(fitsContext(base({ manuscript: long(50_000) }), 0).fits, true);
+    const requests = panel("experimental", { manuscript: long(50_000) });
+    assert.equal(fitsContext(requests, undefined).fits, true);
+    assert.equal(fitsContext(requests, 0).fits, true);
   });
 
-  it("counts the whole request, not the manuscript alone", () => {
-    const bare = fitsContext(base({ manuscript: "x" }), 0);
-    const withGuidance = fitsContext(
-      base({ manuscript: "x", studyGuidance: DEFAULT_STUDY_TYPES[0]!.guidance }),
-      0,
-    );
-    assert.ok(withGuidance.tokens > bare.tokens);
+  it("counts the persona, not the manuscript alone", () => {
+    const theory = fitsContext([panel("experimental")[0]!], 0);
+    const prisma = fitsContext([panel("systematic-review")[1]!], 0);
+    assert.ok(prisma.tokens > theory.tokens);
   });
 
   it("names both numbers and a way out", () => {
-    const message = tooLongMessage(fitsContext(base({ manuscript: long(9_000) }), 8_192));
+    const message = tooLongMessage(fitsContext(panel("experimental", { manuscript: long(9_000) }), 8_192));
     assert.match(message, /9,000 words/);
     assert.match(message, /8,192/);
     assert.match(message, /Models page/);

@@ -5580,3 +5580,28 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
   background: color-mix(in srgb, var(--red) 8%, transparent);
   font-size: 12.5px; line-height: 1.5;
 }
+
+/* Who is on the panel, and how far through it Karen is. */
+.review-panel {
+  padding: 11px 14px; border-radius: var(--radius-sm);
+  background: var(--bg-raised); border: 1px solid var(--border);
+}
+.review-panel ul { list-style: none; margin: 7px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.review-panel li { font-size: 12.5px; color: var(--text-dim); }
+.review-panel li::before { content: "· "; color: var(--text-faint); }
+.review-panel li.done { color: var(--accent-soft); }
+.review-panel li.done::before { content: "✓ "; }
+
+.review-live {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 13px 15px; border-radius: var(--radius-sm);
+  background: var(--accent-wash); border: 1px solid var(--accent-dim);
+}
+.review-live-head { font-size: 12.5px; font-weight: 560; }
+/* The tail of what is arriving. Fixed height so the page does not grow by a
+   thousand words while somebody is reading the part above it. */
+.review-live-text {
+  max-height: 150px; overflow: hidden;
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
+}

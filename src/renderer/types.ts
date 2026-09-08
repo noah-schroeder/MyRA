@@ -661,15 +661,29 @@ export interface KarenApi {
   }>;
   reviewContext(): Promise<{ ok: boolean; error?: string; contextTokens?: number; label?: string }>;
   reviewRun(
-    request: ReviewRequest,
-  ): Promise<{ ok: boolean; error?: string; text?: string; invented?: string[] }>;
+    requests: ReviewRequest[],
+    title: string,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    text?: string;
+    invented?: string[];
+    stopped?: boolean;
+  }>;
   reviewCancel(): Promise<{ ok: boolean }>;
   reviewSave(
     name: string,
     text: string,
   ): Promise<{ ok: boolean; error?: string; saved?: boolean; path?: string }>;
   onReviewDelta(
-    fn: (d: { kind: "text" | "thinking"; text: string; reset?: boolean }) => void,
+    fn: (d: {
+      kind: "text" | "thinking" | "reviewer";
+      index: number;
+      text: string;
+      reset?: boolean;
+      label?: string;
+      total?: number;
+    }) => void,
   ): () => void;
   downloadsList(): Promise<Download[]>;
   downloadPause(id: string): Promise<{ ok: boolean }>;

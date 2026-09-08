@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "./Markdown.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import {
-  buildSystem, buildUser, requestFor, type ReviewRequest,
+  buildSystem, buildUser, requestsFor, studyTypeById, type ReviewRequest,
 } from "../../core/review/prompt.ts";
 import { fitsContext, tooLongMessage, type Fit } from "../../core/review/manuscript.ts";
 import type { Settings } from "../types.ts";
@@ -55,6 +55,11 @@ export function PeerReview({
   /* Citation markers the model produced despite being told not to. Shown, not
      stripped: see the comment in main/review.ts. */
   const [invented, setInvented] = useState<string[]>([]);
+  /* What is being written right now, and how far through the panel. Three
+     reviewers can take twenty minutes between them, and a page that says only
+     "working" for the whole of it is a page that looks stuck. */
+  const [live, setLive] = useState<{ label: string; index: number; total: number } | undefined>();
+  const [draft, setDraft] = useState("");
   const [running, setRunning] = useState(false);
   const [contextTokens, setContextTokens] = useState<number | undefined>();
   const [showPrompt, setShowPrompt] = useState(false);
@@ -82,10 +87,15 @@ export function PeerReview({
   useEffect(
     () =>
       window.karen.onReviewDelta((d) => {
+        if (d.kind === "reviewer") {
+          setLive({ label: d.label ?? "", index: d.index, total: d.total ?? 0 });
+          setDraft("");
+          return;
+        }
         /* Only the answer. A model that thinks out loud is doing so about
            somebody else's paper, and its reasoning is not the review. */
         if (d.kind !== "text") return;
-        setReview((prev) => (d.reset ? "" : prev + d.text));
+        setDraft((prev) => (d.reset ? "" : prev + d.text));
       }),
     [],
   );
@@ -120,9 +130,9 @@ export function PeerReview({
     if (file) void take(file);
   };
 
-  const request: ReviewRequest | undefined = useMemo(() => {
-    if (!loaded) return undefined;
-    return requestFor({
+  const requests: ReviewRequest[] = useMemo(() => {
+    if (!loaded) return [];
+    return requestsFor({
       prompt: settings?.reviewPrompt ?? "",
       types,
       studyTypeId,
@@ -135,20 +145,25 @@ export function PeerReview({
   /* Measured here, in the page, over the same object that will be sent -- so
      the figure in the refusal is the size of the actual request rather than an
      estimate of the manuscript alone. */
-  const fit: Fit | undefined = request ? fitsContext(request, contextTokens) : undefined;
+  const fit: Fit | undefined = requests.length ? fitsContext(requests, contextTokens) : undefined;
+  const panel = studyTypeById(types, studyTypeId)?.reviewers ?? [];
 
   const run = async (): Promise<void> => {
-    if (!request) return;
+    if (!requests.length) return;
     setError(undefined);
     setReview("");
     setInvented([]);
+    setDraft("");
     setRunning(true);
-    const result = await window.karen.reviewRun(request);
+    const result = await window.karen.reviewRun(requests, title);
     setRunning(false);
+    setLive(undefined);
+    setDraft("");
     if (!result.ok) setError(result.error ?? "The review failed.");
     else if (result.text) {
       setReview(result.text);
       setInvented(result.invented ?? []);
+      if (result.stopped) setError("Stopped. What the reviewers finished is kept below.");
     }
   };
 
@@ -288,6 +303,22 @@ export function PeerReview({
               />
             </label>
 
+            {/* Who will be writing, before anything is sent. Three reports of
+                up to 2,000 words takes real time, and the panel is the thing
+                that explains what that time is buying. */}
+            {panel.length ? (
+              <div className="review-panel">
+                <p className="field-label">This will produce {panel.length} reports</p>
+                <ul>
+                  {panel.map((r, i) => (
+                    <li key={r.id} className={live && live.index > i ? "done" : ""}>
+                      {r.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             {fit && !fit.fits ? (
               <div className="review-toolong">
                 <p>{tooLongMessage(fit)}</p>
@@ -319,6 +350,17 @@ export function PeerReview({
           </>
         ) : null}
 
+        {running && live ? (
+          <section className="review-live">
+            <p className="review-live-head">
+              Writing {live.index + 1} of {live.total} · {live.label}
+            </p>
+            {/* The text as it arrives, so a long report is visibly progressing
+                rather than a spinner with nothing behind it. */}
+            <pre className="review-live-text">{draft.slice(-1400)}</pre>
+          </section>
+        ) : null}
+
         {review ? (
           <section className="review-out">
             <header className="review-out-head">
@@ -347,8 +389,8 @@ export function PeerReview({
           </section>
         ) : null}
 
-        {showPrompt && request ? (
-          <PromptPreview request={request} onClose={() => setShowPrompt(false)} />
+        {showPrompt && requests.length ? (
+          <PromptPreview requests={requests} onClose={() => setShowPrompt(false)} />
         ) : null}
       </div>
     </div>
@@ -362,7 +404,15 @@ export function PeerReview({
  * functions the main process calls, over the same request. Showing this sends
  * nothing.
  */
-function PromptPreview({ request, onClose }: { request: ReviewRequest; onClose: () => void }) {
+function PromptPreview({
+  requests,
+  onClose,
+}: {
+  requests: ReviewRequest[];
+  onClose: () => void;
+}) {
+  const [at, setAt] = useState(0);
+  const request = requests[at] ?? requests[0]!;
   useEffect(() => {
     const key = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
@@ -376,9 +426,21 @@ function PromptPreview({ request, onClose }: { request: ReviewRequest; onClose: 
       <div className="dialog dialog-wide">
         <h2 className="dialog-title">Exactly what is sent</h2>
         <p className="dialog-message">
-          Karen sends these two messages and nothing else. The manuscript is shown in full at
-          the end of the second.
+          One request per reviewer, each carrying the whole manuscript. Karen sends these two
+          messages and nothing else; the manuscript is shown in full at the end of the second.
         </p>
+        <div className="review-types">
+          {requests.map((r, i) => (
+            <button
+              key={r.reviewerLabel}
+              type="button"
+              className={i === at ? "review-type on" : "review-type"}
+              onClick={() => setAt(i)}
+            >
+              {r.reviewerLabel}
+            </button>
+          ))}
+        </div>
         <div className="review-preview">
           <p className="project-group-head">System</p>
           <pre>{buildSystem(request)}</pre>
