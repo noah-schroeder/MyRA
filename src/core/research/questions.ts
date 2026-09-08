@@ -285,6 +285,32 @@ export function defaultDepth(): Depth {
 }
 
 /**
+ * What the dialog answers: the slots it actually showed, and nothing else.
+ *
+ * The dialog opens on a map of defaults covering every slot it MIGHT show --
+ * one per role, plus "all" for the one-model layout -- because which layout is
+ * drawn is decided a moment later. Sending that whole map back was the bug:
+ * "all" was populated even on the per-stage layout, where its dropdown was
+ * never on screen, and `applyRoleAnswer` reads a non-empty "all" as "one model
+ * for everything". So picking a screener, an analyst, a synthesist and a
+ * separate reviewer produced a run with the synthesist's default in all four
+ * roles -- silently, and visible only as the wrong model names in the plan.
+ *
+ * An answer is what somebody chose. A value behind a control they were never
+ * shown is a default, and it does not travel back as one.
+ */
+export function slotAnswers(
+  /* Only the key is read, and the renderer's own copy of this shape types it as
+     a plain string -- so this takes the narrowest thing it actually needs. */
+  slots: readonly { key: string }[],
+  chosen: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const slot of slots) out[slot.key] = chosen[slot.key] ?? "";
+  return out;
+}
+
+/**
  * The answer from the model dialog, folded into the roles the run will use.
  *
  * "all" fills every role, which is what the one-model answer means. Anything
@@ -296,14 +322,21 @@ export function applyRoleAnswer(
   current: Record<Role, string>,
   picked: Record<string, string>,
 ): Record<Role, string> {
-  const one = (picked["all"] ?? "").trim();
-  if (one) {
-    return { screener: one, analyst: one, synthesist: one, reviewer: one };
-  }
   const next = { ...current };
+  let named = false;
   for (const role of Object.keys(current) as Role[]) {
     const value = (picked[role] ?? "").trim();
-    if (value) next[role] = value;
+    if (value) {
+      next[role] = value;
+      named = true;
+    }
   }
+  /* Per-role answers win over "all", rather than the other way round. Only one
+     of the two layouts is ever drawn, so both should never arrive together --
+     and when they did, the stale "all" overrode four deliberate choices. The
+     specific answer beating the blanket one fails safe in a way the reverse
+     does not. */
+  const one = (picked["all"] ?? "").trim();
+  if (one && !named) return { screener: one, analyst: one, synthesist: one, reviewer: one };
   return next;
 }
