@@ -46,8 +46,11 @@ function when(iso: string | undefined): string {
 export function RunPanel({
   onClose,
   active,
+  openId,
 }: {
   onClose: () => void;
+  /** A run to select on arrival, from the rail or from a project. */
+  openId?: string | undefined;
   /**
    * The run executing right now, if any.
    *
@@ -59,6 +62,13 @@ export function RunPanel({
 }) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selected, setSelected] = useState<string | undefined>();
+
+  /* Arriving with a run in mind: the rail's list and a project's contents both
+     open a specific run, and landing on the page with nothing selected was the
+     same as not having opened it. */
+  useEffect(() => {
+    if (openId) setSelected(openId);
+  }, [openId]);
   const [detail, setDetail] = useState<RunDetail | undefined>();
   const [tab, setTab] = useState<Tab>("funnel");
   const [error, setError] = useState<string | undefined>();

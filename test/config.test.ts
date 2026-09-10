@@ -126,3 +126,35 @@ test("two switches on one model are stored apart", async () => {
     assert.equal(store.current.reasoning["qwen3:8b"], undefined);
   });
 });
+
+test("a persona is per model, and clearing one is expressible", async () => {
+  await withSettings({ persona: "You are Hilde.", systemPrompts: { "a::b": "Be terse." } }, async (store) => {
+    assert.equal(store.current.persona, "You are Hilde.");
+    assert.deepEqual(store.current.systemPrompts, { "a::b": "Be terse." });
+
+    /* Replaced wholesale like sampling and reasoning: a merge could not say
+       "this model no longer has one". */
+    await store.update({ systemPrompts: {} });
+    assert.deepEqual(store.current.systemPrompts, {});
+  });
+});
+
+test("a blank persona for a model is not an entry", async () => {
+  await withSettings({ systemPrompts: { "a::b": "   ", "c::d": "Real." } }, async (store) => {
+    assert.deepEqual(store.current.systemPrompts, { "c::d": "Real." });
+  });
+});
+
+test("the persona falls back to Karen's own rather than to nothing", async () => {
+  await withSettings({ persona: 42 }, async (store) => {
+    assert.equal(store.current.persona, DEFAULT_SETTINGS.persona);
+    assert.match(store.current.persona, /You are Karen/);
+  });
+});
+
+test("reviews have a root of their own, beside papers", async () => {
+  await withSettings({}, async (store) => {
+    assert.ok(store.current.reviewsRoot.endsWith("reviews"));
+    assert.notEqual(store.current.reviewsRoot, store.current.papersRoot);
+  });
+});

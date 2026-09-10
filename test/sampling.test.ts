@@ -7,11 +7,12 @@
  * with nothing on screen naming the cause.
  */
 
-import { test } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   droppedForExternal, parseSampling, SAMPLING_FIELDS, samplingForRequest,
+  samplingFromGenerationConfig,
 } from "../src/core/llm/sampling.ts";
 import { buildRequest } from "../src/core/llm/chat.ts";
 
@@ -69,4 +70,60 @@ test("every field declares a usable range and says what it does", () => {
     SAMPLING_FIELDS.filter((f) => f.standard).map((f) => f.key).sort(),
     ["frequency_penalty", "max_tokens", "presence_penalty", "seed", "temperature", "top_p"],
   );
+});
+
+/*
+ * What the model's own authors published, from generation_config.json beside
+ * the weights. Applied under anything the user set, so it is a starting point
+ * rather than an override -- see index.ts's samplingFor.
+ */
+describe("the authors' own defaults", () => {
+  it("reads the fields it recognises and renames the two that differ", () => {
+    /* Qwen3's real generation_config.json, trimmed. */
+    const parsed = samplingFromGenerationConfig({
+      bos_token_id: 151643,
+      do_sample: true,
+      eos_token_id: [151645, 151643],
+      pad_token_id: 151643,
+      temperature: 0.6,
+      top_k: 20,
+      top_p: 0.95,
+      repetition_penalty: 1.05,
+      max_new_tokens: 2048,
+      transformers_version: "4.51.0",
+    });
+    assert.deepEqual(parsed, {
+      temperature: 0.6,
+      top_k: 20,
+      top_p: 0.95,
+      repeat_penalty: 1.05,
+      max_tokens: 2048,
+    });
+  });
+
+  it("yields nothing from a file that is all token ids", () => {
+    assert.deepEqual(
+      samplingFromGenerationConfig({ bos_token_id: 1, eos_token_id: 2, pad_token_id: 0 }),
+      {},
+    );
+  });
+
+  it("does not read do_sample: false as a temperature of zero", () => {
+    /* That is an inference about intent, and this module carries stated values
+       rather than guessing what a default would have been. */
+    assert.deepEqual(samplingFromGenerationConfig({ do_sample: false }), {});
+  });
+
+  it("keeps a value the app already spells the same way", () => {
+    assert.deepEqual(samplingFromGenerationConfig({ top_p: 0.9, repeat_penalty: 1.1 }), {
+      top_p: 0.9,
+      repeat_penalty: 1.1,
+    });
+  });
+
+  it("refuses what is not a config at all", () => {
+    for (const bad of [undefined, null, 7, "x", []]) {
+      assert.deepEqual(samplingFromGenerationConfig(bad), {});
+    }
+  });
 });

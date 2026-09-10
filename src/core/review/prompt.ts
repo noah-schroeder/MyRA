@@ -296,6 +296,13 @@ export interface ReviewRequest {
   prompt: string;
   /** This persona's instructions. */
   reviewerInstructions: string;
+  /**
+   * Which persona this is, stable across edits to their label.
+   *
+   * Not sent to the model -- it is how the stored record keeps a report attached
+   * to the reviewer that wrote it when the panel is later renamed in settings.
+   */
+  reviewerId: string;
   /** The heading this report is filed under. */
   reviewerLabel: string;
   /** The design chosen on screen, so the reviewer knows what it is reading. */
@@ -385,6 +392,7 @@ export function requestsFor(opts: {
   return type.reviewers.map((r) => ({
     prompt: opts.prompt,
     reviewerInstructions: r.instructions,
+    reviewerId: r.id,
     reviewerLabel: r.label,
     studyLabel: type.label,
     note: opts.note,

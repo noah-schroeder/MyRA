@@ -186,3 +186,12 @@ test("a real size typed over “auto” is still written", () => {
   assert.deepEqual(read, { value: 32768 });
   assert.deepEqual(patchFrom(options, { ctx_size: 32768 }), { ctx_size: 32768 });
 });
+
+test("the auto-sizer's own guard is the recipe's field list, not a model name", () => {
+  /* `manager.#autoSizeContext` skips a model whose defaults carry no `ctx_size`,
+     which is how whispercpp stays out of it: by asking the daemon what this
+     recipe has rather than by testing the model's name for "whisper". Posting a
+     context size to it is a 400. */
+  assert.ok("ctx_size" in parseModelOptions(LLAMACPP).defaults);
+  assert.ok(!("ctx_size" in parseModelOptions(WHISPERCPP).defaults));
+});

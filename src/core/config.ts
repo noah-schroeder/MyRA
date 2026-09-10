@@ -14,6 +14,17 @@ import type { PermissionMode } from "./policy.ts";
 import { effectiveKind, parseProviders, type Provider } from "./providers.ts";
 import { parseSampling, type Sampling } from "./llm/sampling.ts";
 import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES, type StudyType } from "./review/prompt.ts";
+import { DEFAULT_PERSONA } from "./agent/systemPrompt.ts";
+
+/** Model -> the persona it answers as. Blank entries are not entries. */
+function parsePromptsByModel(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [model, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string" && value.trim()) out[model] = value;
+  }
+  return out;
+}
 
 /** Per-model sampler settings, each rebuilt field by field on the way in. */
 function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
@@ -203,6 +214,13 @@ export interface Settings {
   /** On the host: where the paper drafter keeps one JSON per paper. */
   papersRoot: string;
   /**
+   * On the host: where a finished peer review is kept, one JSON per review.
+   *
+   * The report, and never the manuscript -- see core/review/record.ts. Settable
+   * like the other roots because the page invites you to keep what is in it.
+   */
+  reviewsRoot: string;
+  /**
    * The project new work files itself into. Empty means none.
    *
    * A setting rather than window state because the main process is what has to
@@ -270,6 +288,17 @@ export interface Settings {
    * machine at all.
    */
   providers: Provider[];
+  /**
+   * Who the model is told it is, before Karen's own rules.
+   *
+   * Editable because it is a persona and not a rule: the tool discipline, the
+   * citation rules and the untrusted-content rule follow it and cannot be
+   * replaced, so changing this can never make Karen write a [1] for a source it
+   * does not have. `systemPrompts` overrides it for one model, keyed the way
+   * `sampling` is.
+   */
+  persona: string;
+  systemPrompts: Record<string, string>;
   /**
    * Sampler settings per model, keyed the way a model is chosen.
    *
@@ -402,6 +431,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
   imagesRoot: join(homedir(), "Documents", "karen", "images"),
   papersRoot: join(homedir(), "Documents", "karen", "papers"),
+  reviewsRoot: join(homedir(), "Documents", "karen", "reviews"),
   activeProject: "",
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
   /* Copied, not shared: these are edited in place by the settings pane, and a
@@ -414,6 +444,8 @@ export const DEFAULT_SETTINGS: Settings = {
   keepRunningInTray: true,
   setupCompleted: false,
   providers: [],
+  persona: DEFAULT_PERSONA,
+  systemPrompts: {},
   sampling: {},
   reasoning: {},
 };
@@ -495,6 +527,11 @@ export class ConfigStore {
            where conversations are sent: a half-formed entry must not become a
            route. */
         providers: parseProviders(parsed.providers),
+        /* A string or Karen's own, never whatever the file held. The whole
+           prompt is built by calling `.trim()` on this, so a number here is not
+           a wrong persona -- it is a TypeError on the next message. */
+        persona: typeof parsed.persona === "string" ? parsed.persona : DEFAULT_SETTINGS.persona,
+        systemPrompts: parsePromptsByModel(parsed.systemPrompts),
         sampling: parseSamplingByModel(parsed.sampling),
         reasoning: parseReasoningByModel(parsed.reasoning),
       };
@@ -523,6 +560,13 @@ export class ConfigStore {
       // Replaced wholesale, not merged: removing a provider is a thing the user
       // must be able to do, and a merge cannot express a deletion.
       ...(patch.providers ? { providers: parseProviders(patch.providers) } : {}),
+      /* Replaced wholesale like sampling and reasoning, and for the same
+         reason: clearing one model's persona has to be expressible, and a merge
+         cannot say "this one no longer has one". */
+      ...(patch.persona !== undefined
+        ? { persona: typeof patch.persona === "string" ? patch.persona : DEFAULT_SETTINGS.persona }
+        : {}),
+      ...(patch.systemPrompts ? { systemPrompts: parsePromptsByModel(patch.systemPrompts) } : {}),
       ...(patch.sampling ? { sampling: parseSamplingByModel(patch.sampling) } : {}),
       /* Replaced, not merged: un-choosing a level has to be expressible, and
          a merge cannot say "this model no longer has one". */

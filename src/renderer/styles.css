@@ -1645,7 +1645,45 @@ body:has(.artifact-grip:active) { user-select: none; }
 .session:hover .session-delete, .session-delete:focus-visible { opacity: 1; }
 .session-delete:hover { color: var(--red); }
 
+/* Filing a row into a project, from where you are already looking at it.
+   Hidden until the row is hovered, like the delete beside it, except when the
+   row is already in a project -- that is worth seeing at a glance. */
+.session-file {
+  opacity: 0; flex: none;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-faint); font-size: 13px; line-height: 1;
+  padding: 4px 7px;
+}
+.session:hover .session-file, .session-file:focus-visible { opacity: 1; }
+.session-file:hover { color: var(--text); }
+.session-file.on { opacity: 1; color: var(--accent-soft); }
+/* Absolutely placed, so a long list of projects does not shove the history
+   below it down the rail while the menu is open. */
+.session-file-menu {
+  position: absolute; z-index: 5; right: 4px; top: 100%;
+  min-width: 160px; max-height: 240px; overflow-y: auto;
+  list-style: none; margin: 2px 0 0; padding: 4px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-raised); box-shadow: var(--shadow-lg);
+}
+.session-file-menu button {
+  width: 100%; text-align: left; font: inherit; font-size: 12px;
+  padding: 5px 8px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--text); cursor: pointer;
+}
+.session-file-menu button:hover { background: var(--bg-float); }
+.session-file-menu button.on { color: var(--accent-soft); }
+.session-file-menu button.off { color: var(--text-faint); }
+
 .session-empty { font-size: 12px; color: var(--text-faint); padding: 8px 10px; }
+
+/* What a row is, when it is not a conversation. Chats carry no tag: they are
+   the common case, and a tag on every row is a column of noise. */
+.session-kind {
+  margin-right: 5px; padding: 1px 5px; border-radius: 3px;
+  background: var(--bg-float); color: var(--text-dim);
+  font-size: 10px; letter-spacing: 0.02em; text-transform: uppercase;
+}
 
 .session-delete-all {
   font: inherit; font-size: 11.5px;
@@ -5611,3 +5649,95 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
   white-space: pre-wrap; word-break: break-word;
   font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
 }
+
+/* Reviews already written, on the front of the page.
+   The report is the record: the manuscript was never stored, which the note
+   under this list says rather than leaving it to be discovered. */
+.review-saved { display: flex; flex-direction: column; gap: 7px; }
+.review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.review-list li { display: flex; align-items: stretch; gap: 2px; }
+.review-list-open {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  padding: 7px 10px; text-align: left; font: inherit; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: none; color: var(--text);
+}
+.review-list-open:hover { background: var(--bg-raised); border-color: var(--border); }
+.review-list li.on .review-list-open { background: var(--accent-wash); border-color: var(--accent-dim); }
+.review-list-title { font-size: 13px; font-weight: 530; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-list-meta { font-size: 11.5px; color: var(--text-dim); }
+/* Outside the open button, because a button inside a button is invalid and
+   because deleting must not also be "show me this one". */
+.review-list-del {
+  flex: none; padding: 0 9px; font: inherit; font-size: 15px; line-height: 1;
+  border: 0; border-radius: var(--radius-sm); background: none;
+  color: var(--text-faint); cursor: pointer; opacity: 0.35;
+  transition: opacity var(--t-fast), color var(--t-fast);
+}
+.review-list li:hover .review-list-del, .review-list-del:focus-visible { opacity: 1; }
+.review-list-del:hover { color: var(--red); }
+
+/* Models that have been given a persona of their own, on the Persona tab. */
+.persona-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.persona-list li {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: start;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.persona-model { font-size: 12.5px; font-weight: 560; word-break: break-all; }
+.persona-list li button { grid-row: 1 / span 2; align-self: center; }
+.persona-text {
+  font-size: 11.5px; color: var(--text-dim); line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* One panel now serves three halves of a model's settings, so each says which
+   one it is. Without the headings the persona box read as another sampler. */
+.mopt-section {
+  margin-top: 14px; font-size: 11px; font-weight: 620;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint);
+}
+.mopt-persona { display: flex; flex-direction: column; gap: 6px; }
+.mopt-persona textarea {
+  width: 100%; min-height: 76px; resize: vertical;
+  font: inherit; font-size: 12.5px; line-height: 1.5;
+}
+
+/* The settings cog on a row in the model menu. A third sibling beside the
+   name and the default star -- see .modelmenu-row, which was already laid out
+   for exactly this. */
+.modelmenu-cog {
+  flex: none; font: inherit; font-size: 12px; line-height: 1;
+  padding: 0 8px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--text-faint); cursor: pointer;
+  opacity: 0.35; transition: opacity var(--t-fast), color var(--t-fast);
+}
+.modelmenu-row:hover .modelmenu-cog, .modelmenu-cog:focus-visible { opacity: 1; }
+.modelmenu-cog:hover { color: var(--text); }
+
+/* The llama.cpp flags, as controls over the one string that carries them.
+   The string itself stays reachable underneath: it is what reaches the server,
+   and somebody who knows these flags should be able to check the panel. */
+.mopt-flags { display: flex; flex-direction: column; gap: 9px; }
+.mopt-flag {
+  display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: center;
+}
+.mopt-flag .mopt-help { grid-column: 1 / -1; margin: 0; }
+.mopt-flag-label { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; }
+.mopt-flag-label code {
+  font-size: 11px; color: var(--text-faint);
+  font-family: var(--mono);
+}
+.mopt-flag .mopt-input { width: 130px; }
+.mopt-flag-warn { color: var(--amber); }
+.mopt-flag-acts { display: flex; gap: 12px; }
+
+/* The GPU-layers and MoE-CPU sliders, bounded by the model's own layer count
+   rather than a made-up ceiling. "Auto" is the daemon's own default, so it is
+   the box that reads as ticked, not the one that reads as an achievement. */
+.mopt-slider { display: flex; flex-direction: column; gap: 4px; width: 220px; }
+.mopt-slider-auto { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); }
+.mopt-slider-row { display: flex; align-items: center; gap: 8px; }
+.mopt-slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.mopt-slider-row input[type="range"]:disabled { opacity: 0.4; }
+.mopt-slider-value { font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }

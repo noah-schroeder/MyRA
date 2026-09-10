@@ -18,7 +18,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  assemble, assertPaperId, moveSection, newPaper, newSection, paperId, withoutSection,
+  assemble, assertPaperId, mergeDrafts, moveSection, newPaper, newSection, paperId, withoutSection,
 } from "../src/core/papers/paper.ts";
 import { byNewest, idOfFile, parseRecord, summaryOf } from "../src/core/papers/store.ts";
 
@@ -142,5 +142,48 @@ describe("reading a record back", () => {
       updatedAt: "2026-09-01T00:00:00.000Z",
     };
     assert.deepEqual([older, newer].sort(byNewest).map((s) => s.title), ["b", "a"]);
+  });
+});
+
+/*
+ * The page and the main process now write the same file: the drafter autosaves
+ * on a timer while the author types, and a finished section is committed out
+ * there. The save that fires just after a draft lands carries a record whose
+ * section is still empty, and it used to erase a minute of prose.
+ */
+describe("reconciling the page's copy with the file", () => {
+  const withDraft = (draft: string, updatedAt: string) => {
+    const paper = newPaper({ kind: "section", title: "Methods", now: new Date(0) });
+    return {
+      ...paper,
+      updatedAt,
+      sections: paper.sections.map((s) => ({ ...s, draft })),
+    };
+  };
+
+  it("keeps a draft the page has not seen yet", () => {
+    const stored = withDraft("Participants were undergraduates.", "2026-09-09T12:00:01.000Z");
+    const stale = { ...withDraft("", "2026-09-09T12:00:00.000Z"), sections: stored.sections.map((s) => ({ ...s, draft: "" })) };
+    const merged = mergeDrafts(stored, stale);
+    assert.equal(merged.sections[0]?.draft, "Participants were undergraduates.");
+  });
+
+  it("never reverts prose the author edited by hand", () => {
+    const stored = withDraft("What the model wrote.", "2026-09-09T12:00:01.000Z");
+    const edited = { ...withDraft("What the author wrote.", "2026-09-09T12:00:00.000Z"), sections: stored.sections.map((s) => ({ ...s, draft: "What the author wrote." })) };
+    assert.equal(mergeDrafts(stored, edited).sections[0]?.draft, "What the author wrote.");
+  });
+
+  it("leaves a page that has seen the file entirely alone", () => {
+    const stored = withDraft("Old.", "2026-09-09T12:00:00.000Z");
+    const current = { ...stored, updatedAt: "2026-09-09T12:00:00.000Z", title: "Renamed", sections: stored.sections.map((s) => ({ ...s, draft: "" })) };
+    /* Not stale, so this is somebody clearing a section on purpose. */
+    assert.equal(mergeDrafts(stored, current).sections[0]?.draft, "");
+    assert.equal(mergeDrafts(stored, current).title, "Renamed");
+  });
+
+  it("takes everything from the page when there is no file yet", () => {
+    const fresh = withDraft("First words.", "2026-09-09T12:00:00.000Z");
+    assert.deepEqual(mergeDrafts(undefined, fresh), fresh);
   });
 });

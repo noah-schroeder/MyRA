@@ -92,6 +92,17 @@ export interface InstalledModel {
   checkpoint?: string;
   /** The engine that runs it, needed to describe the repository correctly. */
   recipe?: string;
+  /**
+   * What this model was trained for, straight from the daemon's own list.
+   *
+   * Measured against lemond 11.8.0: every entry carries `max_context_window`
+   * and `context_length` -- 8,192 for SmolLM2-135M, 131,072 for LFM2.5-2.6B --
+   * so the trained length needs neither a guess nor a network request. It is
+   * the ceiling the auto-sizer must not exceed, and the daemon does NOT enforce
+   * it: asked for a million, it passes the number to `llama-server --ctx-size`
+   * and lets the allocation fail.
+   */
+  maxContextTokens?: number;
 }
 
 export class LemonadeApi {
@@ -398,9 +409,18 @@ export class LemonadeApi {
    * downloaded from one it found in the directory Karen points it at.
    */
   async listModels(): Promise<InstalledModel[]> {
+    /* The smaller of the two when both are given, because they can differ and
+       the lower one is the one that will not fail to allocate. */
+    const ceilingOf = (m: { max_context_window?: number; context_length?: number }): number => {
+      const seen = [m.max_context_window, m.context_length].filter(
+        (n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0,
+      );
+      return seen.length ? Math.min(...seen) : 0;
+    };
     type Raw = {
       id?: string; downloaded?: boolean; size?: number; source?: string; labels?: string[];
       checkpoint?: string; recipe?: string;
+      max_context_window?: number; context_length?: number;
     };
     const body = await this.#call<{ data?: Raw[] }>("/models");
     return (body.data ?? [])
@@ -415,6 +435,7 @@ export class LemonadeApi {
         ...(m.source ? { source: m.source } : {}),
         ...(typeof m.checkpoint === "string" && m.checkpoint ? { checkpoint: m.checkpoint } : {}),
         ...(typeof m.recipe === "string" && m.recipe ? { recipe: m.recipe } : {}),
+        ...(ceilingOf(m) ? { maxContextTokens: ceilingOf(m) } : {}),
       }));
   }
 }

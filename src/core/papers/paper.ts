@@ -169,6 +169,36 @@ export function withoutSection(sections: PaperSection[], id: string): PaperSecti
   return sections.filter((s) => s.id !== id);
 }
 
+/**
+ * The page's copy of a paper, reconciled with the one on disk.
+ *
+ * The drafter autosaves on a 700 ms timer while the author types, and the model
+ * now writes finished sections into the record from the main process rather than
+ * handing them back for the page to commit. So the two write to the same file,
+ * and the page's copy can be older than the file by exactly one finished
+ * section: the save that fires just after a draft lands carries a record whose
+ * section is still empty, and it used to erase prose that had taken a minute to
+ * write.
+ *
+ * The rule is narrow on purpose. An **older** page copy does not get to blank a
+ * draft that exists on disk -- but a non-empty draft it sends always wins,
+ * because that is the author editing prose by hand, which must never be reverted
+ * by a save racing with it.
+ */
+export function mergeDrafts(stored: Paper | undefined, incoming: Paper): Paper {
+  /* Not older than what is on disk, so the page has seen everything and is the
+     author of what it is sending. */
+  if (!stored || !(incoming.updatedAt < stored.updatedAt)) return incoming;
+  const onDisk = new Map(stored.sections.map((s) => [s.id, s.draft]));
+  return {
+    ...incoming,
+    sections: incoming.sections.map((section) => {
+      const kept = onDisk.get(section.id);
+      return kept?.trim() && !section.draft.trim() ? { ...section, draft: kept } : section;
+    }),
+  };
+}
+
 /* ------------------------------------------------------------------ *
  * Becoming a document                                                 *
  * ------------------------------------------------------------------ */

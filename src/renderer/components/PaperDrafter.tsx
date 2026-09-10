@@ -5,7 +5,9 @@ import { PaperSection } from "./PaperSection.tsx";
 import { assemble, moveSection, newSection, withoutSection } from "../../core/papers/paper.ts";
 import { requestFor } from "../../core/papers/prompt.ts";
 import { FORMATS } from "../../core/documents/formats.ts";
-import type { DictationState, Paper, PaperKind, PaperSection as Section, PaperSummary } from "../types.ts";
+import type {
+  DictationState, JobSnapshot, Paper, PaperKind, PaperSection as Section, PaperSummary,
+} from "../types.ts";
 
 /**
  * The paper drafter: raw thoughts in, first-draft prose out.
@@ -38,6 +40,7 @@ const SAVE_DELAY_MS = 700;
 
 export function PaperDrafter({
   onClose,
+  openId,
   dictation,
   sink,
 }: {
@@ -55,11 +58,21 @@ export function PaperDrafter({
    * it -- the same way the composer and the literature search box share it.
    */
   sink: { current: ((text: string) => void) | undefined };
+  /** A paper to show, from the rail or from a project. */
+  openId?: string | undefined;
 }) {
   const [papers, setPapers] = useState<PaperSummary[]>([]);
   const [paper, setPaper] = useState<Paper | undefined>();
-  const [busy, setBusy] = useState<string | undefined>();
-  const [stream, setStream] = useState<{ sectionId: string; text: string; thinking: string } | undefined>();
+  /**
+   * The run, as main reports it, rather than as this page remembers it.
+   *
+   * Drafting used to live entirely here: the busy section, the streamed text and
+   * the finished draft were all component state, so leaving the page threw the
+   * lot away while the request carried on writing. Main owns the job and the
+   * record now, and this reads them -- which is what makes coming back mid-draft
+   * show the section still being written.
+   */
+  const [job, setJob] = useState<JobSnapshot | null>(null);
   const [invented, setInvented] = useState<Record<string, string[]>>({});
   const [failed, setFailed] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<{ scope: "paper" | "section"; sectionId?: string } | undefined>();
@@ -154,43 +167,75 @@ export function PaperDrafter({
 
   /* ------------------------------------------------------------- drafting */
 
+  /* Asked once on mount and then pushed: the snapshot is what a page arriving
+     in the middle of a section needs, and the push is the rest of it. */
+  useEffect(() => {
+    void window.karen.workState().then(setJob);
+    return window.karen.onWork(setJob);
+  }, []);
+
+  /* Main commits a finished section, so the record can change without this page
+     doing anything. Taking it as sent avoids re-reading the file to learn what
+     we were just told. */
   useEffect(
     () =>
-      window.karen.onPaperDelta((d) => {
-        setStream((s) => {
-          if (!s || s.sectionId !== d.sectionId) return s;
-          /* A retried attempt starts the section again. Without this the second
-             attempt appends to the half-draft the first one left and the author
-             watches their section written twice. */
-          if (d.reset) return { ...s, text: "", thinking: "" };
-          return d.kind === "thinking"
-            ? { ...s, thinking: s.thinking + d.text }
-            : { ...s, text: s.text + d.text };
+      window.karen.onPaperChanged((next) => {
+        /* Guards `stored.current` too, not only `paper`: a draft finishing for
+           some other paper while this one is open must not leave the autosave
+           baseline pointing at a record that is not the one on screen. */
+        setPaper((p) => {
+          if (!p || p.id !== next.id) return p;
+          stored.current = JSON.stringify(next);
+          return next;
         });
+        void refresh();
       }),
-    [],
+    [refresh],
   );
 
+  /** This paper's own run, if the one in flight is this paper's. */
+  const mine = job && job.kind === "paper" && job.id === paper?.id ? job : undefined;
+  const busy = mine?.sectionId;
+  /* Something long is running that is not this: the reviewer, or another paper.
+     The button says so rather than failing when it is pressed. */
+  const elsewhere = job !== null && !mine;
+
   const draft = async (sectionId: string, mode: "draft" | "refine", instruction: string): Promise<void> => {
-    if (!paper || busy) return;
+    if (!paper || job) return;
     setFailed((f) => ({ ...f, [sectionId]: "" }));
     setInvented((v) => ({ ...v, [sectionId]: [] }));
-    setStream({ sectionId, text: "", thinking: "" });
-    setBusy(sectionId);
-    const result = await window.karen.paperDraft(sectionId, requestFor(paper, sectionId, { mode, instruction }));
-    setBusy(undefined);
-    setStream(undefined);
+    const result = await window.karen.paperDraft(
+      paper.id,
+      sectionId,
+      requestFor(paper, sectionId, { mode, instruction }),
+    );
     if (!result.ok || !result.text) {
       setFailed((f) => ({ ...f, [sectionId]: result.error ?? "The draft failed." }));
       return;
     }
-    editSection(sectionId, { draft: result.text });
+    /* The draft is already in the file -- main wrote it before answering -- so
+       this reads it back rather than committing it a second time. That is what
+       stops the autosave racing the commit, and what makes a draft that landed
+       while the page was closed simply be there.
+       Guarded the way `onPaperChanged` is guarded: this call started against
+       `paper.id`, but the await gives the author time to click back to the list
+       and open a different paper before it resolves, and this section's finished
+       draft must not then reappear over whatever they switched to. */
+    const fresh = await window.karen.paperOpen(paper.id);
+    if (fresh.ok && fresh.paper) {
+      const record = fresh.paper;
+      setPaper((p) => {
+        if (!p || p.id !== record.id) return p;
+        stored.current = JSON.stringify(record);
+        return record;
+      });
+    }
     setInvented((v) => ({ ...v, [sectionId]: result.invented ?? [] }));
   };
 
   /* --------------------------------------------------------------- papers */
 
-  const open = async (id: string): Promise<void> => {
+  const open = useCallback(async (id: string): Promise<void> => {
     const result = await window.karen.paperOpen(id);
     if (!result.ok || !result.paper) {
       setError(result.error ?? "That paper could not be opened.");
@@ -202,7 +247,14 @@ export function PaperDrafter({
     setFailed({});
     setExported(undefined);
     setError(undefined);
-  };
+  }, []);
+
+  /* Opened from the rail or from a project, rather than from this page's own
+     list. Keyed on the id so returning to the page does not reopen it over a
+     paper the author has since switched to. */
+  useEffect(() => {
+    if (openId) void open(openId);
+  }, [openId, open]);
 
   const create = async (kind: PaperKind): Promise<void> => {
     const result = await window.karen.paperCreate(kind, kind === "paper" ? "Untitled paper" : "Untitled section");
@@ -422,8 +474,8 @@ export function PaperDrafter({
             count={paper.sections.length}
             whole={whole}
             busy={busy === section.id}
-            blocked={busy !== undefined && busy !== section.id}
-            stream={stream?.sectionId === section.id ? stream : undefined}
+            blocked={elsewhere || (busy !== undefined && busy !== section.id)}
+            stream={mine && busy === section.id ? { text: mine.text, thinking: mine.thinking } : undefined}
             invented={invented[section.id] ?? []}
             error={failed[section.id] || undefined}
             mic={

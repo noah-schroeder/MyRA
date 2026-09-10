@@ -38,6 +38,13 @@ export interface ModelShape {
   contextLength?: number;
   hasChatTemplate?: boolean | undefined;
   name?: string;
+  /**
+   * How many experts a mixture-of-experts model routes between, when the
+   * config says so. Informative only -- `--n-cpu-moe` offloads by layer, not
+   * by individual expert, so this is not a bound on anything; it is what tells
+   * the settings panel whether to offer that control at all.
+   */
+  experts?: number;
 }
 
 const GIB = 1024 ** 3;
@@ -199,17 +206,156 @@ export function fitModel(
  */
 export const CONTEXT_LADDER = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144];
 
-export function largestContext(fileBytes: number, machine: Machine, shape?: ModelShape): number | undefined {
-  const ceiling = shape?.contextLength ?? Infinity;
-  const budget = (machine.vramBytes ?? 0) + machine.ramBytes;
+export function largestContext(
+  fileBytes: number,
+  machine: Machine,
+  shape?: ModelShape,
+  opts: {
+    /** What the window may be sized against. Default: all memory, as before. */
+    budgetBytes?: number;
+    /** Never above this, whatever fits. */
+    ceiling?: number;
+    /** Below this, return nothing rather than a tiny window. */
+    floor?: number;
+    bytesPerElement?: number;
+  } = {},
+): number | undefined {
+  const ceiling = Math.min(shape?.contextLength ?? Infinity, opts.ceiling ?? Infinity);
+  const budget = opts.budgetBytes ?? (machine.vramBytes ?? 0) + machine.ramBytes;
   let best: number | undefined;
   for (const context of CONTEXT_LADDER) {
     if (context > ceiling) break;
-    const fit = fitModel(fileBytes, machine, { ...(shape ? { shape } : {}), context });
+    const fit = fitModel(fileBytes, machine, {
+      ...(shape ? { shape } : {}),
+      context,
+      ...(opts.bytesPerElement ? { bytesPerElement: opts.bytesPerElement } : {}),
+    });
     if (fit.requiredBytes <= budget) best = context;
     else break;
   }
-  return best;
+  return best !== undefined && opts.floor !== undefined && best < opts.floor ? undefined : best;
+}
+
+/**
+ * How much of the card Karen is willing to plan to fill.
+ *
+ * The overhead above is llama.cpp's; this is everything else. Measured the
+ * expensive way: a probe asked lemond for a 1,000,000-token window on a model
+ * whose ceiling is 131,072, the daemon passed the number straight through to
+ * `llama-server --ctx-size` without clamping it, and the OOM killer took the
+ * process. A window that fits on paper still has to share the machine with a
+ * compositor, a browser, whatever else holds the card, and an allocator that
+ * fragments -- so the last sixth is not ours to plan into.
+ *
+ * The consequence to keep: this only ever makes the chosen window SMALLER.
+ * Nothing here can talk a machine into a context it could not otherwise hold.
+ */
+const SAFETY_FRACTION = 0.85;
+
+export interface AutoContext {
+  /**
+   * The window to ask for, or nothing at all.
+   *
+   * Nothing means "leave the daemon's own default alone", which is the honest
+   * answer when even the floor will not fit. Writing a number down in that case
+   * is how a settings panel becomes the reason a model stops loading.
+   */
+  tokens?: number | undefined;
+  /** True when there is no shape, so this is the floor rather than a calculation. */
+  estimated: boolean;
+  /** What the model was trained for, when that is known and it bound the answer. */
+  cappedAt?: number | undefined;
+  /** One sentence, for the panel that offers it. */
+  why: string;
+}
+
+/**
+ * The window to load a model with, on this machine, with room left over.
+ *
+ * Three bounds, and the answer is the smallest of them: what fits in the safe
+ * share of the machine, what the model was trained for, and what the daemon
+ * says its ceiling is. The daemon's own default is 4,096 whatever the model
+ * can do -- measured, on a model whose ceiling is 131,072 -- which is the
+ * reason this exists at all.
+ *
+ * With no shape there is no honest calculation: `fitModel`'s fallback cache is a
+ * fraction of the file size and therefore identical at 4k and at 128k, so it
+ * cannot answer this question. The floor is returned instead and flagged
+ * `estimated`, which is the same refusal to invent a number that `ContextHint`
+ * already makes on screen.
+ */
+export function autoContext(opts: {
+  fileBytes: number;
+  machine: Machine;
+  shape?: ModelShape | undefined;
+  /** `max_context_window`, straight from the daemon's own model list. */
+  ceiling?: number | undefined;
+  bytesPerElement?: number | undefined;
+  floor?: number;
+}): AutoContext {
+  const floor = opts.floor ?? 8192;
+  const { machine } = opts;
+  /* The whole machine, not the card alone. A context that spills past VRAM is
+     not the crash risk it would look like: llama-server's own `-ngl`/`--fit`
+     (default `auto`/`on`, measured against the bundled binary) is what actually
+     decides which layers sit where, and it degrades to CPU offload rather than
+     failing outright. What still has to hold regardless of which pool this
+     budget is drawn from is the safety fraction below and the hard ceiling a
+     few lines down -- those are what stopped the OOM this exists to prevent,
+     not which memory this number is counted against. */
+  const budget = Math.floor(((machine.vramBytes ?? 0) + machine.ramBytes) * SAFETY_FRACTION);
+  const ceiling = Math.min(opts.ceiling ?? Infinity, opts.shape?.contextLength ?? Infinity);
+  const capped = Number.isFinite(ceiling) ? ceiling : undefined;
+
+  if (!opts.shape) {
+    /* The floor, and only if the rule-of-thumb fit allows even that: a 30B on an
+       8 GB card must not be handed 8,192 on the grounds that we cannot measure
+       it properly. */
+    const rough = fitModel(opts.fileBytes, machine, { context: floor });
+    const fits = rough.requiredBytes <= budget && floor <= ceiling;
+    return {
+      ...(fits ? { tokens: floor } : {}),
+      estimated: true,
+      ...(capped !== undefined ? { cappedAt: capped } : {}),
+      why: fits
+        ? `About ${floor.toLocaleString()} tokens. Karen could not read this model's shape, so ` +
+          `this is the usual default rather than a measurement.`
+        : `Left as the daemon chose it: this model does not leave room for ${floor.toLocaleString()} ` +
+          `tokens on this machine, and Karen will not write down a number that stops it loading.`,
+    };
+  }
+
+  const best = largestContext(opts.fileBytes, machine, opts.shape, {
+    budgetBytes: budget,
+    ...(capped !== undefined ? { ceiling: capped } : {}),
+    floor,
+    ...(opts.bytesPerElement ? { bytesPerElement: opts.bytesPerElement } : {}),
+  });
+
+  if (best === undefined) {
+    return {
+      estimated: false,
+      ...(capped !== undefined ? { cappedAt: capped } : {}),
+      why:
+        `Left as the daemon chose it: ${floor.toLocaleString()} tokens would not fit on this ` +
+        `machine with room to spare, and a window that does not fit is a model that will not load.`,
+    };
+  }
+
+  /* Named honestly now that the budget is graphics memory AND system memory
+     together: "fits in your graphics memory" would be a claim this number does
+     not back once part of it spilled to the processor to get there. */
+  const where = machine.vramBytes ? "this machine's memory" : "system memory";
+  return {
+    tokens: best,
+    estimated: false,
+    ...(capped !== undefined ? { cappedAt: capped } : {}),
+    why:
+      best === capped
+        ? `${best.toLocaleString()} tokens — everything this model was trained for, and it fits.`
+        : `${best.toLocaleString()} tokens — the largest that fits in ${where} with room left for ` +
+          `everything else running on it.`,
+  };
 }
 
 /**

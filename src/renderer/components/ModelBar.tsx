@@ -9,6 +9,8 @@ import {
   choiceIsExternal, isExternal, parseModelRef, providerIsStarted, providerName, qualify,
 } from "../../core/providers.ts";
 import { priceLabel, priceTitle } from "../../core/pricing.ts";
+import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
+import type { Machine } from "../../core/runtime/fit.ts";
 
 /**
  * Which model is answering — and, now, which one answers next.
@@ -47,6 +49,17 @@ export function ModelBar({
   const [runtime, setRuntime] = useState<RuntimeState | undefined>();
   const [models, setModels] = useState<LocalModel[]>([]);
   const [open, setOpen] = useState(false);
+  /**
+   * The per-model settings panel, opened by the cog on a row.
+   *
+   * Held here rather than inside the menu, and rendered outside `wrap` below,
+   * for two reasons that are the same reason: the menu closes itself on any
+   * mousedown outside `wrap` and on Escape, so a panel drawn inside it would be
+   * dismissed by its own first click and would inherit the menu's clipping.
+   * Opening the panel closes the menu first, which unregisters both listeners.
+   */
+  const [tuning, setTuning] = useState<{ model: string; local: boolean } | undefined>();
+  const [machine, setMachine] = useState<Machine>({ ramBytes: 0 });
   const [error, setError] = useState<string | undefined>();
   /* Cleared every time the menu opens. A filter left over from last time would
      hide most of the list with no obvious reason why. */
@@ -62,6 +75,31 @@ export function ModelBar({
    */
   const [pane, setPane] = useState<string>("local");
   const wrap = useRef<HTMLDivElement>(null);
+
+  /* Escape closes the settings panel. A manual listener, like the tuning modal
+     on the Models page: there is no <dialog> and no focus trap anywhere here,
+     and inventing one in this component would be the first. */
+  useEffect(() => {
+    if (!tuning) return undefined;
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setTuning(undefined);
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [tuning]);
+
+  /* The card and the memory, for the context hint in the panel. Asked once:
+     hardware does not change while the window is open, and the panel is opened
+     often enough that fetching per open would be a request per click. */
+  useEffect(() => {
+    void window.karen.lemonadeInfo().then((r) => {
+      if (!r.info) return;
+      setMachine({
+        ...(r.info.devices[0]?.totalBytes ? { vramBytes: r.info.devices[0].totalBytes } : {}),
+        ramBytes: r.info.ramBytes ?? 0,
+      });
+    });
+  }, []);
 
   useEffect(() => {
     void window.karen.runtimeState().then(setRuntime);
@@ -278,6 +316,7 @@ export function ModelBar({
   const shown = filterModels(models, query);
 
   return (
+    <>
     <div className="modelbar-wrap" ref={wrap}>
       <button
         type="button"
@@ -427,6 +466,21 @@ export function ModelBar({
                           {on ? <span className="pill on">in use</span> : null}
                         </span>
                       </button>
+                      {/* A hosted model has no load settings, but it does have
+                          samplers and a persona -- and until this cog there was
+                          no way to reach either for one. */}
+                      <button
+                        type="button"
+                        className="modelmenu-cog"
+                        title={`Settings for ${model}`}
+                        aria-label={`Settings for ${model}`}
+                        onClick={() => {
+                          setOpen(false);
+                          setTuning({ model: qualify(shownProvider.id, model), local: false });
+                        }}
+                      >
+                        ⚙
+                      </button>
                     </li>
                   );
                 })}
@@ -538,6 +592,18 @@ export function ModelBar({
                     >
                       {isDefault ? "★" : "☆"}
                     </button>
+                    <button
+                      type="button"
+                      className="modelmenu-cog"
+                      title={`Settings for ${m.name}`}
+                      aria-label={`Settings for ${m.name}`}
+                      onClick={() => {
+                        setOpen(false);
+                        setTuning({ model: m.path, local: true });
+                      }}
+                    >
+                      ⚙
+                    </button>
                   </li>
                 );
               })}
@@ -631,5 +697,57 @@ export function ModelBar({
 
       {error ? <span className="modelbar-error">{error}</span> : null}
     </div>
+
+      {/*
+        * The per-model settings, a true DOM sibling of `wrap` rather than a
+        * child rendered late in its flex row.
+        *
+        * `.dialog-backdrop` is `position: fixed`, so it already escapes
+        * `wrap`'s layout regardless of nesting -- but nesting still mattered
+        * for two other things. Inside `wrap`, the menu's own outside-click
+        * handler would count a click in this panel as a click elsewhere and
+        * close the menu underneath it, and two Escape handlers would both
+        * fire; the menu is already closed by the time this renders (`setOpen`
+        * and `setTuning` are set together), which sidesteps both regardless of
+        * nesting too. What nesting DID put at risk: `position: fixed` only
+        * escapes the *page* while every ancestor leaves the normal containing
+        * block alone, and that stops being true the moment one of them gains a
+        * `transform`, `filter` or `contain` -- a change nobody editing
+        * `.modelbar-wrap` for something else would think to check against a
+        * modal three screens away. Being an actual sibling makes that
+        * impossible rather than merely untested.
+        *
+        * The backdrop pattern is the tuning modal's on the Models page, down to
+        * the target check: a drag that began inside the panel must not close it.
+        */}
+      {tuning ? (
+        <div
+          className="dialog-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Settings for ${tuning.model}`}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setTuning(undefined);
+          }}
+        >
+          <div className="mopt-modal">
+            <ModelOptionsEditor
+              model={tuning.model}
+              machine={machine}
+              /* The chat model specifically, which is what `activePath` above
+                 already resolves: a voice model being resident must not make
+                 "Reload the model now" appear against a chat model. */
+              loaded={tuning.local && tuning.model === activePath}
+              sections={tuning.local ? ["load", "sampling", "prompt"] : ["sampling", "prompt"]}
+              onReload={async () => {
+                await window.karen.lemonadeUnload();
+                await window.karen.lemonadeLoad(tuning.model);
+              }}
+              onClose={() => setTuning(undefined)}
+            />
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

@@ -17,7 +17,7 @@
  */
 
 import { dialog, ipcMain } from "electron";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
 
@@ -27,13 +27,19 @@ import { runSubagent } from "../core/llm/chat.ts";
 import { citationsIn } from "../core/documents/draft.ts";
 import { pdfToText } from "../core/research/pdf.ts";
 import { engines, readAsText } from "../core/documents/office.ts";
-import { OWNER_ONLY_FILE } from "../core/paths.ts";
+import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import {
   fitsContext, titleFromFileName, titleOf, tooLongMessage, wordCount,
 } from "../core/review/manuscript.ts";
 import {
   assembleReview, buildSystem, buildUser, type ReviewRequest,
 } from "../core/review/prompt.ts";
+import {
+  assertReviewId, byNewest, newReview, summaryOf,
+  type Review, type ReviewSummary,
+} from "../core/review/record.ts";
+import { idOfFile, parseRecord, reviewFileName } from "../core/review/store.ts";
+import type { Jobs } from "./work.ts";
 
 export interface ReviewDeps {
   config: ConfigStore;
@@ -55,6 +61,20 @@ export interface ReviewDeps {
    */
   contextTokens: () => number | undefined;
   send: (channel: string, payload?: unknown) => void;
+  /**
+   * The lease on long work, shared with the paper drafter.
+   *
+   * Injected rather than owned, because "one long generation at a time" is a
+   * fact about the graphics card and not about peer review.
+   */
+  jobs: Jobs;
+  /**
+   * A review has just come into existence, and here is its id.
+   *
+   * Injected rather than imported, for the reason papers.ts gives: the module
+   * that files it also reads reviews, so importing it here would be a cycle.
+   */
+  onCreated?: (ref: string) => void;
 }
 
 /** What extracting a manuscript produced, or why it could not. */
@@ -150,9 +170,100 @@ function finish(name: string, raw: string): Extracted {
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * The record on disk                                                  *
+ * ------------------------------------------------------------------ */
+
+function rootOf(deps: Pick<ReviewDeps, "config">): string {
+  return deps.config.current.reviewsRoot;
+}
+
+async function readReview(root: string, id: string): Promise<Review | undefined> {
+  try {
+    const raw = await readFile(join(root, reviewFileName(assertReviewId(id))), "utf8");
+    return parseRecord(JSON.parse(raw), id);
+  } catch {
+    /* Missing, unparseable, or half-written by a sync client. The list already
+       skips what it cannot read; opening one directly says so instead. */
+    return undefined;
+  }
+}
+
+/**
+ * Write the record, via a temporary name.
+ *
+ * The rename is what makes the save atomic, and this one is saved after every
+ * reviewer rather than once at the end: a panel is three long requests, and a
+ * crash during the third must leave the first two on disk rather than an hour
+ * of nothing. It is the pipeline's rule -- a finished stage is its own
+ * done-marker -- applied to a smaller pipeline.
+ */
+async function saveReview(root: string, review: Review): Promise<Review> {
+  await makeOwnDir(root);
+  const stored: Review = { ...review, updatedAt: new Date().toISOString() };
+  const target = join(root, reviewFileName(assertReviewId(review.id)));
+  const temp = `${target}.partial`;
+  await writeFile(temp, JSON.stringify(stored, null, 2), { mode: OWNER_ONLY_FILE });
+  await rename(temp, target);
+  return stored;
+}
+
+export async function listReviews(root: string): Promise<ReviewSummary[]> {
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return [];
+  }
+  const out: ReviewSummary[] = [];
+  for (const name of names) {
+    const id = idOfFile(name);
+    if (!id) continue;
+    const review = await readReview(root, id);
+    if (review) out.push(summaryOf(review));
+  }
+  return out.sort(byNewest);
+}
+
+/**
+ * Read one review, or nothing if it cannot be read.
+ *
+ * Exported alongside the delete because a project needs both: it writes the
+ * report into the export folder and removes it when the project goes.
+ */
+export async function readReviewRecord(root: string, id: string): Promise<Review | undefined> {
+  return await readReview(root, id);
+}
+
+/** Remove one review. The same call the page's own Delete makes. */
+export async function deleteReview(root: string, id: string): Promise<void> {
+  await rm(join(root, reviewFileName(assertReviewId(id))), { force: true });
+}
+
 export function installReviewIpc(deps: ReviewDeps): void {
-  const { send } = deps;
-  let running: AbortController | undefined;
+  const { send, jobs } = deps;
+
+  /**
+   * The list, with the review this process is actually writing shown as such.
+   *
+   * `parseRecord` reads a `running` status back as `stopped` on purpose -- see
+   * its own comment -- because ordinarily nothing is left writing a record that
+   * still says so after a crash. But this module saves after every reviewer
+   * and republishes the list from the same disk read in the same breath, so
+   * without this, "Your reviews" would call its own job abandoned the moment
+   * the first reviewer finishes -- while the panel right below it is visibly
+   * still writing the second.
+   */
+  const listLive = async (): Promise<ReviewSummary[]> => {
+    const rows = await listReviews(rootOf(deps));
+    const current = jobs.current();
+    if (current?.kind !== "review") return rows;
+    return rows.map((r) => (r.id === current.id ? { ...r, status: "running" as const } : r));
+  };
+
+  const publish = async (): Promise<void> => {
+    send("karen:reviews", await listLive());
+  };
 
   ipcMain.handle("karen:review-extract", async (_e, name: unknown, bytes: unknown) => {
     const buffer = bytes as ArrayBuffer | Uint8Array | undefined;
@@ -185,13 +296,33 @@ export function installReviewIpc(deps: ReviewDeps): void {
     return { ok: true, ...(limit ? { contextTokens: limit } : {}) };
   });
 
+  ipcMain.handle("karen:review-list", async () => {
+    return { ok: true, reviews: await listLive() };
+  });
+
+  ipcMain.handle("karen:review-open", async (_e, id: unknown) => {
+    const review = await readReview(rootOf(deps), String(id ?? ""));
+    return review
+      ? { ok: true, review }
+      : { ok: false, error: "That review could not be read." };
+  });
+
+  ipcMain.handle("karen:review-delete", async (_e, id: unknown) => {
+    try {
+      await deleteReview(rootOf(deps), String(id ?? ""));
+      await publish();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   /**
    * Save the review where the reviewer says.
    *
-   * A save dialog rather than a folder Karen owns, because a review is not
-   * Karen's record -- it goes back to an editor, usually pasted into a
-   * submission system, and the person knows where they keep this year's
-   * reviewing. Nothing is kept here afterwards.
+   * A save dialog as well as the record, because a review is not only Karen's
+   * record -- it goes back to an editor, usually pasted into a submission
+   * system, and the person knows where they keep this year's reviewing.
    */
   ipcMain.handle("karen:review-save", async (_e, name: unknown, text: unknown) => {
     try {
@@ -210,8 +341,8 @@ export function installReviewIpc(deps: ReviewDeps): void {
     }
   });
 
-  ipcMain.handle("karen:review-cancel", async () => {
-    running?.abort();
+  ipcMain.handle("karen:review-cancel", async (_e, id: unknown) => {
+    jobs.cancel(id ? String(id) : undefined);
     return { ok: true };
   });
 
@@ -228,19 +359,48 @@ export function installReviewIpc(deps: ReviewDeps): void {
    * preview honest: it renders these same two functions over the same objects,
    * so "exactly what will be sent" is the thing that is sent rather than a
    * reconstruction of it.
+   *
+   * The record is written before the first reviewer and again after every one,
+   * and the page is not part of that path. Leaving the tab mid-panel used to
+   * throw the finished report away: the run carried on writing into a component
+   * the window had already unmounted.
    */
-  ipcMain.handle("karen:review-run", async (_e, raw: unknown, title: unknown) => {
-    if (running) return { ok: false, error: "Karen is already writing a review." };
+  ipcMain.handle("karen:review-run", async (_e, raw: unknown, meta: unknown) => {
     const requests = raw as ReviewRequest[];
     if (!Array.isArray(requests) || requests.length === 0) {
       return { ok: false, error: "Choose what kind of paper this is first." };
     }
-    if (!requests[0]?.manuscript?.trim()) {
+    const first = requests[0];
+    if (!first?.manuscript?.trim()) {
       return { ok: false, error: "There is no manuscript to review." };
     }
+    const about = (meta ?? {}) as { title?: string; fileName?: string; studyTypeId?: string };
+    const title = String(about.title ?? first.title ?? "");
 
-    const controller = new AbortController();
-    running = controller;
+    const root = rootOf(deps);
+    let record = newReview({
+      title,
+      fileName: String(about.fileName ?? ""),
+      /* Counted here, while the manuscript is in hand. It is the last moment
+         anything can: the text is not written to the record, and the record is
+         the only thing that outlives this call. */
+      words: wordCount(first.manuscript),
+      studyTypeId: String(about.studyTypeId ?? ""),
+      studyLabel: first.studyLabel,
+      prompt: first.prompt,
+      note: first.note,
+      reviewers: requests.length,
+    });
+
+    const signal = jobs.begin({
+      kind: "review",
+      id: record.id,
+      title: record.title,
+      steps: requests.length,
+      label: first.reviewerLabel,
+    });
+    if (!signal) return { ok: false, error: "Karen is already working on something long." };
+
     const reports: { label: string; text: string }[] = [];
     try {
       const resolved = await deps.llm();
@@ -259,17 +419,17 @@ export function installReviewIpc(deps: ReviewDeps): void {
        */
       const fit = fitsContext(requests, deps.contextTokens());
       if (!fit.fits) return { ok: false, error: tooLongMessage(fit) };
+
+      /* Written before a single token is asked for, so the run has somewhere to
+         land from its first moment, and filed at the same time: a project
+         member with no file on disk is pruned by the next read, and filing at
+         the end would lose the filing exactly when the app dies mid-run. */
+      record = await saveReview(root, record);
+      deps.onCreated?.(record.id);
+      await publish();
+
       for (const [index, request] of requests.entries()) {
-        /* Announced before the call rather than after it: a reviewer that takes
-           four minutes is four minutes of nothing happening, and the panel is
-           the only thing on screen that explains the wait. */
-        send("karen:review-delta", {
-          kind: "reviewer",
-          index,
-          total: requests.length,
-          label: request.reviewerLabel,
-          text: "",
-        });
+        jobs.step({ step: index, label: request.reviewerLabel });
 
         const result = await runSubagent({
           model: resolved.endpoint.model ?? "",
@@ -277,16 +437,13 @@ export function installReviewIpc(deps: ReviewDeps): void {
           ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
           system: buildSystem(request),
           prompt: buildUser(request),
-          signal: controller.signal,
-          onDelta: (text, kind) => send("karen:review-delta", { kind, index, text }),
+          signal,
+          onDelta: (text, kind) => jobs.append(kind, text),
+          /* A retry has already streamed half a report into the page; without
+             this the second attempt appends to the first and the reviewer
+             watches their summary written twice. */
           onProgress: (note) => {
-            /* A retry has already streamed half a report into the page. Without
-               this the second attempt appends to the first and the reviewer
-               watches their summary written twice -- the same failure the paper
-               drafter hit, and the same fix. */
-            if (note.startsWith("retrying")) {
-              send("karen:review-delta", { kind: "text", index, text: "", reset: true });
-            }
+            if (note.startsWith("retrying")) jobs.restart();
           },
         });
 
@@ -295,16 +452,20 @@ export function installReviewIpc(deps: ReviewDeps): void {
            as it stands, with that reviewer's failure recorded in its place --
            dropping the heading would leave a two-reviewer report with no sign
            that a third had been asked for. */
-        reports.push({
-          label: request.reviewerLabel,
-          text:
-            text ||
-            "*(This reviewer returned nothing usable — only its own reasoning, or an empty " +
-              "reply. Try again, or choose a different model on the Models page.)*",
+        const body =
+          text ||
+          "*(This reviewer returned nothing usable — only its own reasoning, or an empty " +
+            "reply. Try again, or choose a different model on the Models page.)*";
+        reports.push({ label: request.reviewerLabel, text: body });
+        record = await saveReview(root, {
+          ...record,
+          reports: [...record.reports, { reviewerId: request.reviewerId, label: request.reviewerLabel, text: body }],
+          assembled: assembleReview(record.title, reports),
         });
+        await publish();
       }
 
-      const assembled = assembleReview(String(title ?? ""), reports);
+      const assembled = assembleReview(record.title, reports);
       /*
        * Reported, never repaired.
        *
@@ -319,20 +480,32 @@ export function installReviewIpc(deps: ReviewDeps): void {
        * Not theoretical: a small model under test produced a References section
        * of empty numbered markers on its first run.
        */
-      return { ok: true, text: assembled, invented: citationsIn(assembled) };
+      const invented = citationsIn(assembled);
+      record = await saveReview(root, { ...record, assembled, invented, status: "done" });
+      await publish();
+      return { ok: true, id: record.id, text: assembled, invented };
     } catch (err) {
       const message = (err as Error).message || "The review failed.";
-      if (controller.signal.aborted) {
-        /* Stopped after two of three: what was written is kept, because the
-           alternative is discarding twenty minutes of work as the price of
-           changing your mind about the third. */
+      const assembled = reports.length ? assembleReview(record.title, reports) : "";
+      const stopped = signal.aborted;
+      /* Stopped after two of three: what was written is kept, because the
+         alternative is discarding twenty minutes of work as the price of
+         changing your mind about the third. */
+      record = await saveReview(root, {
+        ...record,
+        assembled,
+        status: stopped ? "stopped" : "failed",
+        ...(stopped ? {} : { error: message }),
+      });
+      await publish();
+      if (stopped) {
         return reports.length
-          ? { ok: true, text: assembleReview(String(title ?? ""), reports), stopped: true }
+          ? { ok: true, id: record.id, text: assembled, stopped: true }
           : { ok: false, error: "Stopped." };
       }
       return { ok: false, error: message };
     } finally {
-      running = undefined;
+      jobs.end();
     }
   });
 }

@@ -18,8 +18,8 @@ resolves open-access PDFs, and can run a full plan → search → read → verif
 synthesise pipeline that produces a cited report.
 
 **Projects.** A folder for one piece of work: put conversations, meetings,
-research runs, papers and images in it, and while it is open everything new
-files itself there. Delete it and its contents in one action — itemised first,
+research runs, papers, peer reviews and images in it, and while it is open
+everything new files itself there. Delete it and its contents in one action — itemised first,
 with the option to keep them. Nothing moves on disk; **Export** writes the whole
 project out as one real folder, conversations rendered readable, which is also
 what you would send a co-author.
@@ -102,6 +102,13 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   repository's details and its model card, and Download fetches the files.
   Typing in the box sends nothing. The registry is named, with its country, on
   every result and on every model's page.
+- **Downloading a model** also asks Hugging Face for that model's `config.json`
+  and `generation_config.json` — two small text files beside the weights — so
+  Karen can size the context window to your machine rather than accept the
+  daemon's 4,096, and can start from the sampler settings the model's authors
+  published. Same host as the download itself, only when you download, and
+  nothing is sent but the repository name. Loading a model afterwards asks
+  nothing: what was learned is kept on this machine.
 - **Checking for engine updates** asks GitHub which builds of llama.cpp,
   whisper.cpp and the rest have been released, and only when you press the
   button in Settings → Runtime. Karen never checks on its own, and installing

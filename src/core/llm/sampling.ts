@@ -112,6 +112,35 @@ export function parseSampling(raw: unknown): Sampling {
 }
 
 /**
+ * What a model's authors published as their own sampler defaults.
+ *
+ * `generation_config.json` sits beside the weights and is where a temperature
+ * of 0.6 with top-p 0.95 comes from when a model card recommends one. Two names
+ * differ from the OpenAI spelling and are renamed; everything else either
+ * matches or is dropped, so a file full of `bos_token_id` and `eos_token_id`
+ * yields nothing rather than noise.
+ *
+ * `do_sample: false` is deliberately NOT read as `temperature: 0`. That is an
+ * inference about what the authors meant, and this module's whole discipline is
+ * to carry values somebody stated rather than to guess a default -- an unset
+ * field is not sent at all, which is a different thing from sending what we
+ * imagine the server would have done.
+ */
+export function samplingFromGenerationConfig(raw: unknown): Sampling {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const row = { ...(raw as Record<string, unknown>) };
+  const rename: Record<string, string> = {
+    max_new_tokens: "max_tokens",
+    repetition_penalty: "repeat_penalty",
+  };
+  for (const [from, to] of Object.entries(rename)) {
+    if (row[from] !== undefined && row[to] === undefined) row[to] = row[from];
+    delete row[from];
+  }
+  return parseSampling(row);
+}
+
+/**
  * The fields to actually send.
  *
  * `standardOnly` is the whole reason this function exists: a hosted API that has

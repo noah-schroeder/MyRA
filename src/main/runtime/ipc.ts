@@ -27,6 +27,7 @@ import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
 import { prepareCard } from "../../core/runtime/modelCard.ts";
 import { deleteModel } from "./modelDelete.ts";
 import { Downloads } from "../downloads.ts";
+import { learnFacts } from "./modelFacts.ts";
 
 /**
  * The daemon's own words, without the plumbing around them.
@@ -76,7 +77,23 @@ export function installRuntimeIpc(
     publish: (list) => send("karen:downloads", list),
     /* A finished download is a new entry in the model list, and the page
        showing that list has no other way to learn it arrived. */
-    onFinished: () => send("karen:models-changed"),
+    onFinished: (name) => {
+      send("karen:models-changed");
+      /*
+       * The one moment Karen asks Hugging Face what this model is.
+       *
+       * Here rather than at load time, and here rather than on a timer: the
+       * bytes have just come from the same host, the user is plainly online,
+       * and they are waiting for this model anyway. A load must never become a
+       * network request -- see the note in main/review.ts about a question that
+       * started behaving like one.
+       */
+      void runtime.api
+        .listModels()
+        .then((models) => models.find((m) => m.id === name))
+        .then((model) => learnFacts(name, model?.checkpoint))
+        .catch(() => undefined);
+    },
   });
   const state = (): unknown => ({
     config: runtime.config,
