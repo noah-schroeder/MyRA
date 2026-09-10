@@ -22,7 +22,7 @@ import { ipcMain, shell } from "electron";
 import type { ConfigStore } from "../core/config.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import {
-  addMembers, byNewest, countsOf, newProject, ownerOf, removeMembers, summaryOf,
+  addMembers, byNewest, countsOf, MEMBER_KINDS, newProject, ownerOf, removeMembers, summaryOf,
   type Member, type MemberKind, type ProjectSummary,
 } from "../core/projects/project.ts";
 import { exportPlan, fileName, renderSession, type ExportItem } from "../core/projects/render.ts";
@@ -37,6 +37,7 @@ import { deleteRun, listRuns } from "../core/research/run.ts";
 import { researchRoot } from "../core/research/config.ts";
 import { assemble } from "../core/papers/paper.ts";
 import { deletePaper, listPapers, readPaperRecord } from "./papers.ts";
+import { deleteReview, listReviews, readReviewRecord } from "./review.ts";
 import { deleteImage, listImages, recordFor } from "./images.ts";
 
 export interface ProjectDeps {
@@ -64,7 +65,7 @@ function minutes(seconds: number): string {
 }
 
 /**
- * The real five, each expressed against the module that already owns it.
+ * The real six, each expressed against the module that already owns it.
  *
  * Meetings are the odd one: they are addressed by directory everywhere else in
  * the app, and what a project stores is the directory's **name**. An absolute
@@ -74,6 +75,7 @@ function minutes(seconds: number): string {
 export function defaultStores(config: ConfigStore): ProjectStores {
   const meetingsRoot = (): string => config.current.meetingsRoot;
   const papersRoot = (): string => config.current.papersRoot;
+  const reviewsRoot = (): string => config.current.reviewsRoot;
   const deps = { config };
 
   return {
@@ -157,6 +159,23 @@ export function defaultStores(config: ConfigStore): ProjectStores {
       },
     },
 
+    review: {
+      list: async () =>
+        (await listReviews(reviewsRoot())).map((r) => ({
+          ref: r.id,
+          title: r.title,
+          at: r.updatedAt,
+          note: `${r.done} of ${r.total} ${r.total === 1 ? "reviewer" : "reviewers"}`,
+        })),
+      remove: (ref) => deleteReview(reviewsRoot(), ref),
+      payload: async (ref) => {
+        const review = await readReviewRecord(reviewsRoot(), ref);
+        /* The assembled panel, which is the whole record: the manuscript was
+           never kept, so there is nothing else an export could carry. */
+        return review ? { title: review.title, at: review.updatedAt, text: review.assembled } : {};
+      },
+    },
+
     image: {
       list: async () =>
         (await listImages(deps)).map((i) => ({
@@ -182,6 +201,14 @@ export function defaultStores(config: ConfigStore): ProjectStores {
     },
   };
 }
+
+/**
+ * How many rows the rail's recent list carries.
+ *
+ * Long enough that a week of work is all there, short enough that reading four
+ * stores to draw a sidebar stays cheap.
+ */
+const RECENT_LIMIT = 50;
 
 /* ------------------------------------------------------------------ *
  * IPC                                                                 *
@@ -280,6 +307,40 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true, items: out };
   });
 
+  /**
+   * The work you have done lately, whatever kind it is.
+   *
+   * Built from the same stores a project reads, so a row in the rail prints the
+   * title and the note its own page prints -- the property `karen:project-open`
+   * is already built on, and the reason this is here rather than in a fourth
+   * lister of its own.
+   *
+   * Meetings and images are not in it deliberately: they have their own pages
+   * with their own shapes, and this list stands where the conversation list
+   * stood. What belongs in it is the work you were in the middle of.
+   */
+  ipcMain.handle("karen:recent", async () => {
+    const kinds: MemberKind[] = ["chat", "paper", "review", "run"];
+    const projects = await readAllPruned(stores);
+    const out: (ItemRow & { kind: MemberKind; project: string })[] = [];
+    for (const kind of kinds) {
+      let rows: ItemRow[] = [];
+      try {
+        rows = await stores[kind].list();
+      } catch {
+        /* One unreadable store must not empty the whole list: the papers
+           directory being missing is not a reason to hide every conversation. */
+        rows = [];
+      }
+      for (const row of rows) {
+        const owner = ownerOf(projects, { kind, ref: row.ref });
+        out.push({ ...row, kind, project: owner?.id ?? "" });
+      }
+    }
+    out.sort((a, b) => b.at.localeCompare(a.at));
+    return { ok: true, items: out.slice(0, RECENT_LIMIT) };
+  });
+
   ipcMain.handle("karen:project-add", async (_e, id: unknown, members: unknown) => {
     const wanted = asMembers(members);
     if (!wanted.length) return { ok: true };
@@ -375,10 +436,11 @@ function asMembers(raw: unknown): Member[] {
     const kind = row["kind"];
     const ref = row["ref"];
     if (typeof ref !== "string" || !ref) continue;
-    if (kind !== "chat" && kind !== "meeting" && kind !== "run" && kind !== "paper" && kind !== "image") {
-      continue;
-    }
-    out.push({ kind, ref });
+    /* Against the list itself, not a chain of comparisons: `parseProject`
+       already validates this way, and the chain was the one place a new kind
+       could be added everywhere else and still be dropped silently here. */
+    if (typeof kind !== "string" || !MEMBER_KINDS.includes(kind as MemberKind)) continue;
+    out.push({ kind: kind as MemberKind, ref });
   }
   return out;
 }

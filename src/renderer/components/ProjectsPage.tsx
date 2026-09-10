@@ -20,13 +20,14 @@ import type { ItemRow, MemberKind, ProjectDetail } from "../types.ts";
  */
 
 /** What you made, then what went into making it. The export uses this order. */
-const ORDER: MemberKind[] = ["paper", "run", "meeting", "chat", "image"];
+const ORDER: MemberKind[] = ["paper", "review", "run", "meeting", "chat", "image"];
 
 const HEADINGS: Record<MemberKind, string> = {
   chat: "Conversations",
   meeting: "Meetings",
   run: "Research runs",
   paper: "Papers",
+  review: "Peer reviews",
   image: "Images",
 };
 
@@ -36,6 +37,7 @@ const HOMES: Record<MemberKind, string> = {
   meeting: "Opens the Meetings page",
   run: "Opens the Research runs page",
   paper: "Opens the Paper drafter",
+  review: "Opens the review",
   image: "Opens the Images page",
 };
 
@@ -43,17 +45,21 @@ export function ProjectsPage({
   id,
   active,
   onClose,
-  onOpenChat,
-  onGoTo,
+  onOpenItem,
   onChanged,
 }: {
   id: string;
   /** Whether new work is currently filing itself here. */
   active: boolean;
   onClose: () => void;
-  onOpenChat: (ref: string) => void;
-  /** Take me to the page this kind of thing lives on. */
-  onGoTo: (kind: MemberKind) => void;
+  /**
+   * Open this thing, whatever it is.
+   *
+   * One callback rather than one per kind: four of the six now open a specific
+   * record on their own page, and a second callback that only navigates would be
+   * the version that quietly stopped opening the thing you clicked.
+   */
+  onOpenItem: (kind: MemberKind, ref: string) => void;
   /** The rail's list needs to hear about renames, adds and deletes. */
   onChanged: () => void;
 }) {
@@ -136,14 +142,6 @@ export function ProjectsPage({
       return;
     }
     setExported(result.path);
-  };
-
-  const open = (kind: MemberKind, ref: string): void => {
-    if (kind === "chat") {
-      onOpenChat(ref);
-      return;
-    }
-    onGoTo(kind);
   };
 
   return (
@@ -272,7 +270,7 @@ export function ProjectsPage({
                     key={`${kind}:${item.ref}`}
                     item={item}
                     kind={kind}
-                    onOpen={() => open(kind, item.ref)}
+                    onOpen={() => onOpenItem(kind, item.ref)}
                     onRemove={() => void remove(kind, item.ref)}
                   />
                 ))}

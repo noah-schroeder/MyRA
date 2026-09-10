@@ -43,7 +43,7 @@ function fake(rows: string[], refuse?: string) {
 
 function stores(over: Partial<ProjectStores> = {}): ProjectStores {
   const empty = { list: async () => [], remove: async () => {}, payload: async () => ({}) };
-  return { chat: empty, meeting: empty, run: empty, paper: empty, image: empty, ...over };
+  return { chat: empty, meeting: empty, run: empty, paper: empty, review: empty, image: empty, ...over };
 }
 
 function project(members: Member[]): Project {

@@ -6,7 +6,7 @@ import {
   buildSystem, buildUser, requestsFor, studyTypeById, type ReviewRequest,
 } from "../../core/review/prompt.ts";
 import { fitsContext, tooLongMessage, type Fit } from "../../core/review/manuscript.ts";
-import type { Settings } from "../types.ts";
+import type { JobSnapshot, ReviewSummary, Settings } from "../types.ts";
 
 /**
  * Reviewing a manuscript somebody sent you.
@@ -33,11 +33,14 @@ interface Loaded {
 
 export function PeerReview({
   settings,
+  openId,
   onClose,
   onOpenSettings,
   onOpenModels,
 }: {
   settings: Settings | undefined;
+  /** A saved review to show, from the rail or from a project. */
+  openId?: string | undefined;
   onClose: () => void;
   onOpenSettings: () => void;
   onOpenModels: () => void;
@@ -56,23 +59,21 @@ export function PeerReview({
   /* Citation markers the model produced despite being told not to. Shown, not
      stripped: see the comment in main/review.ts. */
   const [invented, setInvented] = useState<string[]>([]);
-  /* What is being written right now, and how far through the panel. Three
-     reviewers can take twenty minutes between them, and a page that says only
-     "working" for the whole of it is a page that looks stuck. */
-  const [live, setLive] = useState<{ label: string; index: number; total: number } | undefined>();
-  const [draft, setDraft] = useState("");
-  /*
-   * The model's reasoning, kept apart from its report.
+  /**
+   * The run, as main reports it, rather than as this page remembers it.
    *
-   * Shown while it happens, never saved: the review that is assembled and
-   * copied is built in main from the answer alone, which is the rule the whole
-   * app follows about reasoning. Dropping it on the floor, which is what this
-   * page used to do, left a heading above an empty box for as long as the
-   * model thought -- and on a local model that is most of the wait, so the
-   * page was indistinguishable from a run that had died.
+   * All of this used to be component state -- which reviewer, the text arriving,
+   * the reasoning, whether anything was running at all -- and the window
+   * unmounts this page the moment you look at a conversation. So leaving the tab
+   * mid-panel threw away a report the run then carried on writing into nothing.
+   * Main owns the job and the record; this reads them, and the snapshot below is
+   * what makes coming back mid-reviewer show that reviewer.
    */
-  const [thinking, setThinking] = useState("");
-  const [running, setRunning] = useState(false);
+  const [job, setJob] = useState<JobSnapshot | null>(null);
+  /** Reviews already on disk, newest first. */
+  const [reviews, setReviews] = useState<ReviewSummary[]>([]);
+  /** Which saved review is on screen, so it can be re-read as it grows. */
+  const [openedId, setOpenedId] = useState<string | undefined>();
   const [contextTokens, setContextTokens] = useState<number | undefined>();
   const [showPrompt, setShowPrompt] = useState(false);
 
@@ -96,29 +97,66 @@ export function PeerReview({
     return window.karen.onRuntime(askContext);
   }, [askContext]);
 
+  const refreshList = useCallback(async () => {
+    const result = await window.karen.reviewList();
+    setReviews(result.reviews ?? []);
+  }, []);
+
+  /**
+   * Put a saved review on screen.
+   *
+   * `fields` is false when the record is being re-read because a reviewer just
+   * finished: the report grows, and the title and note boxes must not be
+   * rewritten underneath somebody who is typing in them.
+   */
+  const showReview = useCallback(async (id: string, fields = true): Promise<void> => {
+    const result = await window.karen.reviewOpen(id);
+    if (!result.ok || !result.review) {
+      if (fields) setError(result.error ?? "That review could not be read.");
+      return;
+    }
+    const record = result.review;
+    setOpenedId(record.id);
+    setReview(record.assembled);
+    setInvented(record.invented);
+    if (fields) {
+      setTitle(record.title);
+      setStudyTypeId(record.studyTypeId);
+      setNote(record.note);
+      setError(record.status === "failed" ? record.error : undefined);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshList();
+  }, [refreshList]);
+
+  /* Asked once on mount and then pushed. The question is the half that matters:
+     a page mounted four minutes into the second reviewer draws that reviewer,
+     rather than sitting empty until the third begins. */
+  useEffect(() => {
+    void window.karen.workState().then((snapshot) => {
+      setJob(snapshot);
+      if (snapshot?.kind === "review") void showReview(snapshot.id);
+    });
+    return window.karen.onWork(setJob);
+  }, [showReview]);
+
+  /* Main saves after every reviewer, so the report on screen catches up one
+     reviewer at a time rather than all at once at the end. */
   useEffect(
     () =>
-      window.karen.onReviewDelta((d) => {
-        if (d.kind === "reviewer") {
-          setLive({ label: d.label ?? "", index: d.index, total: d.total ?? 0 });
-          /* Both, because the next reviewer starts from nothing: leaving the
-             previous one's reasoning on screen would attribute it to this one. */
-          setDraft("");
-          setThinking("");
-          return;
-        }
-        /* A retry has already streamed part of a report into the page; its
-           second attempt starts over rather than appending to the first. */
-        if (d.reset) {
-          setDraft("");
-          setThinking("");
-          return;
-        }
-        if (d.kind === "thinking") setThinking((prev) => prev + d.text);
-        else if (d.kind === "text") setDraft((prev) => prev + d.text);
+      window.karen.onReviews((rows) => {
+        setReviews(rows);
+        if (openedId) void showReview(openedId, false);
       }),
-    [],
+    [openedId, showReview],
   );
+
+  /* Opening one from the rail or from a project. */
+  useEffect(() => {
+    if (openId) void showReview(openId);
+  }, [openId, showReview]);
 
   const take = useCallback(async (file: File): Promise<void> => {
     setError(undefined);
@@ -168,25 +206,42 @@ export function PeerReview({
   const fit: Fit | undefined = requests.length ? fitsContext(requests, contextTokens) : undefined;
   const panel = studyTypeById(types, studyTypeId)?.reviewers ?? [];
 
+  /** This page's own run, if the long job in flight is a review. */
+  const mine = job?.kind === "review" ? job : undefined;
+  const running = Boolean(mine);
+  /* Something long is running that is not a review -- a paper section. Said
+     rather than discovered by pressing the button. */
+  const elsewhere = job !== null && !mine;
+
   const run = async (): Promise<void> => {
-    if (!requests.length) return;
+    if (!requests.length || job) return;
     setError(undefined);
     setReview("");
     setInvented([]);
-    setDraft("");
-    setThinking("");
-    setRunning(true);
-    const result = await window.karen.reviewRun(requests, title);
-    setRunning(false);
-    setLive(undefined);
-    setDraft("");
-    setThinking("");
+    setOpenedId(undefined);
+    const result = await window.karen.reviewRun(requests, {
+      title,
+      fileName: loaded?.name ?? "",
+      studyTypeId,
+    });
+    await refreshList();
+    if (result.id) setOpenedId(result.id);
     if (!result.ok) setError(result.error ?? "The review failed.");
     else if (result.text) {
       setReview(result.text);
       setInvented(result.invented ?? []);
       if (result.stopped) setError("Stopped. What the reviewers finished is kept below.");
     }
+  };
+
+  const remove = async (id: string): Promise<void> => {
+    await window.karen.reviewDelete(id);
+    if (openedId === id) {
+      setOpenedId(undefined);
+      setReview("");
+      setInvented([]);
+    }
+    await refreshList();
   };
 
   const installPandoc = async (): Promise<void> => {
@@ -275,6 +330,45 @@ export function PeerReview({
           </div>
         ) : null}
 
+        {/* What is already on disk. It sits above the manuscript form because
+            "the one I ran this morning" is the more common reason to open this
+            page than "here is a new manuscript". */}
+        {reviews.length ? (
+          <section className="review-saved">
+            <p className="field-label">Your reviews</p>
+            <ul className="review-list">
+              {reviews.map((r) => (
+                <li key={r.id} className={r.id === openedId ? "on" : ""}>
+                  <button type="button" className="review-list-open" onClick={() => void showReview(r.id)}>
+                    <span className="review-list-title">{r.title}</span>
+                    <span className="review-list-meta">
+                      {r.studyLabel ? `${r.studyLabel} · ` : ""}
+                      {r.done} of {r.total} {r.total === 1 ? "reviewer" : "reviewers"}
+                      {r.status === "stopped" ? " · stopped" : ""}
+                      {r.status === "failed" ? " · failed" : ""}
+                      {r.words ? ` · ${r.words.toLocaleString()} words` : ""}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="review-list-del"
+                    title="Delete this review"
+                    onClick={() => void remove(r.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {/* Said plainly, because the absence is deliberate and would
+                otherwise be discovered by someone expecting to re-run one. */}
+            <p className="field-note">
+              Karen keeps the report and never the manuscript — it is not yours to store. To
+              review one of these again, drop the file in again.
+            </p>
+          </section>
+        ) : null}
+
         {loaded ? (
           <>
             <div className="review-file-row">
@@ -333,7 +427,7 @@ export function PeerReview({
                 <p className="field-label">This will produce {panel.length} reports</p>
                 <ul>
                   {panel.map((r, i) => (
-                    <li key={r.id} className={live && live.index > i ? "done" : ""}>
+                    <li key={r.id} className={mine && mine.step > i ? "done" : ""}>
                       {r.label}
                     </li>
                   ))}
@@ -355,14 +449,19 @@ export function PeerReview({
                 Preview what is sent
               </button>
               {running ? (
-                <button type="button" className="stop" onClick={() => void window.karen.reviewCancel()}>
+                <button
+                  type="button"
+                  className="stop"
+                  onClick={() => void window.karen.reviewCancel(mine?.id)}
+                >
                   Stop
                 </button>
               ) : (
                 <button
                   type="button"
                   className="primary"
-                  disabled={!fit?.fits}
+                  disabled={!fit?.fits || elsewhere}
+                  title={elsewhere ? "Karen is drafting a section. This can start when that finishes." : undefined}
                   onClick={() => void run()}
                 >
                   Review it
@@ -372,20 +471,20 @@ export function PeerReview({
           </>
         ) : null}
 
-        {running && live ? (
+        {mine ? (
           <section className="review-live">
             <p className="review-live-head">
-              Writing {live.index + 1} of {live.total} · {live.label}
+              Writing {mine.step + 1} of {mine.steps} · {mine.label}
             </p>
             {/* Collapsed, with a live tail in its header until the report
                 starts. `streaming` is tied to the report rather than to the
                 run: once prose is arriving the thinking is finished, and the
                 block settles into a word count instead of a moving tail
                 competing with the text below it. */}
-            {thinking ? <Reasoning text={thinking} streaming={!draft} /> : null}
+            {mine.thinking ? <Reasoning text={mine.thinking} streaming={!mine.text} /> : null}
             {/* The text as it arrives, so a long report is visibly progressing
                 rather than a spinner with nothing behind it. */}
-            {draft ? <pre className="review-live-text">{draft.slice(-1400)}</pre> : null}
+            {mine.text ? <pre className="review-live-text">{mine.text.slice(-1400)}</pre> : null}
           </section>
         ) : null}
 

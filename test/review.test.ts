@@ -23,6 +23,7 @@ import {
 const base = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   prompt: DEFAULT_REVIEW_PROMPT,
   reviewerInstructions: "",
+  reviewerId: "theory",
   reviewerLabel: "Reviewer 1 — Theory and contribution",
   studyLabel: "",
   note: "",

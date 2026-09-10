@@ -32,21 +32,22 @@
  * the files and resolves members against the five stores.
  */
 
-/** The five kinds of thing that have a page listing them. */
-export type MemberKind = "chat" | "meeting" | "run" | "paper" | "image";
+/** The six kinds of thing that have a page listing them. */
+export type MemberKind = "chat" | "meeting" | "run" | "paper" | "review" | "image";
 
 export const MEMBER_KINDS: readonly MemberKind[] = [
   "chat",
   "meeting",
   "run",
   "paper",
+  "review",
   "image",
 ];
 
 /**
  * One thing in a project.
  *
- * `ref` is whatever that store addresses an item by, and for four of the five
+ * `ref` is whatever that store addresses an item by, and for five of the six
  * that is an id. Meetings are addressed by directory, and what is stored here
  * is the directory's **name**, not its path: an absolute path would break the
  * moment somebody moved their meetings folder in Settings, which is a thing the
@@ -79,6 +80,7 @@ const KIND_WORDS: Record<MemberKind, [string, string]> = {
   meeting: ["meeting", "meetings"],
   run: ["research run", "research runs"],
   paper: ["paper", "papers"],
+  review: ["peer review", "peer reviews"],
   image: ["image", "images"],
 };
 
@@ -229,7 +231,7 @@ export function pruneMembers(project: Project, alive: (member: Member) => boolea
 
 /** How many of each kind, for a dialog that has to say what it is about to do. */
 export function countsOf(members: readonly Member[]): Record<MemberKind, number> {
-  const counts = { chat: 0, meeting: 0, run: 0, paper: 0, image: 0 };
+  const counts = { chat: 0, meeting: 0, run: 0, paper: 0, review: 0, image: 0 };
   for (const member of members) counts[member.kind] += 1;
   return counts;
 }

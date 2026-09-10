@@ -131,13 +131,15 @@ const api = {
   /* The request is built in the window and sent whole, so the preview dialog
      renders the very object that goes to the model rather than a copy of the
      rules it was built from. */
-  paperDraft: (sectionId: string, request: unknown) =>
-    ipcRenderer.invoke("karen:paper-draft", sectionId, request),
-  paperCancel: () => ipcRenderer.invoke("karen:paper-cancel"),
+  paperDraft: (paperId: string, sectionId: string, request: unknown) =>
+    ipcRenderer.invoke("karen:paper-draft", paperId, sectionId, request),
+  paperCancel: (id?: string) => ipcRenderer.invoke("karen:paper-cancel", id ?? null),
   paperExport: (id: string, format: string) =>
     ipcRenderer.invoke("karen:paper-export", id, format),
   paperReveal: (path: string) => ipcRenderer.invoke("karen:paper-reveal", path),
-  onPaperDelta: (cb: (d: unknown) => void) => on("karen:paper-delta", cb),
+  /* The record as main saved it, because main is what commits a finished
+     section now -- the page reflects the file rather than owning it. */
+  onPaperChanged: (cb: (paper: unknown) => void) => on("karen:paper-changed", cb),
 
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
     ipcRenderer.invoke("karen:provider-models", opts),
@@ -214,6 +216,16 @@ const api = {
   /* What the chosen model can be told about thinking, and the choice itself.
      Both are per model: the vocabulary belongs to the endpoint. */
   reasoningCapability: () => ipcRenderer.invoke("karen:reasoning-capability"),
+  /* Main derives the key: three per-model records share it, and the window has
+     been wrong about which one a loaded model uses before. */
+  modelPrompt: (model?: string) => ipcRenderer.invoke("karen:model-prompt", model ?? null),
+  /* What the model's authors published: shown as each field's placeholder, so an
+     untouched box says where its value comes from. */
+  modelFacts: (model?: string) => ipcRenderer.invoke("karen:model-facts", model ?? null),
+  setIgnoreSuggested: (model: string | undefined, ignore: boolean) =>
+    ipcRenderer.invoke("karen:model-facts-ignore", model ?? null, ignore),
+  setModelPrompt: (model: string | undefined, value?: string) =>
+    ipcRenderer.invoke("karen:set-model-prompt", model ?? null, value ?? null),
   setReasoning: (dialectId: string, value?: string) =>
     ipcRenderer.invoke("karen:set-reasoning", dialectId, value ?? null),
   /* Engine builds. `engineUpdatesCheck` is the only one of the three that
@@ -266,15 +278,25 @@ const api = {
   reviewExtract: (name: string, bytes: ArrayBuffer) =>
     ipcRenderer.invoke("karen:review-extract", name, bytes),
   reviewContext: () => ipcRenderer.invoke("karen:review-context"),
-  reviewRun: (requests: unknown, title: string) =>
-    ipcRenderer.invoke("karen:review-run", requests, title),
-  reviewCancel: () => ipcRenderer.invoke("karen:review-cancel"),
+  reviewRun: (requests: unknown, meta: unknown) =>
+    ipcRenderer.invoke("karen:review-run", requests, meta),
+  reviewCancel: (id?: string) => ipcRenderer.invoke("karen:review-cancel", id ?? null),
   reviewSave: (name: string, text: string) => ipcRenderer.invoke("karen:review-save", name, text),
-  onReviewDelta: (fn: (d: unknown) => void) => {
-    const handler = (_e: unknown, d: unknown): void => fn(d);
-    ipcRenderer.on("karen:review-delta", handler);
-    return () => ipcRenderer.removeListener("karen:review-delta", handler);
-  },
+  reviewList: () => ipcRenderer.invoke("karen:review-list"),
+  reviewOpen: (id: string) => ipcRenderer.invoke("karen:review-open", id),
+  reviewDelete: (id: string) => ipcRenderer.invoke("karen:review-delete", id),
+  onReviews: (cb: (rows: unknown) => void) => on("karen:reviews", cb),
+
+  /*
+   * The long job that is not a chat turn, in one shape for both features.
+   *
+   * `workState` is the half that matters: a page mounted in the middle of a run
+   * asks once and draws what has arrived so far, rather than sitting blank until
+   * the next reviewer starts.
+   */
+  workState: () => ipcRenderer.invoke("karen:work-state"),
+  onWork: (cb: (job: unknown) => void) => on("karen:work", cb),
+  recent: () => ipcRenderer.invoke("karen:recent"),
 
   /* Every transfer, pushed whenever the list changes. Independent of any
      page: the registry lives in main precisely so a download outlives the
@@ -333,6 +355,8 @@ const api = {
   researchDelete: (id: string) => ipcRenderer.invoke("karen:research-delete", id),
   onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
   onResearchStage: (cb: (stage: string) => void) => on("karen:research-stage", cb),
+  /** The run in flight, for a page that has just mounted into the middle of one. */
+  researchActive: () => ipcRenderer.invoke("karen:research-active-state"),
   /** The research run executing right now, or null. Independent of the page. */
   onResearchActive: (
     cb: (run: { id: string; stage?: string; note?: string } | null) => void,

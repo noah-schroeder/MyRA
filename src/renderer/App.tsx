@@ -38,11 +38,22 @@ import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import type {
-  ActiveRun, CitedSource, MemberKind, ProjectSummary, PromptRequest, RuntimeState, Settings,
+  ActiveRun, CitedSource, JobSnapshot, MemberKind, ProjectSummary, PromptRequest, RuntimeState,
+  Settings,
 } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
 type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "review" | "projects" | "api";
+
+/** Where each kind of work lives. One table, so a seventh kind is one line. */
+const PAGE_FOR: Record<MemberKind, Page> = {
+  chat: "chat",
+  meeting: "meetings",
+  run: "runs",
+  paper: "papers",
+  review: "review",
+  image: "images",
+};
 
 export function App() {
   const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
@@ -97,9 +108,14 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const { open: projectsOpen, toggle: toggleProjects } = useRailSection("projects");
   const [openProject, setOpenProject] = useState<string | undefined>();
-  /* The active project's conversations, so the rail can show its history
-     rather than everything. Re-read whenever it or the session list changes. */
-  const [projectChats, setProjectChats] = useState<Set<string>>(new Set());
+  /* Which record each page should show when it is opened from somewhere else --
+     the rail's recent list, or a project. Four kinds have their own page now, so
+     "go to the Papers page" is no longer the same thing as "open this paper". */
+  const [openPaper, setOpenPaper] = useState<string | undefined>();
+  const [openReview, setOpenReview] = useState<string | undefined>();
+  const [openRun, setOpenRun] = useState<string | undefined>();
+  /** The long job that is not a chat turn, so the rail can show it anywhere. */
+  const [job, setJob] = useState<JobSnapshot | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
   /*
@@ -136,24 +152,13 @@ export function App() {
     return window.karen.onProjects(setProjects);
   }, [refreshProjects]);
 
-  /* Which conversations belong to the project being worked in. Keyed on the
-     session list too: a conversation started a moment ago files itself in the
-     main process, and the rail has to hear about it without being told. */
+  /* The long job, asked once and then pushed. It is drawn on every page,
+     including chat: a review running while you carry on talking to the model is
+     the case this whole arrangement exists for. */
   useEffect(() => {
-    if (!activeProject) {
-      setProjectChats(new Set());
-      return;
-    }
-    void window.karen.projectOpen(activeProject).then((r) => {
-      setProjectChats(
-        new Set(
-          (r.detail?.project.members ?? [])
-            .filter((m) => m.kind === "chat")
-            .map((m) => m.ref),
-        ),
-      );
-    });
-  }, [activeProject, sessionsKey, projects]);
+    void window.karen.workState().then(setJob);
+    return window.karen.onWork(setJob);
+  }, []);
 
   useEffect(() => window.karen.onPrompt(setPrompt), []);
   /* What the daemon is holding, for the three pickers in the bar above: each
@@ -173,7 +178,13 @@ export function App() {
      conversation, which is hidden on every other page. This one has to reach
      the rail and the Research runs list wherever the user happens to be. */
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
-  useEffect(() => window.karen.onResearchActive(setActiveRun), []);
+  /* Asked as well as listened for: a run's stage can take minutes, so arriving
+     mid-run with only the push meant the rail said nothing at all until the next
+     stage began. */
+  useEffect(() => {
+    void window.karen.researchActive().then(setActiveRun);
+    return window.karen.onResearchActive(setActiveRun);
+  }, []);
   /* Subscribed here, at the top, because the counter is in the bar above every
      page and the toast floats over all of them. */
   const downloads = useDownloads();
@@ -319,6 +330,27 @@ export function App() {
     startFresh();
   };
 
+  /**
+   * Open one piece of work, whatever kind it is.
+   *
+   * The rail's list and a project's contents both call this, so a review opens
+   * the review rather than merely the reviewing page -- which is the difference
+   * between a list of your work and a list of links to places your work might
+   * be. Each page takes the id as a prop and shows that record when it changes.
+   */
+  const openItem = useCallback((kind: MemberKind, ref: string): void => {
+    if (kind === "chat") {
+      void openSession(ref);
+      return;
+    }
+    if (kind === "paper") setOpenPaper(ref);
+    if (kind === "review") setOpenReview(ref);
+    if (kind === "run") setOpenRun(ref);
+    setLookup(false);
+    setPage(PAGE_FOR[kind]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const projectName = projects.find((p) => p.id === activeProject)?.name ?? "";
 
   /**
@@ -415,7 +447,16 @@ export function App() {
             icon="paper"
             label="Paper drafter"
             active={page === "papers"}
-            onClick={() => setPage((p) => (p === "papers" ? "chat" : "papers"))}
+            /* Plain navigation, not `openItem` -- so any paper opened earlier
+               from the rail or a project must not still be sitting in
+               `openPaper` for the drafter's next mount to resume. Without this,
+               leaving a specific paper and coming back here by the icon (not by
+               reopening that paper) silently reopened it instead of showing the
+               drafter's own list. */
+            onClick={() => {
+              setOpenPaper(undefined);
+              setPage((p) => (p === "papers" ? "chat" : "papers"));
+            }}
           />
           {/* Beside the drafter, because they are the two halves of the same
               job: this app's users write papers and are asked to review them,
@@ -424,7 +465,10 @@ export function App() {
             icon="review"
             label="Peer review"
             active={page === "review"}
-            onClick={() => setPage((p) => (p === "review" ? "chat" : "review"))}
+            onClick={() => {
+              setOpenReview(undefined);
+              setPage((p) => (p === "review" ? "chat" : "review"));
+            }}
           />
           {/* The audit trail. Every run already wrote its search log, screening
               reasons, source hashes and verification table; until this existed
@@ -433,7 +477,10 @@ export function App() {
             icon="runs"
             label="Research runs"
             active={page === "runs"}
-            onClick={() => setPage((p) => (p === "runs" ? "chat" : "runs"))}
+            onClick={() => {
+              setOpenRun(undefined);
+              setPage((p) => (p === "runs" ? "chat" : "runs"));
+            }}
           />
           {/* Models are a place you go, not a dialog you open on top of a
               conversation: choosing one means comparing sizes against what this
@@ -505,12 +552,12 @@ export function App() {
 
         <SessionList
           {...(sessionId ? { currentId: sessionId } : {})}
-          onOpen={(id) => void openSession(id)}
+          onOpen={openItem}
           onNew={() => void newSession()}
           refreshKey={sessionsKey}
           onChanged={refreshProjects}
           {...(activeProject && projectName
-            ? { filter: { name: projectName, refs: projectChats } }
+            ? { filter: { name: projectName, id: activeProject } }
             : {})}
         />
 
@@ -524,6 +571,26 @@ export function App() {
             note={activeRun?.note ?? progress}
             onOpen={toChat}
             onStop={abort}
+          />
+        ) : null}
+
+        {/* The long job that is not a chat turn, on EVERY page including this
+            one: a panel being written while you carry on talking to the model is
+            the case the whole arrangement exists for, and the only sign of it
+            used to be a page you had navigated away from. */}
+        {job ? (
+          <WorkingBar
+            label={job.kind === "review" ? "Peer review" : "Drafting"}
+            note={job.label || job.title}
+            step={job.step}
+            steps={job.steps}
+            openLabel={job.kind === "review" ? "Open this review" : "Open this paper"}
+            onOpen={() => openItem(job.kind === "review" ? "review" : "paper", job.id)}
+            onStop={() =>
+              void (job.kind === "review"
+                ? window.karen.reviewCancel(job.id)
+                : window.karen.paperCancel(job.id))
+            }
           />
         ) : null}
 
@@ -619,20 +686,23 @@ export function App() {
             id={openProject}
             active={openProject === activeProject}
             onClose={toChat}
-            onOpenChat={(ref) => void openSession(ref)}
-            onGoTo={(kind: MemberKind) =>
-              setPage(kind === "meeting" ? "meetings" : kind === "run" ? "runs" : kind === "paper" ? "papers" : "images")
-            }
+            onOpenItem={openItem}
             onChanged={refreshProjects}
           />
         ) : null}
         {page === "papers" ? (
-          <PaperDrafter onClose={toChat} dictation={dictation} sink={dictationSink} />
+          <PaperDrafter
+            onClose={toChat}
+            dictation={dictation}
+            sink={dictationSink}
+            {...(openPaper ? { openId: openPaper } : {})}
+          />
         ) : null}
         {page === "review" ? (
           <PeerReview
             settings={settings}
             onClose={toChat}
+            {...(openReview ? { openId: openReview } : {})}
             onOpenSettings={() => {
               setSettingsTab("review");
               setShowSettings(true);
@@ -640,7 +710,9 @@ export function App() {
             onOpenModels={() => setPage("models")}
           />
         ) : null}
-        {page === "runs" ? <RunPanel onClose={toChat} active={activeRun} /> : null}
+        {page === "runs" ? (
+          <RunPanel onClose={toChat} active={activeRun} {...(openRun ? { openId: openRun } : {})} />
+        ) : null}
         {/* Its own scroll region at full width: the models page is a browser
             over 228 entries, and `.pane`'s 62ch reading measure -- right for a
             settings form -- turns the catalogue into a single squeezed column

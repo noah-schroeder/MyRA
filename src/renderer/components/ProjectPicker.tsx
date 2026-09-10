@@ -17,13 +17,14 @@ import type { ItemRow, MemberKind } from "../types.ts";
  * a thing to be told before you tick it rather than after.
  */
 
-const ORDER: MemberKind[] = ["paper", "run", "meeting", "chat", "image"];
+const ORDER: MemberKind[] = ["paper", "review", "run", "meeting", "chat", "image"];
 
 const HEADINGS: Record<MemberKind, string> = {
   chat: "Conversations",
   meeting: "Meetings",
   run: "Research runs",
   paper: "Papers",
+  review: "Peer reviews",
   image: "Images",
 };
 

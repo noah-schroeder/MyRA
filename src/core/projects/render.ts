@@ -52,6 +52,7 @@ const FOLDERS: Record<Member["kind"], string> = {
   meeting: "meetings",
   run: "research",
   paper: "papers",
+  review: "reviews",
   image: "images",
 };
 
@@ -60,11 +61,12 @@ const HEADINGS: Record<Member["kind"], string> = {
   meeting: "Meetings",
   run: "Research runs",
   paper: "Papers",
+  review: "Peer reviews",
   image: "Images",
 };
 
 /** Order the index reads in: what you made, then what went into making it. */
-const ORDER: Member["kind"][] = ["paper", "run", "meeting", "chat", "image"];
+const ORDER: Member["kind"][] = ["paper", "review", "run", "meeting", "chat", "image"];
 
 /**
  * A title as a filename: readable, and safe on every platform we ship to.

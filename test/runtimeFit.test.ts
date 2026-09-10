@@ -10,7 +10,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CONTEXT_LADDER, fitModel, kvCacheBytes, largestContext, quantRank } from "../src/core/runtime/fit.ts";
+import {
+  autoContext, CONTEXT_LADDER, fitModel, kvCacheBytes, largestContext, quantRank,
+} from "../src/core/runtime/fit.ts";
 import type { ModelShape } from "../src/core/runtime/fit.ts";
 
 const GIB = 1024 ** 3;
@@ -93,4 +95,97 @@ test("Q4_K_M is the default recommendation", () => {
   assert.ok(quantRank("model-Q4_K_M.gguf") < quantRank("model-Q2_K.gguf"));
   assert.ok(quantRank("model-Q4_K_M.gguf") < quantRank("model-Q8_0.gguf"));
   assert.ok(quantRank("model-BF16.gguf") >= quantRank("model-Q6_K.gguf"));
+});
+
+/*
+ * Choosing the window to load with, and leaving room.
+ *
+ * The buffer is not a preference. A probe asked lemond for a 1,000,000-token
+ * window on a model whose ceiling is 131,072; the daemon passed it straight to
+ * `llama-server --ctx-size` without clamping, and the OOM killer took the
+ * process. So the arithmetic has to bind, the trained length has to bind, and
+ * what is left of the card after everything else on it has to bind too.
+ */
+
+/** 16 GB card, 64 GB of system memory, and an 11 GB model file. */
+const CARD = { vramBytes: 16 * GIB, ramBytes: 64 * GIB };
+/** An 8 GB card beside 16 GB of system memory: small enough that the memory
+ *  budget binds before the model's trained length does, which is what the
+ *  tests below below need in order to say anything about the budget at all. */
+const SMALL_CARD = { vramBytes: 8 * GIB, ramBytes: 16 * GIB };
+const FILE = 11 * GIB;
+
+test("uses system memory to make up what a small card cannot hold alone", () => {
+  const tightCard = { vramBytes: 4 * GIB, ramBytes: 64 * GIB };
+  const auto = autoContext({ fileBytes: FILE, machine: tightCard, shape: QWEN });
+  /* 4 GB of VRAM alone could not hold an 11 GB file, let alone any cache on
+     top of it -- llama-server's own `--fit` is what actually places the layers
+     that do not fit on the card, and degrades to the processor rather than
+     failing, so sizing the window against the whole machine is safe again. */
+  assert.equal(auto.tokens, 262144);
+  assert.equal(auto.cappedAt, 262144);
+  assert.ok(CONTEXT_LADDER.includes(auto.tokens!));
+});
+
+test("leaves the last of the machine alone, not just the last of the card", () => {
+  const auto = autoContext({ fileBytes: FILE, machine: SMALL_CARD, shape: QWEN });
+  const needed = fitModel(FILE, SMALL_CARD, { shape: QWEN, context: auto.tokens! }).requiredBytes;
+  /* Room for a compositor, a browser, and an allocator that fragments --
+     measured against the combined pool the budget is actually drawn from now. */
+  const combined = (SMALL_CARD.vramBytes + SMALL_CARD.ramBytes) * 0.85;
+  assert.ok(needed <= combined, `${needed} exceeds the safe share of ${combined}`);
+  assert.equal(auto.tokens, 65536);
+});
+
+test("never goes above what the model was trained for", () => {
+  const small = { ...QWEN, contextLength: 8192 };
+  const auto = autoContext({ fileBytes: 1 * GIB, machine: CARD, shape: small });
+  assert.equal(auto.tokens, 8192);
+  assert.equal(auto.cappedAt, 8192);
+});
+
+test("never goes above the ceiling the daemon reports", () => {
+  /* `/models` carries max_context_window per model, so this needs no guessing
+     and no network -- measured against lemond 11.8.0. */
+  const auto = autoContext({ fileBytes: 1 * GIB, machine: CARD, shape: QWEN, ceiling: 16384 });
+  assert.equal(auto.tokens, 16384);
+});
+
+test("writes down nothing at all when even the floor will not fit", () => {
+  const tiny = { vramBytes: 8 * GIB, ramBytes: 16 * GIB };
+  const huge = 30 * GIB;
+  const auto = autoContext({ fileBytes: huge, machine: tiny, shape: QWEN });
+  /* The daemon's own default stands. A number written here that stops the model
+     loading is worse than the 4,096 this feature exists to improve on. */
+  assert.equal(auto.tokens, undefined);
+  assert.match(auto.why, /will not load|does not leave room/);
+});
+
+test("falls back to the floor, marked as a guess, when the shape is unknown", () => {
+  const auto = autoContext({ fileBytes: 2 * GIB, machine: CARD });
+  assert.equal(auto.tokens, 8192);
+  assert.equal(auto.estimated, true);
+  assert.match(auto.why, /could not read this model's shape/);
+});
+
+test("does not hand the floor to a model that cannot hold it either", () => {
+  const auto = autoContext({ fileBytes: 30 * GIB, machine: { vramBytes: 8 * GIB, ramBytes: 8 * GIB } });
+  assert.equal(auto.tokens, undefined);
+  assert.equal(auto.estimated, true);
+});
+
+test("a quantised KV cache buys a longer window, and the sizing knows it", () => {
+  /* SMALL_CARD, not CARD: on the bigger machine the model's own trained length
+     is already the binding limit at full precision, so quantising the cache
+     would have nowhere left to buy room and the comparison would prove
+     nothing. */
+  const full = autoContext({ fileBytes: FILE, machine: SMALL_CARD, shape: QWEN });
+  const half = autoContext({ fileBytes: FILE, machine: SMALL_CARD, shape: QWEN, bytesPerElement: 1 });
+  assert.ok(half.tokens! > full.tokens!, `${half.tokens} should beat ${full.tokens}`);
+});
+
+test("largestContext still answers the old question the old way", () => {
+  /* The default path is unchanged: existing callers ask "will this run", and
+     the budget for that is still the whole machine. */
+  assert.equal(largestContext(FILE, CARD, QWEN), largestContext(FILE, CARD, QWEN, {}));
 });

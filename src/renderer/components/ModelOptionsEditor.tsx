@@ -20,6 +20,12 @@
  * default and resolves to something specific -- 4,096 on this machine for a
  * model whose ceiling is 131,072 -- so the resolved figure is shown next to
  * the word "auto", which is otherwise an answer that tells you nothing.
+ *
+ * It is also the whole per-model settings panel now, reached from the cog beside
+ * a model in the menu as well as from the Models page, and `sections` is how one
+ * panel serves both kinds of model. A hosted model has no load settings at all
+ * -- Lemonade is not launching anything -- but it has samplers and a persona,
+ * and until this it had no route to either.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -37,6 +43,9 @@ import {
   type OptionField,
 } from "../../core/runtime/modelOptions.ts";
 import { formatTokens } from "../../core/tokens.ts";
+import {
+  LLAMA_FLAGS, readFlags, validFlag, writeFlags, type FlagSpec,
+} from "../../core/runtime/llamaArgs.ts";
 
 /**
  * Form state is all strings, including the toggles, and that is deliberate.
@@ -51,6 +60,9 @@ import { formatTokens } from "../../core/tokens.ts";
  * unchanged and omits.
  */
 type Draft = Record<string, string>;
+
+export type Section = "load" | "sampling" | "prompt";
+const ALL_SECTIONS: readonly Section[] = ["load", "sampling", "prompt"];
 
 function toDraft(options: ModelOptions, fields: OptionField[]): Draft {
   const draft: Draft = {};
@@ -77,6 +89,7 @@ export function ModelOptionsEditor({
   model,
   machine,
   loaded,
+  sections = ALL_SECTIONS,
   onReload,
   onClose,
 }: {
@@ -85,9 +98,19 @@ export function ModelOptionsEditor({
   machine: Machine;
   /** Whether this model is the one currently loaded, so a reload is offered. */
   loaded: boolean;
+  /**
+   * Which halves to show.
+   *
+   * A local model gets all three. A hosted one gets everything except `load`:
+   * asking the daemon for the load settings of a model it has never heard of
+   * returns an error, and an empty "How it loads" box would be a worse answer
+   * than not offering one.
+   */
+  sections?: readonly Section[];
   onReload: () => void | Promise<void>;
   onClose: () => void;
 }) {
+  const wantsLoad = sections.includes("load");
   const [options, setOptions] = useState<ModelOptions | undefined>();
   const [draft, setDraft] = useState<Draft>({});
   const [error, setError] = useState<string | undefined>();
@@ -98,6 +121,7 @@ export function ModelOptionsEditor({
   const fields = useMemo(() => (options ? fieldsFor(options) : []), [options]);
 
   const load = useCallback(async (): Promise<void> => {
+    if (!wantsLoad) return;
     const res = await window.karen.modelOptions(model);
     if (!res.ok || !res.options) {
       setError(res.error ?? "These settings could not be read.");
@@ -105,20 +129,22 @@ export function ModelOptionsEditor({
     }
     setOptions(res.options);
     setDraft(toDraft(res.options, fieldsFor(res.options)));
-  }, [model]);
+  }, [model, wantsLoad]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  if (error && !options) {
+  if (wantsLoad && error && !options) {
     return (
       <div className="mopt">
         <p className="run-error">{error}</p>
       </div>
     );
   }
-  if (!options) return <div className="mopt"><p className="mopt-wait">Reading settings…</p></div>;
+  if (wantsLoad && !options) {
+    return <div className="mopt"><p className="mopt-wait">Reading settings…</p></div>;
+  }
 
   /* Typed text back into the daemon's types. Only the context field needs
      interpreting; the rest are numbers, booleans or free text. */
@@ -140,6 +166,7 @@ export function ModelOptionsEditor({
   };
 
   const save = async (): Promise<void> => {
+    if (!options) return;
     const edited: Record<string, unknown> = {};
     for (const field of fields) {
       const value = coerce(field, draft[field.key] ?? "");
@@ -187,19 +214,23 @@ export function ModelOptionsEditor({
     setNote("Back to the defaults.");
   };
 
-  const overrides = Object.keys(options.saved).filter((k) => k !== "model_name").length;
+  const overrides = options
+    ? Object.keys(options.saved).filter((k) => k !== "model_name").length
+    : 0;
   const shown = fields.filter((f) => showAdvanced || !f.advanced);
 
   return (
     <div className="mopt">
       <header className="mopt-head">
         <div>
-          <h4>How {displayModelName(model)} loads</h4>
+          <h4>{displayModelName(model)}</h4>
           <p>
-            {options.recipe ? <>Run by {options.recipe}. </> : null}
-            {overrides
-              ? `${overrides} setting${overrides === 1 ? "" : "s"} changed from the default.`
-              : "Everything is at the default."}
+            {options?.recipe ? <>Run by {options.recipe}. </> : null}
+            {wantsLoad
+              ? overrides
+                ? `${overrides} load setting${overrides === 1 ? "" : "s"} changed from the default.`
+                : "Everything is at the default."
+              : "A hosted model, so how it loads is not Karen's to set."}
           </p>
         </div>
         <button type="button" className="lem-act" onClick={onClose}>
@@ -207,57 +238,126 @@ export function ModelOptionsEditor({
         </button>
       </header>
 
-      <div className="mopt-fields">
-        {shown.map((field) => (
-          <Field
-            key={field.key}
-            field={field}
-            options={options}
-            value={draft[field.key] ?? ""}
-            machine={machine}
-            onChange={(v) => setDraft((d) => ({ ...d, [field.key]: v }))}
-          />
-        ))}
-      </div>
+      {options ? (
+        <>
+          <h5 className="mopt-section">How it loads</h5>
+          <div className="mopt-fields">
+            {shown.map((field) => (
+              <Field
+                key={field.key}
+                model={model}
+                field={field}
+                options={options}
+                value={draft[field.key] ?? ""}
+                machine={machine}
+                onChange={(v) => setDraft((d) => ({ ...d, [field.key]: v }))}
+              />
+            ))}
+          </div>
 
-      <button type="button" className="lem-more" onClick={() => setShowAdvanced((v) => !v)}>
-        {showAdvanced ? "Hide the advanced settings" : "Show the advanced settings"}
-      </button>
+          <button type="button" className="lem-more" onClick={() => setShowAdvanced((v) => !v)}>
+            {showAdvanced ? "Hide the advanced settings" : "Show the advanced settings"}
+          </button>
+        </>
+      ) : null}
 
-      {/* The other half of tuning a model, and deliberately below the fold of
-          the load settings: these take effect on the next message, while
-          everything above costs a reload. */}
-      <SamplingEditor model={model} />
+      {/* The other half of tuning a model, and deliberately below the load
+          settings: these take effect on the next message, while everything
+          above costs a reload. */}
+      {sections.includes("sampling") ? <SamplingEditor model={model} /> : null}
+
+      {sections.includes("prompt") ? <PersonaField model={model} /> : null}
 
       {error ? <p className="run-error">{error}</p> : null}
       {note ? <p className="mopt-note">{note}</p> : null}
 
-      <div className="mopt-acts">
-        <button type="button" className="lem-act get" disabled={busy} onClick={() => void save()}>
-          {busy ? "Saving…" : "Save"}
-        </button>
-        <button type="button" className="lem-act" disabled={busy || !overrides} onClick={() => void reset()}>
-          Reset to defaults
-        </button>
-        {/* Offered only when it would do something: reloading a model that is
-            not loaded is a long operation with no visible result. */}
-        {loaded ? (
-          <button type="button" className="lem-act" disabled={busy} onClick={() => void onReload()}>
-            Reload the model now
+      {options ? (
+        <div className="mopt-acts">
+          <button type="button" className="lem-act get" disabled={busy} onClick={() => void save()}>
+            {busy ? "Saving…" : "Save"}
           </button>
-        ) : null}
-      </div>
+          <button type="button" className="lem-act" disabled={busy || !overrides} onClick={() => void reset()}>
+            Reset to defaults
+          </button>
+          {/* Offered only when it would do something: reloading a model that is
+              not loaded is a long operation with no visible result. */}
+          {loaded ? (
+            <button type="button" className="lem-act" disabled={busy} onClick={() => void onReload()}>
+              Reload the model now
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What this model is told it is, before Karen's rules.
+ *
+ * Saved on blur rather than on every keystroke, the way the sampler rows commit:
+ * this is prose, and a write per character would be a settings file rewritten a
+ * hundred times a sentence.
+ *
+ * The key is derived in the main process, not here. Three per-model records now
+ * share it -- samplers, thinking effort, and this -- and a hosted choice is keyed
+ * `provider::model` while a local one is keyed by the model that actually
+ * answers. The window has been wrong about which is which before.
+ */
+function PersonaField({ model }: { model: string }) {
+  const [text, setText] = useState("");
+  const [fallback, setFallback] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void window.karen.modelPrompt(model).then((r) => {
+      if (!alive) return;
+      setText(r.text);
+      setFallback(r.fallback);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [model]);
+
+  const commit = (): void => {
+    void window.karen.setModelPrompt(model, text.trim() || undefined).then(() => {
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1500);
+    });
+  };
+
+  return (
+    <div className="mopt-persona">
+      <h5 className="mopt-section">Who it is</h5>
+      <textarea
+        rows={4}
+        value={text}
+        placeholder={fallback}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+      />
+      <p className="sampling-note">
+        Only for this model, and only the description of who it is. Karen&rsquo;s own rules — how
+        to hold a tool, that a citation marker may only be one a tool returned, and that untrusted
+        text is data rather than instruction — follow it and cannot be replaced from here. Leave it
+        empty to use the persona from Settings.
+        {saved ? <strong> Saved.</strong> : null}
+      </p>
     </div>
   );
 }
 
 function Field({
+  model,
   field,
   options,
   value,
   machine,
   onChange,
 }: {
+  model: string;
   field: OptionField;
   options: ModelOptions;
   value: string;
@@ -286,6 +386,12 @@ function Field({
           />
           <span>{value === "" ? "Not set — the daemon decides" : value === "true" ? "On" : "Off"}</span>
         </label>
+      ) : field.key === "llamacpp_args" ? (
+        /* The one option whose value is a whole command line. Everything people
+           come to this panel for lives inside it, and the daemon accepts any
+           nonsense in it with a 200 -- so the controls, and the checking, are
+           here. */
+        <FlagsField model={model} value={value} onChange={onChange} />
       ) : (
         <input
           type="text"
@@ -311,6 +417,221 @@ function Field({
           hours -- are an hour apart. */}
       {field.kind === "seconds" ? <Seconds value={value} /> : null}
       {field.help ? <p className="mopt-help">{field.help}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * The llama.cpp flags, as controls, over the string that holds them.
+ *
+ * Every edit goes through `writeFlags`, which rewrites only the flags it owns
+ * and leaves every other token exactly where it was -- including the daemon's
+ * own `--parallel 1`, and including anything hand-tuned before this panel
+ * existed. The resulting string is shown underneath rather than hidden, because
+ * it is what actually reaches `llama-server` and somebody who knows these flags
+ * should be able to check the panel's work.
+ */
+function FlagsField({
+  model,
+  value,
+  onChange,
+}: {
+  model: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const [raw, setRaw] = useState(false);
+  /**
+   * The GPU-layers and MoE-CPU sliders' real bound, and whether this model
+   * routes between experts at all.
+   *
+   * Fetched independently rather than lifted from `SamplingEditor`, which asks
+   * for the same record for a different reason -- the pattern `PersonaField`
+   * above already uses. `layers` absent (an imported model, an offline
+   * download, a fetch that failed) is not an error: the fields fall back to a
+   * plain number box, same as every other integer flag without a measured
+   * model.
+   */
+  const [shape, setShape] = useState<{ layers?: number; experts?: number }>({});
+
+  useEffect(() => {
+    let alive = true;
+    void window.karen.modelFacts(model).then((r) => {
+      if (!alive) return;
+      setShape({ ...(r.layers ? { layers: r.layers } : {}), ...(r.experts ? { experts: r.experts } : {}) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [model]);
+
+  const { values, unknown } = readFlags(value);
+
+  const set = (spec: FlagSpec, next: string): void => {
+    const problem = validFlag(spec, next);
+    setError(problem);
+    if (problem) return;
+    onChange(writeFlags(value, { ...values, [spec.flag]: next }));
+  };
+
+  const shown = LLAMA_FLAGS.filter((f) => {
+    /* Offloading MoE experts to the CPU does nothing on a model that has none
+       -- a control that does nothing is worse than an absent one. */
+    if (f.flag === "--n-cpu-moe" && !shape.experts) return false;
+    return showAll || !f.advanced || values[f.flag] !== undefined;
+  });
+
+  return (
+    <div className="mopt-flags">
+      {shown.map((spec) => (
+        <div key={spec.flag} className="mopt-flag">
+          <span className="mopt-flag-label">
+            {spec.label}
+            <code>{spec.flag}</code>
+          </span>
+
+          {spec.sliderMax === "layers" && shape.layers ? (
+            <LayerSlider
+              layers={shape.layers}
+              value={values[spec.flag] ?? ""}
+              /* Where the slider starts the moment "Auto" is unchecked: all of
+                 them on the GPU for -ngl, none offloaded to the CPU for
+                 -ncmoe -- both read as "nothing has changed yet" from where
+                 llama.cpp's own default already sits. */
+              startAt={spec.flag === "--n-gpu-layers" ? shape.layers : 0}
+              onChange={(v) => set(spec, v)}
+            />
+          ) : spec.kind === "toggle" ? (
+            <input
+              type="checkbox"
+              checked={values[spec.flag] === "true"}
+              onChange={(e) => set(spec, e.target.checked ? "true" : "")}
+            />
+          ) : spec.kind === "enum" ? (
+            <select
+              className="mopt-input"
+              value={values[spec.flag] ?? ""}
+              onChange={(e) => set(spec, e.target.value)}
+            >
+              <option value="">not set</option>
+              {spec.values?.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              /* Keyed by its own parsed value, not just the flag: this box is
+                 uncontrolled so typing feels normal, but that means React never
+                 refreshes it from a value edited elsewhere -- e.g. through "Show
+                 what is sent" below. Without the key, blurring this box after
+                 such an edit would resubmit the value it was last drawn with and
+                 silently undo the other edit. */
+              key={`${spec.flag}:${values[spec.flag] ?? ""}`}
+              type="text"
+              className="mopt-input"
+              inputMode={spec.kind === "text" ? "text" : "numeric"}
+              defaultValue={values[spec.flag] ?? ""}
+              spellCheck={false}
+              placeholder="not set"
+              onBlur={(e) => set(spec, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") set(spec, (e.target as HTMLInputElement).value);
+              }}
+            />
+          )}
+
+          <p className="mopt-help">
+            {spec.help}
+            {spec.warn ? <strong className="mopt-flag-warn"> {spec.warn}</strong> : null}
+          </p>
+        </div>
+      ))}
+
+      {error ? <p className="mopt-hint bad">{error}</p> : null}
+
+      <div className="mopt-flag-acts">
+        <button type="button" className="lem-more" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Fewer flags" : "Every flag Karen knows"}
+        </button>
+        <button type="button" className="lem-more" onClick={() => setRaw((v) => !v)}>
+          {raw ? "Hide what is sent" : "Show what is sent"}
+        </button>
+      </div>
+
+      {raw ? (
+        <input
+          type="text"
+          className="mopt-input"
+          value={value}
+          spellCheck={false}
+          placeholder="not set"
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : null}
+
+      {/* Said, not silently preserved: somebody who typed a flag Karen has never
+          heard of should know it is still there and still being sent. */}
+      {unknown.length ? (
+        <p className="mopt-hint">
+          Karen does not know {unknown.filter((t) => t.startsWith("-")).join(", ") || "some of these"},
+          so {unknown.length === 1 ? "it is" : "they are"} passed through unchanged. The daemon
+          accepts anything here and only fails later, at load.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A GPU-layers or MoE-CPU-layers control, bounded by the model's own layer
+ * count rather than the made-up 999 the plain number box used to allow.
+ *
+ * Blank (`value === ""`) is "Auto" -- the flag stays unset, and llama.cpp's own
+ * `--fit` (default on) is what actually places layers, redoing it every time
+ * the context changes. Unchecking "Auto" writes an explicit number and hands
+ * that one setting to the user from then on; it does not turn `--fit` off,
+ * which keeps adjusting whatever is still unset.
+ */
+function LayerSlider({
+  layers,
+  value,
+  startAt,
+  onChange,
+}: {
+  layers: number;
+  value: string;
+  startAt: number;
+  onChange: (v: string) => void;
+}) {
+  const auto = value.trim() === "";
+  const current = auto ? startAt : Math.min(layers, Math.max(0, Math.round(Number(value)) || 0));
+
+  return (
+    <div className="mopt-slider">
+      <label className="mopt-slider-auto">
+        <input
+          type="checkbox"
+          checked={auto}
+          onChange={(e) => onChange(e.target.checked ? "" : String(current))}
+        />
+        <span>Auto — llama.cpp decides</span>
+      </label>
+      <div className="mopt-slider-row">
+        <input
+          type="range"
+          min={0}
+          max={layers}
+          step={1}
+          value={current}
+          disabled={auto}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <span className="mopt-slider-value">{auto ? "Auto" : `${current} of ${layers}`}</span>
+      </div>
     </div>
   );
 }

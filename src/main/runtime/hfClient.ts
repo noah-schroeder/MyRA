@@ -165,6 +165,56 @@ export async function repoCard(repo: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * A small JSON file from beside the weights: `config.json`, `generation_config.json`.
+ *
+ * `repoCard`'s shape, with two differences that both matter here. **A missing
+ * file is `undefined`, not an error** -- a quantised GGUF repository holds one
+ * `.gguf` and a README, so 404 is the ordinary answer and the caller follows
+ * `base_model` to the repository that does have one. And **the body is capped
+ * before it is parsed**: these files are a kilobyte or two, and nothing about
+ * this path should be able to pull a large one into memory because a URL
+ * pointed at it.
+ *
+ * Anything but 200 or 404 -- a gated repository's 401, a rate limit's 429 --
+ * is also `undefined`. Every one of them means the same thing to the only
+ * caller: there is no shape, so size the window by the floor and say so.
+ */
+const SMALL_FILE_LIMIT = 64 * 1024;
+
+async function repoFile(repo: string, name: string): Promise<unknown | undefined> {
+  const id = validRepo(repo);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${HOST}/${id}/raw/main/${name}`, {
+      signal: controller.signal,
+      headers: { "user-agent": AGENT, accept: "application/json, text/plain, */*" },
+    });
+    if (!res.ok) return undefined;
+    const text = await res.text();
+    if (text.length > SMALL_FILE_LIMIT) return undefined;
+    return JSON.parse(text) as unknown;
+  } catch {
+    /* A timeout, a parse failure, no network at all. The caller's answer is the
+       same for all of them and it is not an error: this is an improvement on a
+       default, not a precondition for using a model. */
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The architecture, for sizing the context window. */
+export async function repoConfig(repo: string): Promise<unknown | undefined> {
+  return repoFile(repo, "config.json");
+}
+
+/** What the model's authors set as their own sampler defaults. */
+export async function repoGenerationConfig(repo: string): Promise<unknown | undefined> {
+  return repoFile(repo, "generation_config.json");
+}
+
 /* The repository id goes into a path, so it is checked rather than trusted:
    `org/name` and nothing else, which also rules out `..` and any absolute or
    scheme-bearing string. */

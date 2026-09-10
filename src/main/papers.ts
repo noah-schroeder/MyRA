@@ -15,10 +15,16 @@
  * entry, and its own model list; a second copy of all that is the drift that
  * makes a privacy claim untrue.
  *
- * **The draft that is saved is `result.text`, not the stream.** The deltas are
+ * **The draft that is saved is `result.text`, not the stream.** The live text is
  * for the page to show while it works. `chat` already separates a model's
  * reasoning from its answer, so the returned text cannot contain thinking --
  * which is what keeps reasoning out of the record here as everywhere else.
+ *
+ * **And this file writes it, not the page.** The renderer used to commit the
+ * finished draft, so leaving the tab mid-section discarded a minute of work into
+ * an unmounted component while the request itself carried on. The section is
+ * written into the record here, and `mergeDrafts` stops the page's autosave
+ * racing back over it with the empty draft it still believes in.
  */
 
 import { readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -30,10 +36,11 @@ import { runSubagent } from "../core/llm/chat.ts";
 import { citationsIn } from "../core/documents/draft.ts";
 import { resolveFormat, slugName } from "../core/documents/formats.ts";
 import { convert, documentsDir, writeText } from "../core/documents/office.ts";
-import { assemble, assertPaperId, newPaper, type Paper } from "../core/papers/paper.ts";
+import { assemble, assertPaperId, mergeDrafts, newPaper, type Paper } from "../core/papers/paper.ts";
 import { buildSystem, buildUser, type DraftRequest } from "../core/papers/prompt.ts";
 import { byNewest, idOfFile, paperFileName, parseRecord, summaryOf } from "../core/papers/store.ts";
 import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
+import type { Jobs } from "./work.ts";
 
 export interface PaperDeps {
   config: ConfigStore;
@@ -47,6 +54,13 @@ export interface PaperDeps {
   llm: () => Promise<{ endpoint: EndpointSettings; apiKey?: string; label?: string }>;
   send: (channel: string, payload?: unknown) => void;
   /**
+   * The lease on long work, shared with the peer reviewer.
+   *
+   * It also holds the live text, which is why a section drafted while the page
+   * is closed is no longer lost: the buffer and the record both live out here.
+   */
+  jobs: Jobs;
+  /**
    * A paper has just been created, and here is its id.
    *
    * Injected rather than imported, because the module that files it also reads
@@ -54,22 +68,6 @@ export interface PaperDeps {
    * deliberately never known that projects exist.
    */
   onCreated?: (ref: string) => void;
-}
-
-/** One frame of a draft in flight, as the page receives it. */
-export interface PaperDelta {
-  sectionId: string;
-  kind: "text" | "thinking";
-  text: string;
-  /**
-   * Start this section's text again.
-   *
-   * `runSubagent` retries a failed request up to three times, and an attempt
-   * that died halfway has already streamed half a draft into the page. Without
-   * this the retry appends to it and the author watches their section written
-   * twice.
-   */
-  reset?: boolean;
 }
 
 function rootOf(deps: Pick<PaperDeps, "config">): string {
@@ -137,12 +135,7 @@ export async function deletePaper(root: string, id: string): Promise<void> {
 }
 
 export function installPaperIpc(deps: PaperDeps): void {
-  const { send } = deps;
-  /* One draft at a time, deliberately. Two sections drafting at once on a local
-     model is the out-of-memory failure meetings avoids by transcribing
-     serially, and a second Draft button pressed while the first is running is
-     far more often a double click than an intention. */
-  let running: AbortController | undefined;
+  const { jobs } = deps;
 
   ipcMain.handle("karen:paper-list", async () => ({
     ok: true,
@@ -173,8 +166,12 @@ export function installPaperIpc(deps: PaperDeps): void {
        window is sandboxed and this object is about to become a file. */
     const paper = parseRecord(raw, assertPaperId(id));
     if (!paper) return { ok: false, error: "That paper could not be saved." };
-    const stored = await savePaper(rootOf(deps), paper);
-    return { ok: true, updatedAt: stored.updatedAt };
+    /* Reconciled with the file, because the page is no longer the only writer:
+       a section finished a moment ago is on disk and not yet in the copy this
+       save was built from. */
+    const merged = mergeDrafts(await readPaper(rootOf(deps), paper.id), paper);
+    const stored = await savePaper(rootOf(deps), merged);
+    return { ok: true, updatedAt: stored.updatedAt, paper: stored };
   });
 
   ipcMain.handle("karen:paper-delete", async (_e, id: unknown) => {
@@ -182,8 +179,8 @@ export function installPaperIpc(deps: PaperDeps): void {
     return { ok: true, papers: await listPapers(rootOf(deps)) };
   });
 
-  ipcMain.handle("karen:paper-cancel", async () => {
-    running?.abort();
+  ipcMain.handle("karen:paper-cancel", async (_e, id: unknown) => {
+    jobs.cancel(id ? String(id) : undefined);
     return { ok: true };
   });
 
@@ -195,8 +192,7 @@ export function installPaperIpc(deps: PaperDeps): void {
    * object, so "exactly what will be sent" is the thing that is sent rather
    * than a reconstruction of it.
    */
-  ipcMain.handle("karen:paper-draft", async (_e, sectionId: unknown, raw: unknown) => {
-    if (running) return { ok: false, error: "Karen is already drafting a section." };
+  ipcMain.handle("karen:paper-draft", async (_e, paperId: unknown, sectionId: unknown, raw: unknown) => {
     const id = String(sectionId);
     const request = raw as DraftRequest;
     if (!request || typeof request !== "object") return { ok: false, error: "Nothing to draft." };
@@ -204,8 +200,17 @@ export function installPaperIpc(deps: PaperDeps): void {
       return { ok: false, error: "Write or dictate some notes for this section first." };
     }
 
-    const controller = new AbortController();
-    running = controller;
+    const paper = String(paperId ?? "");
+    const signal = jobs.begin({
+      kind: "paper",
+      id: paper,
+      title: request.paperTitle,
+      steps: 1,
+      label: request.sectionName,
+      sectionId: id,
+    });
+    if (!signal) return { ok: false, error: "Karen is already working on something long." };
+
     try {
       const resolved = await deps.llm();
       const result = await runSubagent({
@@ -217,11 +222,10 @@ export function installPaperIpc(deps: PaperDeps): void {
         ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
         system: buildSystem(request),
         prompt: buildUser(request),
-        signal: controller.signal,
-        onDelta: (text, kind) => send("karen:paper-delta", { sectionId: id, kind, text } satisfies PaperDelta),
+        signal,
+        onDelta: (text, kind) => jobs.append(kind, text),
         onProgress: (note) => {
-          if (!note.startsWith("retrying")) return;
-          send("karen:paper-delta", { sectionId: id, kind: "text", text: "", reset: true } satisfies PaperDelta);
+          if (note.startsWith("retrying")) jobs.restart();
         },
       });
       const text = result.text.trim();
@@ -233,6 +237,19 @@ export function installPaperIpc(deps: PaperDeps): void {
             "Try again, or choose a different model on the Models page.",
         };
       }
+      /* Committed here, not by the page. This is the line that makes leaving
+         the tab mid-draft free: the record has the section whether or not
+         anything is still listening. A paper that has since been deleted is not
+         resurrected -- there is nothing to write into. */
+      const stored = await readPaper(rootOf(deps), paper);
+      const saved = stored
+        ? await savePaper(rootOf(deps), {
+            ...stored,
+            sections: stored.sections.map((s) => (s.id === id ? { ...s, draft: text } : s)),
+          })
+        : undefined;
+      if (saved) deps.send("karen:paper-changed", saved);
+
       /* Reported, never repaired. The prompt forbids citations and this checks;
          removing a fabricated marker would leave the sentence it supported
          reading as the author's own established fact, which is the more
@@ -242,10 +259,10 @@ export function installPaperIpc(deps: PaperDeps): void {
       const message = (err as Error).message || "The draft failed.";
       return {
         ok: false,
-        error: controller.signal.aborted ? "Stopped." : message,
+        error: signal.aborted ? "Stopped." : message,
       };
     } finally {
-      running = undefined;
+      jobs.end();
     }
   });
 

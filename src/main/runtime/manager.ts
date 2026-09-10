@@ -41,8 +41,30 @@ import {
   defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
 } from "./paths.ts";
 import type { Progress } from "./download.ts";
-import type { PullProgress } from "../../core/runtime/systemInfo.ts";
+import type { MachineInfo, PullProgress } from "../../core/runtime/systemInfo.ts";
 import type { InstalledModel } from "./lemonadeApi.ts";
+import { autoContext } from "../../core/runtime/fit.ts";
+import { kvBytesPerElement, readFlags, writeFlags } from "../../core/runtime/llamaArgs.ts";
+import { factsFor } from "./modelFacts.ts";
+import { isOverridden, type ModelOptions } from "../../core/runtime/modelOptions.ts";
+
+/**
+ * Whether CUDA is what this model would actually run on.
+ *
+ * A backend pinned for this model, in `llamacpp_backend`, is respected
+ * outright -- matching CUDA or not, that is the user's own choice. Left on
+ * the daemon's "auto", it is inferred from the hardware: an Nvidia device the
+ * probe found, and the cuda backend actually installed rather than merely
+ * offered as an option.
+ */
+function cudaIsTheBackend(options: ModelOptions, info: MachineInfo): boolean {
+  const pinned = String(options.effective["llamacpp_backend"] ?? "").trim().toLowerCase();
+  if (pinned) return pinned === "cuda";
+  return (
+    info.devices.some((d) => d.id.startsWith("CUDA")) &&
+    info.backends.some((b) => b.id === "cuda" && b.state === "installed")
+  );
+}
 
 const CONFIG_PATH = join(CONFIG_DIR, "runtime.json");
 
@@ -477,8 +499,99 @@ export class RuntimeManager {
     return this.#loading;
   }
 
+  /**
+   * Give a model a window worth having and a sensible backend default, before
+   * it loads.
+   *
+   * The daemon's default is `ctx_size: -1`, which resolves to **4,096** whatever
+   * the model can do -- measured, on one whose ceiling is 131,072. That is the
+   * number the context half of this exists to improve on, and
+   * `POST /models/{id}/options` before `/load` is how: measured against lemond
+   * 11.8.0, the launch command came out as `llama-server ... --ctx-size 8192`,
+   * so the patch reaches the process. Both patches below go through the same
+   * one call when there is anything to send, rather than two round trips.
+   *
+   * Three refusals hold for context, and each is load-bearing:
+   *
+   *   - **A value the user set is never touched.** `saved` is the daemon's own
+   *     record of what was overridden, so this asks it rather than guessing.
+   *   - **A recipe with no `ctx_size` is left alone**, which is how whispercpp
+   *     stays out of this by the daemon's own field list rather than by a
+   *     model-name test.
+   *   - **A window that will not fit is not written down.** `autoContext`
+   *     returns nothing in that case and this writes nothing: the daemon's 4,096
+   *     is a poor default, but a number that stops the model loading is worse.
+   *     The daemon does not clamp -- asked for a million it tries, and the OOM
+   *     killer arrives -- so the clamping is ours to do.
+   *
+   * Flash attention gets one refusal of its own, and it is finer-grained than
+   * "has `llamacpp_args` been overridden": that string holds many flags, and a
+   * user who has set `-ngl 32` and nothing else about attention has not made a
+   * choice about this one. So the check reads the string itself -- `--flash-attn`
+   * present, in any of its three values, is left exactly as it is; only its
+   * absence, which covers both "never set" and an old bare `--flash-attn` from
+   * before this flag required a value, gets `on` written in, and only on CUDA.
+   */
+  async #autoTuneLoad(name: string): Promise<void> {
+    try {
+      const options = await this.#api.modelOptions(name);
+      /* `ctx_size`, `llamacpp_args` and `llamacpp_backend` are the llamacpp
+         recipe's own fields, measured and documented in modelOptions.ts --
+         their presence here, not a name test, is what keeps this whole method
+         away from whispercpp, kokoro and sd-cpp models. */
+      if (!("ctx_size" in options.defaults)) return;
+
+      const info = await this.#api.systemInfo().catch(() => undefined);
+      const patch: { ctx_size?: number; llamacpp_args?: string } = {};
+
+      if (info && !isOverridden(options, "ctx_size")) {
+        const model = (await this.#api.listModels().catch(() => [])).find((m) => m.id === name);
+        if (model?.sizeBytes) {
+          /* Read, never fetched: the shape was learned when the model was
+             downloaded. Absent means the sizer falls back to the floor and
+             says so, which is the honest answer for a model imported from
+             elsewhere or downloaded before this existed. */
+          const facts = await factsFor(name);
+          const args = options.effective["llamacpp_args"];
+          const bpe = typeof args === "string" ? kvBytesPerElement(args) : undefined;
+
+          const auto = autoContext({
+            fileBytes: model.sizeBytes,
+            machine: {
+              ...(info.devices[0]?.totalBytes ? { vramBytes: info.devices[0].totalBytes } : {}),
+              ramBytes: info.ramBytes ?? 0,
+            },
+            ...(facts?.shape ? { shape: facts.shape } : {}),
+            ...(model.maxContextTokens ? { ceiling: model.maxContextTokens } : {}),
+            /* A quantised KV cache is the one flag that changes how long a
+               window fits, so somebody who set it gets sized against what
+               they set. */
+            ...(bpe ? { bytesPerElement: bpe } : {}),
+          });
+          if (auto.tokens && auto.tokens !== options.resolvedCtxSize) patch.ctx_size = auto.tokens;
+        }
+      }
+
+      if (info) {
+        const args = options.effective["llamacpp_args"];
+        const current = typeof args === "string" ? args : "";
+        if (!readFlags(current).values["--flash-attn"] && cudaIsTheBackend(options, info)) {
+          patch.llamacpp_args = writeFlags(current, { "--flash-attn": "on" });
+        }
+      }
+
+      if (Object.keys(patch).length) await this.#api.setModelOptions(name, patch);
+    } catch {
+      /* Tuning is an improvement on the default, not a precondition for
+         loading one. A daemon that refuses the patch, a model list that
+         fails, a probe that reports no devices -- all of them mean "load it
+         as it was". */
+    }
+  }
+
   async loadModel(name: string): Promise<void> {
     await this.ensureLemonade();
+    await this.#autoTuneLoad(name);
     this.#loading = name;
     this.#emit();
     try {

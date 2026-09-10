@@ -10,6 +10,7 @@ import { voicesFor } from "../../core/audio/voices.ts";
 import { engineStates, runnable, type Runnable } from "../../core/runtime/runnable.ts";
 import { modelIdOf } from "../../core/audio/models.ts";
 import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES } from "../../core/review/prompt.ts";
+import { DEFAULT_PERSONA } from "../../core/agent/systemPrompt.ts";
 
 /**
  * Everything configurable, in one place.
@@ -22,7 +23,7 @@ import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES } from "../../core/review/pr
 
 type Tab =
   | "providers" | "runtime" | "library" | "storage" | "audio" | "appearance"
-  | "permissions" | "review" | "about";
+  | "permissions" | "persona" | "review" | "about";
 
 /*
  * There was an "Endpoints" tab here, and Providers replaced it.
@@ -45,6 +46,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "audio", label: "Audio" },
   { id: "appearance", label: "Appearance" },
   { id: "permissions", label: "Permissions" },
+  { id: "persona", label: "Persona" },
   { id: "review", label: "Peer review" },
   { id: "about", label: "About" },
 ];
@@ -115,6 +117,7 @@ export function SettingsModal({
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}
           {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
+          {tab === "persona" ? <Persona settings={settings} patch={patch} /> : null}
           {tab === "review" ? <Review settings={settings} patch={patch} /> : null}
           {tab === "about" ? <About /> : null}
         </div>
@@ -403,6 +406,7 @@ const FOLDERS = [
      settings.json is not one. */
   { key: "imagesRoot", label: "Images", hint: "Where generated figures are filed, beside a note of what was asked for." },
   { key: "papersRoot", label: "Papers", hint: "Where the paper drafter keeps your notes and drafts, one file per paper." },
+  { key: "reviewsRoot", label: "Peer reviews", hint: "Where finished reviews are kept. The manuscript itself is never written here." },
 ] as const;
 
 function Folders({
@@ -992,6 +996,88 @@ const MODES = [
   { value: "manual", label: "Ask every time", hint: "Confirm every tool call, searches included. Thorough, and noisy: a research run becomes a wall of prompts." },
   { value: "yolo", label: "Never ask", hint: "Nothing prompts. With this tool set that is the same as Guarded, and it stays honest if a riskier tool is ever added." },
 ] as const;
+
+/**
+ * Who Karen is, in the user's own words.
+ *
+ * Only the persona: what follows it in the prompt is the tool discipline, the
+ * citation rules and the untrusted-content rule, and those are not offered here
+ * because a prompt that replaced them could produce a [1] pointing at nothing --
+ * the app's one unbreakable promise, broken by a text box. The note below says
+ * so rather than leaving it to be discovered.
+ */
+function Persona({
+  settings,
+  patch,
+}: {
+  settings: Settings;
+  patch: (p: Partial<Settings>) => Promise<void>;
+}) {
+  return (
+    <div className="pane">
+      <p className="pane-lead">
+        The first thing every conversation tells the model. Change it to give Karen a different
+        voice, a field of your own, or a house style — it applies to chat, and a single model can
+        be given its own from the cog beside it in the model menu.
+      </p>
+
+      <label className="field">
+        <span className="field-label">Persona</span>
+        <textarea
+          rows={6}
+          value={settings.persona}
+          onChange={(e) => void patch({ persona: e.target.value })}
+        />
+      </label>
+
+      <p className="pane-note">
+        This replaces the description of who Karen is, and nothing else. Karen&rsquo;s own rules
+        follow it and cannot be edited from here: how to hold a tool, that a citation marker may
+        only ever be one a tool actually returned, and that text inside untrusted-content markers
+        is data rather than instruction. Those are what keep a reference from being invented, so
+        they are not a setting.
+      </p>
+
+      <div className="pane-actions">
+        <button
+          type="button"
+          className="ghost"
+          disabled={settings.persona === DEFAULT_PERSONA}
+          onClick={() => void patch({ persona: DEFAULT_PERSONA })}
+        >
+          Back to Karen&rsquo;s own
+        </button>
+      </div>
+
+      <h3>Models with their own</h3>
+      {Object.keys(settings.systemPrompts).length ? (
+        <ul className="persona-list">
+          {Object.entries(settings.systemPrompts).map(([model, text]) => (
+            <li key={model}>
+              <span className="persona-model">{model}</span>
+              <span className="persona-text">{text}</span>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  const next = { ...settings.systemPrompts };
+                  delete next[model];
+                  void patch({ systemPrompts: next });
+                }}
+              >
+                Clear
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="pane-note">
+          None yet. The cog beside a model in the model menu gives that one its own.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Permissions({
   settings,

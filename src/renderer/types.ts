@@ -25,8 +25,10 @@ export type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.
 import type { DraftRequest } from "../core/papers/prompt.ts";
 export type { Paper, PaperKind, PaperSection, PaperSummary } from "../core/papers/paper.ts";
 export type { DraftRequest } from "../core/papers/prompt.ts";
-import type { PaperDelta } from "../main/papers.ts";
-export type { PaperDelta } from "../main/papers.ts";
+export type { Review, ReviewReport, ReviewStatus, ReviewSummary } from "../core/review/record.ts";
+import type { Review, ReviewSummary } from "../core/review/record.ts";
+export type { JobSnapshot } from "../main/work.ts";
+import type { JobSnapshot } from "../main/work.ts";
 import type { PullProgress } from "../core/runtime/systemInfo.ts";
 import type { DownloadJob, MachineInfo } from "../core/runtime/systemInfo.ts";
 import type { ReasoningDialect } from "../core/llm/reasoningDialect.ts";
@@ -182,6 +184,7 @@ export interface Settings {
   imagesRoot: string;
   /** Where the paper drafter keeps one file per paper. */
   papersRoot: string;
+  reviewsRoot: string;
   /** The project new work files itself into. Empty means none. */
   activeProject: string;
   /** The peer reviewer's instructions, and one block per study design. */
@@ -194,6 +197,10 @@ export interface Settings {
   keepRunningInTray: boolean;
   setupCompleted: boolean;
   providers: Provider[];
+  /** Who the model is told it is. Karen's rules follow it and are not editable. */
+  persona: string;
+  /** Per model, overriding the above. Keyed the way `sampling` is. */
+  systemPrompts: Record<string, string>;
   /** Sampler settings per model, keyed the way a model is chosen. */
   sampling: Record<string, Record<string, number>>;
 }
@@ -577,6 +584,7 @@ export interface KarenApi {
   }>;
   onResearchProgress(cb: (note: string) => void): () => void;
   onResearchStage(cb: (stage: string) => void): () => void;
+  researchActive(): Promise<ActiveRun | null>;
   onResearchActive(cb: (run: ActiveRun | null) => void): () => void;
   answerPrompt(id: string, answer: string | undefined): Promise<void>;
   onPrompt(cb: (request: PromptRequest) => void): () => void;
@@ -612,6 +620,27 @@ export interface KarenApi {
   }>;
   /** Choose a level for one dialect, or clear it by passing nothing. */
   setReasoning(dialectId: string, value?: string): Promise<{ ok: boolean; error?: string }>;
+  /** This model's own persona, the key it is stored under, and the global one. */
+  modelPrompt(model?: string): Promise<{ ok: boolean; key: string; text: string; fallback: string }>;
+  setModelPrompt(model: string | undefined, value?: string): Promise<{ ok: boolean; error?: string; key?: string }>;
+  /** The sampler settings this model's authors published, and where they came from. */
+  modelFacts(model?: string): Promise<{
+    ok: boolean;
+    key: string;
+    repo?: string;
+    suggested: Record<string, number>;
+    hasSuggested: boolean;
+    ignoreSuggested: boolean;
+    /** Whether Karen could read the architecture, so the context is measured. */
+    measured: boolean;
+    /** The model's own layer count, when known -- the GPU-layers and MoE-CPU
+     *  sliders' real bound. */
+    layers?: number;
+    /** How many experts a MoE model routes between, when known. Informative:
+     *  it decides whether the MoE-CPU slider is offered, not what it goes to. */
+    experts?: number;
+  }>;
+  setIgnoreSuggested(model: string | undefined, ignore: boolean): Promise<{ ok: boolean }>;
   /** The build each backend is on, and the one Lemonade shipped with. */
   engineVersions(): Promise<{
     ok: boolean;
@@ -665,29 +694,33 @@ export interface KarenApi {
   reviewContext(): Promise<{ ok: boolean; error?: string; contextTokens?: number }>;
   reviewRun(
     requests: ReviewRequest[],
-    title: string,
+    meta: { title: string; fileName?: string; studyTypeId?: string },
   ): Promise<{
     ok: boolean;
     error?: string;
+    id?: string;
     text?: string;
     invented?: string[];
     stopped?: boolean;
   }>;
-  reviewCancel(): Promise<{ ok: boolean }>;
+  reviewCancel(id?: string): Promise<{ ok: boolean }>;
   reviewSave(
     name: string,
     text: string,
   ): Promise<{ ok: boolean; error?: string; saved?: boolean; path?: string }>;
-  onReviewDelta(
-    fn: (d: {
-      kind: "text" | "thinking" | "reviewer";
-      index: number;
-      text: string;
-      reset?: boolean;
-      label?: string;
-      total?: number;
-    }) => void,
-  ): () => void;
+  reviewList(): Promise<{ ok: boolean; reviews?: ReviewSummary[] }>;
+  reviewOpen(id: string): Promise<{ ok: boolean; error?: string; review?: Review }>;
+  reviewDelete(id: string): Promise<{ ok: boolean; error?: string }>;
+  onReviews(cb: (rows: ReviewSummary[]) => void): () => void;
+  /**
+   * The long job that is not a chat turn: a review panel, or a section.
+   *
+   * `workState` is what a page asks on mount, so returning to a run already in
+   * progress draws the reviewer being written rather than an empty page.
+   */
+  workState(): Promise<JobSnapshot | null>;
+  onWork(cb: (job: JobSnapshot | null) => void): () => void;
+  recent(): Promise<{ ok: boolean; items?: (ItemRow & { kind: MemberKind; project: string })[] }>;
   downloadsList(): Promise<Download[]>;
   downloadPause(id: string): Promise<{ ok: boolean }>;
   downloadResume(id: string): Promise<{ ok: boolean }>;
@@ -804,13 +837,15 @@ export interface KarenApi {
    * sentence reading as the author's own established fact.
    */
   paperDraft(
+    paperId: string,
     sectionId: string,
     request: DraftRequest,
   ): Promise<{ ok: boolean; error?: string; text?: string; invented?: string[] }>;
-  paperCancel(): Promise<{ ok: boolean }>;
+  paperCancel(id?: string): Promise<{ ok: boolean }>;
   paperExport(id: string, format: string): Promise<{ ok: boolean; error?: string; path?: string }>;
   paperReveal(path: string): Promise<{ ok: boolean }>;
-  onPaperDelta(cb: (d: PaperDelta) => void): () => void;
+  /** The record as main saved it, after it committed a finished section. */
+  onPaperChanged(cb: (paper: Paper) => void): () => void;
   onRuntime(cb: (state: RuntimeState) => void): () => void;
   onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
 

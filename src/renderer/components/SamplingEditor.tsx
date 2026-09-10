@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "../types.ts";
 import {
   droppedForExternal, SAMPLING_FIELDS, type Sampling, type SamplingField,
@@ -22,10 +22,36 @@ import {
 export function SamplingEditor({ model }: { model: string }) {
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showAdvanced, setShowAdvanced] = useState(false);
+  /**
+   * What this model's authors published, read when the model was downloaded.
+   *
+   * Shown as each field's placeholder rather than filled in, so an untouched box
+   * says where its value comes from: a number typed into it is the user's, and a
+   * greyed one is the model's. Filling them in would make "I have tuned this"
+   * and "this came with the model" the same state.
+   */
+  const [facts, setFacts] = useState<{
+    repo?: string;
+    suggested: Sampling;
+    hasSuggested: boolean;
+    ignoreSuggested: boolean;
+  }>({ suggested: {}, hasSuggested: false, ignoreSuggested: false });
+
+  const loadFacts = useCallback(() => {
+    void window.karen.modelFacts(model).then((r) =>
+      setFacts({
+        ...(r.repo ? { repo: r.repo } : {}),
+        suggested: r.suggested,
+        hasSuggested: r.hasSuggested,
+        ignoreSuggested: r.ignoreSuggested,
+      }),
+    );
+  }, [model]);
 
   useEffect(() => {
     void window.karen.getSettings().then(setSettings);
-  }, []);
+    loadFacts();
+  }, [loadFacts]);
 
   if (!settings) return null;
 
@@ -43,7 +69,12 @@ export function SamplingEditor({ model }: { model: string }) {
     void window.karen.updateSettings({ sampling: all }).then(setSettings);
   };
 
-  const shown = SAMPLING_FIELDS.filter((f) => showAdvanced || !f.advanced || current[f.key] !== undefined);
+  /* A field the authors set is worth showing even when it is advanced: it is
+     already in force, and hiding it would make the reply depend on something
+     the panel never mentioned. */
+  const shown = SAMPLING_FIELDS.filter(
+    (f) => showAdvanced || !f.advanced || current[f.key] !== undefined || facts.suggested[f.key] !== undefined,
+  );
   const dropped = droppedForExternal(current);
   const tuned = Object.keys(current).length;
 
@@ -64,6 +95,7 @@ export function SamplingEditor({ model }: { model: string }) {
             key={field.key}
             field={field}
             value={current[field.key]}
+            suggested={facts.suggested[field.key]}
             onChange={(v) => set(field.key, v)}
           />
         ))}
@@ -72,6 +104,24 @@ export function SamplingEditor({ model }: { model: string }) {
       <button type="button" className="lem-more" onClick={() => setShowAdvanced((v) => !v)}>
         {showAdvanced ? "Hide the rarely-used samplers" : "Show every sampler"}
       </button>
+
+      {facts.hasSuggested || facts.ignoreSuggested ? (
+        <p className="sampling-note">
+          {facts.ignoreSuggested
+            ? "Karen is ignoring the settings this model was published with."
+            : `Greyed values are what this model's authors published${facts.repo ? ` in ${facts.repo}` : ""}. ` +
+              "They apply unless you type over them; clearing a box goes back to them, not to nothing."}{" "}
+          <button
+            type="button"
+            className="sampling-clear"
+            onClick={() => {
+              void window.karen.setIgnoreSuggested(model, !facts.ignoreSuggested).then(loadFacts);
+            }}
+          >
+            {facts.ignoreSuggested ? "Use them" : "Ignore them"}
+          </button>
+        </p>
+      ) : null}
 
       {/* Said here, where the setting is made, rather than discovered as a 400
           from a hosted endpoint that names nothing useful. */}
@@ -89,10 +139,13 @@ export function SamplingEditor({ model }: { model: string }) {
 function SamplingRow({
   field,
   value,
+  suggested,
   onChange,
 }: {
   field: SamplingField;
   value: number | undefined;
+  /** What the model was published with, shown as the placeholder. */
+  suggested?: number | undefined;
   onChange: (value: number | undefined) => void;
 }) {
   /* The text is held locally so a half-typed number stays typeable. Committing
@@ -130,12 +183,17 @@ function SamplingRow({
       <span className="sampling-label">
         {field.label}
         {!field.standard ? <em className="sampling-tag" title="llama.cpp only; not sent to hosted providers">llama.cpp</em> : null}
+        {suggested !== undefined && value === undefined ? (
+          <em className="sampling-tag" title="Published with the model, and in force">
+            from the model
+          </em>
+        ) : null}
       </span>
       <input
         className="input-line sampling-input"
         inputMode="decimal"
         value={text}
-        placeholder="server default"
+        placeholder={suggested !== undefined ? String(suggested) : "server default"}
         aria-label={field.label}
         onChange={(e) => setText(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
@@ -150,7 +208,11 @@ function SamplingRow({
         type="button"
         className="sampling-clear"
         disabled={value === undefined}
-        title="Leave this to the server"
+        title={
+          suggested !== undefined
+            ? "Back to what this model was published with"
+            : "Leave this to the server"
+        }
         onClick={() => onChange(undefined)}
       >
         Clear

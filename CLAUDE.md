@@ -151,8 +151,12 @@ transcription failed must not vanish while its audio sits on disk.
 ### Projects
 
 A project is an **index, not a folder** ([project.ts](src/core/projects/project.ts)): it
-lists the five kinds of thing Karen makes — `chat | meeting | run | paper | image` — and
-the files never move. A real directory per project was costed and rejected, and will be
+lists the six kinds of thing Karen makes — `chat | meeting | run | paper | review | image`
+— and the files never move. Adding a kind means moving six enumerations together
+(`MemberKind`/`MEMBER_KINDS`/`KIND_WORDS`/`countsOf`, render.ts's `FOLDERS`/`HEADINGS`/
+`ORDER`, `defaultStores`, and the two renderer tables); `asMembers` validates against
+`MEMBER_KINDS` rather than a chain of literals, because that chain was the one place a new
+kind could be added everywhere else and still be dropped silently. A real directory per project was costed and rejected, and will be
 proposed again: as soon as items live in different directories every "open this by id"
 call has to first discover *which* directory holds it, so that design needs this index
 anyway — and on top of it the research root would have to be threaded through the
@@ -194,6 +198,94 @@ directory holding one file, and [store.ts](src/core/papers/store.ts) parses forg
 the way images/store.ts does — a list that throws on the fifth of twenty papers is worse
 than one that skips it, and skipping is visible.
 
+### Peer review
+
+Somebody sends you a manuscript to review, and Karen writes the panel's reports. It sits
+beside the paper drafter and keeps two of its habits — a pure prompt module, so the preview
+renders character for character what is sent, and citations **reported rather than
+repaired** — but differs in one way that matters: the prompts here are **editable**
+([prompt.ts](src/core/review/prompt.ts)). A reviewer's standards are their own and journals
+differ, so the rule against inventing literature is stated in the text where it can be read,
+not hidden where it cannot be removed. It is not decoration: a small model under test
+produced a References section of empty numbered markers on its first run, and a fabricated
+citation in a review reaches an editor under the reviewer's name.
+
+**The manuscript arrives as bytes, never as a path.** The renderer reads the dropped `File`
+with `arrayBuffer()` — a web API, so the sandbox is untouched — and `pdfToText` already
+extracts from a `Uint8Array`. The alternative, `webUtils.getPathForFile`, hands main an
+arbitrary absolute path to open for the sake of a convenience; Karen never learns where a
+confidential manuscript lives ([main/review.ts](src/main/review.ts)).
+
+**One request per reviewer, and one shared block of house rules.** The reviewer's two
+prompts are about eighty per cent the same text; what differs is *who* the three reviewers
+are, and in particular what the methodologist looks for — a statistician on an experiment,
+a PRISMA 2020 checklist on a systematic review. So the shared part is one editable block and
+each study design carries its own panel; adding a design later means writing three personas,
+not another thousand-word prompt free to drift. Asking each persona separately keeps every
+request small, the reason [draft.ts](src/core/documents/draft.ts) writes a section at a
+time, and three reviewers who have not read each other is what a journal sends an editor. A
+reviewer that returns nothing has its failure filed under its own heading rather than
+dropped, and stopping after two of three keeps the two.
+
+**Refuse rather than truncate** ([manuscript.ts](src/core/review/manuscript.ts)). A
+manuscript is six to twelve thousand words and a model on an 8 GB card commonly holds eight
+thousand tokens, so not fitting is the ordinary case. The fit is measured against the
+*largest* reviewer rather than the sum — each carries the same manuscript, so what has to
+fit is one of them — and it reserves `REPLY_TOKENS` for the reply, because a review that
+stops halfway through the major concerns is still a review that goes to an editor. An
+unknown window is not a refusal: a hosted provider reports none, and refusing on "we could
+not measure it" would block the models most able to do this.
+
+**The report is kept and the manuscript is not.** A review is a flat `<id>.json` under
+`reviewsRoot` ([record.ts](src/core/review/record.ts)), written before the first reviewer
+and again after every one — the pipeline's rule, so a crash during the third leaves the
+first two — and filed into the active project at the moment it comes into existence, since
+a member with no file on disk is pruned by the next read. The manuscript is held in memory
+for the length of the run and never written: it is somebody else's unpublished paper, and
+`~/Documents` is a directory a file manager and any cloud sync can read. The page says so,
+because a record that looks like a document but silently lacks its source is worse than one
+that explains itself.
+
+Asking *whether* it fits must not behave like a turn. The window is read off the runtime,
+where the conversation's own context meter reads it, and never by resolving the endpoint:
+resolving calls `ensureChatModel`, so a page that re-asks whenever the runtime changes —
+and a model going away is a runtime change — loaded the model straight back in about a
+second after the user unloaded it, everywhere, and the card was never actually freed.
+
+### The long job that is not a chat turn
+
+A review panel and a paper section are minutes of work started from a page the window
+unmounts as soon as you look at something else, and both used to keep their own
+`AbortController` and stream deltas straight at the renderer. So leaving the tab meant the
+deltas arrived at nobody, the finished text landed in an unmounted component, and the guard
+stayed held — the next attempt refused by a run whose output had already been thrown away.
+[work.ts](src/main/work.ts) is one registry for both, and three things about it are the
+point.
+
+**The snapshot is absolute, not a delta.** One channel carrying the whole current state.
+`runSubagent` retries up to three times and a died-halfway attempt has already streamed half
+a report, so both features carried a `reset` flag — the same fix written twice, either of
+which could be forgotten. With a whole-state snapshot, writing a report twice is not
+expressible.
+
+**A late subscriber gets everything.** `karen:work-state` behind an `ipcMain.handle` is what
+lets a page mounting mid-run draw the reviewer already in progress; `karen:research-active`
+had no such question and sat blank until the next stage, which is why it now has
+`karen:research-active-state` beside it. The precedent is `karen:meeting-state`, not the
+research channel.
+
+**One at a time, across both features, and chat is deliberately outside it.** Two long
+generations on one card is the OOM meetings avoids by transcribing serially. A chat turn is
+short and somebody is waiting for it. A research run stays on `inFlight` rather than joining
+the lease: it happens *inside* a chat turn, and folding it in would make starting a run
+refuse while a review was writing.
+
+Main owns the record too. `karen:paper-draft` commits the finished section itself, and
+`mergeDrafts` ([paper.ts](src/core/papers/paper.ts)) stops the page's 700 ms autosave racing
+back over it with the empty draft it still believes in — an older page copy may not blank a
+draft that exists on disk, but a non-empty draft it sends always wins, because that is the
+author editing prose by hand.
+
 ### Drafting a document
 
 [draft.ts](src/core/documents/draft.ts) is outline, approve, then one section at a time,
@@ -205,6 +297,19 @@ local model comes from; context stays bounded however long the document gets, be
 section sees the outline and the tail of what came before rather than the whole draft; and
 the file is saved after every section, so a run that dies at section eight leaves seven
 sections on disk instead of nothing.
+
+Conversion is **pandoc and only pandoc** ([formats.ts](src/core/documents/formats.ts)): CSL
+styles, bibliographies and journal templates are the whole point for this audience, and it
+is one static binary where LibreOffice was a gigabyte-scale prerequisite the user installed
+themselves. Karen therefore fetches it on first run, into the user's own data directory
+beside the model runtime ([main/tools/pandoc.ts](src/main/tools/pandoc.ts)) — from
+`releases/latest`, which is right here and wrong for llama.cpp, whose every build is a
+prerelease; checked against the sha256 the API publishes; and never an installer, since a
+`.deb`, `.pkg` or `.msi` would want privilege for a binary we only ever run ourselves.
+Installing it is not a tool call. Two rules on the conversion itself: **the output path is
+always explicit**, because LibreOffice wrote beside the input under the same basename and so
+converting `report.docx` destroyed the `report.md` next to it — observed, not theorised —
+and **the argv is a fixed template** no caller may add flags to.
 
 ### The Zotero library
 
@@ -276,6 +381,71 @@ that is not on this machine is external whatever the label says
 ([destinations.ts](src/core/destinations.ts) owns that rule, and the privacy report reads
 the same function).
 
+### Thinking, and sampling
+
+Reasoning is separated from the answer as it arrives
+([thinking.ts](src/core/llm/thinking.ts)). A server uses either convention: llama.cpp with
+`--jinja` extracts it into `reasoning_content` beside `content`, while some templates emit
+it inline in `<think>` or `<thinking>` tags — which you get depends on the model file, not
+on anything Karen chose, and knowing only the first spelling printed a whole chain of
+reasoning into the answer as prose. Inline text is held back only as far as it could still
+be part of a tag, at most eleven characters, because a tag arrives split across frames and
+passing `<` through makes the answer flicker. Reasoning is never fed back to the model.
+
+**Karen does not invent a vocabulary for "think harder."** Four vendors have four shapes —
+`reasoning_effort`, an OpenRouter object, a Google budget in tokens, an Anthropic one — and
+local models have a fifth, where the switch is a variable inside the model's own chat
+template. A single Off/Brief/Deep control would have to claim that OpenAI's "low" and a
+1024-token Gemini budget are the same thing, and would put Karen's words in front of a
+parameter the user may need to discuss with a sysadmin. So the control shows the field name
+and the values that endpoint actually takes
+([reasoningDialect.ts](src/core/llm/reasoningDialect.ts)).
+
+**A switch is offered only where it has been measured, and the two sides are measured
+differently.** Locally the evidence is the model's own template: `POST /apply-template`
+returns the rendered prompt, so rendering the same messages with and without a switch says
+whether the template reads it ([templateProbe.ts](src/core/llm/templateProbe.ts)) —
+llama.cpp answers 200 to a request carrying `karen_nonsense_param`, so "it did not error"
+is never evidence here. Hosted endpoints cannot be read, only asked, so a hosted control
+appears only after the reasoning check in Settings → Providers has sent one probe carrying
+the field and had it come back clean ([reasoningProbe.ts](src/core/llm/reasoningProbe.ts),
+[main/llm/reasoning.ts](src/main/llm/reasoning.ts)): a strict server rejects a whole request
+over one unknown parameter, and a chat that 400s is far worse than a chat that does not show
+its workings. A dialect's `preferred` — thinking on without being asked — is set only for a
+local template switch, never a hosted one, where an effort nobody chose is billed to
+somebody's account. "No control" is four states kept apart on purpose: `none` and `always`
+are findings, `unchecked` and `unknown` are the absence of one, and printing the first pair
+for the second would be Karen asserting a fact about a model that it does not have.
+
+Sampling is per model and rides on each request ([sampling.ts](src/core/llm/sampling.ts)),
+which is what separates it from `runtime/modelOptions.ts`: those are *load* settings that
+Lemonade reads when it starts llama-server, so changing one reloads several gigabytes. Each
+field declares whether it is `standard`, because llama.cpp accepts a wide sampler set on its
+OpenAI-compatible endpoint and a hosted API returns 400 for `top_k` rather than ignoring it.
+An unset field is not sent at all, so the server's own default applies — a different thing
+from sending what we guess that default to be.
+
+### The persona, and what is not the user's to replace
+
+`systemPrompt()` lived in main and therefore had no test at all — the prompt that decides how
+every conversation behaves was the one thing nothing checked. It is
+[core/agent/systemPrompt.ts](src/core/agent/systemPrompt.ts) now, and it is four parts of
+which exactly one is anybody's to change. `DEFAULT_PERSONA` says who this is and is replaced
+wholesale by `Settings.persona`, or per model by `Settings.systemPrompts[key]`. The tool
+discipline, the citation rules and the research-mode closing follow it **unchanged**: a
+prompt that could remove them could produce a `[1]` pointing at nothing, which is the app's
+one unbreakable promise broken by a text box. Both editors say so.
+
+The persona reaches the request through `resolveLlm`, which returns it as a separate field
+that **only the chat turn reads** (`index.ts`'s `runTurn` call). That resolver also serves
+the paper drafter, the reviewer, meetings and every research stage, and a user's "be terse,
+answer in Danish" silently rewriting a PRISMA checklist is precisely the failure to prevent
+— so wiring it in anywhere else is a bug however helpful it looks. It is keyed by the same
+expression `samplingFor` uses, and main derives that key
+(`karen:model-prompt`/`karen:model-facts`) rather than the window: three per-model records
+share it now, and a hosted choice is keyed `provider::model` while a local one is keyed by
+the model that actually answers.
+
 ### The model catalogue
 
 Lemonade's `/models` lists only what is registered or already downloaded — three things on
@@ -298,6 +468,97 @@ offers the GGUFs the user already downloaded with LM Studio or Ollama, as a dire
 symlinked **files**: Lemonade takes one hint about models it did not fetch itself
 (`extra_models_dir`), it names a model after the leaf directory, and it skips symlinked
 *directories* silently — so pointing it at `~/.lmstudio` does not work.
+
+A download has a life of its own ([main/downloads.ts](src/main/downloads.ts), with the pure
+record in [core/downloads/download.ts](src/core/downloads/download.ts)). It was a local
+variable in the models page, so changing page threw away the name and the progress while the
+bytes kept arriving — indistinguishable, from where the user sits, from it having stopped —
+and there was no way to stop one on purpose either. Three facts measured against `lemond`
+11.8.0 shape it: a streamed `/pull` never appears in `/api/v1/jobs` or `/api/v1/downloads`,
+so the daemon's own pause/resume API cannot drive one; aborting the request cancels it at
+the far end, so an `AbortController` *is* the stop button; and restarting resumes from the
+partial file, so a pause is an abort that keeps the bytes and a resume is a fresh pull.
+Cancel additionally asks the daemon to delete what it fetched — never for a model that was
+already installed, because re-downloading one must not take the working copy with it.
+
+### Sizing a model, and the flags that change it
+
+The daemon's `ctx_size` default is `-1`, which resolves to **4,096** whatever the model can
+do — measured, on one whose ceiling is 131,072. `autoContext` in
+[fit.ts](src/core/runtime/fit.ts) is what replaces it, and the delivery is a
+`POST /models/{id}/options {ctx_size}` before `/load`: measured against lemond 11.8.0, the
+launch command came out as `llama-server … --ctx-size 8192`, so the patch reaches the
+process. Not `pinnedConfig` — that is one number for every model, and nothing proves the
+daemon reads it.
+
+**Leave a buffer.** The sizer plans to fill 85% of the machine — graphics memory and system
+memory together — on top of the 512 MiB + 6% `fitModel` already reserves. This is not caution
+for its own sake: a probe asked for a 1,000,000-token window on a 131,072-ceiling model, the
+daemon **did not clamp it** — it passed the number to `--ctx-size` — and the OOM killer took
+the process. A window that fits on paper still shares the machine with a compositor, a
+browser and an allocator that fragments. Three bounds and the smallest wins: the safe share,
+the model's trained length, and `max_context_window` from the daemon's own `/models` (which
+carries it per model, so the ceiling needs no network at all).
+
+Graphics memory and system memory count together rather than the card alone, and that is safe
+for a reason worth naming rather than assuming: measured against the bundled binary,
+`llama-server` already defaults `-ngl`/`--n-gpu-layers` to `auto` and ships `--fit` (default
+**on**), which "adjusts unset arguments to fit in device memory." A context that spills past
+VRAM is not the crash risk it would look like — llama.cpp's own placement logic, working from
+exact per-tensor sizes Karen does not have, is what decides which layers sit on the card and
+which on the processor, and it degrades to CPU offload rather than failing outright. What still
+has to hold, whichever pool the budget is drawn from, is the 85% margin above and the hard
+ceiling below — those are what actually stopped the OOM, not which memory the number was
+counted against.
+
+And three refusals, each load-bearing: a `ctx_size` the user set is never touched (`saved`
+says which); a recipe with no `ctx_size` is skipped, which is how whispercpp stays out by the
+daemon's own field list rather than a name test; and **a window that will not fit is not
+written down** — `autoContext` returns nothing and the daemon's own default stands, because
+4,096 is a poor default but a number that stops the model loading is worse.
+
+The shape that makes it arithmetic rather than a rule of thumb comes from the model's
+`config.json` on Hugging Face ([modelShape.ts](src/core/runtime/modelShape.ts)), fetched
+**when a model is downloaded and never when one is loaded** — a load must not become a
+network request — and cached in `modelFacts.json` including negative results, so an offline
+machine does not re-ask. A partial shape is never built: every field is needed to compute a
+cache, and a half-read config produces a number that looks measured and is not. Without one
+the floor is used and flagged `estimated`, the same refusal `ContextHint` already makes on
+screen. The same fetch reads `generation_config.json`, whose values are applied **under**
+anything the user set, per key — so tuning a temperature does not cost you the published
+top-p, and clearing a box goes back to what the authors said rather than to nothing.
+
+Everything else people come to this panel for lives inside one free-text string.
+[llamaArgs.ts](src/core/runtime/llamaArgs.ts) puts typed controls over it, because the
+daemon will not: `llamacpp_args: "--parallel 1 --karen-nonsense 3"` is accepted with a 200
+and only fails later, at load, inside a process nobody is watching. **Every token it does not
+own is preserved exactly where it stood** — the daemon's own default is `--parallel 1`, and a
+panel that silently dropped what it did not recognise would be data loss wearing a form. On
+the registry's "never splice a chosen string into a command line": that rule is about
+*model*-chosen strings and these are the user's own, already passed through verbatim, so this
+narrows what reaches the command line rather than widening it — and it is enforced anyway,
+since a value carrying whitespace or a quote is refused unless its field is free text.
+
+Two of those controls are sliders bounded by the model's own layer count rather than a
+made-up ceiling — `--n-gpu-layers` and `--n-cpu-moe`, the second offered only when the
+model's `config.json` said it routes between experts at all
+([modelShape.ts](src/core/runtime/modelShape.ts) checks `num_local_experts`, `num_experts`
+and `n_routed_experts`, since no family's `model_type` reliably says "moe" — Mixtral and DBRX
+do not). Left on **Auto** — the flag unset, which is also `-ngl`'s own default — `--fit` is
+what re-fits both of them every time the context changes, so "change the context and the
+layers refit themselves" is `--fit` doing its job rather than something Karen recomputes from
+numbers it can only estimate. Pinning one by hand is respected exactly as a user-set
+`ctx_size` already is, since `--fit` only ever touches what is left unset.
+
+On a CUDA backend, `--flash-attn` defaults to `on` rather than the daemon's own `auto`
+([manager.ts](src/main/runtime/manager.ts)'s pre-load pass, folded into the same options
+patch that sizes the context — one PATCH rather than two), and only when it has never been
+set. Measured against the bundled binary: `--flash-attn` on its own now refuses to start the
+model outright, `"expected value for argument"` — it takes `auto`, `on` or `off` — which is
+what the toggle-kind control here used to write the moment anyone turned it on. Fixed by
+making it an `enum` like every other typed value in this list; an old saved config with the
+bare form heals itself the next time anything here is edited, since it is read back as a token
+nothing owns and dropped rather than carried forward.
 
 ### Images
 
@@ -326,9 +587,9 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `karen:*` — around 150 of them, registered in
-[main/index.ts](src/main/index.ts)'s `installIpc` and in the eight `install*Ipc` modules it
-calls (meetings, dictation, audio, images, papers, projects, runtime, api), and exposed
+IPC channels are all `karen:*` — 174 of them, registered in
+[main/index.ts](src/main/index.ts)'s `installIpc` and in the nine `install*Ipc` modules it
+calls (meetings, dictation, audio, images, papers, projects, runtime, api, review), and exposed
 one-by-one in the preload. Adding a capability means touching all three layers plus
 `src/renderer/types.ts`, and at that scale a channel wired in only three of the four is a
 `window.karen` call that is `undefined` at runtime.
