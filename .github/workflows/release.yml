@@ -1,0 +1,136 @@
+name: Release
+
+# A pushed v* tag builds all three platforms and publishes a GitHub Release.
+# workflow_dispatch runs the same matrix without a tag, as a dry run: build
+# and upload artifacts, but the release job's `if` never fires without a
+# tag, so nothing is published. That is the cheap way to find a matrix
+# mistake before a tag exists.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails in seconds, before three platform builds run, on the mistake that
+  # matters most: a tag that does not name the version electron-builder is
+  # about to bake into every artifact's filename.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the tag matches package.json's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::Tag $tag does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            args: --linux
+          - os: macos-latest
+            args: --mac --arm64
+          - os: windows-latest
+            args: --win --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # electron-builder fetches its own Electron dist (per electronVersion
+      # in electron-builder.yml), plus fpm/nsis/appimagetool on first run.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+
+      - run: npm run build
+
+      # identity: null in electron-builder.yml means "skip signing", not
+      # "sign ad-hoc" (see the comment there) -- this stops electron-builder
+      # from going looking for a keychain identity on the runner anyway.
+      - if: runner.os == 'macOS'
+        run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+
+      # --publish never: artifacts are collected and released by the release
+      # job below, rather than three parallel jobs racing to publish.
+      - run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+            dist/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+
+          notes="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="$tag" --jq .body)"
+          { cat .github/release-body.md; echo "$notes"; } > full-notes.md
+
+          # A tag with a hyphen (v0.3.0-beta.1) is a prerelease; a plain
+          # v0.3.0 is not -- semver's own convention for a pre-release tag.
+          prerelease_flag=()
+          case "$tag" in
+            *-*) prerelease_flag=(--prerelease) ;;
+          esac
+
+          gh release create "$tag" artifacts/* \
+            --title "Karen $tag" \
+            --notes-file full-notes.md \
+            "${prerelease_flag[@]}"

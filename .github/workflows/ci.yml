@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Linux only, deliberately: test/pdf.test.ts hard-asserts that poppler's
+  # pdftotext is installed rather than skipping when it is absent, and
+  # poppler-utils is preinstalled on the ubuntu-* runner images and not on
+  # macos-* or windows-*. Packaging itself is still checked on all three
+  # platforms, in release.yml's build job.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # .npmrc sets ignore-scripts=true; npm ci already honours it.
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
