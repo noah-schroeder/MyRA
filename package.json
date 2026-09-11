@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "MyRA — a private, local-first assistant for academic work",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "main": "./out/main/index.js",
   "engines": {
     "node": ">=24"
