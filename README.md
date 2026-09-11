@@ -38,7 +38,37 @@ PDF, jailed to a folder you choose.
 chosen the same way the speech ones are, and files each into a folder you own
 beside a note of what it was asked for.
 
-## Running it
+## Installing it
+
+Download the build for your platform from
+[Releases](../../releases/latest). Every build is **unsigned**, on purpose —
+see below — so the first launch takes one extra step:
+
+- **Linux.** The `.deb` installs and runs normally. The `.AppImage` needs no
+  package manager or root: `chmod +x Karen-*.AppImage` and run it.
+- **Windows.** SmartScreen says *"Windows protected your PC"*. Click **More
+  info**, then **Run anyway**. Once.
+- **macOS.** *"Apple could not verify this app is free of malware."*
+  **Try to open the app first, then** go to System Settings → Privacy &
+  Security, scroll down, and click **Open Anyway**, then **Open**. That order
+  matters — the Open Anyway button only appears for about an hour after a
+  failed launch attempt, so opening Settings first can find nothing there.
+
+Nobody paid Apple or Microsoft to sign these builds. On Windows that costs a
+first-run warning. On macOS it costs the dialog above — a Developer ID would
+remove it and fix nothing else, so it is not worth $99/year on its own. Ad-hoc
+signing would be free, but a known electron-builder regression makes an
+ad-hoc-signed build open the microphone and receive silence, with no error —
+the worse failure for an app whose two headline features are dictation and
+meeting capture — so these builds skip signing entirely rather than sign
+ad-hoc.
+
+## Running it from source
+
+Needs **Node 24** (`node:sqlite`, used for the Zotero fallback path, is
+unflagged there) and **poppler** (`pdftotext`, for reading PDFs — `apt install
+poppler-utils`, `brew install poppler`, or the Windows build from
+[the poppler releases](https://github.com/oschwartz10612/poppler-windows/releases)).
 
     npm install
     npm run dev
@@ -139,7 +169,7 @@ Electron main                       Renderer (sandboxed)
 │   ├─ research   OpenAlex · arXiv · PubMed · CORE · S2 · hydrate · pdf
 │   ├─ documents  pandoc argv · path jail
 │   └─ llm        one HTTP client, OpenAI-shaped
-└─ vendor/     pandoc, pdftotext — bundled per platform
+└─ pandoc      fetched into your data directory on first use, not bundled
 ```
 
 **The tool registry is the security boundary.** There is no `bash`, so "run a
