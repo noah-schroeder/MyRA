@@ -27,6 +27,11 @@ jobs:
           node-version: 24
           cache: npm
 
+      # Measured on ubuntu-latest: poppler-utils is not preinstalled, so
+      # test/pdf.test.ts's hard assertion that pdftotext exists fails
+      # without this.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - run: npm ci
 
       - name: Check the tag matches package.json's version
