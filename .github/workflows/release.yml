@@ -20,9 +20,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -62,9 +62,9 @@ jobs:
             args: --win --x64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -73,7 +73,7 @@ jobs:
 
       # electron-builder fetches its own Electron dist (per electronVersion
       # in electron-builder.yml), plus fpm/nsis/appimagetool on first run.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/electron
@@ -94,7 +94,7 @@ jobs:
       # job below, rather than three parallel jobs racing to publish.
       - run: npx electron-builder ${{ matrix.args }} --publish never
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ runner.os }}
           path: |
@@ -112,9 +112,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
