@@ -17,10 +17,8 @@ neither runs automatically on save.
 
 ## Before you start on something bigger
 
-For anything more than a small fix, open an issue first, or check
-[PLAN.md](PLAN.md), [DECISIONS.md](DECISIONS.md) and [PORT.md](PORT.md) — the
-design docs behind this app. `DECISIONS.md` in particular lists judgment calls
-that are still open; a PR that resolves one should say so.
+For anything more than a small fix, open an issue first to talk through the
+approach.
 
 ## Conventions
 

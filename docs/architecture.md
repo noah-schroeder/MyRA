@@ -61,11 +61,5 @@ file nothing shows — never a half-written result presented as finished.
 
 ## Further reading
 
-- [PLAN.md](https://github.com/noah-schroeder/myra/blob/main/PLAN.md) — the
-  build plan and threat model.
-- [PORT.md](https://github.com/noah-schroeder/myra/blob/main/PORT.md) — what
-  came across from the VM-based v1.
-- [DECISIONS.md](https://github.com/noah-schroeder/myra/blob/main/DECISIONS.md)
-  — judgment calls that are still open.
 - [CONTRIBUTING.md](https://github.com/noah-schroeder/myra/blob/main/CONTRIBUTING.md)
   — building from source and code conventions.
