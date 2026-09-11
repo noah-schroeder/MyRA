@@ -10,3 +10,12 @@ vendor/
 
 # This machine's local Claude Code agent state -- not project config.
 .claude/
+
+# Internal planning docs -- kept locally, never pushed.
+API-PLAN.md
+DECISIONS.md
+DISTRIBUTION.md
+PLAN.md
+PORT.md
+RESEARCH-REWORK.md
+RUNTIME-PLAN.md
