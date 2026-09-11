@@ -226,12 +226,7 @@ Two rules hold that boundary up, and neither may be relaxed:
 2. **Every path is resolved and jailed on every call**, with `realpath`, after
    normalisation — so a symlink pointing out of the jail is caught.
 
-See [PLAN.md](PLAN.md) for the build plan and threat model, [PORT.md](PORT.md)
-for what came across from the VM-based v1, and [DECISIONS.md](DECISIONS.md) for
-the judgment calls that are still open.
-
 ## Contributing
 
 Bug reports and pull requests are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, and where the
-design docs above fit in.
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to build and test.

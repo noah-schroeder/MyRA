@@ -1,8 +1,7 @@
 # Security
 
 MyRA runs entirely on your own machine — see the README's "What leaves this
-machine" for exactly what it sends and when. The threat model and the
-reasoning behind it are in [PLAN.md](PLAN.md).
+machine" for exactly what it sends and when.
 
 ## Reporting a vulnerability
 

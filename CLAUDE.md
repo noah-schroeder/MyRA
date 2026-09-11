@@ -698,11 +698,3 @@ asserts this under a `0000` umask.
 - No telemetry, no auto-updater, no remote assets, spellchecker off. If a change makes
   the app fetch something at runtime, it needs a line in the README's "What leaves this
   machine".
-
-## Design docs
-
-[PLAN.md](PLAN.md) build plan and threat model · [DECISIONS.md](DECISIONS.md) open
-judgment calls · [PORT.md](PORT.md) what came from the VM-based v1 ·
-[RESEARCH-REWORK.md](RESEARCH-REWORK.md) the pipeline's current direction ·
-[RUNTIME-PLAN.md](RUNTIME-PLAN.md) local inference · [API-PLAN.md](API-PLAN.md) the
-gateway · [DISTRIBUTION.md](DISTRIBUTION.md) packaging and the macOS signing decision.
