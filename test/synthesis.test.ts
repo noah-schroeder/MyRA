@@ -72,6 +72,25 @@ test("headings are not mistaken for claims", () => {
   assert.equal(splitCitedSentences("# Heading [1]\n\nReal sentence [1].").length, 1);
 });
 
+test("a bulleted quote list is one claim per bullet, not one claim for the whole list", () => {
+  // Real shape from synthesis: one quoted passage per bullet, each ending in
+  // "[n]" with no full stop. Without a list-item split, all four bullets glue
+  // into one "sentence" and every source is then checked against the other
+  // three bullets it was never cited for.
+  const draft = [
+    "**1. Does it work?**  ",
+    '- "effect sizes related more to the outcome than the agent" [1]  ',
+    '- "we found small positive effects on learning" [2]  ',
+    '- "significant positive impacts on student learning" [4]  ',
+  ].join("\n");
+  const s = splitCitedSentences(draft);
+  assert.equal(s.length, 3);
+  assert.deepEqual(s.map((x) => x.citations), [[1], [2], [4]]);
+  // The heading carries no citation and is dropped, not glued to bullet one.
+  assert.equal(s.every((x) => !x.text.includes("Does it work")), true);
+  assert.equal(pairsToCheck(s).length, 3);
+});
+
 test("a pair the verifier skipped is unchecked, never assumed supported", () => {
   const pairs = pairsToCheck(splitCitedSentences(DRAFT));
   const checks = parseVerdicts('[{"n":1,"verdict":"supports","note":"direct"}]', pairs);

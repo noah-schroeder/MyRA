@@ -36,6 +36,16 @@ export interface Check {
  * Splitting is deliberately conservative: an over-long "sentence" is checked
  * as a unit and reads fine in a flag, whereas a wrongly split one would ask
  * the verifier about half a claim.
+ *
+ * A markdown list item is the one case split first and unconditionally,
+ * before that conservative rule even applies. The synthesist's own prompt
+ * asks for "evidence organised by sub-question", which it reliably renders as
+ * one quoted passage per bullet, each with its own citation and no terminal
+ * period -- "quote" [1]. With no full stop to split on, every bullet in the
+ * list glued into the next, and a source cited by bullet one was then asked
+ * whether it supports bullets two, three and four as well. It does not, so
+ * it failed -- not because the quote was a poor match, but because the
+ * "sentence" it was judged against was four unrelated quotes wide.
  */
 export function splitCitedSentences(draft: string): CitedSentence[] {
   const out: CitedSentence[] = [];
@@ -43,20 +53,22 @@ export function splitCitedSentences(draft: string): CitedSentence[] {
   for (const block of draft.split(/\n{2,}/)) {
     const body = block.trim();
     if (!body || body.startsWith("#")) continue;
-    // A citation marker often sits before the full stop, so keep it with its
-    // sentence: split only on terminal punctuation followed by a capital.
-    for (const raw of body.split(/(?<=[.!?])\s+(?=[A-Z"“(\-*\d])/)) {
-      const text = raw.replace(/^[-*]\s*/, "").trim();
-      if (!text) continue;
-      const citations = [
-        ...new Set(
-          [...text.matchAll(/\[(\d+)\]/g)]
-            .map((m) => Number(m[1]))
-            .filter((n) => Number.isFinite(n) && n >= 1),
-        ),
-      ];
-      if (citations.length === 0) continue;
-      out.push({ index: index++, text, citations });
+    for (const item of body.split(/\n(?=\s*(?:[-*]|\d+[.)])\s)/)) {
+      // A citation marker often sits before the full stop, so keep it with its
+      // sentence: split only on terminal punctuation followed by a capital.
+      for (const raw of item.split(/(?<=[.!?])\s+(?=[A-Z"“(\-*\d])/)) {
+        const text = raw.replace(/^[-*]\s*|^\d+[.)]\s*/, "").trim();
+        if (!text) continue;
+        const citations = [
+          ...new Set(
+            [...text.matchAll(/\[(\d+)\]/g)]
+              .map((m) => Number(m[1]))
+              .filter((n) => Number.isFinite(n) && n >= 1),
+          ),
+        ];
+        if (citations.length === 0) continue;
+        out.push({ index: index++, text, citations });
+      }
     }
   }
   return out;
