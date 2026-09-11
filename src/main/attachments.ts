@@ -12,7 +12,7 @@
  * same reason a paper's own manuscript is never written to disk either.
  *
  * One directory per conversation, `CONFIG_DIR/attachments/<sessionId>/`,
- * owner-only like everything else Karen writes for itself.
+ * owner-only like everything else MyRA writes for itself.
  */
 
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -59,7 +59,7 @@ export async function saveImageAttachment(sessionId: string, bytes: Uint8Array):
     throw new Error(`That image is too large (${Math.round(bytes.byteLength / 1024 / 1024)} MB).`);
   }
   const mime = sniffImage(bytes);
-  if (!mime) throw new Error("That does not look like an image Karen can read.");
+  if (!mime) throw new Error("That does not look like an image MyRA can read.");
 
   const dir = sessionDir(sessionId);
   await makeOwnDir(dir);
@@ -126,7 +126,7 @@ export async function deleteSessionAttachments(sessionId: string): Promise<void>
  *
  * Reads the root directly rather than asking `listSessions()` for the id
  * list: a session with an attachment but no message was never saved (see
- * main/index.ts's `karen:new-session`), so it has no session file to list
+ * main/index.ts's `myra:new-session`), so it has no session file to list
  * but still has bytes on disk worth clearing.
  */
 export async function deleteAllAttachments(): Promise<void> {

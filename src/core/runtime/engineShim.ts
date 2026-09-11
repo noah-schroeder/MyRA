@@ -1,10 +1,10 @@
 /**
- * Giving Lemonade's engines the C runtime Karen already carries.
+ * Giving Lemonade's engines the C runtime MyRA already carries.
  *
- * Karen ships a glibc beside `lemond` when the host's is older than the
+ * MyRA ships a glibc beside `lemond` when the host's is older than the
  * GLIBC_2.38 the embeddable needs, and starts the daemon through that loader.
  * The engines Lemonade downloads afterwards are built the same way and get
- * none of it, because **Lemonade starts them itself** -- Karen never sees the
+ * none of it, because **Lemonade starts them itself** -- MyRA never sees the
  * spawn and cannot wrap it.
  *
  * Measured on the released binaries, which is what makes this worth solving
@@ -15,7 +15,7 @@
  *     llama-server b10375     GLIBC_2.34   GLIBCXX_3.4.21
  *
  * So on Ubuntu 22.04 (2.35) chat works perfectly and every speech or image
- * model dies on startup with exit code 1, which reads as "Karen is broken"
+ * model dies on startup with exit code 1, which reads as "MyRA is broken"
  * rather than "this machine is older than that build". Reported from exactly
  * such a machine.
  *
@@ -41,10 +41,10 @@ import { LIBC_DIR, loaderName } from "./libc.ts";
  * backend search is relative to the executable's directory either way and one
  * fewer moving part is one fewer thing to get wrong on the next engine.
  */
-export const REAL_SUFFIX = ".karen-real";
+export const REAL_SUFFIX = ".myra-real";
 
 /** The line that identifies a shim as ours, so it is never renamed as a binary. */
-export const SHIM_MARK = "# Karen: run this engine through the bundled C runtime.";
+export const SHIM_MARK = "# MyRA: run this engine through the bundled C runtime.";
 
 export interface ShimSpec {
   /** Architecture, for the loader's name. */

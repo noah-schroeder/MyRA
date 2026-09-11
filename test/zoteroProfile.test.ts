@@ -3,7 +3,7 @@
  *
  * This is the case that made the whole integration look broken: a library
  * moved to a second disk misses every candidate, so the file route reported
- * nothing, so Karen fell back to the local API's message — "Zotero does not
+ * nothing, so MyRA fell back to the local API's message — "Zotero does not
  * appear to be reachable" — said to somebody with Zotero open in front of
  * them. Zotero writes the real path into its own prefs.js, and reading it is
  * the difference between guessing and knowing.
@@ -121,7 +121,7 @@ describe("end to end, against a library nothing would have guessed", () => {
   it("follows the profile to a library on another disk, and reads it", async () => {
     /* The whole failing case, assembled: a library somewhere no candidate
        names, and a Zotero profile that says where it is. */
-    const home = mkdtempSync(join(tmpdir(), "karen-home-"));
+    const home = mkdtempSync(join(tmpdir(), "myra-home-"));
     const library = buildLibrary(
       [
         { key: "AAAA1111", fields: { title: "Worked example", abstractNote: "" } },
@@ -174,7 +174,7 @@ describe("end to end, against a library nothing would have guessed", () => {
   });
 
   it("says the named folder is empty rather than reading a different library", async () => {
-    const home = mkdtempSync(join(tmpdir(), "karen-home-"));
+    const home = mkdtempSync(join(tmpdir(), "myra-home-"));
     const real = buildLibrary([{ key: "AAAA1111", fields: { title: "Not this one" } }]);
     const profile = join(home, ".zotero", "zotero", "abcd5678.default");
     mkdirSync(profile, { recursive: true });
@@ -189,7 +189,7 @@ describe("end to end, against a library nothing would have guessed", () => {
       const { inspectLibraryFile, setZoteroDataDir, forgetZoteroSnapshot } =
         await import("../src/main/runtime/zoteroSqlite.ts");
       forgetZoteroSnapshot();
-      // The user pointed at the wrong folder. Karen must say so, not quietly
+      // The user pointed at the wrong folder. MyRA must say so, not quietly
       // read the library it found by itself -- that answer looks like success.
       setZoteroDataDir(join(home, "Documents", "not-a-library"));
       const report = await inspectLibraryFile();
@@ -222,7 +222,7 @@ describe("what the Library panel says when the file cannot be read", () => {
        local API, with 20 collections" and the card under it began "Zotero's
        local API did not answer". The panel probes both routes independently,
        so the file route must speak only for itself. */
-    const home = mkdtempSync(join(tmpdir(), "karen-home-"));
+    const home = mkdtempSync(join(tmpdir(), "myra-home-"));
     const data = join(home, "Zotero");
     mkdirSync(data, { recursive: true });
     // A file at the right path that SQLite will refuse.

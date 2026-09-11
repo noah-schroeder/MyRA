@@ -4,7 +4,7 @@ import { DATABASES, DEFAULT_DATABASES, databaseLabel } from "../../core/research
 import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 
 /**
- * One control for the whole question of how far Karen may reach.
+ * One control for the whole question of how far MyRA may reach.
  *
  * Five of these six choices are a ladder, each rung a superset of the one
  * below: nothing, then your files, then your own library, then the literature,
@@ -27,7 +27,7 @@ import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
  * boundary it is legible without being read.
  *
  * The labels name what each rung can reach, not how hard it tries, because the
- * thing a person needs to predict is what Karen might do without being asked.
+ * thing a person needs to predict is what MyRA might do without being asked.
  * "Off" in particular has to be true: it used to leave the three document tools
  * in the schema, so a model greeted with "hi" had something to call and called
  * it, under a button that said the opposite.
@@ -101,13 +101,13 @@ export function ResearchBar({
   const [config, setConfig] = useState<ResearchConfig>({ mode: "assistant", category: "science" });
 
   useEffect(() => {
-    void window.karen.getResearch().then(setConfig);
+    void window.myra.getResearch().then(setConfig);
   }, []);
 
   const apply = (patch: Partial<ResearchConfig>): void => {
     const next = { ...config, category: CATEGORY, ...patch };
     setConfig(next);
-    void window.karen.setResearch(next);
+    void window.myra.setResearch(next);
   };
 
   const rung = (m: Rung) => {
@@ -220,7 +220,7 @@ function DatabasePicker({
   const [present, setPresent] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    void window.karen.secretsBackend().then((v) => setPresent(v.present ?? {}));
+    void window.myra.secretsBackend().then((v) => setPresent(v.present ?? {}));
   }, []);
 
   const active = chosen.length ? chosen : [...DEFAULT_DATABASES];
@@ -267,7 +267,7 @@ function DatabasePicker({
               }
               className={usable ? (on ? "mode active" : "mode") : "mode needs-key"}
               onClick={() =>
-                usable ? toggle(d.id, usable) : void window.karen.openExternal(d.signup ?? "")
+                usable ? toggle(d.id, usable) : void window.myra.openExternal(d.signup ?? "")
               }
             >
               {d.label}
@@ -314,7 +314,7 @@ function CollectionPicker({
 
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true }));
-    void window.karen.zoteroCollections().then((res) => {
+    void window.myra.zoteroCollections().then((res) => {
       setState({
         loading: false,
         collections: res.collections ?? [],
@@ -349,7 +349,7 @@ function CollectionPicker({
     <div className="collection-ask">
       <label
         htmlFor="zotero-collection"
-        title="Only the collection you pick is searched when Karen looks in your Zotero library. The rest of it is left alone. This does not affect web searching."
+        title="Only the collection you pick is searched when MyRA looks in your Zotero library. The rest of it is left alone. This does not affect web searching."
       >
         Which Zotero collection?
       </label>
@@ -384,7 +384,7 @@ function CollectionPicker({
       {below > 0 ? (
         <span
           className="collection-note"
-          title="Zotero's own search does not look inside subcollections. Karen's does, or choosing a collection you file everything below would come back empty."
+          title="Zotero's own search does not look inside subcollections. MyRA's does, or choosing a collection you file everything below would come back empty."
         >
           + {below} below it
         </span>
@@ -396,7 +396,7 @@ function CollectionPicker({
       {state.via === "database" ? (
         <span
           className="collection-note reading-file"
-          title="Zotero's local API did not answer — a Flatpak or Snap install keeps that port inside its own sandbox. Karen is reading a read-only copy of zotero.sqlite instead. Titles, abstracts, authors, tags and notes are searched; the text inside PDFs is not."
+          title="Zotero's local API did not answer — a Flatpak or Snap install keeps that port inside its own sandbox. MyRA is reading a read-only copy of zotero.sqlite instead. Titles, abstracts, authors, tags and notes are searched; the text inside PDFs is not."
         >
           reading the library file
         </span>

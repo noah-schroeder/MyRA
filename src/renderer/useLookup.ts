@@ -52,7 +52,7 @@ export function useLookup(): Lookup {
       const ticket = ++seq.current;
       setState((s) => ({ ...s, query, page, sort, busy: true, error: undefined }));
       try {
-        const found = await window.karen.academicSearch(query, { page, sort });
+        const found = await window.myra.academicSearch(query, { page, sort });
         if (ticket !== seq.current) return;
         setState((s) => ({ ...s, results: found.results, failures: found.failures, busy: false }));
       } catch (e) {

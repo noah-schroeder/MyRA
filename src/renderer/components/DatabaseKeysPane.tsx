@@ -7,7 +7,7 @@ import type { VaultStatus } from "../types.ts";
  * every request, PubMed's own free tier being tight enough on a multi-query
  * deep run that it is offered under the same rule (see databases.ts).
  *
- * No new IPC channel: `karen:set-secret` and `karen:secrets-backend` already
+ * No new IPC channel: `myra:set-secret` and `myra:secrets-backend` already
  * carry everything this pane needs, because `ncbiKey` and `coreKey` are named
  * secrets like every other one the vault already handles. This mirrors
  * `ProviderCard`'s key field in ProvidersPane.tsx exactly — write-only input,
@@ -29,7 +29,7 @@ export function DatabaseKeysPane({
   return (
     <div className="pane">
       <p className="pane-lead">
-        Two of the four literature databases need a key of your own — free, and yours alone. Karen
+        Two of the four literature databases need a key of your own — free, and yours alone. MyRA
         never ships a shared key: every user supplies theirs, encrypted into this machine's own
         keyring, never written to a settings file a repository or a cloud sync could pick up.
       </p>
@@ -69,7 +69,7 @@ function DatabaseKeyCard({
   const [hasKey, setHasKey] = useState<boolean | undefined>();
 
   useEffect(() => {
-    void window.karen.secretsBackend().then((v) => setHasKey(Boolean(v.present?.[secret])));
+    void window.myra.secretsBackend().then((v) => setHasKey(Boolean(v.present?.[secret])));
   }, [secret, note]);
 
   return (
@@ -105,7 +105,7 @@ function DatabaseKeyCard({
           onChange={(e) => setKey(e.target.value)}
           onBlur={() => {
             if (!key) return;
-            void window.karen.setSecret(secret, key).then(() => {
+            void window.myra.setSecret(secret, key).then(() => {
               setKey("");
               setNote("Saved.");
             });
@@ -117,7 +117,7 @@ function DatabaseKeyCard({
         <button
           type="button"
           className="btn-sm"
-          onClick={() => void window.karen.setSecret(secret, "").then(() => setNote("Key removed."))}
+          onClick={() => void window.myra.setSecret(secret, "").then(() => setNote("Key removed."))}
         >
           Remove the stored key
         </button>

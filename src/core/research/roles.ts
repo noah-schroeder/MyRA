@@ -37,8 +37,8 @@ export type ResolvedRoles = Record<Role, string>;
 
 export function rolesPath(): string {
   return (
-    process.env["KAREN_RESEARCH_ROLES"] ??
-    join(process.env["HOME"] ?? homedir(), ".config", "karen", "research-roles.json")
+    process.env["MYRA_RESEARCH_ROLES"] ??
+    join(process.env["HOME"] ?? homedir(), ".config", "myra", "research-roles.json")
   );
 }
 

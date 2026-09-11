@@ -71,20 +71,20 @@ export function SessionList({
   const [filing, setFiling] = useState<string | undefined>();
 
   const load = useCallback((): void => {
-    void window.karen.recent().then((r) => setRows(r.items ?? []));
+    void window.myra.recent().then((r) => setRows(r.items ?? []));
   }, []);
 
   useEffect(load, [refreshKey, load]);
 
   useEffect(() => {
-    void window.karen.projectList().then((r) => setProjects(r.projects ?? []));
-    return window.karen.onProjects(setProjects);
+    void window.myra.projectList().then((r) => setProjects(r.projects ?? []));
+    return window.myra.onProjects(setProjects);
   }, []);
   /* A review saved by a run that finished while another page was open. */
-  useEffect(() => window.karen.onReviews(() => load()), [load]);
+  useEffect(() => window.myra.onReviews(() => load()), [load]);
   /* A paper section committed by main while this list, not the drafter, was
      the page on screen -- the same reason the review listener above exists. */
-  useEffect(() => window.karen.onPaperChanged(() => load()), [load]);
+  useEffect(() => window.myra.onPaperChanged(() => load()), [load]);
 
   /* Back to the project's own list whenever the project changes. "Show all" is
      a peek, not a preference: left latched, opening a second project would
@@ -94,13 +94,13 @@ export function SessionList({
   const remove = async (row: Row): Promise<void> => {
     /* One kind per call, because they are different stores and a single
        "delete this ref" would be a guess about which one owns it. */
-    if (row.kind === "chat") await window.karen.deleteSession(row.ref);
-    else if (row.kind === "paper") await window.karen.paperDelete(row.ref);
-    else if (row.kind === "review") await window.karen.reviewDelete(row.ref);
+    if (row.kind === "chat") await window.myra.deleteSession(row.ref);
+    else if (row.kind === "paper") await window.myra.paperDelete(row.ref);
+    else if (row.kind === "review") await window.myra.reviewDelete(row.ref);
     /* Through the same channel the Research runs page uses, which refuses a run
        that is still being written to rather than deleting it out from under a
        stage. */
-    else if (row.kind === "run") await window.karen.researchDelete(row.ref);
+    else if (row.kind === "run") await window.myra.researchDelete(row.ref);
     load();
     onChanged?.();
   };
@@ -109,15 +109,15 @@ export function SessionList({
     /* Membership is exclusive, so this MOVES a thing that is already filed --
        which is why the menu names where it is now rather than only where it
        could go. `projectAdd` does the moving; nothing here has to. */
-    if (projectId) await window.karen.projectAdd(projectId, [{ kind: row.kind, ref: row.ref }]);
-    else if (row.project) await window.karen.projectRemove(row.project, [{ kind: row.kind, ref: row.ref }]);
+    if (projectId) await window.myra.projectAdd(projectId, [{ kind: row.kind, ref: row.ref }]);
+    else if (row.project) await window.myra.projectRemove(row.project, [{ kind: row.kind, ref: row.ref }]);
     setFiling(undefined);
     load();
     onChanged?.();
   };
 
   const removeAll = async (): Promise<void> => {
-    await window.karen.deleteAllSessions();
+    await window.myra.deleteAllSessions();
     setConfirming(false);
     load();
     onChanged?.();

@@ -14,7 +14,7 @@ import { isCollectionKey } from "../library/zotero.ts";
 import { DATABASES } from "./databases.ts";
 
 /** OpenAlex's "polite pool" is faster and more generously rate limited. */
-export const OPENALEX_MAILTO = process.env["KAREN_OPENALEX_MAILTO"] ?? "";
+export const OPENALEX_MAILTO = process.env["MYRA_OPENALEX_MAILTO"] ?? "";
 
 export const FETCH_TIMEOUT_MS = 20_000;
 
@@ -45,8 +45,8 @@ export const FETCH_CONCURRENCY = 4;
  */
 export function researchRoot(): string {
   return (
-    process.env["KAREN_RESEARCH_ROOT"] ??
-    join(process.env["HOME"] ?? homedir(), "Documents", "karen", "research")
+    process.env["MYRA_RESEARCH_ROOT"] ??
+    join(process.env["HOME"] ?? homedir(), "Documents", "myra", "research")
   );
 }
 
@@ -59,8 +59,8 @@ export function researchRoot(): string {
  */
 export function researchConfigPath(): string {
   return (
-    process.env["KAREN_RESEARCH_CONFIG"] ??
-    join(process.env["HOME"] ?? homedir(), ".config", "karen", "research.json")
+    process.env["MYRA_RESEARCH_CONFIG"] ??
+    join(process.env["HOME"] ?? homedir(), ".config", "myra", "research.json")
   );
 }
 
@@ -129,7 +129,7 @@ const FALLBACK_CATEGORY = "science";
  * at all. Every install on disk has `mode: "off"` written into it -- that was
  * the default -- so reading those literally would take document writing away
  * from everyone who had never touched the control. A file with no version is
- * therefore read under the OLD meaning, and only a file this Karen wrote can
+ * therefore read under the OLD meaning, and only a file this MyRA wrote can
  * say "off" and be taken at its word.
  */
 const CONFIG_VERSION = 2;
@@ -140,7 +140,7 @@ const CONFIG_VERSION = 2;
  * "off" is not the safe default it looks like. The document tools are local and
  * jailed, so nothing egresses at "assistant" that would not egress at "off" --
  * the privacy question is entirely about "web" and "deep", and those stay off
- * either way. What "off" costs instead is Karen's other half: asked to write
+ * either way. What "off" costs instead is MyRA's other half: asked to write
  * something up, it would have to say it cannot.
  */
 export const DEFAULT_RESEARCH: ResearchConfig = { mode: "assistant", category: FALLBACK_CATEGORY };
@@ -225,7 +225,7 @@ export function readResearchConfig(path = researchConfigPath()): ResearchConfig 
  * instruction that holds right up until someone adds a field. Now a field that
  * survives a round trip is one function away from a field that does not.
  *
- * Always stamped with the current version, so a mode this Karen wrote is read
+ * Always stamped with the current version, so a mode this MyRA wrote is read
  * back at face value: only a file from before the rungs existed gets its "off"
  * reinterpreted.
  */

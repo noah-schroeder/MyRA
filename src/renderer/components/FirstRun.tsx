@@ -4,7 +4,7 @@ import type { DownloadProgress, RuntimeState } from "../types.ts";
 /**
  * The first launch.
  *
- * Karen needs two things it cannot ship inside the application bundle: pandoc,
+ * MyRA needs two things it cannot ship inside the application bundle: pandoc,
  * to write Word and OpenDocument files, and Lemonade to run a model.
  * Before this screen existed neither was mentioned anywhere — the runtime was
  * reachable only by opening Settings and finding a pane, and pandoc was not
@@ -40,7 +40,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const installPandoc = useCallback(async () => {
     setPandoc("working");
     setPandocNote(undefined);
-    const result = await window.karen.installPandoc();
+    const result = await window.myra.installPandoc();
     if (result.ok) {
       setPandoc("done");
       setPandocNote(`pandoc ${result.version ?? ""} installed.`.trim());
@@ -51,14 +51,14 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   }, []);
 
   useEffect(() => {
-    const offSetup = window.karen.onSetupProgress(setProgress);
-    const offRuntime = window.karen.onRuntimeDownload((p) => setProgress(p as DownloadProgress));
-    const offState = window.karen.onRuntime((s) => setState(s as RuntimeState));
-    void window.karen.runtimeState().then((s) => setState(s as RuntimeState));
+    const offSetup = window.myra.onSetupProgress(setProgress);
+    const offRuntime = window.myra.onRuntimeDownload((p) => setProgress(p as DownloadProgress));
+    const offState = window.myra.onRuntime((s) => setState(s as RuntimeState));
+    void window.myra.runtimeState().then((s) => setState(s as RuntimeState));
 
     // pandoc starts on its own: it is small, has nothing to choose, and the
     // first thing a new user is likely to ask for is a document.
-    void window.karen.engines().then((e) => {
+    void window.myra.engines().then((e) => {
       if (e.pandoc) {
         setPandoc("done");
         setPandocNote(`Already present${e.pandocVersion ? ` — ${e.pandocVersion}` : ""}.`);
@@ -77,7 +77,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const installRuntime = async (): Promise<void> => {
     setRuntime("working");
     setRuntimeNote(undefined);
-    const result = await window.karen.lemonadeEnsure();
+    const result = await window.myra.lemonadeEnsure();
     if (result.ok) {
       setRuntime("done");
       setRuntimeNote(undefined);
@@ -94,11 +94,11 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="firstrun-backdrop">
-      <section className="firstrun" aria-label="Set up Karen">
+      <section className="firstrun" aria-label="Set up MyRA">
         <header>
-          <h1>Welcome to Karen</h1>
+          <h1>Welcome to MyRA</h1>
           <p>
-            Everything Karen does happens on this machine. Two pieces are downloaded rather
+            Everything MyRA does happens on this machine. Two pieces are downloaded rather
             than bundled, because they are large and specific to your hardware.
           </p>
         </header>
@@ -106,7 +106,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         <ul className="firstrun-steps">
           <Step
             title="Document tools"
-            what="pandoc, so Karen can write Word, OpenDocument and HTML files."
+            what="pandoc, so MyRA can write Word, OpenDocument and HTML files."
             phase={pandoc}
             note={pandocNote}
             action={pandoc === "failed" ? { label: "Try again", run: () => void installPandoc() } : undefined}
@@ -154,7 +154,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             downloads from GitHub and nothing else leaves your machine.
           </p>
           <button type="button" className="primary" onClick={onDone} disabled={busy}>
-            {busy ? "Working…" : ready ? "Start using Karen" : "Continue without a local engine"}
+            {busy ? "Working…" : ready ? "Start using MyRA" : "Continue without a local engine"}
           </button>
         </footer>
       </section>

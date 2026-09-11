@@ -109,7 +109,7 @@ test("the documents folder is the only place these tools reach", async () => {
 });
 
 test("a supplied name still gets the extension its format needs", () => {
-  /* Observed: asked for "wm-transfer" as Markdown, Karen wrote a file called
+  /* Observed: asked for "wm-transfer" as Markdown, MyRA wrote a file called
      `wm-transfer` with the right bytes and no extension -- it opens in nothing.
      slugName has always appended one, so the fallback path produced usable
      files while the common path did not. */

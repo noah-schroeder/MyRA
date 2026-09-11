@@ -2,7 +2,7 @@
  * Reading Lemonade's account of the machine.
  *
  * The fixture is the real payload from `/api/v1/system-info`, captured from
- * lemond 11.8.0 -- including the exact wording of the strings Karen now shows
+ * lemond 11.8.0 -- including the exact wording of the strings MyRA now shows
  * to users instead of composing its own.
  */
 
@@ -117,7 +117,7 @@ describe("parseSystemInfo", () => {
 
 describe("explainNoAccelerator", () => {
   it("uses the daemon's own reason rather than one written here", () => {
-    /* Karen used to compose this from nvidia-smi, because ggml reports "driver
+    /* MyRA used to compose this from nvidia-smi, because ggml reports "driver
        too old" and "no card" identically. Lemonade states it per device, so the
        explanation stays true as its support changes. */
     const why = explainNoAccelerator(NO_GPU);

@@ -28,34 +28,34 @@ export interface TourStep {
 export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "welcome",
-    title: "Welcome to Karen",
+    title: "Welcome to MyRA",
     body: "A short tour of where things live — about a minute, thirteen stops. Leave whenever you like; nothing here is required.",
     page: "chat",
   },
   {
     id: "composer",
     title: "Ask anything here",
-    body: "This box is the front door. Ask a question, describe what you need written, or drop in something to work from — Karen reads what's here before doing anything else.",
+    body: "This box is the front door. Ask a question, describe what you need written, or drop in something to work from — MyRA reads what's here before doing anything else.",
     anchor: "composer",
     page: "chat",
   },
   {
     id: "attach",
     title: "Drop in a paper or an image",
-    body: "Drag a PDF, Word file or photo onto the composer, paste one in, or click the clip. A document's text is read into your question; an image is something Karen can look at directly.",
+    body: "Drag a PDF, Word file or photo onto the composer, paste one in, or click the clip. A document's text is read into your question; an image is something MyRA can look at directly.",
     anchor: "composer-attach",
     page: "chat",
   },
   {
     id: "voice",
     title: "Talk instead of typing",
-    body: "Click the microphone to dictate into the box. The wave beside it is speech-to-speech — Karen listens, answers out loud, and keeps listening until you switch it off.",
+    body: "Click the microphone to dictate into the box. The wave beside it is speech-to-speech — MyRA listens, answers out loud, and keeps listening until you switch it off.",
     anchor: "composer-dictate",
     page: "chat",
   },
   {
     id: "research",
-    title: "How far Karen may reach",
+    title: "How far MyRA may reach",
     body: "Two rings, one boundary. The left ring never leaves this machine; the right one searches the actual literature and cites what it used. Pick per question — nothing here is a permanent setting.",
     anchor: "composer-research",
     page: "chat",
@@ -70,7 +70,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "models",
     title: "Getting a model onto this machine",
-    body: "Browse and download models sized to what your own hardware can hold — Karen checks your graphics memory before recommending one, so you're not guessing.",
+    body: "Browse and download models sized to what your own hardware can hold — MyRA checks your graphics memory before recommending one, so you're not guessing.",
     anchor: "rail-models",
     page: "models",
   },
@@ -105,7 +105,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "settings",
     title: "Everything configurable lives here",
-    body: "Folders, your microphone, API keys, and exactly what Karen is and isn't allowed to do without asking first. Settings → About also lists exactly what ever leaves this machine, and when.",
+    body: "Folders, your microphone, API keys, and exactly what MyRA is and isn't allowed to do without asking first. Settings → About also lists exactly what ever leaves this machine, and when.",
     anchor: "rail-settings",
     page: "chat",
   },

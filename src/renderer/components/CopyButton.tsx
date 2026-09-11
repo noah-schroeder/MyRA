@@ -38,7 +38,7 @@ export function CopyButton({
   const copy = (): void => {
     const body = text();
     if (!body) return;
-    void window.karen
+    void window.myra
       .copy(body)
       .then(() => setState("done"))
       .catch(() => setState("failed"))

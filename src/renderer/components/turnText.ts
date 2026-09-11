@@ -15,7 +15,7 @@ import type { Block } from "../types.ts";
  * Reasoning is deliberately not part of what a conversation keeps -- it is not
  * written to the session and not sent back on the next turn -- and a copy
  * button is the one place that guarantee could quietly spring a leak, because
- * copied text goes somewhere Karen cannot see and is very often a document
+ * copied text goes somewhere MyRA cannot see and is very often a document
  * somebody is about to send to somebody else.
  */
 export function answerText(blocks: Block[]): string {

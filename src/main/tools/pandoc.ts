@@ -1,7 +1,7 @@
 /**
  * Installing pandoc on first run.
  *
- * Karen writes Word, OpenDocument and HTML by driving pandoc, and there is no
+ * MyRA writes Word, OpenDocument and HTML by driving pandoc, and there is no
  * sensible way to require a non-technical user to install it themselves: on
  * Linux that is a package manager, on macOS a `.pkg` that wants an
  * administrator, on Windows an `.msi`. So the app fetches the plain archive
@@ -43,7 +43,7 @@ export interface InstallResult {
 
 export async function installPandoc(opts: InstallOptions = {}): Promise<InstallResult> {
   const res = await fetch(LATEST, {
-    headers: { accept: "application/vnd.github+json", "user-agent": "Karen" },
+    headers: { accept: "application/vnd.github+json", "user-agent": "MyRA" },
     ...(opts.signal ? { signal: opts.signal } : {}),
   });
   if (!res.ok) {
@@ -57,23 +57,23 @@ export async function installPandoc(opts: InstallOptions = {}): Promise<InstallR
   if (!asset) {
     throw new DownloadError(
       `pandoc publishes no build for ${process.platform}/${process.arch}. ` +
-        `Install it yourself and Karen will use the one on your PATH.`,
+        `Install it yourself and MyRA will use the one on your PATH.`,
     );
   }
 
   /*
-   * `mkdtemp`, not `karen-pandoc-<pid>`.
+   * `mkdtemp`, not `myra-pandoc-<pid>`.
    *
    * The predictable name was a real hazard rather than an untidiness: another
    * account on the machine can create that directory first and wait. The
    * archive is checksummed, but `findExecutable` then searches the whole
    * directory for anything named `pandoc` and the app COPIES WHAT IT FINDS into
    * the tools directory and runs it from then on. A planted binary would be
-   * installed by Karen and executed as the user, for as long as it sat there.
+   * installed by MyRA and executed as the user, for as long as it sat there.
    *
    * mkdtemp makes the name unguessable and the directory 0700.
    */
-  const work = await mkdtemp(join(tmpdir(), "karen-pandoc-"));
+  const work = await mkdtemp(join(tmpdir(), "myra-pandoc-"));
   const archive = join(work, asset.name);
   try {
     const sha = digestOf(asset);

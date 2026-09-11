@@ -175,7 +175,7 @@ export function availableBackends(platform: NodeJS.Platform, arch: string): Back
    *
    * Upstream publishes no Linux CUDA asset -- checked against the live feed:
    * of 27 assets on b10655, every cuda one is `-win-`. They DO build it, into
-   * `ghcr.io/ggml-org/llama.cpp:server-cuda`, so Karen takes it from there.
+   * `ghcr.io/ggml-org/llama.cpp:server-cuda`, so MyRA takes it from there.
    * See core/runtime/oci.ts; `pickAsset` deliberately finds nothing for this
    * combination and the manager routes around it.
    */

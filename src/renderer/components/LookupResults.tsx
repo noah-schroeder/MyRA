@@ -124,11 +124,11 @@ export function LookupResults({
                   <span className="pill">cited by {r.citedBy.toLocaleString()}</span>
                 ) : null}
                 {r.pdfUrl ? <span className="pill open">open access</span> : null}
-                <button type="button" onClick={() => void window.karen.openExternal(r.url)}>
+                <button type="button" onClick={() => void window.myra.openExternal(r.url)}>
                   {r.doi ? "Publisher page" : "Open"}
                 </button>
                 {r.pdfUrl ? (
-                  <button type="button" onClick={() => void window.karen.openExternal(r.pdfUrl!)}>
+                  <button type="button" onClick={() => void window.myra.openExternal(r.pdfUrl!)}>
                     Read full text
                   </button>
                 ) : null}

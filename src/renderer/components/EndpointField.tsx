@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Settings } from "../types.ts";
 
 /**
- * One service Karen talks to that is not a chat model.
+ * One service MyRA talks to that is not a chat model.
  *
  * This used to be a tab of its own, "Endpoints", listing three of these. The
  * language model one is gone: Providers does that job properly, with a model
@@ -50,13 +50,13 @@ export function EndpointField({
 
   const test = async (): Promise<void> => {
     setStatus("testing…");
-    const result = await window.karen.testEndpoint(which.key);
+    const result = await window.myra.testEndpoint(which.key);
     setStatus(result.ok ? "reachable" : `unreachable — ${result.error}`);
   };
 
   const discover = async (): Promise<void> => {
     setStatus("asking…");
-    const result = await window.karen.discoverModels(which.key);
+    const result = await window.myra.discoverModels(which.key);
     if (result.ok) {
       setModels(result.models ?? []);
       setStatus(`${result.models?.length ?? 0} model(s)`);
@@ -88,7 +88,7 @@ export function EndpointField({
           onChange={(e) => setKey(e.target.value)}
           onBlur={() => {
             if (key) {
-              void window.karen.setSecret(which.secret, key);
+              void window.myra.setSecret(which.secret, key);
               setKey("");
               setStatus("key saved");
             }

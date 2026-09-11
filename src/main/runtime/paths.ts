@@ -56,7 +56,7 @@ export function lemonadeConfigDir(): string {
 /**
  * The single directory Lemonade is told about, built out of symlinks.
  *
- * `extra_models_dir` takes one path and one only, so everything Karen can
+ * `extra_models_dir` takes one path and one only, so everything MyRA can
  * offer -- its own downloads, and whatever LM Studio and Ollama already hold --
  * has to be reachable from here. Disposable: it is rebuilt from scratch on
  * every start and contains no data of its own.

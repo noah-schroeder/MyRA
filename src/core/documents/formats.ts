@@ -1,5 +1,5 @@
 /**
- * What Karen can turn a document into, and how.
+ * What MyRA can turn a document into, and how.
  *
  * **pandoc is the only engine.** For this audience that is not a compromise: an
  * academic writing tool needs CSL citation styles, bibliographies and journal
@@ -108,7 +108,7 @@ export function safeRelativePath(name: string): string | undefined {
  * The name the model gave, ending in the extension the format needs.
  *
  * A name is supplied far more often than not, and it was used verbatim: asked
- * for "wm-transfer" as Markdown, Karen wrote a file called `wm-transfer` with
+ * for "wm-transfer" as Markdown, MyRA wrote a file called `wm-transfer` with
  * no extension at all. It has the right bytes in it and it opens in nothing --
  * a double click gets a "choose an application" dialog, and the file manager
  * shows it as unknown. Observed, not hypothesised.

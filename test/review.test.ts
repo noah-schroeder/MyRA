@@ -87,7 +87,7 @@ describe("assembling the prompt", () => {
 
   it("carries the manuscript whole, and warns about the extraction", () => {
     /* An extracted PDF has broken tables and stray running heads in it. A model
-       not told that reviews the formatting of the extract, which is Karen's
+       not told that reviews the formatting of the extract, which is MyRA's
        artefact and not the author's manuscript. */
     const user = buildUser(base({ manuscript: "METHODS\nWe ran three experiments." }));
     assert.match(user, /We ran three experiments\./);

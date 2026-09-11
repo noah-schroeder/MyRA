@@ -12,7 +12,7 @@
  * The registry will give an exact parameter count for a whole page:
  * `expand[]=gguf` returns `{total, architecture, context_length}` and, measured,
  * 100 of 100 rows carried it. It also returns each row's full Jinja chat
- * template, which takes the page from **50 kB to 857 kB** -- and Karen makes up
+ * template, which takes the page from **50 kB to 857 kB** -- and MyRA makes up
  * to eight such requests when publishers are crossed. Seven megabytes of
  * somebody else's bandwidth for a number that is already written on the tin is
  * not a trade worth making.

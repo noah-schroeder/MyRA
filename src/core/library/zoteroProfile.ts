@@ -6,7 +6,7 @@
  * directory is routinely moved to a second disk, an encrypted volume, or a
  * synced folder, and none of those are anywhere a list of candidates could
  * name. When that has happened, every candidate misses, the scan misses, and
- * Karen reports "Zotero does not appear to be reachable" — the message for a
+ * MyRA reports "Zotero does not appear to be reachable" — the message for a
  * completely different problem — to somebody whose library is fine.
  *
  * Zotero writes the answer down. It is a Firefox-derived application, so it
@@ -32,7 +32,7 @@ const DATA_DIR_PREF = "extensions.zotero.dataDir";
  *
  * Zotero keeps the last custom path even after the user moves back to the
  * default, so the path alone is not an answer: `useDataDir` false means "that
- * is where it used to be". Honouring the stale path would point Karen at a
+ * is where it used to be". Honouring the stale path would point MyRA at a
  * library the user has stopped using — which is worse than not finding one,
  * because it looks like it worked.
  */
@@ -65,7 +65,7 @@ export function profileRoots(home: string, env: Record<string, string | undefine
     // macOS.
     join(home, "Library", "Application Support", "Zotero"),
   ];
-  /* Windows. Karen is a Linux application today, but this file is the one
+  /* Windows. MyRA is a Linux application today, but this file is the one
      place that would have to change first, and leaving it out would make the
      omission invisible rather than deliberate. */
   const appData = env["APPDATA"];

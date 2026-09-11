@@ -6,13 +6,13 @@
  * CUDA build upstream does not publish there, probing devices, guessing a
  * backend from PCI vendor ids, scanning GGUF headers, composing launch flags.
  * All of that is now Lemonade's, which is the point: it maintains a build
- * matrix across CUDA, ROCm, Vulkan, NPU, Metal and CPU that Karen could not,
- * and it was already doing it correctly on hardware where Karen's own attempt
+ * matrix across CUDA, ROCm, Vulkan, NPU, Metal and CPU that MyRA could not,
+ * and it was already doing it correctly on hardware where MyRA's own attempt
  * had failed five times over.
  *
- * What is left here is the part that is genuinely Karen's: which model to load
+ * What is left here is the part that is genuinely MyRA's: which model to load
  * on launch, whether chat should use the local model at all, where models live,
- * and the guarantee that nothing Karen starts outlives it.
+ * and the guarantee that nothing MyRA starts outlives it.
  */
 
 import { readFile, writeFile } from "node:fs/promises";
@@ -69,7 +69,7 @@ function cudaIsTheBackend(options: ModelOptions, info: MachineInfo): boolean {
 const CONFIG_PATH = join(CONFIG_DIR, "runtime.json");
 
 export interface RuntimeConfig {
-  /** Where Karen's own model files live; Lemonade is pointed at this too. */
+  /** Where MyRA's own model files live; Lemonade is pointed at this too. */
   modelsDir: string;
   /** Start the backend when the app opens. Off by default: an 8 GB process
    *  should not appear because someone opened a window. */
@@ -93,7 +93,7 @@ export interface RuntimeConfig {
      and un-choosing a default is a thing people need to do. */
   defaultModel?: string | undefined;
   /**
-   * Send chat and research to the model Karen is serving.
+   * Send chat and research to the model MyRA is serving.
    *
    * Separate from the endpoint settings rather than overwriting them: someone
    * who configures their own endpoint and then tries the bundled runtime should
@@ -219,7 +219,7 @@ export class RuntimeManager {
     return this.#index?.found ?? [];
   }
 
-  /** Karen's own models folder, as configured. */
+  /** MyRA's own models folder, as configured. */
   get modelsDir(): string {
     return this.#config.modelsDir || defaultModelsDir();
   }
@@ -240,7 +240,7 @@ export class RuntimeManager {
    * Rebuild the index and restart the daemon so it rescans.
    *
    * Lemonade reads `extra_models_dir` once at startup, so a model added in LM
-   * Studio while Karen is open cannot appear without this.
+   * Studio while MyRA is open cannot appear without this.
    */
   async rescanModels(): Promise<IndexResult["found"]> {
     await this.stop();
@@ -276,7 +276,7 @@ export class RuntimeManager {
     }
 
     /*
-     * Everything Karen can offer has to be reachable from one directory,
+     * Everything MyRA can offer has to be reachable from one directory,
      * because that is all `extra_models_dir` accepts. Built before the daemon
      * starts, since the daemon scans it once at startup.
      *
@@ -320,7 +320,7 @@ export class RuntimeManager {
    *
    * Runs on every launch rather than once, because Lemonade installs engines
    * whenever the user asks for one and reinstalls them on an upgrade -- and a
-   * wrapper that exists only if you were running the right version of Karen on
+   * wrapper that exists only if you were running the right version of MyRA on
    * the day you pressed the button is not a fix.
    *
    * Never fatal. A machine that cannot be repaired still has a working daemon
@@ -332,7 +332,7 @@ export class RuntimeManager {
       for (const fixed of await repairEngines(lemonadeCacheDir(), lemondDir)) {
         this.#lemonade.note(
           `${fixed.recipe} (${fixed.backend}) needs ${fixed.missing.join(", ")}, which this ` +
-            `system does not have; started it through the C library Karen ships instead.`,
+            `system does not have; started it through the C library MyRA ships instead.`,
         );
       }
     } catch (err) {
@@ -346,7 +346,7 @@ export class RuntimeManager {
    * Which build each installed backend is on, and which Lemonade shipped.
    *
    * The installed figure comes from the daemon, which reads it from the
-   * `version.txt` beside the binary -- not from Karen's pin. The two are the
+   * `version.txt` beside the binary -- not from MyRA's pin. The two are the
    * same right up until somebody changes one, which is exactly when showing
    * the pin instead would start lying about what is on the disk.
    */
@@ -409,7 +409,7 @@ export class RuntimeManager {
       opts.onPhase?.("Downloading the engine");
       await this.#api.installBackend(recipe, backend);
       /* Before reporting success: a newer build can want newer system
-         libraries than this machine has, and Karen's answer to that is to run
+         libraries than this machine has, and MyRA's answer to that is to run
          it through the C runtime it ships. The moment it was installed is the
          only moment anybody is watching. */
       await this.repairInstalledEngines();
@@ -442,7 +442,7 @@ export class RuntimeManager {
   /**
    * Whether this machine was too old for the daemon's own build.
    *
-   * Karen ships a C runtime beside `lemond` when the host's glibc is older
+   * MyRA ships a C runtime beside `lemond` when the host's glibc is older
    * than the GLIBC_2.38 the embeddable needs. That fact is worth far more than
    * the daemon's startup, because the ENGINES lemond downloads afterwards are
    * built the same way and get no such help: measured on the released
@@ -628,7 +628,7 @@ export class RuntimeManager {
   /* ------------------------------------------------------------ endpoints -- */
 
   /**
-   * Where chat should send its requests, when Karen is hosting the model.
+   * Where chat should send its requests, when MyRA is hosting the model.
    *
    * Gated on a model actually being loaded, not merely on the daemon running:
    * Lemonade comes up in a second and holds nothing, so "it is up" says
@@ -654,7 +654,7 @@ export class RuntimeManager {
    * unload one. Lemonade evicts on its own -- "Load failed with
    * non-file-not-found error, evicting all models and retrying", seen in a
    * user's log dropping their chat model to make room for a Whisper that then
-   * failed anyway -- and Karen's own eject button frees a card deliberately.
+   * failed anyway -- and MyRA's own eject button frees a card deliberately.
    * After either, `chatModel()` is empty, the bar reads "None selected", and
    * the only way back was to reopen the menu and pick the same model again.
    *
@@ -714,7 +714,7 @@ export class RuntimeManager {
      * through the same daemon it is routinely a speech model: transcribe one
      * clip and it reads `Whisper-Tiny` while the chat model is still resident
      * on its own backend. Reading it here sent the next message in the
-     * conversation to Whisper. `chatModelOf` prefers the model Karen loaded on
+     * conversation to Whisper. `chatModelOf` prefers the model MyRA loaded on
      * purpose and will only ever return one whose engine can hold a
      * conversation.
      */

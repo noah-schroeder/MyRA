@@ -273,7 +273,7 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
      * A reasoning model whose reasoning never appears.
      *
      * Some hosted providers reason and then withhold the chain, reporting only
-     * the token count. On screen that is indistinguishable from Karen having
+     * the token count. On screen that is indistinguishable from MyRA having
      * dropped it -- and the first thing anyone concludes is that the app is
      * broken. So the count is reported as what it is: work that happened
      * somewhere else and was not sent here.
@@ -285,7 +285,7 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
         type: "notice",
         text:
           `The model spent ${n.toLocaleString()} token${n === 1 ? "" : "s"} reasoning, and this ` +
-          `provider does not send the reasoning itself — so there is nothing for Karen to show. ` +
+          `provider does not send the reasoning itself — so there is nothing for MyRA to show. ` +
           `That is the provider's choice, not a setting here.`,
       });
     }

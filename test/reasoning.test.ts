@@ -1,7 +1,7 @@
 /**
  * Reasoning, in every shape a provider actually sends it.
  *
- * Karen read two field names and one inline tag. That was enough for llama.cpp
+ * MyRA read two field names and one inline tag. That was enough for llama.cpp
  * and for DeepSeek, and it silently produced nothing at all against providers
  * using any of the other conventions -- which looks, on screen, exactly like a
  * model that did no reasoning. Driven against a real SSE server for the same

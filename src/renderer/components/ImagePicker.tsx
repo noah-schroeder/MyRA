@@ -50,21 +50,21 @@ export function ImagePicker({
 
   const chosen = settings?.image.model ?? "";
 
-  useEffect(() => window.karen.onImageProgress((p) => setProgress(p)), []);
+  useEffect(() => window.myra.onImageProgress((p) => setProgress(p)), []);
 
   // Asked when the menu opens, like the other pickers: the answer changes as
   // models are downloaded, and polling for a dropdown nobody has opened is
   // work done on the chance it will be looked at.
   useEffect(() => {
     if (!open) return;
-    void window.karen.imageModels().then((r) => {
+    void window.myra.imageModels().then((r) => {
       setOptions(r.options);
       setError(r.ok ? undefined : r.error);
     });
     /* Best effort, and silent when it fails: not knowing which engines are
        installed costs a warning, while blocking the menu on it would cost the
        menu. */
-    void window.karen.lemonadeInfo().then((r) => {
+    void window.myra.lemonadeInfo().then((r) => {
       if (r.ok && r.info) setEngines(engineStates(r.info.engines));
     });
   }, [open]);
@@ -97,7 +97,7 @@ export function ImagePicker({
    */
   const choose = async (option: ModelOption): Promise<void> => {
     setError(undefined);
-    onSettingsChange(await window.karen.updateSettings({ image: { ...settings!.image, model: option.ref } }));
+    onSettingsChange(await window.myra.updateSettings({ image: { ...settings!.image, model: option.ref } }));
 
     if (option.where !== "local") {
       setOpen(false);
@@ -106,7 +106,7 @@ export function ImagePicker({
 
     setBusy(option.ref);
     setProgress(undefined);
-    const result = await window.karen.imageLoad(option.model);
+    const result = await window.myra.imageLoad(option.model);
     setBusy(undefined);
     setProgress(undefined);
     if (!result.ok) setError(result.error);

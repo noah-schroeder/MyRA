@@ -1,16 +1,16 @@
 /**
  * Reading Lemonade's account of the machine.
  *
- * This replaces three things Karen used to do for itself: enumerate devices by
+ * This replaces three things MyRA used to do for itself: enumerate devices by
  * running `llama-server --list-devices`, guess a backend from PCI vendor ids,
  * and explain to the user why a card it could see was not being used. Lemonade
- * answers all three in one request, and answers the third better than Karen
+ * answers all three in one request, and answers the third better than MyRA
  * did -- every device carries an `error` string when it is unavailable, and
  * every backend a `state` and a human `message`.
  *
  * The shape is upstream's and may change, so everything here is defensive:
  * unknown keys are ignored, missing ones produce absence rather than throwing,
- * and a device Karen cannot interpret is simply not listed. A parser that threw
+ * and a device MyRA cannot interpret is simply not listed. A parser that threw
  * on an unexpected payload would take the whole runtime pane down with it.
  *
  * **One field is deliberately read through a list of candidate names.** The
@@ -23,7 +23,7 @@
  * with a card has shown which it is.
  */
 
-/** One accelerator, in Karen's existing vocabulary. */
+/** One accelerator, in MyRA's existing vocabulary. */
 export interface Device {
   id: string;
   description: string;
@@ -262,7 +262,7 @@ export function parseSystemInfo(raw: unknown): MachineInfo {
 /**
  * Why no accelerator is being used, in the machine's own words.
  *
- * Karen used to construct this itself from `nvidia-smi`, because ggml reports
+ * MyRA used to construct this itself from `nvidia-smi`, because ggml reports
  * "your driver is too old" and "you have no graphics card" identically. That
  * work is no longer needed: every device carries its own `error`, and every
  * backend a `message`. Preferring those to a sentence written here means the
@@ -329,7 +329,7 @@ export interface DownloadJob {
 /**
  * Read `/v1/downloads`, which is how progress is reported for everything.
  *
- * Karen used to own its own download progress because it did its own
+ * MyRA used to own its own download progress because it did its own
  * downloading. Now the daemon fetches backends and models, and this is the only
  * window onto it -- so a reload or a reconnect can pick a transfer back up
  * rather than losing sight of it, which the old in-process progress could not

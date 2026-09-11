@@ -123,8 +123,8 @@ describe("which version to recommend", () => {
 
 describe("the id a download will be listed under", () => {
   it("is the pull name without the namespace the daemon strips", () => {
-    /* Measured: registering `user.karen-delete-probe` answers with
-       `id: "karen-delete-probe"`, and `embeddinggemma-300M-GGUF-Q8_0` sits in
+    /* Measured: registering `user.myra-delete-probe` answers with
+       `id: "myra-delete-probe"`, and `embeddinggemma-300M-GGUF-Q8_0` sits in
        `/models` under exactly that shape. */
     assert.equal(pullName("ggml-org/embeddinggemma-300M-GGUF", "Q8_0"), "user.embeddinggemma-300M-GGUF-Q8_0");
     assert.equal(pulledId("ggml-org/embeddinggemma-300M-GGUF", "Q8_0"), "embeddinggemma-300M-GGUF-Q8_0");

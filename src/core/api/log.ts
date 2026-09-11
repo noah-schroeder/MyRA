@@ -1,5 +1,5 @@
 /**
- * What was asked of Karen, and how it went.
+ * What was asked of MyRA, and how it went.
  *
  * Metadata only, in memory, capped. Request bodies are prompts, which is the
  * most sensitive material in the application: someone drafting a paper about a
@@ -10,7 +10,7 @@
  * was removed rather than shipped switched off: a prompt log is the single
  * most sensitive artefact this application could hold, and the strongest
  * guarantee is code that cannot produce one. Nothing here is written to disk
- * either -- closing Karen loses the log, which is the right trade for what is
+ * either -- closing MyRA loses the log, which is the right trade for what is
  * only a debugging aid.
  */
 
@@ -20,7 +20,7 @@ export type RequestState = "open" | "done" | "error" | "cancelled";
 export interface RequestRecord {
   id: string;
   startedAt: string;
-  /** Which Karen key was used, by label. Never the key itself. */
+  /** Which MyRA key was used, by label. Never the key itself. */
   keyLabel: string;
   keyId: string;
   method: string;

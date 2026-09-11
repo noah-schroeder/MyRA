@@ -131,6 +131,6 @@ jobs:
           esac
 
           gh release create "$tag" artifacts/* \
-            --title "Karen $tag" \
+            --title "MyRA $tag" \
             --notes-file full-notes.md \
             "${prerelease_flag[@]}"

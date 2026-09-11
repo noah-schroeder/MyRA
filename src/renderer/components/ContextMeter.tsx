@@ -9,10 +9,10 @@ import { formatTokens } from "../../core/tokens.ts";
  * them is the single most confusing failure an assistant has: it starts
  * forgetting the beginning of the conversation, or stops answering, with
  * nothing on screen having changed. Making the limit visible turns that from a
- * mystery into a gauge — and since Karen summarises automatically before it
+ * mystery into a gauge — and since MyRA summarises automatically before it
  * fills, the gauge mostly exists to explain why that happened.
  *
- * Shown only when the number is real. Karen knows the window for a model it
+ * Shown only when the number is real. MyRA knows the window for a model it
  * started, because it asks that server; for an endpoint someone else runs there
  * is no honest figure, so this falls back to a plain token count rather than
  * inventing a denominator.
@@ -41,8 +41,8 @@ export function ContextMeter({ usage }: { usage: Usage | undefined }) {
    * fills, which explains itself.
    */
   useEffect(() => {
-    void window.karen.runtimeState().then(setRuntime);
-    return window.karen.onRuntime(setRuntime);
+    void window.myra.runtimeState().then(setRuntime);
+    return window.myra.onRuntime(setRuntime);
   }, []);
 
   const loaded = runtime?.config.useForChat && runtime.lemonade.state === "ready";
@@ -53,7 +53,7 @@ export function ContextMeter({ usage }: { usage: Usage | undefined }) {
    * model loads, so the gauge can be right before a single message is sent --
    * which is what this component wanted all along and could not have while
    * nothing read the window. The reply's own figure remains the fallback for
-   * an endpoint Karen does not run, where there is nothing to measure.
+   * an endpoint MyRA does not run, where there is nothing to measure.
    */
   const limit = (loaded ? runtime?.lemonade.active?.contextTokens : undefined) ?? usage?.contextLimit;
   const used = usage?.contextTokens ?? 0;
@@ -69,7 +69,7 @@ export function ContextMeter({ usage }: { usage: Usage | undefined }) {
   }
 
   const share = Math.min(1, used / limit);
-  // 75% is where Karen summarises, so the bar changes colour just before it
+  // 75% is where MyRA summarises, so the bar changes colour just before it
   // acts rather than at some other number that would need explaining.
   const tone = share >= 0.75 ? "full" : share >= 0.5 ? "half" : "";
 
@@ -78,7 +78,7 @@ export function ContextMeter({ usage }: { usage: Usage | undefined }) {
       className="meter"
       title={
         `${used.toLocaleString()} of ${limit.toLocaleString()} tokens of context in use. ` +
-        `Karen summarises the earlier part of the conversation when this gets close to full.`
+        `MyRA summarises the earlier part of the conversation when this gets close to full.`
       }
     >
       <span className={`meter-bar ${tone}`}>

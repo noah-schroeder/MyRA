@@ -1,4 +1,4 @@
-# Karen
+# MyRA
 
 A private, local-first assistant for academic work: meeting notes, research
 synthesis, and document drafting. Everything runs on your own machine, and the
@@ -45,7 +45,7 @@ Download the build for your platform from
 see below — so the first launch takes one extra step:
 
 - **Linux.** The `.deb` installs and runs normally. The `.AppImage` needs no
-  package manager or root: `chmod +x Karen-*.AppImage` and run it.
+  package manager or root: `chmod +x MyRA-*.AppImage` and run it.
 - **Windows.** SmartScreen says *"Windows protected your PC"*. Click **More
   info**, then **Run anyway**. Once.
 - **macOS.** *"Apple could not verify this app is free of malware."*
@@ -114,7 +114,7 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   there. The app cannot change that.
 - **Speech is the same choice made twice.** A transcription or voice model from
   the bundled runtime stays here; one from a provider you added means your
-  recordings, or the answers Karen reads out, are sent to that provider. The
+  recordings, or the answers MyRA reads out, are sent to that provider. The
   picker says which it is, and the model chosen is named on screen.
 - **Images go wherever their model is.** A model from the bundled runtime draws
   on this machine and the prompt stays here; one from a provider you added means
@@ -137,14 +137,14 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   every result and on every model's page.
 - **Downloading a model** also asks Hugging Face for that model's `config.json`
   and `generation_config.json` — two small text files beside the weights — so
-  Karen can size the context window to your machine rather than accept the
+  MyRA can size the context window to your machine rather than accept the
   daemon's 4,096, and can start from the sampler settings the model's authors
   published. Same host as the download itself, only when you download, and
   nothing is sent but the repository name. Loading a model afterwards asks
   nothing: what was learned is kept on this machine.
 - **Checking for engine updates** asks GitHub which builds of llama.cpp,
   whisper.cpp and the rest have been released, and only when you press the
-  button in Settings → Runtime. Karen never checks on its own, and installing
+  button in Settings → Runtime. MyRA never checks on its own, and installing
   one is a separate press.
 - Everything else — files, transcripts, meeting audio, conversation history —
   never crosses the network at all.

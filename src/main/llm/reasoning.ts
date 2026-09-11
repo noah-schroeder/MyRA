@@ -4,7 +4,7 @@
  * Two very different kinds of evidence, kept apart on purpose.
  *
  * **Local models are read, not guessed.** The loaded llama-server renders its
- * own chat template on `/apply-template`, so Karen asks it to render the same
+ * own chat template on `/apply-template`, so MyRA asks it to render the same
  * messages with and without each known switch and compares the prompts. A
  * difference means the template reads that variable; identical prompts mean it
  * does not, whatever the API accepted -- and llama.cpp accepts everything,
@@ -32,10 +32,10 @@ import type { Provider } from "../../core/providers.ts";
 /**
  * Why there is no control, in a form the UI can branch on.
  *
- * The distinction is not decoration. `none` and `always` are findings -- Karen
+ * The distinction is not decoration. `none` and `always` are findings -- MyRA
  * asked the model and this is the answer -- while `unchecked` and `unknown`
  * mean nothing has been established. Printing "no thinking setting" for the
- * second pair would be Karen asserting a fact it does not have, which is the
+ * second pair would be MyRA asserting a fact it does not have, which is the
  * one thing this app is not allowed to do about models.
  */
 export type NoControl =
@@ -63,7 +63,7 @@ export interface ReasoningCapability {
    * Why there is no control, when there is none.
    *
    * Said rather than left blank: "this model has no setting for that" and
-   * "Karen has not checked yet" look identical as an absence, and only one of
+   * "MyRA has not checked yet" look identical as an absence, and only one of
    * them is something the user can act on.
    */
   note?: string | undefined;
@@ -111,7 +111,7 @@ export async function localCapability(loaded: LoadedModel): Promise<ReasoningCap
     return {
       dialects: [],
       reason: "unknown",
-      note: "Karen cannot see this model's template, so it cannot say what it accepts.",
+      note: "MyRA cannot see this model's template, so it cannot say what it accepts.",
     };
   }
 
@@ -147,7 +147,7 @@ export async function localCapability(loaded: LoadedModel): Promise<ReasoningCap
 /**
  * The switch a hosted provider takes, once it has been checked.
  *
- * The check is the gate, not the vendor's documentation. Karen knows what
+ * The check is the gate, not the vendor's documentation. MyRA knows what
  * OpenAI's field is called; what it does not know until it has asked is
  * whether THIS endpoint -- which may be a proxy, a gateway, or an older
  * deployment -- will accept it.
@@ -158,7 +158,7 @@ export function hostedCapability(provider: Provider): ReasoningCapability {
     return {
       dialects: [],
       reason: "unknown",
-      note: "Karen does not know what this endpoint calls its thinking setting.",
+      note: "MyRA does not know what this endpoint calls its thinking setting.",
     };
   }
   if (provider.reasoningParam !== dialect.id) {
@@ -166,7 +166,7 @@ export function hostedCapability(provider: Provider): ReasoningCapability {
       dialects: [],
       reason: "unchecked",
       note:
-        `${provider.label} documents a “${dialect.param}” setting. Karen has not checked that ` +
+        `${provider.label} documents a “${dialect.param}” setting. MyRA has not checked that ` +
         "this endpoint accepts it — run the reasoning check in Settings → Providers, and the " +
         "control appears here if it does.",
     };

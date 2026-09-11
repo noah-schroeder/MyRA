@@ -15,7 +15,7 @@
 export type ResearchMode = "off" | "assistant" | "library" | "web" | "deep";
 
 /**
- * One ladder, not five controls: how far Karen may reach on its own.
+ * One ladder, not five controls: how far MyRA may reach on its own.
  *
  * Each rung is a superset of the one below, which is what lets a single control
  * express the whole question -- and, more usefully, what lets every gate be

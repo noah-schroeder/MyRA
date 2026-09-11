@@ -90,14 +90,14 @@ export class SecretVault {
         return (this.#persistenceOk = true);
       }
       await makeOwnDir(CONFIG_DIR);
-      await writeFile(probePath, safeStorage.encryptString("karen-probe").toString("base64"), {
+      await writeFile(probePath, safeStorage.encryptString("myra-probe").toString("base64"), {
         mode: OWNER_ONLY_FILE,
       });
       // First run cannot prove persistence yet; assume good and re-check next launch.
       return (this.#persistenceOk = true);
     } catch {
       // The probe existed but would not decrypt: the key did not survive.
-      await writeFile(probePath, safeStorage.encryptString("karen-probe").toString("base64"), {
+      await writeFile(probePath, safeStorage.encryptString("myra-probe").toString("base64"), {
         mode: OWNER_ONLY_FILE,
       }).catch(() => undefined);
       return (this.#persistenceOk = false);
@@ -115,7 +115,7 @@ export class SecretVault {
         reason:
           "The keyring accepts secrets but loses them on restart — its key is going to a " +
           "memory-only collection. Unlock a persistent login keyring, or supply keys via " +
-          "the KAREN_LLM_KEY environment variable instead.",
+          "the MYRA_LLM_KEY environment variable instead.",
       };
     }
     // Linux-only; returns a friendly backend name.
@@ -130,7 +130,7 @@ export class SecretVault {
         backend,
         reason:
           "No system keyring was detected, so secrets would be encrypted with a " +
-          "hardcoded password. Install/unlock gnome-keyring, then restart Karen.",
+          "hardcoded password. Install/unlock gnome-keyring, then restart MyRA.",
       };
     }
     return { usable: true, backend, reason: "OS keyring available" };
@@ -277,20 +277,20 @@ export class SecretVault {
 
   /**
    * The environment handed to the bridge, which injects it into pi only.
-   * Names match the "$KAREN_LLM_KEY" references written into models.json.
+   * Names match the "$MYRA_LLM_KEY" references written into models.json.
    */
   async envForBridge(): Promise<Record<string, string>> {
     const env: Record<string, string> = {};
-    const llm = (await this.get("llmKey")) ?? process.env["KAREN_LLM_KEY"];
+    const llm = (await this.get("llmKey")) ?? process.env["MYRA_LLM_KEY"];
     // Falling back to our own environment lets keys come from a password
     // manager or systemd credential without ever touching disk -- which is
     // strictly better than storing them, and the only option when the keyring
     // cannot persist.
-    if (llm) env["KAREN_LLM_KEY"] = llm;
+    if (llm) env["MYRA_LLM_KEY"] = llm;
     // The embeddings endpoint is reached from inside the VM too, so its key
     // travels the same path and is never written to disk there.
-    const embed = (await this.get("embedKey")) ?? process.env["KAREN_EMBED_KEY"];
-    if (embed) env["KAREN_EMBED_KEY"] = embed;
+    const embed = (await this.get("embedKey")) ?? process.env["MYRA_EMBED_KEY"];
+    if (embed) env["MYRA_EMBED_KEY"] = embed;
     return env;
   }
 }

@@ -51,7 +51,7 @@ function parseSamplingByModel(raw: unknown): Record<string, Sampling> {
  * one switch. Such a value is filed under this key and read as a fallback for
  * every dialect the model turns out to have, which cannot land on the wrong
  * one: `reasoningFields` drops a value its dialect does not list, and no two
- * dialects Karen knows share a value. The first time the control is touched an
+ * dialects MyRA knows share a value. The first time the control is touched an
  * ordinary entry is written and this stops being consulted.
  */
 export const LEGACY_REASONING = "";
@@ -88,7 +88,7 @@ const SETTINGS_PATH = join(CONFIG_DIR, "settings.json");
 
 export interface EndpointSettings {
   baseUrl: string;
-  /** Env var name the key is exposed as, e.g. KAREN_LLM_KEY. */
+  /** Env var name the key is exposed as, e.g. MYRA_LLM_KEY. */
   envVar: string;
   model?: string;
   /**
@@ -119,7 +119,7 @@ export type Theme = "dark" | "light";
 export interface AudioSettings {
   /** What turns speech into text, for dictation and for meetings. */
   transcriptionModel: string;
-  /** What turns text into speech. Empty means Karen never speaks. */
+  /** What turns text into speech. Empty means MyRA never speaks. */
   voiceModel: string;
   /** Which voice, for a model that has more than one. */
   voice: string;
@@ -129,7 +129,7 @@ export interface AudioSettings {
    * Whether the chat screen is in the hands-free mode.
    *
    * Persisted deliberately. It is a toggle on the chat bar rather than a
-   * settings row, but someone who talks to Karen talks to it every day, and a
+   * settings row, but someone who talks to MyRA talks to it every day, and a
    * mode that resets each launch is a mode that has to be switched on before
    * every conversation.
    */
@@ -170,7 +170,7 @@ export interface Settings {
    * reads it, and once it is empty it stays empty.
    *
    * Deleting the field outright was the alternative, and it would have silently
-   * unconfigured transcription for anyone who had pointed Karen at their own
+   * unconfigured transcription for anyone who had pointed MyRA at their own
    * whisper server. A migration that runs once is cheaper than that surprise.
    */
   legacyTranscription?: EndpointSettings | undefined;
@@ -183,13 +183,13 @@ export interface Settings {
    */
   embeddings: EndpointSettings;
   /**
-   * Where the user's Zotero library is, when Karen cannot work it out itself.
+   * Where the user's Zotero library is, when MyRA cannot work it out itself.
    *
    * Empty is the normal case and means "find it": Zotero's own profile is read
    * first, then the default locations. This field is for the library that is
    * on a second disk or in a synced folder, which is exactly the library a
    * researcher with twenty years of papers has -- and, before this existed,
-   * the one Karen could only report as "Zotero does not appear to be
+   * the one MyRA could only report as "Zotero does not appear to be
    * reachable", which is the message for an entirely different problem.
    *
    * A path, not a file: the folder holding zotero.sqlite.
@@ -261,10 +261,10 @@ export interface Settings {
    */
   meetingInstructions: string;
   /**
-   * Closing the window leaves Karen running in the tray.
+   * Closing the window leaves MyRA running in the tray.
    *
    * On, because the case that motivates it is the one where a window is
-   * actively in the way: another app is using Karen's API, and closing the
+   * actively in the way: another app is using MyRA's API, and closing the
    * window should not take the model and the gateway down with it.
    *
    * Ignored when no tray icon could be created -- on a desktop with no status
@@ -295,16 +295,16 @@ export interface Settings {
    * Extra endpoints models can be served from, beyond the managed local one.
    *
    * Empty by default and empty for anyone who never adds one, which is the
-   * point: Karen without providers is Karen as it was, with no route off the
+   * point: MyRA without providers is MyRA as it was, with no route off the
    * machine at all.
    */
   providers: Provider[];
   /**
-   * Who the model is told it is, before Karen's own rules.
+   * Who the model is told it is, before MyRA's own rules.
    *
    * Editable because it is a persona and not a rule: the tool discipline, the
    * citation rules and the untrusted-content rule follow it and cannot be
-   * replaced, so changing this can never make Karen write a [1] for a source it
+   * replaced, so changing this can never make MyRA write a [1] for a source it
    * does not have. `systemPrompts` overrides it for one model, keyed the way
    * `sampling` is.
    */
@@ -358,7 +358,7 @@ export const DEFAULT_IMAGE: ImageSettings = {
  * The image block, rebuilt field by field.
  *
  * The size is validated for SHAPE rather than against the offered list: the
- * three sizes in sizes.ts are what Karen shows, not what an engine accepts, and
+ * three sizes in sizes.ts are what MyRA shows, not what an engine accepts, and
  * a model that wants 1152x896 should not be overruled by a table. What is
  * rejected is a value that is not a size at all, which can only have come from
  * an edited file.
@@ -419,7 +419,7 @@ function legacyEndpoint(raw: unknown): EndpointSettings | undefined {
   const stored = row as Partial<EndpointSettings>;
   if (typeof stored.baseUrl !== "string" || !stored.baseUrl.trim()) return undefined;
   return endpoint(
-    { baseUrl: "", envVar: "KAREN_TRANSCRIPTION_KEY", model: "whisper-1", timeoutMs: 120_000 },
+    { baseUrl: "", envVar: "MYRA_TRANSCRIPTION_KEY", model: "whisper-1", timeoutMs: 120_000 },
     stored,
   );
 }
@@ -427,22 +427,22 @@ function legacyEndpoint(raw: unknown): EndpointSettings | undefined {
 export const DEFAULT_SETTINGS: Settings = {
   permissionMode: "guarded",
   theme: "dark",
-  llm: { baseUrl: "", envVar: "KAREN_LLM_KEY", timeoutMs: 120_000 },
+  llm: { baseUrl: "", envVar: "MYRA_LLM_KEY", timeoutMs: 120_000 },
   audio: { ...DEFAULT_AUDIO },
   image: { ...DEFAULT_IMAGE },
-  embeddings: { baseUrl: "", envVar: "KAREN_EMBED_KEY", model: "", timeoutMs: 120_000 },
+  embeddings: { baseUrl: "", envVar: "MYRA_EMBED_KEY", model: "", timeoutMs: 120_000 },
   zoteroDataDir: "",
-  workspaceRoot: join(homedir(), "Documents", "karen"),
+  workspaceRoot: join(homedir(), "Documents", "myra"),
   vaultRoot: "",
-  vaultWriteSubdir: "Karen",
+  vaultWriteSubdir: "MyRA",
   dictationHotkey: "<Super>d",
   dictationSource: "",
   dictationLanguage: "",
   deleteRawAudioAfterTranscription: false,
-  meetingsRoot: join(homedir(), "Documents", "karen", "meetings"),
-  imagesRoot: join(homedir(), "Documents", "karen", "images"),
-  papersRoot: join(homedir(), "Documents", "karen", "papers"),
-  reviewsRoot: join(homedir(), "Documents", "karen", "reviews"),
+  meetingsRoot: join(homedir(), "Documents", "myra", "meetings"),
+  imagesRoot: join(homedir(), "Documents", "myra", "images"),
+  papersRoot: join(homedir(), "Documents", "myra", "papers"),
+  reviewsRoot: join(homedir(), "Documents", "myra", "reviews"),
   activeProject: "",
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
   /* Copied, not shared: these are edited in place by the settings pane, and a
@@ -539,7 +539,7 @@ export class ConfigStore {
            where conversations are sent: a half-formed entry must not become a
            route. */
         providers: parseProviders(parsed.providers),
-        /* A string or Karen's own, never whatever the file held. The whole
+        /* A string or MyRA's own, never whatever the file held. The whole
            prompt is built by calling `.trim()` on this, so a number here is not
            a wrong persona -- it is a TypeError on the next message. */
         persona: typeof parsed.persona === "string" ? parsed.persona : DEFAULT_SETTINGS.persona,
@@ -602,7 +602,7 @@ export class ConfigStore {
 }
 
 /**
- * The endpoints the user pointed Karen at, described honestly.
+ * The endpoints the user pointed MyRA at, described honestly.
  *
  * This replaced an `egressAllowlist()` that nothing called: it described a
  * default-deny filter that was never installed, which made it worse than

@@ -5,10 +5,10 @@
  * Zotero installed as a Flatpak or a Snap runs inside a sandbox with its own
  * network namespace: the port is open, Zotero's own settings pane truthfully
  * says so, and nothing on the host can reach it whatever address is dialled.
- * That is not a bug Karen can fix from the outside, and "install Zotero
+ * That is not a bug MyRA can fix from the outside, and "install Zotero
  * differently" is not an answer to give a researcher whose library works.
  *
- * So when nothing answers on the port, Karen reads `zotero.sqlite` instead. The
+ * So when nothing answers on the port, MyRA reads `zotero.sqlite` instead. The
  * file is right there on the host filesystem -- a Flatpak's data directory is
  * under ~/.var/app, not inside the sandbox -- and Zotero's schema is published
  * and stable.

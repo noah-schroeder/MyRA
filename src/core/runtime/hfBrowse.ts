@@ -2,12 +2,12 @@
  * Browsing Hugging Face the way LM Studio does, rather than the way a
  * subprocess happens to.
  *
- * Karen's registry search went through Lemonade, which offers exactly one
+ * MyRA's registry search went through Lemonade, which offers exactly one
  * knob: `search=<text>`, capped at 50, matched against repository names. That
  * is not a search experience, and three measurements say why.
  *
  *   - **"granite" returned 42 repositories of which 5 were usable.** Not
- *     because of any filtering Karen added: only 5 of them contain GGUF files
+ *     because of any filtering MyRA added: only 5 of them contain GGUF files
  *     at all. Hugging Face's own publisher page shows 36 `ibm-granite` repos
  *     because it lists what exists rather than what one runtime can load.
  *   - **There is no way to ask for a publisher.** Lemonade sends no `author=`,
@@ -18,7 +18,7 @@
  *     image, speech and embedding models are unreachable except by guessing
  *     words that might appear in their titles.
  *
- * Hugging Face's own API answers all three, and Karen already sends every
+ * Hugging Face's own API answers all three, and MyRA already sends every
  * search to that host -- `lemond` makes the call today. Talking to it directly
  * changes which process opens the socket, not which company receives the
  * query, and it buys `author`, `pipeline_tag`, `filter`, `sort` and a hundred
@@ -27,7 +27,7 @@
  * **Nothing here is curated.** An earlier version of the shelves dropped
  * safety-stripped merges, capped how many repositories one owner could
  * occupy, and cut the list at 24. That was the wrong instinct: a person
- * looking for a model wants the registry's answer, not Karen's opinion of it.
+ * looking for a model wants the registry's answer, not MyRA's opinion of it.
  * What is kept is *labelling* -- every row says what it is and whether this
  * machine can run it -- because describing a result is not the same as hiding
  * it.
@@ -79,7 +79,7 @@ export interface ModelKind {
   /** The `pipeline_tag` values this tab asks for; empty means no filter. */
   tasks: string[];
   hint: string;
-  /** Whether Karen can load this kind once downloaded. */
+  /** Whether MyRA can load this kind once downloaded. */
   runnable: boolean;
 }
 
@@ -167,7 +167,7 @@ export const SORTS: { id: BrowseSort; label: string }[] = [
  * `/pull` does honour an explicit recipe: measured, a pull naming `sd-cpp`
  * fetches `stabilityai/sd-turbo:sd_turbo.safetensors` happily, and a pull
  * naming a recipe that does not exist is refused with `Recipe 'x' not found`.
- * So Karen decides the recipe from what the registry says the model is FOR,
+ * So MyRA decides the recipe from what the registry says the model is FOR,
  * rather than from what file extensions happen to be in the repository.
  */
 export const KIND_RECIPE: Record<string, string> = {
@@ -227,8 +227,8 @@ export function browseParams(q: BrowseQuery): URLSearchParams {
    * `filter=gguf` selects repositories tagged `gguf`. That is exactly right
    * for chat, vision and embeddings, which llama.cpp loads. It is wrong for
    * every other kind: sd-cpp reads `.safetensors`, whisper.cpp reads ggml
-   * `.bin`, kokoro reads `.onnx` -- so a "only what Karen can run" switch that
-   * meant `gguf` would exclude `stabilityai/sd-turbo`, which Karen can run
+   * `.bin`, kokoro reads `.onnx` -- so a "only what MyRA can run" switch that
+   * meant `gguf` would exclude `stabilityai/sd-turbo`, which MyRA can run
    * perfectly well. On those tabs the switch has nothing to filter on and is
    * left off.
    */
@@ -294,7 +294,7 @@ export function parseModels(raw: unknown): HfModel[] {
 }
 
 /**
- * What Karen can do with a repository, said plainly on the row.
+ * What MyRA can do with a repository, said plainly on the row.
  *
  * Three states, and the middle one is the useful addition. A diffusion model
  * is not unloadable -- it needs `sd-cpp`, which this machine can install in a
@@ -327,7 +327,7 @@ export const LOADABLE_WORDS: Record<Loadable, { short: string; tone: string; why
     short: "Needs engine",
     tone: "warn",
     why:
-      "Karen can download this, but the engine that runs it is not installed yet. " +
+      "MyRA can download this, but the engine that runs it is not installed yet. " +
       "Install it under Settings → Runtime and it will load.",
   },
   "wrong-format": {
@@ -416,7 +416,7 @@ export interface Publisher {
 
 const NO_GGUF = (who: string): string =>
   `${who} publishes the original weights rather than GGUF builds. ` +
-  "Turn off “Only models Karen can run” to see them, or look under unsloth, " +
+  "Turn off “Only models MyRA can run” to see them, or look under unsloth, " +
   "bartowski or ggml-org for GGUF versions of the same models.";
 
 export const PUBLISHERS: Publisher[] = [
@@ -477,7 +477,7 @@ const TASK_RECIPE: Record<string, string> = {
  * **The `user.` prefix is required, not decorative.** Lemonade refuses any
  * pull that supplies its own checkpoint unless the name is in the `user.`
  * namespace: `Registered model definitions must use a non-empty 'user.*'
- * name`. Karen was sending `Qwen3-0.6B-GGUF-Q4_K_M` and getting a 400 every
+ * name`. MyRA was sending `Qwen3-0.6B-GGUF-Q4_K_M` and getting a 400 every
  * time, which means the Download button on the search page had never once
  * worked. The namespace is the daemon's way of keeping models a person added
  * apart from the ones its own catalogue defines, so this belongs on the name
@@ -506,8 +506,8 @@ export function pullCheckpoint(repo: string, file?: string): string {
  *
  * A pull has to be named `user.<something>` -- see `pullName` -- and the daemon
  * then reports it with the namespace removed. Measured: registering
- * `user.karen-delete-probe` answers
- * `{"canonical_model_name":"user.karen-delete-probe","model":{"id":"karen-delete-probe",…}}`,
+ * `user.myra-delete-probe` answers
+ * `{"canonical_model_name":"user.myra-delete-probe","model":{"id":"myra-delete-probe",…}}`,
  * and `embeddinggemma-300M-GGUF-Q8_0` sits in `/models` today under exactly
  * that shape.
  *

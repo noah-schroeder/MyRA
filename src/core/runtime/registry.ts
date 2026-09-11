@@ -1,7 +1,7 @@
 /**
  * Which registry a model comes from, and what to call it in front of a person.
  *
- * Lemonade can reach two registries. Karen uses one: Hugging Face. ModelScope
+ * Lemonade can reach two registries. MyRA uses one: Hugging Face. ModelScope
  * is disabled -- see `ENABLED_SOURCES` for why, and for how to put it back.
  *
  * Browsing itself now happens in `hfBrowse.ts`, which talks to the registry's
@@ -27,19 +27,19 @@
 /** The two registries lemonade can reach. */
 export type RegistrySource = "huggingface" | "modelscope";
 
-/** Every registry lemonade knows, which is not the same as every one Karen uses. */
+/** Every registry lemonade knows, which is not the same as every one MyRA uses. */
 export const KNOWN_SOURCES: RegistrySource[] = ["huggingface", "modelscope"];
 
 /**
- * The registries Karen will actually contact. **Hugging Face only.**
+ * The registries MyRA will actually contact. **Hugging Face only.**
  *
  * ModelScope is deliberately not here. The labels, parsing and plumbing for it
  * remain -- it costs nothing to keep and re-enabling is this one line -- but
- * nothing in Karen may search it, list a repository on it, or download from
+ * nothing in MyRA may search it, list a repository on it, or download from
  * it, and `isEnabled` is checked in the main process rather than only in the
  * UI so that a stored config or a stale renderer cannot reach it either.
  *
- * The reason is institutional rather than technical: for the researchers Karen
+ * The reason is institutional rather than technical: for the researchers MyRA
  * is for, obtaining models from a PRC-hosted service can be a policy breach,
  * and an option that is merely labelled is still an option that can be clicked
  * by accident. It was also, measured, half-broken from outside its region --

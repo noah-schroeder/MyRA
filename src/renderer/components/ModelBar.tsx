@@ -16,7 +16,7 @@ import type { Machine } from "../../core/runtime/fit.ts";
  * Which model is answering — and, now, which one answers next.
  *
  * It began as a label, because nothing on screen said where answers came from:
- * Karen will happily talk to a model served from this machine, a box on the
+ * MyRA will happily talk to a model served from this machine, a box on the
  * LAN, or a hosted API, and the only way to find out which was to open
  * Settings. That made "why is this slow" and "why does this sound different
  * today" questions with no visible answer.
@@ -92,7 +92,7 @@ export function ModelBar({
      hardware does not change while the window is open, and the panel is opened
      often enough that fetching per open would be a request per click. */
   useEffect(() => {
-    void window.karen.lemonadeInfo().then((r) => {
+    void window.myra.lemonadeInfo().then((r) => {
       if (!r.info) return;
       setMachine({
         ...(r.info.devices[0]?.totalBytes ? { vramBytes: r.info.devices[0].totalBytes } : {}),
@@ -102,8 +102,8 @@ export function ModelBar({
   }, []);
 
   useEffect(() => {
-    void window.karen.runtimeState().then(setRuntime);
-    return window.karen.onRuntime(setRuntime);
+    void window.myra.runtimeState().then(setRuntime);
+    return window.myra.onRuntime(setRuntime);
   }, []);
 
   // Only when the menu opens. Lemonade answers from what it has registered,
@@ -131,10 +131,10 @@ export function ModelBar({
 
   useEffect(() => {
     if (open) {
-      void window.karen.lemonadeModels().then((r) =>
+      void window.myra.lemonadeModels().then((r) =>
         setModels(
           r.models
-            /* Chat models only. Karen serves speech, voice and diffusion
+            /* Chat models only. MyRA serves speech, voice and diffusion
                models through the same daemon and the same /models listing, so
                without this the conversation picker offered Whisper and Kokoro
                as things to talk to -- and picking one produces a request the
@@ -217,9 +217,9 @@ export function ModelBar({
    *
    * The bar used to branch on "is the choice external", and a provider on
    * 127.0.0.1 -- somebody's own llama.cpp or LM Studio, registered here rather
-   * than run by Karen -- is deliberately not external: destinations.ts calls an
+   * than run by MyRA -- is deliberately not external: destinations.ts calls an
    * address on this machine local whatever the provider's label says. So the
-   * external branch was skipped, the local branch wanted a model Karen had
+   * external branch was skipped, the local branch wanted a model MyRA had
    * loaded itself, and the bar said "No model yet" while every message went to
    * that provider and came back answered.
    */
@@ -235,7 +235,7 @@ export function ModelBar({
   const pick = async (providerId: string, model: string): Promise<void> => {
     setOpen(false);
     onSettingsChange(
-      await window.karen.updateSettings({ llm: { ...settings!.llm, model: qualify(providerId, model) } }),
+      await window.myra.updateSettings({ llm: { ...settings!.llm, model: qualify(providerId, model) } }),
     );
   };
 
@@ -293,7 +293,7 @@ export function ModelBar({
   const load = async (path: string): Promise<void> => {
     setError(undefined);
     setOpen(false);
-    const result = await window.karen.lemonadeLoad(path);
+    const result = await window.myra.lemonadeLoad(path);
     if (!result.ok && result.error) setError(result.error);
   };
 
@@ -308,7 +308,7 @@ export function ModelBar({
    */
   const makeDefault = async (path: string): Promise<void> => {
     const next = defaultModel === path ? undefined : path;
-    setRuntime(await window.karen.runtimeConfig({ defaultModel: next }).then(
+    setRuntime(await window.myra.runtimeConfig({ defaultModel: next }).then(
       (config) => (runtime ? { ...runtime, config } : runtime),
     ));
   };
@@ -329,7 +329,7 @@ export function ModelBar({
             ? `Running on this machine. ${runtime?.lemonade.loaded ?? ""}`.trim()
             : tone === "remote"
               ? `Answering from ${settings?.llm.baseUrl}`
-              : "Choose where Karen gets its answers"
+              : "Choose where MyRA gets its answers"
         }
       >
         <span className={`dot dot-${tone === "local" ? "ready" : tone === "loading" ? "starting" : "idle"}`} />
@@ -454,7 +454,7 @@ export function ModelBar({
                           {/* The provider's own figure, from the last time
                               its models were fetched. Absent for the many
                               endpoints that publish no prices, because the
-                              alternative would be a number Karen made up. */}
+                              alternative would be a number MyRA made up. */}
                           {shownProvider.prices?.[model] ? (
                             <span
                               className="modelmenu-price"
@@ -585,8 +585,8 @@ export function ModelBar({
                       aria-pressed={isDefault}
                       title={
                         isDefault
-                          ? "Loads when Karen starts. Click to stop."
-                          : "Load this one when Karen starts"
+                          ? "Loads when MyRA starts. Click to stop."
+                          : "Load this one when MyRA starts"
                       }
                       onClick={() => void makeDefault(m.path)}
                     >
@@ -614,7 +614,7 @@ export function ModelBar({
               row -- and only when it would otherwise be a lie. */}
           {defaultModel && !runtime?.config.startOnLaunch ? (
             <p className="modelmenu-note">
-              A starred model loads at startup only while “Start the local engine when Karen
+              A starred model loads at startup only while “Start the local engine when MyRA
               opens” is on, under Settings → Runtime.
             </p>
           ) : null}
@@ -639,7 +639,7 @@ export function ModelBar({
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  void window.karen.unloadModel(model);
+                  void window.myra.unloadModel(model);
                 }}
               >
                 Eject {shorten(model)}
@@ -740,8 +740,8 @@ export function ModelBar({
               loaded={tuning.local && tuning.model === activePath}
               sections={tuning.local ? ["load", "sampling", "prompt"] : ["sampling", "prompt"]}
               onReload={async () => {
-                await window.karen.lemonadeUnload();
-                await window.karen.lemonadeLoad(tuning.model);
+                await window.myra.lemonadeUnload();
+                await window.myra.lemonadeLoad(tuning.model);
               }}
               onClose={() => setTuning(undefined)}
             />

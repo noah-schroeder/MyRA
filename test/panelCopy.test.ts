@@ -16,7 +16,7 @@ import {
 
 test("copying a turn takes the answer and never the reasoning", () => {
   /* Reasoning is deliberately not written to the session and not sent back on
-     the next turn. Copied text goes somewhere Karen cannot see -- very often a
+     the next turn. Copied text goes somewhere MyRA cannot see -- very often a
      document about to be sent to someone else -- so this button is the one
      place that guarantee could spring a leak without anybody noticing. */
   const copied = answerText([

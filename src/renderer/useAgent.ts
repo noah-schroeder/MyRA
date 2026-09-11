@@ -41,7 +41,7 @@ export function useAgent() {
   const open = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    return window.karen.onAgentEvent((event: AgentEvent) => {
+    return window.myra.onAgentEvent((event: AgentEvent) => {
       switch (event.type) {
         case "text": {
           if (!event.text) break;
@@ -216,11 +216,11 @@ export function useAgent() {
           : {}),
       },
     ]);
-    await window.karen.send(trimmed, attachments);
+    await window.myra.send(trimmed, attachments);
   }, []);
 
   const abort = useCallback(() => {
-    void window.karen.abort();
+    void window.myra.abort();
     setBusy(false);
   }, []);
 

@@ -45,7 +45,7 @@ async function throttle(): Promise<void> {
 }
 
 async function commonParams(): Promise<URLSearchParams> {
-  const q = new URLSearchParams({ db: "pubmed", tool: "karen" });
+  const q = new URLSearchParams({ db: "pubmed", tool: "myra" });
   if (OPENALEX_MAILTO) q.set("email", OPENALEX_MAILTO);
   const key = await databaseKey("ncbiKey");
   if (key) q.set("api_key", key);

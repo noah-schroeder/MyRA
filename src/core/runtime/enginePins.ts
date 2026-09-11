@@ -1,5 +1,5 @@
 /**
- * Which build of each engine Karen asks Lemonade to install.
+ * Which build of each engine MyRA asks Lemonade to install.
  *
  * Lemonade keeps one table of engine versions in its own `resources/
  * backend_versions.json`, and invites this directly:
@@ -9,18 +9,18 @@
  *    modify these values to pin specific versions without rebuilding the
  *    application."
  *
- * So updating an engine is not a matter of Karen fetching a tarball -- it is a
+ * So updating an engine is not a matter of MyRA fetching a tarball -- it is a
  * matter of changing one string and letting the daemon do what it already
  * does. The daemon reads the file once at startup, compares each pin against
  * the `version.txt` the installed engine carries, and reports the difference
  * as `update_required` on `/system-info`.
  *
- * **The choice lives in Karen's own config, not in that file.**
+ * **The choice lives in MyRA's own config, not in that file.**
  * `installLemonade` does `rm -rf` on the install directory, so a Lemonade
  * upgrade would silently revert every version anybody had chosen -- and the
  * revert would look like the app deciding on its own to undo their work. Pins
  * are held in `runtime.json` and re-applied on every daemon start, which also
- * makes "put it back to the build Karen ships" free: delete the key.
+ * makes "put it back to the build MyRA ships" free: delete the key.
  */
 
 /** `llamacpp:vulkan` -- a backend, not an engine. */
@@ -70,7 +70,7 @@ export function shippedVersion(
  * produce a daemon that fails to parse its own resources. A pin naming
  * something this table does not already version is dropped rather than
  * honoured, because it can only have come from a stale config: the backends
- * Karen offers to update are the ones the daemon just reported.
+ * MyRA offers to update are the ones the daemon just reported.
  */
 export function mergeBackendVersions(
   shipped: Record<string, unknown>,
@@ -87,7 +87,7 @@ export function mergeBackendVersions(
   return out;
 }
 
-/** Drop a pin, which is how "back to the build Karen ships" is expressed. */
+/** Drop a pin, which is how "back to the build MyRA ships" is expressed. */
 export function withoutPin(pins: EnginePins, key: string): EnginePins {
   const out = { ...pins };
   delete out[key];

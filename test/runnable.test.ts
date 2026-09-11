@@ -92,7 +92,7 @@ test('a "-CPU" model can still be one this machine cannot run', () => {
  *
  * Captured from the daemon with the llama.cpp pin moved from b10375 to b10793
  * and nothing else changed. The engine was on disk and working -- a model
- * loaded and generated through it seconds later -- while Karen was telling
+ * loaded and generated through it seconds later -- while MyRA was telling
  * people the hardware was missing.
  */
 const PENDING: EngineInfo[] = [

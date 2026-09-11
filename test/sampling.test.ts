@@ -41,7 +41,7 @@ test("only known samplers survive a read", () => {
 });
 
 test("an unset field is absent from the request, not sent as zero", () => {
-  /* Blank means "let the server decide", which is a different thing from Karen
+  /* Blank means "let the server decide", which is a different thing from MyRA
      guessing the default and sending its guess. */
   const body = buildRequest({ messages: [], sampling: { top_k: 40 } });
   assert.equal("min_p" in body, false);

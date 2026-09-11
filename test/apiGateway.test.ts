@@ -139,7 +139,7 @@ test("a failure inside the handler says nothing about this machine", async () =>
     // Thrown from inside the handler, carrying exactly the kind of detail that
     // must not reach a client: a path under the user's home directory.
     models: async () => {
-      throw new Error("ENOENT: open '/home/someone/.config/karen/models.json'");
+      throw new Error("ENOENT: open '/home/someone/.config/myra/models.json'");
     },
   });
   open.push(() => gateway.stop());

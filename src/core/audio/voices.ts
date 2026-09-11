@@ -71,7 +71,7 @@ const LANGUAGES: Record<string, string> = {
 export function describeVoice(id: string): Voice {
   const match = /^([a-z])([fm])_(.+)$/.exec(id);
   if (!match) {
-    /* A voice someone typed in for a model Karen does not know. Shown as it
+    /* A voice someone typed in for a model MyRA does not know. Shown as it
        was written rather than dropped: the field accepts free text precisely
        so an unknown engine's voices can be used. */
     return { id, name: id, language: "", gender: "female" };
@@ -89,7 +89,7 @@ export function describeVoice(id: string): Voice {
  * The voices to offer for a model, or none when they are not knowable.
  *
  * An empty list is not a failure and the UI must not treat it as one: it means
- * "this engine's voices are not something Karen can enumerate", and the right
+ * "this engine's voices are not something MyRA can enumerate", and the right
  * control for that is a text box, not an empty dropdown that cannot be used.
  * Every TTS engine besides Kokoro is in that position today -- OpenMOSS clones
  * a voice from a reference clip rather than choosing from a set, and a hosted
@@ -137,7 +137,7 @@ export function voiceIsValid(model: string, voice: string): boolean {
  *     come from one engine and mean nothing to another. Empty is legal
  *     everywhere: `speak` omits the field and the engine picks its own.
  *
- * A voice typed in for an engine Karen cannot enumerate is left exactly as it
+ * A voice typed in for an engine MyRA cannot enumerate is left exactly as it
  * was — that free text is the whole point of the box it was typed into.
  */
 export function voiceForModel(model: string, voice: string): string {

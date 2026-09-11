@@ -3,7 +3,7 @@
  *
  * Almost all of this pane is now LemonadePane, which reports what the daemon
  * says about the machine and offers its engines and models. What remains here
- * are the two settings that are Karen's own rather than the backend's: whether
+ * are the two settings that are MyRA's own rather than the backend's: whether
  * the local model answers chat, and whether it starts with the app.
  */
 
@@ -30,16 +30,16 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
   const [showLog, setShowLog] = useState(false);
 
   const refresh = useCallback(async (): Promise<void> => {
-    setState((await window.karen.runtimeState()) as RuntimeState);
+    setState((await window.myra.runtimeState()) as RuntimeState);
   }, []);
 
   useEffect(() => {
     void refresh();
-    return window.karen.onRuntime((next) => setState(next as RuntimeState));
+    return window.myra.onRuntime((next) => setState(next as RuntimeState));
   }, [refresh]);
 
   const patch = async (change: Record<string, unknown>): Promise<void> => {
-    await window.karen.runtimeConfig(change);
+    await window.myra.runtimeConfig(change);
     await refresh();
   };
 
@@ -49,8 +49,8 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
        dialog empty beside it. The prose inside keeps its own measure. */
     <div className="pane pane-wide">
       <p className="pane-lead">
-        Karen can run models on this machine, so nothing you type leaves it. This is optional — if
-        you already point Karen at an endpoint of your own, you can ignore all of it.
+        MyRA can run models on this machine, so nothing you type leaves it. This is optional — if
+        you already point MyRA at an endpoint of your own, you can ignore all of it.
       </p>
 
       {/* Engines only. The models themselves are a screen of their own -- this
@@ -85,7 +85,7 @@ export function RuntimePane({ onOpenHub }: { onOpenHub?: () => void }) {
               onChange={(e) => void patch({ startOnLaunch: e.target.checked })}
             />
             <span title={state.config.activeModel}>
-              Load {shortName(state.config.activeModel) ?? "the last model"} when Karen opens
+              Load {shortName(state.config.activeModel) ?? "the last model"} when MyRA opens
             </span>
           </label>
 

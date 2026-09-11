@@ -82,13 +82,13 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   const capture = useRef<MeetingCapture | undefined>(undefined);
 
   const refresh = useCallback(async () => {
-    setMeetings(await window.karen.meetingList());
+    setMeetings(await window.myra.meetingList());
   }, []);
 
   useEffect(() => {
-    const offState = window.karen.onMeeting(setState);
-    const offList = window.karen.onMeetings((list) => setMeetings(list));
-    void window.karen.meetingState().then(setState);
+    const offState = window.myra.onMeeting(setState);
+    const offList = window.myra.onMeetings((list) => setMeetings(list));
+    void window.myra.meetingState().then(setState);
     void refresh();
     return () => {
       offState();
@@ -99,7 +99,7 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   /* Re-read the folder when the list is opened.
    *
    * The main process pushes a new list after every stage it runs, so this is
-   * not about Karen's own writes -- it is about everything else: a meeting
+   * not about MyRA's own writes -- it is about everything else: a meeting
    * deleted in a file manager, a folder synced from another machine, or a
    * recording made before this window was opened. The directory is the record,
    * so the page has to re-read it rather than trust a cache. */
@@ -112,7 +112,7 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   useEffect(() => {
     if (state.phase !== "recording") return;
     const timer = setInterval(() => {
-      void window.karen.meetingLevels().then(setLevels);
+      void window.myra.meetingLevels().then(setLevels);
     }, 100);
     return () => clearInterval(timer);
   }, [state.phase]);
@@ -127,13 +127,13 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
      * track exists, and it carries silence for the whole meeting. Every other
      * platform answers "granted" and this costs one IPC round trip.
      */
-    const access = await window.karen.mediaAccess();
+    const access = await window.myra.mediaAccess();
     if (access.microphone === "not-determined") {
-      await window.karen.requestMicrophone();
+      await window.myra.requestMicrophone();
     } else if (access.microphone === "denied" || access.microphone === "restricted") {
       setWarning(
-        "Karen does not have permission to use the microphone. Open System Settings → " +
-          "Privacy & Security → Microphone, switch Karen on, and try again.",
+        "MyRA does not have permission to use the microphone. Open System Settings → " +
+          "Privacy & Security → Microphone, switch MyRA on, and try again.",
       );
       return;
     }
@@ -149,11 +149,11 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
       const tracks = await session.start({
         ...(settings.dictationSource ? { micDeviceId: settings.dictationSource } : {}),
         systemAudio: settings.meetingCaptureSystemAudio,
-        onChunk: (trackId, pcm) => void window.karen.meetingAudio(trackId, pcm),
+        onChunk: (trackId, pcm) => void window.myra.meetingAudio(trackId, pcm),
         onWarning: setWarning,
       });
       capture.current = session;
-      await window.karen.meetingStart(title.trim() || "Meeting", tracks);
+      await window.myra.meetingStart(title.trim() || "Meeting", tracks);
     } catch (err) {
       await session.stop();
       setWarning(
@@ -165,7 +165,7 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   const stop = async (): Promise<void> => {
     await capture.current?.stop();
     capture.current = undefined;
-    await window.karen.meetingStop();
+    await window.myra.meetingStop();
     setTitle("");
     // Straight to the list: the meeting you just held is the one you want to
     // act on, and it is now the first row.
@@ -175,7 +175,7 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
   const discard = async (): Promise<void> => {
     await capture.current?.stop();
     capture.current = undefined;
-    await window.karen.meetingDiscard();
+    await window.myra.meetingDiscard();
     setTitle("");
   };
 
@@ -333,7 +333,7 @@ function Recorder({
     <div className="meeting-start-card">
       <h2>Start a recording</h2>
       <p className="dim">
-        Karen records two tracks — your microphone and what your speakers are playing — so the
+        MyRA records two tracks — your microphone and what your speakers are playing — so the
         write-up has both halves of the conversation. Nothing is sent anywhere while you record.
       </p>
       <div className="meeting-start">
@@ -402,7 +402,7 @@ function MeetingRow({
   useEffect(() => {
     if (!expanded || view === "prompt") return;
     setText(undefined);
-    void window.karen.meetingRead(meeting.dir, view).then(setText);
+    void window.myra.meetingRead(meeting.dir, view).then(setText);
   }, [expanded, view, meeting.dir, meeting.transcribed, meeting.noted]);
 
   const act = async (fn: () => Promise<{ ok: boolean; error?: string }>): Promise<void> => {
@@ -411,7 +411,7 @@ function MeetingRow({
   };
 
   const savePrompt = async (): Promise<void> => {
-    await window.karen.meetingInstructions(meeting.dir, prompt);
+    await window.myra.meetingInstructions(meeting.dir, prompt);
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
     onChanged();
@@ -442,7 +442,7 @@ function MeetingRow({
           <div className="bar">
             <span style={{ width: `${Math.round((progress?.fraction ?? 0) * 100)}%` }} />
           </div>
-          <button type="button" onClick={() => void window.karen.meetingCancel()}>
+          <button type="button" onClick={() => void window.myra.meetingCancel()}>
             Cancel
           </button>
         </div>
@@ -460,7 +460,7 @@ function MeetingRow({
         <button
           type="button"
           disabled={busy || !meeting.hasAudio}
-          onClick={() => void act(() => window.karen.meetingTranscribe(meeting.dir))}
+          onClick={() => void act(() => window.myra.meetingTranscribe(meeting.dir))}
           title={meeting.hasAudio ? "" : "The audio for this meeting has been deleted."}
         >
           {meeting.transcribed ? "Transcribe again" : "Transcribe"}
@@ -468,7 +468,7 @@ function MeetingRow({
         <button
           type="button"
           disabled={busy || !meeting.transcribed}
-          onClick={() => void act(() => window.karen.meetingNotes(meeting.dir))}
+          onClick={() => void act(() => window.myra.meetingNotes(meeting.dir))}
           title={meeting.transcribed ? "" : "Transcribe it first."}
         >
           {meeting.noted ? "Take notes again" : "Take notes"}
@@ -478,13 +478,13 @@ function MeetingRow({
             type="button"
             className="primary-sm"
             disabled={busy || !meeting.hasAudio}
-            onClick={() => void act(() => window.karen.meetingRun(meeting.dir))}
+            onClick={() => void act(() => window.myra.meetingRun(meeting.dir))}
           >
             Transcribe and take notes
           </button>
         ) : null}
         <span className="meet-spacer" />
-        <button type="button" onClick={() => void window.karen.meetingReveal(meeting.dir)}>
+        <button type="button" onClick={() => void window.myra.meetingReveal(meeting.dir)}>
           Open folder
         </button>
         {confirming ? (
@@ -493,7 +493,7 @@ function MeetingRow({
             <button
               type="button"
               className="danger"
-              onClick={() => void act(() => window.karen.meetingDelete(meeting.dir))}
+              onClick={() => void act(() => window.myra.meetingDelete(meeting.dir))}
             >
               Delete
             </button>
@@ -549,7 +549,7 @@ function MeetingRow({
                     disabled={busy}
                     onClick={async () => {
                       await savePrompt();
-                      await act(() => window.karen.meetingNotes(meeting.dir));
+                      await act(() => window.myra.meetingNotes(meeting.dir));
                     }}
                   >
                     Save and rewrite the notes
@@ -580,7 +580,7 @@ function MeetingRow({
               <button
                 type="button"
                 className="linkish"
-                onClick={() => void window.karen.meetingReveal(meeting.state.filedNotePath!)}
+                onClick={() => void window.myra.meetingReveal(meeting.state.filedNotePath!)}
               >
                 show it
               </button>

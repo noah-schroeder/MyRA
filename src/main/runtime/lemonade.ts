@@ -8,7 +8,7 @@
  *
  * What is genuinely different is the lifecycle. llama-server WAS the model, so
  * starting it and loading a model were one act. `lemond` is a manager: it comes
- * up once, holds no model, and Karen loads and unloads through its API. So this
+ * up once, holds no model, and MyRA loads and unloads through its API. So this
  * supervisor knows nothing about models, and "ready" means the daemon is
  * answering -- seconds, not the minutes a 30 GB mmap took.
  */
@@ -49,7 +49,7 @@ export type LemonadeState = "stopped" | "starting" | "ready" | "failed";
    error under exactOptionalPropertyTypes otherwise. */
 export interface LemonadeStatus {
   state: LemonadeState;
-  /** OpenAI-compatible base, which is what Karen's clients speak. */
+  /** OpenAI-compatible base, which is what MyRA's clients speak. */
   baseUrl?: string | undefined;
   /** Lemonade's own management base, for devices, backends and models. */
   adminUrl?: string | undefined;
@@ -65,7 +65,7 @@ export interface LemonadeStartOptions {
   binary: string;
   cacheDir: string;
   configDir: string;
-  /** Karen's existing model library, which the daemon should also list. */
+  /** MyRA's existing model library, which the daemon should also list. */
   modelsDir?: string;
   /**
    * Engine builds the user chose, over the ones this Lemonade ships with.
@@ -115,7 +115,7 @@ export class LemonadeServer {
     for (const fn of this.#listeners) fn(this.#status);
   }
 
-  /** A line from Karen rather than from the daemon, for the same log panel. */
+  /** A line from MyRA rather than from the daemon, for the same log panel. */
   note(line: string): void {
     this.#log(line);
   }
@@ -155,7 +155,7 @@ export class LemonadeServer {
      * Through launchSpec so a bundled C runtime is used when one is present.
      * The daemon requires GLIBC_2.38 -- it is built on Ubuntu 24.04 -- which no
      * Ubuntu 22.04 or Debian 12 machine has, so on those it runs through the
-     * loader Karen ships beside it. See core/runtime/libc.ts for why the loader
+     * loader MyRA ships beside it. See core/runtime/libc.ts for why the loader
      * must be BESIDE the binary: lemond finds its `resources/` directory
      * relative to /proc/self/exe, which under a bundled loader is the loader.
      */
@@ -215,7 +215,7 @@ export class LemonadeServer {
   }
 
   /**
-   * Write the settings Karen will not leave to a default.
+   * Write the settings MyRA will not leave to a default.
    *
    * Done before every start rather than once at install, because the file IS
    * the daemon's own and it does rewrite it: measured, it rewrote config.json

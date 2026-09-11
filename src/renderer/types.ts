@@ -137,7 +137,7 @@ export interface Usage {
   total: number;
   /** What the conversation currently occupies in the model's window. */
   contextTokens?: number;
-  /** The window itself. Only known for a model Karen started. */
+  /** The window itself. Only known for a model MyRA started. */
   contextLimit?: number;
 }
 
@@ -193,7 +193,7 @@ export interface Settings {
   /** The image model and its size. Mirrors core's ImageSettings. */
   image: ImageSettings;
   embeddings: EndpointSettings;
-  /** Where Zotero's library is, when Karen cannot work it out. Empty = find it. */
+  /** Where Zotero's library is, when MyRA cannot work it out. Empty = find it. */
   zoteroDataDir: string;
   workspaceRoot: string;
   vaultRoot: string;
@@ -216,13 +216,13 @@ export interface Settings {
   meetingReportDir: string;
   meetingCaptureSystemAudio: boolean;
   meetingInstructions: string;
-  /** Closing the window leaves Karen running in the tray. */
+  /** Closing the window leaves MyRA running in the tray. */
   keepRunningInTray: boolean;
   setupCompleted: boolean;
   /** Whether the first-run tour has been shown. Settings -> About can reset it. */
   seenTutorial: boolean;
   providers: Provider[];
-  /** Who the model is told it is. Karen's rules follow it and are not editable. */
+  /** Who the model is told it is. MyRA's rules follow it and are not editable. */
   persona: string;
   /** Per model, overriding the above. Keyed the way `sampling` is. */
   systemPrompts: Record<string, string>;
@@ -353,7 +353,7 @@ export interface MeetingSummary {
   state: MeetingArtifacts;
 }
 
-/** One Whisper model Karen offers to download. */
+/** One Whisper model MyRA offers to download. */
 export interface WhisperModel {
   file: string;
   label: string;
@@ -467,7 +467,7 @@ export interface ActiveRun {
 
 /**
  * A dropped image or document, held in the composer between the drop and
- * Send. Mirrors the discriminated shape `karen:chat-attach` resolves to.
+ * Send. Mirrors the discriminated shape `myra:chat-attach` resolves to.
  */
 export type PendingAttachment =
   | { kind: "image"; id: string; name: string; mime: string; bytes: number; canSee: boolean; warning?: string }
@@ -477,7 +477,7 @@ export type ChatAttachResult =
   | ({ ok: true } & PendingAttachment)
   | { ok: false; error?: string; needsPandoc?: boolean };
 
-export interface KarenApi {
+export interface MyRAApi {
   send(text: string, attachments?: PendingAttachment[]): Promise<void>;
   abort(): Promise<void>;
   /** A dropped image or document, read and sized before Send is pressed. */
@@ -678,7 +678,7 @@ export interface KarenApi {
     suggested: Record<string, number>;
     hasSuggested: boolean;
     ignoreSuggested: boolean;
-    /** Whether Karen could read the architecture, so the context is measured. */
+    /** Whether MyRA could read the architecture, so the context is measured. */
     measured: boolean;
     /** The model's own layer count, when known -- the GPU-layers and MoE-CPU
      *  sliders' real bound. */
@@ -899,7 +899,7 @@ export interface KarenApi {
 }
 
 declare global {
-  interface Window { karen: KarenApi }
+  interface Window { myra: MyRAApi }
 }
 
 /* ------------------------------------------------------------------ *

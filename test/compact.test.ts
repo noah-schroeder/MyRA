@@ -35,7 +35,7 @@ function withTools(id: string): ChatMessage[] {
 /* ------------------------------------------------------------- threshold -- */
 
 test("nothing happens without a known window", () => {
-  // A remote endpoint whose context Karen cannot know must never trigger this:
+  // A remote endpoint whose context MyRA cannot know must never trigger this:
   // guessing a limit and summarising against it would destroy a conversation
   // that was nowhere near full.
   assert.equal(needsCompaction(999_999, undefined), false);
@@ -211,7 +211,7 @@ test("a summary covers messages counted against the real transcript", () => {
 
 test("the tool schemas count against the window", () => {
   /*
-   * Measured: Karen's seven tools serialise to about a thousand tokens, sent
+   * Measured: MyRA's seven tools serialise to about a thousand tokens, sent
    * with every request. Omitting them made compaction fire roughly twelve
    * hundred tokens late — found by watching an already-compacted request still
    * exceed a 2,048-token window by more than its messages could account for.

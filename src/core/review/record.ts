@@ -8,7 +8,7 @@
  * writing it. A record on disk is what makes leaving the page free.
  *
  * **The manuscript is not part of it.** `main/review.ts` opens by explaining
- * that Karen never learns where a confidential manuscript lives, and writing the
+ * that MyRA never learns where a confidential manuscript lives, and writing the
  * text into `~/Documents` would undo that on the way to a smaller convenience.
  * The word count is kept because it is what the header and the fit message need;
  * the text is held in memory for the length of the run and then let go. The page

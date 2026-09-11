@@ -2,7 +2,7 @@
  * Tuning how one model loads.
  *
  * The settings are per model and live in the daemon, so this is a view onto
- * something Lemonade owns rather than a Karen preference screen. Three things
+ * something Lemonade owns rather than a MyRA preference screen. Three things
  * follow from that and shape what is on screen:
  *
  *   - **The fields are whatever this model's recipe accepts**, read from the
@@ -122,7 +122,7 @@ export function ModelOptionsEditor({
 
   const load = useCallback(async (): Promise<void> => {
     if (!wantsLoad) return;
-    const res = await window.karen.modelOptions(model);
+    const res = await window.myra.modelOptions(model);
     if (!res.ok || !res.options) {
       setError(res.error ?? "These settings could not be read.");
       return;
@@ -184,7 +184,7 @@ export function ModelOptionsEditor({
     setBusy(true);
     setError(undefined);
     setNote(undefined);
-    const res = await window.karen.modelOptionsSet(model, patch);
+    const res = await window.myra.modelOptionsSet(model, patch);
     setBusy(false);
     if (!res.ok || !res.options) {
       // The daemon's own sentence, which is the one that matches what it refuses.
@@ -203,7 +203,7 @@ export function ModelOptionsEditor({
   const reset = async (): Promise<void> => {
     setBusy(true);
     setError(undefined);
-    const res = await window.karen.modelOptionsReset(model);
+    const res = await window.myra.modelOptionsReset(model);
     setBusy(false);
     if (!res.ok || !res.options) {
       setError(res.error ?? "Those settings could not be reset.");
@@ -230,7 +230,7 @@ export function ModelOptionsEditor({
               ? overrides
                 ? `${overrides} load setting${overrides === 1 ? "" : "s"} changed from the default.`
                 : "Everything is at the default."
-              : "A hosted model, so how it loads is not Karen's to set."}
+              : "A hosted model, so how it loads is not MyRA's to set."}
           </p>
         </div>
         <button type="button" className="lem-act" onClick={onClose}>
@@ -293,7 +293,7 @@ export function ModelOptionsEditor({
 }
 
 /**
- * What this model is told it is, before Karen's rules.
+ * What this model is told it is, before MyRA's rules.
  *
  * Saved on blur rather than on every keystroke, the way the sampler rows commit:
  * this is prose, and a write per character would be a settings file rewritten a
@@ -311,7 +311,7 @@ function PersonaField({ model }: { model: string }) {
 
   useEffect(() => {
     let alive = true;
-    void window.karen.modelPrompt(model).then((r) => {
+    void window.myra.modelPrompt(model).then((r) => {
       if (!alive) return;
       setText(r.text);
       setFallback(r.fallback);
@@ -322,7 +322,7 @@ function PersonaField({ model }: { model: string }) {
   }, [model]);
 
   const commit = (): void => {
-    void window.karen.setModelPrompt(model, text.trim() || undefined).then(() => {
+    void window.myra.setModelPrompt(model, text.trim() || undefined).then(() => {
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1500);
     });
@@ -339,7 +339,7 @@ function PersonaField({ model }: { model: string }) {
         onBlur={commit}
       />
       <p className="sampling-note">
-        Only for this model, and only the description of who it is. Karen&rsquo;s own rules — how
+        Only for this model, and only the description of who it is. MyRA&rsquo;s own rules — how
         to hold a tool, that a citation marker may only be one a tool returned, and that untrusted
         text is data rather than instruction — follow it and cannot be replaced from here. Leave it
         empty to use the persona from Settings.
@@ -458,7 +458,7 @@ function FlagsField({
 
   useEffect(() => {
     let alive = true;
-    void window.karen.modelFacts(model).then((r) => {
+    void window.myra.modelFacts(model).then((r) => {
       if (!alive) return;
       setShape({ ...(r.layers ? { layers: r.layers } : {}), ...(r.experts ? { experts: r.experts } : {}) });
     });
@@ -555,7 +555,7 @@ function FlagsField({
 
       <div className="mopt-flag-acts">
         <button type="button" className="lem-more" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? "Fewer flags" : "Every flag Karen knows"}
+          {showAll ? "Fewer flags" : "Every flag MyRA knows"}
         </button>
         <button type="button" className="lem-more" onClick={() => setRaw((v) => !v)}>
           {raw ? "Hide what is sent" : "Show what is sent"}
@@ -573,11 +573,11 @@ function FlagsField({
         />
       ) : null}
 
-      {/* Said, not silently preserved: somebody who typed a flag Karen has never
+      {/* Said, not silently preserved: somebody who typed a flag MyRA has never
           heard of should know it is still there and still being sent. */}
       {unknown.length ? (
         <p className="mopt-hint">
-          Karen does not know {unknown.filter((t) => t.startsWith("-")).join(", ") || "some of these"},
+          MyRA does not know {unknown.filter((t) => t.startsWith("-")).join(", ") || "some of these"},
           so {unknown.length === 1 ? "it is" : "they are"} passed through unchanged. The daemon
           accepts anything here and only fails later, at load.
         </p>

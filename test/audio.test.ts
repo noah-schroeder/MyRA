@@ -63,7 +63,7 @@ describe("voices", () => {
     assert.equal(describeVoice("zf_xiaobei").language, "Mandarin Chinese");
   });
 
-  test("a voice from an engine Karen does not know is shown, not dropped", () => {
+  test("a voice from an engine MyRA does not know is shown, not dropped", () => {
     // The field takes free text precisely so an unknown engine can be used, and
     // a parser that threw here would make that field unusable.
     const odd = describeVoice("Rachel");
@@ -175,7 +175,7 @@ describe("a speech model must not become the chat model", () => {
     assert.equal(health.modelLoaded, "Whisper-Tiny");
   });
 
-  test("the model Karen loaded on purpose wins", () => {
+  test("the model MyRA loaded on purpose wins", () => {
     const chosen = chatModelOf(health, "LiquidAI__LFM2.5-2.6B-GGUF");
     assert.equal(chosen?.id, "LiquidAI__LFM2.5-2.6B-GGUF");
     assert.equal(chosen?.contextTokens, 4096);
@@ -202,7 +202,7 @@ describe("a speech model must not become the chat model", () => {
 
   test("an unknown engine is assumed to be a chat engine", () => {
     // The catalogue gains recipes over time, and refusing to chat with one
-    // Karen has not heard of would break on an upgrade rather than on a bug.
+    // MyRA has not heard of would break on an upgrade rather than on a bug.
     assert.ok(isChatEngine("vllm"));
     assert.ok(isChatEngine(undefined));
     assert.ok(!isChatEngine("whispercpp"));
@@ -346,7 +346,7 @@ describe("the audio settings", () => {
 
   test("an older build's transcription endpoint is picked up to be migrated", async () => {
     /*
-     * The whole point of `legacyTranscription`: somebody pointing Karen at
+     * The whole point of `legacyTranscription`: somebody pointing MyRA at
      * their own whisper server must not find transcription silently
      * unconfigured after an upgrade. The main process turns this into a
      * provider; what is asserted here is that the value survives the read at
@@ -456,7 +456,7 @@ describe("keeping the voice and its model in step", () => {
     assert.equal(voiceForModel("", "am_michael"), "");
   });
 
-  it("keeps a voice typed in for an engine Karen cannot enumerate", () => {
+  it("keeps a voice typed in for an engine MyRA cannot enumerate", () => {
     /* The free-text box exists precisely so an unknown engine's voices can be
        used, so its contents must survive this. */
     assert.equal(voiceForModel("provider::eleven-turbo", "Rachel"), "Rachel");
@@ -617,7 +617,7 @@ describe("keeping the chat list to models you can talk to", () => {
   it("recognises an embedding model by name, for a model with no labels", () => {
     /* Seen in the chat menu of a running build: `embeddinggemma-300M-GGUF`,
        offered as something to hold a conversation with. It came from an LM
-       Studio folder Karen indexed, and the daemon only labels what is in its
+       Studio folder MyRA indexed, and the daemon only labels what is in its
        own catalogue -- so the label test had nothing to test and the name was
        the only fact available. */
     assert.equal(guessRole("embeddinggemma-300M-GGUF"), "embeddings");

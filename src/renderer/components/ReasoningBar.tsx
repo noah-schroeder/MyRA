@@ -22,7 +22,7 @@ import type { ReasoningDialect } from "../types.ts";
  * The row is absent, rather than disabled, when there is no setting to make.
  * A permanently greyed control teaches only that something is broken. The
  * reason is not thrown away though -- it goes under the model in the bar's
- * tooltip, because "this model always thinks" and "Karen has not checked this
+ * tooltip, because "this model always thinks" and "MyRA has not checked this
  * endpoint yet" are different situations and only one of them can be acted on.
  */
 export function ReasoningBar({ model }: { model: string | undefined }) {
@@ -38,8 +38,8 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
    */
   const [loaded, setLoaded] = useState<string | undefined>();
   useEffect(() => {
-    void window.karen.runtimeState().then((s) => setLoaded(s.lemonade.chat?.id));
-    return window.karen.onRuntime((s) => setLoaded(s.lemonade.chat?.id));
+    void window.myra.runtimeState().then((s) => setLoaded(s.lemonade.chat?.id));
+    return window.myra.onRuntime((s) => setLoaded(s.lemonade.chat?.id));
   }, []);
 
   const [dialects, setDialects] = useState<ReasoningDialect[]>([]);
@@ -61,7 +61,7 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
     setDialects([]);
     setNote(undefined);
     setReason(undefined);
-    void window.karen.reasoningCapability().then((r) => {
+    void window.myra.reasoningCapability().then((r) => {
       if (!live) return;
       setDialects(r.dialects ?? []);
       setNote(r.note);
@@ -74,14 +74,14 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
   if (!dialects.length) {
     /* Small, muted, and still real text, because an empty element cannot be
        hovered and the reason is the whole value here: "this model thinks on
-       every turn and cannot be stopped" and "Karen has not checked this
+       every turn and cannot be stopped" and "MyRA has not checked this
        endpoint yet" are different situations, and the second one is something
        the user can go and fix. Nothing at all is drawn before the first answer
        arrives, so the composer does not flash a label and then replace it. */
-    /* Only when Karen actually asked and got an answer. "No model is loaded
+    /* Only when MyRA actually asked and got an answer. "No model is loaded
        yet" and "this endpoint has not been checked" are not findings about the
        model, and printing "no thinking setting" for either would state
-       something Karen does not know -- while the model in question may well
+       something MyRA does not know -- while the model in question may well
        have one. */
     const found = reason === "none" || reason === "always";
     return found && note ? (
@@ -98,7 +98,7 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
        rather than to nothing, because `true` is what the request will carry.
        Showing it as unset would be the button lying about the wire. */
     setValues((prev) => ({ ...prev, [dialect.id]: wanted || dialect.preferred || "" }));
-    void window.karen.setReasoning(dialect.id, wanted || undefined);
+    void window.myra.setReasoning(dialect.id, wanted || undefined);
   };
 
   return (
@@ -115,8 +115,8 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
             title={
               `The request field this sends, exactly as ${dialect.source} names it. ` +
               (dialect.evidence === "measured"
-                ? "Karen read this model's own chat template and confirmed it reads this setting."
-                : "Karen checked that this endpoint accepts this field before offering it here.")
+                ? "MyRA read this model's own chat template and confirmed it reads this setting."
+                : "MyRA checked that this endpoint accepts this field before offering it here.")
             }
           >
             {dialect.param}
@@ -130,7 +130,7 @@ export function ReasoningBar({ model }: { model: string | undefined }) {
                 aria-pressed={values[dialect.id] === level.value}
                 className={values[dialect.id] === level.value ? "mode active" : "mode"}
                 /* Pressing the chosen one again clears it, which is the only
-                   way back to the level Karen would send on its own -- there
+                   way back to the level MyRA would send on its own -- there
                    is no value meaning "unset", and inventing one would send a
                    field where the user wants none sent. */
                 onClick={() => choose(dialect, level.value)}

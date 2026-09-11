@@ -26,8 +26,8 @@ import {
 export function useDownloads(): Download[] {
   const [list, setList] = useState<Download[]>([]);
   useEffect(() => {
-    void window.karen.downloadsList().then(setList).catch(() => {});
-    return window.karen.onDownloads(setList);
+    void window.myra.downloadsList().then(setList).catch(() => {});
+    return window.myra.onDownloads(setList);
   }, []);
   return list;
 }
@@ -42,7 +42,7 @@ function Row({ d, onAct }: { d: Download; onAct: () => void }) {
 
   const cancel = async (): Promise<void> => {
     setConfirming(false);
-    await window.karen.downloadCancel(d.id);
+    await window.myra.downloadCancel(d.id);
     onAct();
   };
 
@@ -81,12 +81,12 @@ function Row({ d, onAct }: { d: Download; onAct: () => void }) {
       ) : (
         <div className="dl-actions">
           {d.state === "running" ? (
-            <button type="button" onClick={() => void window.karen.downloadPause(d.id)}>
+            <button type="button" onClick={() => void window.myra.downloadPause(d.id)}>
               Pause
             </button>
           ) : null}
           {d.state === "paused" ? (
-            <button type="button" onClick={() => void window.karen.downloadResume(d.id)}>
+            <button type="button" onClick={() => void window.myra.downloadResume(d.id)}>
               Resume
             </button>
           ) : null}
@@ -98,7 +98,7 @@ function Row({ d, onAct }: { d: Download; onAct: () => void }) {
             <button
               type="button"
               className="dl-quiet"
-              onClick={() => void window.karen.downloadDismiss(d.id)}
+              onClick={() => void window.myra.downloadDismiss(d.id)}
             >
               Dismiss
             </button>
@@ -166,7 +166,7 @@ export function DownloadsButton({ list }: { list: Download[] }) {
               <button
                 type="button"
                 className="dl-quiet"
-                onClick={() => void window.karen.downloadDismiss()}
+                onClick={() => void window.myra.downloadDismiss()}
               >
                 Clear finished
               </button>
@@ -180,7 +180,7 @@ export function DownloadsButton({ list }: { list: Download[] }) {
           {/* The one thing a person cannot work out from the bars, and the
               thing that makes leaving the page safe. */}
           <p className="dl-foot">
-            These keep going while you work elsewhere, and stop if you quit Karen.
+            These keep going while you work elsewhere, and stop if you quit MyRA.
             A paused or interrupted download resumes where it left off.
           </p>
         </div>

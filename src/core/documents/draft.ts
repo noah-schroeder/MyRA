@@ -250,7 +250,7 @@ export function buildSectionPrompt(
     /*
      * Said here because it reaches nowhere else.
      *
-     * Karen's system prompt forbids unsourced markers, but runSubagent sends
+     * MyRA's system prompt forbids unsourced markers, but runSubagent sends
      * only the system string it is given and this stage gives none -- so the
      * section writer inherits no citation discipline whatever. Measured, on the
      * first real draft: asked for an academic tone, a 2.6B produced

@@ -66,7 +66,7 @@ import {
  * What the composer sends alongside the typed words: an image's saved
  * reference, or a document's already-extracted text.
  *
- * Mirrors the discriminated result `karen:chat-attach` returns, minus `ok` --
+ * Mirrors the discriminated result `myra:chat-attach` returns, minus `ok` --
  * this is exactly what a successful attach produced, held in the renderer
  * until Send and handed back unchanged.
  */
@@ -93,7 +93,7 @@ import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
 import { ApiManager } from "./api/manager.ts";
 import { installApiIpc } from "./api/ipc.ts";
-import { KarenTray, claimSingleInstance, reveal } from "./tray.ts";
+import { MyraTray, claimSingleInstance, reveal } from "./tray.ts";
 import { displayModelName } from "../core/runtime/foreign.ts";
 import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
@@ -128,17 +128,17 @@ app.commandLine.appendSwitch("password-store", "gnome-libsecret");
  * Pin the application name before anything asks Electron where to put things.
  *
  * `app.getPath("userData")` derives from it, and the name differs between how
- * the app is launched: electron-vite dev takes package.json's "karen", a
- * packaged build takes electron-builder's productName "Karen", and running the
+ * the app is launched: electron-vite dev takes package.json's "myra", a
+ * packaged build takes electron-builder's productName "MyRA", and running the
  * built main directly gets the default "Electron". Three different data
  * directories for one app, which strands a downloaded model in whichever one
  * happened to be current -- a 30 GB file the app then reports as missing.
  *
  * Setting it explicitly also stops Chromium's caches being written into
- * ~/.config/karen, where Karen keeps settings, sessions and the encrypted
+ * ~/.config/myra, where MyRA keeps settings, sessions and the encrypted
  * secrets file. Those had been sharing a directory with Cookies and GPUCache.
  */
-app.setName("Karen");
+app.setName("MyRA");
 
 const config = new ConfigStore();
 const vault = new SecretVault();
@@ -146,7 +146,7 @@ const registry = new ToolRegistry();
 const runtime = new RuntimeManager();
 
 /**
- * The gateway that serves Karen's model to other apps.
+ * The gateway that serves MyRA's model to other apps.
  *
  * It is handed accessors rather than the runtime itself: what it needs is
  * "where do I forward to, right now" and "what may I say exists", and both
@@ -159,7 +159,7 @@ const api = new ApiManager({
   models: async () => {
     const loaded = runtime.lemonade.status.health?.modelLoaded;
     /* Only what is downloaded. Offering the whole 228-entry catalogue would
-       invite a client to ask for something that is not here, and Karen does
+       invite a client to ask for something that is not here, and MyRA does
        not expose model loading through the API. */
     const models = await runtime.api.listModels().catch(() => []);
     return models
@@ -178,11 +178,11 @@ let window_: BrowserWindow | undefined;
  * Whether the app is on its way out, as opposed to the window merely closing.
  *
  * With a tray, those stopped being the same event: closing the window hides it
- * and Karen keeps serving. This flag is what tells the close handler which one
+ * and MyRA keeps serving. This flag is what tells the close handler which one
  * is happening, and it is set only by the tray's Quit and by `before-quit`.
  */
 let quitting = false;
-let tray: KarenTray | undefined;
+let tray: MyraTray | undefined;
 let session_: Session | undefined;
 let inFlight: AbortController | undefined;
 /*
@@ -214,7 +214,7 @@ function send(channel: string, payload?: unknown): void {
 
 /** The live run, or null for "nothing is running", on one channel. */
 function publishActiveRun(): void {
-  send("karen:research-active", activeRun ?? null);
+  send("myra:research-active", activeRun ?? null);
 }
 
 /**
@@ -223,11 +223,11 @@ function publishActiveRun(): void {
  * The push alone is not enough for a page that mounts in the middle of a run: a
  * stage can take minutes, so the Research runs page opened during one sat
  * saying nothing until the next stage began -- indistinguishable from a run that
- * had died. `karen:meeting-state` has answered this question for meetings all
- * along, and `karen:work-state` now answers it for reviews and drafts.
+ * had died. `myra:meeting-state` has answered this question for meetings all
+ * along, and `myra:work-state` now answers it for reviews and drafts.
  */
 function installActiveRunQuestion(): void {
-  ipcMain.handle("karen:research-active-state", () => activeRun ?? null);
+  ipcMain.handle("myra:research-active-state", () => activeRun ?? null);
 }
 
 /**
@@ -380,13 +380,13 @@ function createWindow(): void {
    *
    * `setWindowOpenHandler` covers `target="_blank"` and `window.open`. It does
    * not cover a plain link, a `location.assign`, or a form post, any of which
-   * would replace Karen's own page with the destination -- which then runs
-   * inside the window that has Karen's preload bridge attached to it. The
+   * would replace MyRA's own page with the destination -- which then runs
+   * inside the window that has MyRA's preload bridge attached to it. The
    * renderer's request filter matches http and https URLs and so stops the
    * fetch, but it does not match `file://`, and a navigation to a local HTML
    * file is exactly the shape a malicious document would take.
    *
-   * So: the page Karen loaded is the only page this window ever shows.
+   * So: the page MyRA loaded is the only page this window ever shows.
    * Anything else is cancelled, and an http(s) address is handed to the
    * browser instead, which is where a person clicking a citation link expects
    * it to open anyway.
@@ -595,7 +595,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       ...(extra ? { extra } : {}),
       signal: inFlight.signal,
       approve,
-      onEvent: (event: AgentEvent) => send("karen:agent-event", event),
+      onEvent: (event: AgentEvent) => send("myra:agent-event", event),
       ...(limit ? { contextLimit: limit } : {}),
       contextUsed: conversation.contextTokens ?? 0,
       ...(conversation.compaction ? { compaction: conversation.compaction } : {}),
@@ -609,7 +609,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
         const { text } = await runSubagent({
           endpoint,
           ...(apiKey ? { apiKey } : {}),
-          /* `endpoint.model`, not `settings.llm.model`: for a model Karen is
+          /* `endpoint.model`, not `settings.llm.model`: for a model MyRA is
              serving, the configured name is empty and the daemon rejects a
              request that does not name one. Compaction would therefore have
              failed the first time it fired -- the same fault the chat turn
@@ -625,7 +625,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
     conversation.messages_.push(...result.messages);
     conversation.contextTokens = result.contextTokens;
     if (result.compaction) conversation.compaction = result.compaction;
-    send("karen:agent-event", {
+    send("myra:agent-event", {
       type: "done",
       result: JSON.stringify({
         ...result.usage,
@@ -634,7 +634,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       }),
     });
   } catch (err) {
-    send("karen:agent-event", { type: "error", text: (err as Error).message });
+    send("myra:agent-event", { type: "error", text: (err as Error).message });
   } finally {
     conversation.messages = conversation.messages_.length;
     await saveSession(conversation).catch(() => {});
@@ -689,7 +689,7 @@ function prompt(request: Record<string, unknown>): Promise<string | undefined> {
   const id = `p${++promptSeq}`;
   return new Promise((resolve) => {
     pending.set(id, resolve);
-    send("karen:prompt", { id, ...request });
+    send("myra:prompt", { id, ...request });
   });
 }
 
@@ -720,10 +720,10 @@ function levelsFor(
 }
 
 function installIpc(): void {
-  ipcMain.handle("karen:send", async (_e, text: string, attachments: unknown) => {
+  ipcMain.handle("myra:send", async (_e, text: string, attachments: unknown) => {
     void handleSend(String(text ?? ""), Array.isArray(attachments) ? (attachments as PendingAttachment[]) : []);
   });
-  ipcMain.handle("karen:abort", () => {
+  ipcMain.handle("myra:abort", () => {
     inFlight?.abort();
   });
 
@@ -734,7 +734,7 @@ function installIpc(): void {
    * has until the bytes are sniffed -- see extractDocument, which is tried
    * whenever the bytes do not sniff as one of sniffImage's formats.
    */
-  ipcMain.handle("karen:chat-attach", async (_e, name: unknown, bytes: unknown) => {
+  ipcMain.handle("myra:chat-attach", async (_e, name: unknown, bytes: unknown) => {
     const buffer = bytes as ArrayBuffer | Uint8Array | undefined;
     if (!buffer) return { ok: false, error: "Nothing was dropped." };
     const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
@@ -762,7 +762,7 @@ function installIpc(): void {
           canSee,
           ...(canSee
             ? {}
-            : { warning: "This model is not marked as reading images. Karen will send it anyway." }),
+            : { warning: "This model is not marked as reading images. MyRA will send it anyway." }),
         };
       } catch (err) {
         return { ok: false, error: (err as Error).message || "That image could not be read." };
@@ -797,11 +797,11 @@ function installIpc(): void {
     };
   });
 
-  ipcMain.handle("karen:chat-attach-remove", async (_e, id: unknown) => {
+  ipcMain.handle("myra:chat-attach-remove", async (_e, id: unknown) => {
     await deleteAttachment(currentSession().id, String(id ?? "")).catch(() => {});
   });
 
-  ipcMain.handle("karen:new-session", async () => {
+  ipcMain.handle("myra:new-session", async () => {
     if (session_ && session_.messages_.length) {
       await saveSession(session_).catch(() => {});
     } else if (session_) {
@@ -816,8 +816,8 @@ function installIpc(): void {
     resetCitations();
     return currentSession().id;
   });
-  ipcMain.handle("karen:list-sessions", () => listSessions());
-  ipcMain.handle("karen:open-session", async (_e, id: string) => {
+  ipcMain.handle("myra:list-sessions", () => listSessions());
+  ipcMain.handle("myra:open-session", async (_e, id: string) => {
     if (session_ && session_.messages_.length) await saveSession(session_).catch(() => {});
     const loaded = await loadSession(String(id));
     if (loaded) session_ = loaded;
@@ -831,18 +831,18 @@ function installIpc(): void {
     );
     return loaded?.messages_ ?? [];
   });
-  ipcMain.handle("karen:delete-session", async (_e, id: string) => {
+  ipcMain.handle("myra:delete-session", async (_e, id: string) => {
     await deleteSession(String(id));
     await deleteSessionAttachments(String(id)).catch(() => {});
     if (session_?.id === id) session_ = undefined;
   });
-  ipcMain.handle("karen:delete-all-sessions", async () => {
+  ipcMain.handle("myra:delete-all-sessions", async () => {
     await deleteAllSessions();
     await deleteAllAttachments().catch(() => {});
     session_ = undefined;
   });
 
-  ipcMain.handle("karen:get-settings", () => config.current);
+  ipcMain.handle("myra:get-settings", () => config.current);
 
   /* The Zotero folder the user named, handed to the module that looks for the
      library. Set here rather than read there, so the search path does not
@@ -858,8 +858,8 @@ function installIpc(): void {
   /* Whether this desktop actually shows a tray icon, which decides whether
      "keep running when closed" can do anything at all. Linux answers this
      differently per desktop, so it is reported rather than assumed. */
-  ipcMain.handle("karen:tray-available", () => tray?.available ?? false);
-  ipcMain.handle("karen:update-settings", async (_e, patch: unknown) => {
+  ipcMain.handle("myra:tray-available", () => tray?.available ?? false);
+  ipcMain.handle("myra:update-settings", async (_e, patch: unknown) => {
     const before = config.current.providers;
     const beforeDir = config.current.zoteroDataDir;
     const next = await config.update(patch as Partial<typeof config.current>);
@@ -882,8 +882,8 @@ function installIpc(): void {
     if (next.zoteroDataDir !== beforeDir) forgetZoteroSnapshot();
     return next;
   });
-  ipcMain.handle("karen:set-secret", (_e, name: string, value: string) => {
-    /* Checked rather than cast. The renderer is Karen's own code, but this
+  ipcMain.handle("myra:set-secret", (_e, name: string, value: string) => {
+    /* Checked rather than cast. The renderer is MyRA's own code, but this
        handler takes a name off the wire and writes it into the vault, and the
        set of things that may be written there should be stated somewhere
        rather than being whatever a caller passes. */
@@ -891,7 +891,7 @@ function installIpc(): void {
     if (!isSecretName(requested)) {
       throw new Error("Refusing to store a secret under an unknown name.");
     }
-    /* Provider keys go through karen:provider-key, which checks that the
+    /* Provider keys go through myra:provider-key, which checks that the
        provider exists. Allowing them here too would leave a second door into
        the vault with the check on only one of them -- and a key written for a
        provider that does not exist belongs to nothing and is cleaned up by
@@ -901,7 +901,7 @@ function installIpc(): void {
     }
     return vault.set(requested, String(value));
   });
-  ipcMain.handle("karen:secrets-backend", async () => ({
+  ipcMain.handle("myra:secrets-backend", async () => ({
     ...vault.status(),
     persistent: await vault.checkPersistence(),
     present: await vault.present(),
@@ -909,7 +909,7 @@ function installIpc(): void {
 
   /* No "transcription" any more: it is a model chosen from a list, not an
      endpoint someone types a URL into, so there is nothing here to discover. */
-  ipcMain.handle("karen:discover-models", async (_e, which: "llm" | "embeddings") => {
+  ipcMain.handle("myra:discover-models", async (_e, which: "llm" | "embeddings") => {
     const endpoint = config.current[which];
     /*
      * The daemon already has these, and asking for an endpoint first was wrong.
@@ -919,7 +919,7 @@ function installIpc(): void {
      * -- so a user who has downloaded one has it available with nothing to
      * configure. This returned "No base URL is set for this endpoint" instead,
      * sending somebody to Settings to describe a server they are already
-     * running through Karen.
+     * running through MyRA.
      *
      * Both sources are offered when both exist, local first, because the
      * question the picker asks is "which model", not "whose server".
@@ -985,7 +985,7 @@ function installIpc(): void {
    * its key retyped to refresh its model list.
    */
   ipcMain.handle(
-    "karen:provider-models",
+    "myra:provider-models",
     async (_e, opts: { baseUrl?: unknown; id?: unknown; apiKey?: unknown }) => {
       const baseUrl = String(opts?.baseUrl ?? "").trim();
       if (!baseUrl) return { ok: false, error: "No base URL is set for this provider." };
@@ -1030,8 +1030,8 @@ function installIpc(): void {
    * Ask a provider, in one request, whether it sends the model's reasoning.
    *
    * The answer cannot be worked out from the outside -- "the model did not
-   * reason", "the provider withholds it", "it needs asking" and "Karen does not
-   * know that field name" all look identical from the chat window. So Karen
+   * reason", "the provider withholds it", "it needs asking" and "MyRA does not
+   * know that field name" all look identical from the chat window. So MyRA
    * asks, twice if the first answer is nothing: once plainly, once with the
    * fields that ask for reasoning. If asking is what worked, the switch is
    * turned on for that provider and stays on.
@@ -1047,7 +1047,7 @@ function installIpc(): void {
    * provider (a lookup) and cheap enough for a local one (two or three
    * template renders, no inference), and cached per model either way.
    */
-  ipcMain.handle("karen:reasoning-capability", async () => {
+  ipcMain.handle("myra:reasoning-capability", async () => {
     try {
       const chosen = config.current.llm.model ?? "";
       const provider = providerFor(config.current.providers, chosen);
@@ -1086,7 +1086,7 @@ function installIpc(): void {
   /**
    * The persona a given model answers as, and the key it is stored under.
    *
-   * Main derives the key, the way `karen:set-reasoning` does and for the same
+   * Main derives the key, the way `myra:set-reasoning` does and for the same
    * reason: a hosted choice is keyed `provider::model` while a local one is
    * keyed by the model that actually answers, and the window has been wrong
    * about which is which before. Three per-model records now share that key --
@@ -1099,7 +1099,7 @@ function installIpc(): void {
     return chosen || runtime.chatModel()?.id || "";
   };
 
-  ipcMain.handle("karen:model-prompt", (_e, ref?: unknown) => {
+  ipcMain.handle("myra:model-prompt", (_e, ref?: unknown) => {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
     return {
       ok: true,
@@ -1119,7 +1119,7 @@ function installIpc(): void {
    * Keyed the same way everything per-model is keyed, and derived in the same
    * one place: `modelKey` above.
    */
-  ipcMain.handle("karen:model-facts", async (_e, ref?: unknown) => {
+  ipcMain.handle("myra:model-facts", async (_e, ref?: unknown) => {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
     const facts = await factsFor(key);
     return {
@@ -1141,13 +1141,13 @@ function installIpc(): void {
     };
   });
 
-  ipcMain.handle("karen:model-facts-ignore", async (_e, ref: unknown, ignore: unknown) => {
+  ipcMain.handle("myra:model-facts-ignore", async (_e, ref: unknown, ignore: unknown) => {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
     await setIgnoreSuggested(key, Boolean(ignore));
     return { ok: true };
   });
 
-  ipcMain.handle("karen:set-model-prompt", async (_e, ref: unknown, value?: string | null) => {
+  ipcMain.handle("myra:set-model-prompt", async (_e, ref: unknown, value?: string | null) => {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
     if (!key) return { ok: false, error: "No model is chosen." };
     const next = { ...config.current.systemPrompts };
@@ -1164,7 +1164,7 @@ function installIpc(): void {
    * independent answers, and writing one of them must not disturb the other.
    */
   ipcMain.handle(
-    "karen:set-reasoning",
+    "myra:set-reasoning",
     async (_e, dialectId: unknown, value?: string | null) => {
       const chosen = config.current.llm.model ?? "";
       const key = chosen.trim() || runtime.chatModel()?.id || "";
@@ -1200,7 +1200,7 @@ function installIpc(): void {
   });
 
   ipcMain.handle(
-    "karen:provider-reasoning",
+    "myra:provider-reasoning",
     async (_e, opts: { baseUrl?: unknown; id?: unknown; model?: unknown; apiKey?: unknown }) => {
       const baseUrl = String(opts?.baseUrl ?? "").trim();
       const model = String(opts?.model ?? "").trim();
@@ -1231,7 +1231,7 @@ function installIpc(): void {
        * The second question, asked in the same trip: will this endpoint take
        * the field that says HOW HARD to think?
        *
-       * Karen knows what each vendor calls it. What it cannot know from the
+       * MyRA knows what each vendor calls it. What it cannot know from the
        * documentation is whether the address in this box will accept it -- a
        * proxy, a gateway or an older deployment may not -- and a strict server
        * refuses the whole request over one unknown field. So it is sent once,
@@ -1283,7 +1283,7 @@ function installIpc(): void {
   );
 
   /** A provider's API key. Write-only from the renderer, like every other secret. */
-  ipcMain.handle("karen:provider-key", async (_e, id: unknown, value: unknown) => {
+  ipcMain.handle("myra:provider-key", async (_e, id: unknown, value: unknown) => {
     const target = String(id ?? "");
     /* Only a provider that exists. Otherwise this writes keys for providers
        nobody can see and nothing will ever clean up. */
@@ -1300,7 +1300,7 @@ function installIpc(): void {
    * saved key and no key look identical -- so the honest thing to do about a
    * provider that is refusing requests is retype the key, every time.
    */
-  ipcMain.handle("karen:provider-keys-present", async () => {
+  ipcMain.handle("myra:provider-keys-present", async () => {
     const out: Record<string, boolean> = {};
     for (const provider of config.current.providers) {
       out[provider.id] = Boolean(await vault.get(providerSecret(provider.id)));
@@ -1308,7 +1308,7 @@ function installIpc(): void {
     return out;
   });
 
-  ipcMain.handle("karen:test-endpoint", async (_e, which: "llm" | "embeddings") => {
+  ipcMain.handle("myra:test-endpoint", async (_e, which: "llm" | "embeddings") => {
     const endpoint = config.current[which];
     if (!endpoint.baseUrl) return { ok: false, error: "No base URL is set." };
     try {
@@ -1321,7 +1321,7 @@ function installIpc(): void {
     }
   });
 
-  ipcMain.handle("karen:choose-directory", async (_e, opts: { title?: string; current?: string }) => {
+  ipcMain.handle("myra:choose-directory", async (_e, opts: { title?: string; current?: string }) => {
     const result = await dialog.showOpenDialog(window_!, {
       title: opts?.title ?? "Choose a folder",
       ...(opts?.current ? { defaultPath: opts.current } : {}),
@@ -1347,7 +1347,7 @@ function installIpc(): void {
    * macOS-and-Windows only, and "not-determined" is the state before the first
    * prompt, which is why it is reported rather than treated as a refusal.
    */
-  ipcMain.handle("karen:media-access", () => {
+  ipcMain.handle("myra:media-access", () => {
     if (process.platform !== "darwin") return { microphone: "granted", screen: "granted" };
     return {
       microphone: systemPreferences.getMediaAccessStatus("microphone"),
@@ -1364,12 +1364,12 @@ function installIpc(): void {
    * once and then requires System Settings -- which is why the UI says where to
    * go rather than offering the button again.
    */
-  ipcMain.handle("karen:request-microphone", async () => {
+  ipcMain.handle("myra:request-microphone", async () => {
     if (process.platform !== "darwin") return true;
     return await systemPreferences.askForMediaAccess("microphone");
   });
 
-  ipcMain.handle("karen:engines", () => engines());
+  ipcMain.handle("myra:engines", () => engines());
 
   /*
    * Installing pandoc, on a gesture.
@@ -1379,21 +1379,21 @@ function installIpc(): void {
    * the button twice does not fetch 34 MB twice.
    */
   let pandocInstall: AbortController | undefined;
-  ipcMain.handle("karen:install-pandoc", async () => {
+  ipcMain.handle("myra:install-pandoc", async () => {
     if (pandocInstall) return { ok: false, error: "An install is already running." };
     pandocInstall = new AbortController();
     try {
       const { installPandoc } = await import("./tools/pandoc.ts");
       const result = await installPandoc({
         signal: pandocInstall.signal,
-        onProgress: (p) => send("karen:setup-progress", p),
+        onProgress: (p) => send("myra:setup-progress", p),
       });
       return { ok: true, ...result };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     } finally {
       pandocInstall = undefined;
-      send("karen:setup-progress", undefined);
+      send("myra:setup-progress", undefined);
     }
   });
 
@@ -1404,17 +1404,17 @@ function installIpc(): void {
    * cannot drift from the code -- test/destinations.test.ts fails if a host
    * appears in a fetch and not in the table.
    */
-  ipcMain.handle("karen:privacy", () => ({
+  ipcMain.handle("myra:privacy", () => ({
     destinations: DESTINATIONS,
     blocked,
     endpoints: configuredEndpoints(config.current),
   }));
 
-  ipcMain.handle("karen:report-devices", (_e, devices: AudioSource[]) => {
+  ipcMain.handle("myra:report-devices", (_e, devices: AudioSource[]) => {
     setDeviceResolver(async () => devices);
   });
 
-  ipcMain.handle("karen:answer-prompt", (_e, id: string, answer: string | undefined) => {
+  ipcMain.handle("myra:answer-prompt", (_e, id: string, answer: string | undefined) => {
     const resolve = pending.get(String(id));
     if (resolve) {
       pending.delete(String(id));
@@ -1434,7 +1434,7 @@ function installIpc(): void {
    * said. Wanting to look something up is not the same as wanting to talk to a
    * language model about it.
    */
-  ipcMain.handle("karen:academic-search", (_e, query: string, opts: LookupOptions) =>
+  ipcMain.handle("myra:academic-search", (_e, query: string, opts: LookupOptions) =>
     academicLookup(String(query ?? ""), {
       page: Number(opts?.page) || 1,
       sort: opts?.sort === "citations" || opts?.sort === "newest" ? opts.sort : "relevance",
@@ -1453,7 +1453,7 @@ function installIpc(): void {
    * applications. This is reachable only from a click in the results list --
    * no tool exposes it, so the model cannot ask for it.
    */
-  ipcMain.handle("karen:open-external", async (_e, url: string) => {
+  ipcMain.handle("myra:open-external", async (_e, url: string) => {
     const raw = String(url ?? "");
     let parsed: URL;
     try {
@@ -1468,13 +1468,13 @@ function installIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("karen:research-runs", () => listRuns());
-  ipcMain.handle("karen:research-run", (_e, id: string) => readRun(String(id)));
-  ipcMain.handle("karen:research-source", (_e, id: string, n: number) =>
+  ipcMain.handle("myra:research-runs", () => listRuns());
+  ipcMain.handle("myra:research-run", (_e, id: string) => readRun(String(id)));
+  ipcMain.handle("myra:research-source", (_e, id: string, n: number) =>
     readRunSource(String(id), Number(n)),
   );
   /** Reveal a run's directory, so the raw files are one click away. */
-  ipcMain.handle("karen:research-reveal", async (_e, id: string) => {
+  ipcMain.handle("myra:research-reveal", async (_e, id: string) => {
     const run = await ResearchRun.open(String(id));
     await shell.openPath(run.dir);
   });
@@ -1486,7 +1486,7 @@ function installIpc(): void {
    * small act it looks like next to deleting a chat. The number of files and
    * the size on disk are the two facts that make that concrete.
    */
-  ipcMain.handle("karen:research-footprint", async (_e, id: string) => {
+  ipcMain.handle("myra:research-footprint", async (_e, id: string) => {
     try {
       return { ok: true, footprint: await runFootprint(String(id)) };
     } catch (err) {
@@ -1494,7 +1494,7 @@ function installIpc(): void {
     }
   });
 
-  ipcMain.handle("karen:research-delete", async (_e, id: string) => {
+  ipcMain.handle("myra:research-delete", async (_e, id: string) => {
     try {
       const gone = await deleteRun(String(id));
       return { ok: true, deleted: gone, runs: await listRuns() };
@@ -1511,7 +1511,7 @@ function installIpc(): void {
    * a file manager somewhere is worth checking against the same jail the
    * writing side enforces rather than trusting the round trip.
    */
-  ipcMain.handle("karen:document-reveal", async (_e, path: unknown) => {
+  ipcMain.handle("myra:document-reveal", async (_e, path: unknown) => {
     const abs = await resolveInJail(documentsDir(), String(path ?? ""));
     await shell.openPath(dirname(abs));
   });
@@ -1524,7 +1524,7 @@ function installIpc(): void {
    * the user fixes in Zotero, and a picker that was merely empty would be
    * indistinguishable from a library with no collections in it.
    */
-  ipcMain.handle("karen:zotero-collections", async () => {
+  ipcMain.handle("myra:zotero-collections", async () => {
     try {
       const collections = collectionTree(await libraryCollections());
       /* Which way in answered, so the picker can say when it is reading the
@@ -1542,11 +1542,11 @@ function installIpc(): void {
    * For the panel in Settings → Library. It exists because the failure a user
    * actually reports is "it says it cannot reach Zotero", which is one message
    * covering two unrelated problems -- a switch inside Zotero, and a library
-   * folder somewhere Karen did not look. This says which, names every place it
+   * folder somewhere MyRA did not look. This says which, names every place it
    * looked, and reports what Zotero's own profile said about where the library
    * is, so the answer does not depend on anyone reading source.
    */
-  ipcMain.handle("karen:zotero-status", async () => {
+  ipcMain.handle("myra:zotero-status", async () => {
     try {
       return { ok: true, ...(await libraryStatus()) };
     } catch (err) {
@@ -1563,12 +1563,12 @@ function installIpc(): void {
    * unconditional. A copy button that fails is worse than none, because the
    * user walks away believing they have the text.
    */
-  ipcMain.handle("karen:copy", (_e, text: unknown) => {
+  ipcMain.handle("myra:copy", (_e, text: unknown) => {
     clipboard.writeText(String(text ?? ""));
   });
 
-  ipcMain.handle("karen:get-research", () => readResearchConfig());
-  ipcMain.handle("karen:set-research", async (_e, next: unknown) => {
+  ipcMain.handle("myra:get-research", () => readResearchConfig());
+  ipcMain.handle("myra:set-research", async (_e, next: unknown) => {
     await makeOwnDir(dirname(researchConfigPath()));
     // Built by the same module that reads it back, so a field cannot survive
     // one side and be dropped by the other -- which is what the two hand-kept
@@ -1582,7 +1582,7 @@ function installIpc(): void {
 }
 
 /**
- * One-time sweep over content an older Karen already wrote.
+ * One-time sweep over content an older MyRA already wrote.
  *
  * Narrowing the roots protects everything written from now on, and nothing
  * that is already there. The runs, meetings and drafts on disk were created
@@ -1595,7 +1595,7 @@ function installIpc(): void {
  * the first pass everything loose has already been narrowed, and everything
  * written since was private from birth.
  *
- * Only Karen's own default locations. A root the user pointed somewhere of
+ * Only MyRA's own default locations. A root the user pointed somewhere of
  * their own is theirs -- see makePrivateDir -- and the Obsidian vault
  * especially so.
  */
@@ -1615,12 +1615,12 @@ async function tightenExistingContent(): Promise<void> {
   ] as const) {
     if (current === fallback) roots.push(current);
   }
-  if (!process.env["KAREN_RESEARCH_ROOT"]) roots.push(researchRoot());
+  if (!process.env["MYRA_RESEARCH_ROOT"]) roots.push(researchRoot());
   roots.push(CONFIG_DIR);
 
   for (const root of roots) await tightenTree(root).catch(() => 0);
 
-  /* Written even if a sweep partly failed. A tree Karen cannot chmod is one it
+  /* Written even if a sweep partly failed. A tree MyRA cannot chmod is one it
      will not manage to chmod on the next launch either, and retrying the whole
      walk forever is worse than leaving it. */
   await writeFile(stamp, new Date().toISOString() + "\n", { mode: OWNER_ONLY_FILE }).catch(
@@ -1637,7 +1637,7 @@ async function tightenExistingContent(): Promise<void> {
  * its own screen. It is now a model chosen from a list, and the list is drawn
  * from the local runtime and from the user's providers -- which is what that
  * endpoint always was, described in the app's own vocabulary. Rather than
- * dropping the setting and quietly unconfiguring anyone pointing Karen at their
+ * dropping the setting and quietly unconfiguring anyone pointing MyRA at their
  * own whisper server, it is carried across: a provider is created, the key
  * moves with it, and the choice points at it.
  *
@@ -1706,7 +1706,7 @@ async function main(): Promise<void> {
    *
    * Both were created with the umask and came out 0775 on a stock Ubuntu --
    * measured, not assumed. The individual files inside were already 0600, so
-   * nothing secret was ever exposed, but everything Karen wrote WITHOUT an
+   * nothing secret was ever exposed, but everything MyRA wrote WITHOUT an
    * explicit mode was 0644 and readable by any other account on the machine.
    * Every writer now passes a mode; this narrows the directories an existing
    * install already has, which no amount of care in new code would reach.
@@ -1723,7 +1723,7 @@ async function main(): Promise<void> {
   await migrateTranscriptionEndpoint();
 
   /*
-   * The content roots too -- but only the ones Karen chose for itself.
+   * The content roots too -- but only the ones MyRA chose for itself.
    *
    * A per-meeting folder is created private now, which protects the transcript
    * inside it. The folder ABOVE it is a different matter: an install that
@@ -1731,7 +1731,7 @@ async function main(): Promise<void> {
    * ("2026-08-27T09-46-56-quarterly-review"), so the titles of every meeting
    * ever recorded stay readable even when the recordings are not.
    *
-   * The test is whether the path is still the default. Where it is, Karen put
+   * The test is whether the path is still the default. Where it is, MyRA put
    * it there and may tighten it. Where the user has pointed it somewhere of
    * their own -- and always for the Obsidian vault, which is theirs and full of
    * things that have nothing to do with this app -- it is left alone, because
@@ -1744,7 +1744,7 @@ async function main(): Promise<void> {
   ] as const) {
     if (current === fallback) await makeOwnDir(current).catch(() => undefined);
   }
-  if (!process.env["KAREN_RESEARCH_ROOT"]) {
+  if (!process.env["MYRA_RESEARCH_ROOT"]) {
     await makeOwnDir(researchRoot()).catch(() => undefined);
   }
 
@@ -1821,17 +1821,17 @@ async function main(): Promise<void> {
       },
       input: (title, placeholder) => ask("input", title, placeholder),
       editor: (title, prefill) => ask("editor", title, prefill),
-      notify: (message) => send("karen:research-progress", message),
+      notify: (message) => send("myra:research-progress", message),
     },
     onProgress: (note) => {
-      send("karen:research-progress", note);
+      send("myra:research-progress", note);
       if (activeRun) {
         activeRun.note = note;
         publishActiveRun();
       }
     },
     onStage: (stage) => {
-      send("karen:research-stage", stage);
+      send("myra:research-stage", stage);
       /* The pipeline sends an empty stage when it is finished, which is the
          one signal that the run is over while the turn carries on writing. */
       if (!stage) activeRun = undefined;
@@ -1848,7 +1848,7 @@ async function main(): Promise<void> {
   /*
    * Drafting shares the research pipeline's dialog and its progress channel.
    *
-   * Deliberately the same two: from where the user sits, "Karen is working on
+   * Deliberately the same two: from where the user sits, "MyRA is working on
    * something long and will ask me to approve a plan" is one experience, and
    * giving it a second dialog style and a second status line would make it look
    * like two features that happen to resemble each other.
@@ -1863,13 +1863,13 @@ async function main(): Promise<void> {
        is written into a document as its provenance. */
     model: () => basename(runtime.chatModel()?.id ?? "") || config.current.llm.model || "",
     ui: { editor: (title, prefill) => ask("editor", title, prefill) },
-    onProgress: (note) => send("karen:research-progress", note),
+    onProgress: (note) => send("myra:research-progress", note),
   });
 
   /* Every document the model writes, as it is written. The draft flow saves
      after each section, so this fires repeatedly for one file with `final`
      false until the last one. */
-  setDocumentWatcher((doc) => send("karen:document", doc));
+  setDocumentWatcher((doc) => send("myra:document", doc));
 
   await runtime.load();
   /*
@@ -1889,7 +1889,7 @@ async function main(): Promise<void> {
     await config.update({ llm: { ...config.current.llm, model: "" } });
     // The bar reads this from settings; without the nudge it keeps the old name
     // until something else happens to refresh it.
-    send("karen:settings", config.current);
+    send("myra:settings", config.current);
   });
 
   await api.load();
@@ -2105,7 +2105,7 @@ async function main(): Promise<void> {
      * Said out loud when there isn't one. The failure this replaces was silent
      * and misdirected: with no endpoint set, the request went to a base URL of
      * "" and surfaced as a fetch error about a malformed address, which reads
-     * as a bug in Karen rather than as "load a model". A stale address from an
+     * as a bug in MyRA rather than as "load a model". A stale address from an
      * older build did worse -- it named a host that had not existed for weeks.
      */
     const llm = config.current.llm;
@@ -2197,8 +2197,8 @@ async function main(): Promise<void> {
   /* The snapshot a page asks for when it mounts. Without it, coming back to a
      review that is four minutes into its second reviewer shows an empty page
      until the reviewer after that begins -- which is the whole complaint
-     `karen:research-active` still has. */
-  ipcMain.handle("karen:work-state", () => jobs.current() ?? null);
+     `myra:research-active` still has. */
+  ipcMain.handle("myra:work-state", () => jobs.current() ?? null);
   installActiveRunQuestion();
 
   installPaperIpc({
@@ -2233,11 +2233,11 @@ async function main(): Promise<void> {
 }
 
 /**
- * One Karen at a time.
+ * One MyRA at a time.
  *
  * Two would each start a Lemonade daemon and the second would fail to bind the
  * API port. It is also the way back to a hidden window when no tray icon is
- * visible: launching Karen again raises the one already running.
+ * visible: launching MyRA again raises the one already running.
  */
 const soleInstance = claimSingleInstance(() => reveal(window_));
 if (!soleInstance) {
@@ -2249,7 +2249,7 @@ if (!soleInstance) {
 }
 
 /**
- * Say once that closing the window did not stop Karen.
+ * Say once that closing the window did not stop MyRA.
  *
  * A tray icon is easy to miss, and an app that appears to have quit while
  * holding several gigabytes of model is exactly the surprise this should not
@@ -2263,8 +2263,8 @@ function noteHidden(): void {
   try {
     if (!Notification.isSupported()) return;
     new Notification({
-      title: "Karen is still running",
-      body: "Your model and the API stay up. Quit from the Karen icon in your tray.",
+      title: "MyRA is still running",
+      body: "Your model and the API stay up. Quit from the MyRA icon in your tray.",
     }).show();
   } catch {
     // A desktop without notifications is not a reason to fail a window close.
@@ -2328,11 +2328,11 @@ if (soleInstance) app.whenReady().then(() => {
   void main();
 
   /*
-   * The tray is created after the window so that "Open Karen" always has
+   * The tray is created after the window so that "Open MyRA" always has
    * something to open, and its menu is refreshed from the two things that
    * change underneath it: which model is loaded, and whether the API serves.
    */
-  tray = new KarenTray({
+  tray = new MyraTray({
     show: () => {
       if (!window_ || window_.isDestroyed()) createWindow();
       else reveal(window_);
@@ -2362,8 +2362,8 @@ if (soleInstance) app.whenReady().then(() => {
   /*
    * Printed after a moment, and reporting the icon rather than the object.
    *
-   * It decides whether closing the window quits Karen, and on Linux the answer
-   * depends on the desktop rather than on anything Karen controls. It used to
+   * It decides whether closing the window quits MyRA, and on Linux the answer
+   * depends on the desktop rather than on anything MyRA controls. It used to
    * print the result of `start()`, which is only whether a Tray was
    * constructed -- and this machine constructs one happily while publishing no
    * icon at all, so the line said the window would stay running and be
@@ -2375,8 +2375,8 @@ if (soleInstance) app.whenReady().then(() => {
   setTimeout(() => {
     console.log(
       tray?.available
-        ? "Tray icon is showing; closing the window will keep Karen running."
-        : "No tray icon appeared on this desktop; closing the window will quit Karen.",
+        ? "Tray icon is showing; closing the window will keep MyRA running."
+        : "No tray icon appeared on this desktop; closing the window will quit MyRA.",
     );
   }, 2000).unref?.();
   runtime.onChange(() => tray?.refresh());
@@ -2389,7 +2389,7 @@ if (soleInstance) app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  /* A hidden window is not a closed one, so this does not fire while Karen is
+  /* A hidden window is not a closed one, so this does not fire while MyRA is
      in the tray. It fires when the window was really destroyed, which now only
      happens on the way out or when the tray is unavailable. */
   if (process.platform !== "darwin") app.quit();
@@ -2430,7 +2430,7 @@ process.on("exit", () => {
  * `void`-ed promise, every timer. When it fires the app dies without running
  * `before-quit`, and the model server -- which is a child of a process that is
  * already gone -- is orphaned holding several gigabytes of memory. The user
- * sees Karen vanish and their RAM stay spent, which is the exact failure the
+ * sees MyRA vanish and their RAM stay spent, which is the exact failure the
  * shutdown path above exists to prevent.
  *
  * So both handlers do the same two things: say what happened somewhere a
@@ -2439,10 +2439,10 @@ process.on("exit", () => {
  * means running with state that has already been left half-written.
  */
 process.on("unhandledRejection", (reason) => {
-  console.error("[karen] unhandled rejection:", reason);
+  console.error("[myra] unhandled rejection:", reason);
 });
 process.on("uncaughtException", (err) => {
-  console.error("[karen] uncaught exception:", err);
+  console.error("[myra] uncaught exception:", err);
   quitting = true;
   try {
     runtime.killNow();

@@ -65,7 +65,7 @@ export async function pdfToText(
   const header = new TextDecoder().decode(bytes.slice(0, 5));
   if (header !== "%PDF-") throw new PdfError("not a PDF (missing %PDF- header)");
 
-  const dir = await mkdtemp(join(tmpdir(), "karen-pdf-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-pdf-"));
   const src = join(dir, "in.pdf");
   try {
     await writeFile(src, bytes, { mode: 0o600 });

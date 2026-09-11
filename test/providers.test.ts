@@ -53,7 +53,7 @@ test("an unparseable endpoint is treated as leaving the machine", () => {
 });
 
 test("calling a remote endpoint local does not make it local", () => {
-  /* The label can only make Karen more cautious. This is the assertion that
+  /* The label can only make MyRA more cautious. This is the assertion that
      stops a mislabelled provider putting a false "stays on your machine" in
      front of the one decision where it matters. */
   const mislabelled = provider({ kind: "local", baseUrl: "https://api.openai.com/v1" });
@@ -84,7 +84,7 @@ test("a model id containing a colon survives qualification", () => {
 });
 
 test("a bare model is not external; a model whose provider is gone is", () => {
-  /* A provider deleted since the choice was made leaves a model Karen cannot
+  /* A provider deleted since the choice was made leaves a model MyRA cannot
      account for. The honest answer is that it does not know where that goes,
      and not knowing is treated as leaving. */
   const providers = [provider({ id: "p1", kind: "local" })];

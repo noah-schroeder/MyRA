@@ -25,9 +25,9 @@ const RULES = [
 ];
 
 describe("the persona", () => {
-  it("is Karen's own when nothing is set", () => {
+  it("is MyRA's own when nothing is set", () => {
     const prompt = systemPrompt({ mode: "web" });
-    assert.match(prompt, /You are Karen, an assistant for academic work/);
+    assert.match(prompt, /You are Myra, an assistant for academic work/);
     assert.ok(prompt.startsWith(DEFAULT_PERSONA.split("\n")[0]!));
   });
 
@@ -39,7 +39,7 @@ describe("the persona", () => {
     assert.match(prompt, /You are Hilde, a terse Norwegian statistician/);
     /* Replaced, not appended to: two personas in one prompt is a model told it
        is two people. */
-    assert.doesNotMatch(prompt, /You are Karen/);
+    assert.doesNotMatch(prompt, /You are Myra/);
     for (const rule of RULES) assert.match(prompt, rule);
   });
 
@@ -54,8 +54,8 @@ describe("the persona", () => {
     for (const rule of RULES) assert.match(prompt, rule);
   });
 
-  it("falls back to Karen's own when it is only whitespace", () => {
-    assert.match(systemPrompt({ persona: "   \n  ", mode: "web" }), /You are Karen/);
+  it("falls back to MyRA's own when it is only whitespace", () => {
+    assert.match(systemPrompt({ persona: "   \n  ", mode: "web" }), /You are Myra/);
   });
 });
 

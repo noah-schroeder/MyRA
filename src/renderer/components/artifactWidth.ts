@@ -6,7 +6,7 @@
  */
 
 /** Remembered between launches; a reading width is not a per-document choice. */
-export const WIDTH_KEY = "karen.artifactWidth";
+export const WIDTH_KEY = "myra.artifactWidth";
 
 /** What it was before the edge could be dragged. */
 export const DEFAULT_WIDTH = 400;

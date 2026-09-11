@@ -66,7 +66,7 @@ export function ImagePage({
   const box = useRef<HTMLTextAreaElement>(null);
 
   const refresh = useCallback(async (): Promise<ImageRecord[]> => {
-    const result = await window.karen.imageList();
+    const result = await window.myra.imageList();
     setImages(result.images);
     return result.images;
   }, []);
@@ -99,7 +99,7 @@ export function ImagePage({
     if (!typed || busy) return;
     setError(undefined);
     setBusy(true);
-    const result = await window.karen.imageGenerate({
+    const result = await window.myra.imageGenerate({
       prompt: typed,
       ...(negative.trim() ? { negative: negative.trim() } : {}),
       ...(preset ? { preset } : {}),
@@ -118,7 +118,7 @@ export function ImagePage({
   };
 
   const remove = async (record: ImageRecord): Promise<void> => {
-    const result = await window.karen.imageDelete(record.id);
+    const result = await window.myra.imageDelete(record.id);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -259,7 +259,7 @@ export function ImagePage({
                 value={settings.image.size}
                 onChange={(e) => {
                   const size = e.target.value;
-                  void window.karen
+                  void window.myra
                     .updateSettings({ image: { ...settings.image, size } })
                     .then(onSettingsChange);
                 }}
@@ -277,7 +277,7 @@ export function ImagePage({
             {busy ? (
               <>
                 <span className="dim">{elapsed}s</span>
-                <button type="button" onClick={() => void window.karen.imageCancel()}>
+                <button type="button" onClick={() => void window.myra.imageCancel()}>
                   Stop
                 </button>
               </>
@@ -339,10 +339,10 @@ function Shown({
         </p>
         <div className="image-actions">
           <button type="button" onClick={() => onReuse(record)}>Use this prompt again</button>
-          <button type="button" onClick={() => void window.karen.imageSaveCopy(record.id)}>
+          <button type="button" onClick={() => void window.myra.imageSaveCopy(record.id)}>
             Save a copy…
           </button>
-          <button type="button" onClick={() => void window.karen.imageReveal(record.id)}>
+          <button type="button" onClick={() => void window.myra.imageReveal(record.id)}>
             Show in folder
           </button>
           <span className="composer-spacer" />
@@ -384,7 +384,7 @@ function useBytes(record: ImageRecord): string | undefined {
       return;
     }
     let live = true;
-    void window.karen.imageRead(record.id).then((r) => {
+    void window.myra.imageRead(record.id).then((r) => {
       if (!live || !r.ok || !r.image) return;
       setUrl(urlFor(record.id, r.image, r.mime ?? record.mime));
     });

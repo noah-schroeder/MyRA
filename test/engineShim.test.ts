@@ -12,7 +12,7 @@
  * second time with the GPU emptied first, which is what rules out memory.
  *
  * Measured cause: whisper-server v1.8.4 and kokoro's koko b17 both need
- * GLIBC_2.38, while the llama.cpp build needs 2.34. Karen already carries a
+ * GLIBC_2.38, while the llama.cpp build needs 2.34. MyRA already carries a
  * newer glibc for `lemond` on such a machine; the engines get none of it
  * because Lemonade spawns them itself.
  */
@@ -34,7 +34,7 @@ const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]);
 
 /** A directory shaped like one Lemonade installs an engine into. */
 async function engineDir(names: string[] = ["whisper-server"]): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "karen-engine-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-engine-"));
   for (const name of names) {
     await writeFile(join(dir, name), ELF);
     await chmod(join(dir, name), 0o755);
@@ -45,9 +45,9 @@ async function engineDir(names: string[] = ["whisper-server"]): Promise<string> 
   return dir;
 }
 
-/** A stand-in for the runtime Karen ships beside lemond. */
+/** A stand-in for the runtime MyRA ships beside lemond. */
 async function runtimeDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "karen-libc-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-libc-"));
   await mkdir(join(dir, "libc"));
   for (const name of ["libc.so.6", "libm.so.6", "libstdc++.so.6"]) {
     await writeFile(join(dir, "libc", name), ELF);
@@ -109,7 +109,7 @@ describe("finding what to wrap", () => {
   });
 
   it("reads Lemonade's own bin/<recipe>/<backend> layout", async () => {
-    const cache = await mkdtemp(join(tmpdir(), "karen-cache-"));
+    const cache = await mkdtemp(join(tmpdir(), "myra-cache-"));
     await mkdir(join(cache, "bin", "whispercpp", "vulkan"), { recursive: true });
     await mkdir(join(cache, "bin", "kokoro", "cpu"), { recursive: true });
     const found = (await engineDirs(cache)).map((e) => `${e.recipe}:${e.backend}`).sort();
@@ -151,19 +151,19 @@ describe("wrapping an engine", () => {
     assert.equal((await readdir(dir)).filter((n) => n.endsWith(REAL_SUFFIX)).length, 1);
   });
 
-  it("leaves the machine alone when Karen did not have to bundle a C library", async () => {
+  it("leaves the machine alone when MyRA did not have to bundle a C library", async () => {
     /* The common case, and the reason this costs nothing on a modern system:
        no loader beside lemond means the host is new enough for everything. */
-    const cache = await mkdtemp(join(tmpdir(), "karen-cache-"));
+    const cache = await mkdtemp(join(tmpdir(), "myra-cache-"));
     await mkdir(join(cache, "bin", "whispercpp", "vulkan"), { recursive: true });
-    assert.deepEqual(await repairEngines(cache, await mkdtemp(join(tmpdir(), "karen-lemond-"))), []);
+    assert.deepEqual(await repairEngines(cache, await mkdtemp(join(tmpdir(), "myra-lemond-"))), []);
   });
 });
 
 describe("after Lemonade upgrades an engine", () => {
   it("wraps the new binaries, rather than trusting a leftover rename", async () => {
     /* An upgrade unpacks fresh binaries over the shims and leaves the renamed
-       originals in place. A directory that merely CONTAINS a `.karen-real` is
+       originals in place. A directory that merely CONTAINS a `.myra-real` is
        therefore not evidence of anything, and treating it as evidence would
        silently strand the engine as unstartable again. */
     const dir = await engineDir();

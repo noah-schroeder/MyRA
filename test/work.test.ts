@@ -12,7 +12,7 @@
  * A page that arrives late gets everything. This is the difference between
  * coming back to a review four minutes into its second reviewer and seeing that
  * reviewer, and seeing an empty page until the third begins -- which is what
- * `karen:research-active`, having no such question, still does.
+ * `myra:research-active`, having no such question, still does.
  *
  * And one job at a time, across both features, because two long generations on
  * one card is the out-of-memory meetings avoids by transcribing serially.

@@ -200,7 +200,7 @@ test("a missing embeddings key is reported as a key problem, not a network one",
       configuredEmbeddingEndpoint({
         embeddings: {
           baseUrl: "http://x/v1",
-          envVar: "KAREN_TEST_EMBED_KEY_ABSENT",
+          envVar: "MYRA_TEST_EMBED_KEY_ABSENT",
           model: "m",
           timeoutMs: 0,
         },
@@ -381,7 +381,7 @@ test("role choices survive to the next run", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const dir = await mkdtemp(join(tmpdir(), "karen-roles-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-roles-"));
   const path = join(dir, "research-roles.json");
   try {
     await writeRoleConfig(

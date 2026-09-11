@@ -1,5 +1,5 @@
 /**
- * Where Karen keeps its own files on the host.
+ * Where MyRA keeps its own files on the host.
  *
  * Its own module so that config and the broker can find it without importing
  * the secret vault, which imports Electron -- and a module that imports
@@ -12,15 +12,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export const CONFIG_DIR =
-  process.env["KAREN_CONFIG_DIR"] ?? join(homedir(), ".config", "karen");
+  process.env["MYRA_CONFIG_DIR"] ?? join(homedir(), ".config", "myra");
 
 /**
- * Owner-only, because everything Karen writes is the user's private material.
+ * Owner-only, because everything MyRA writes is the user's private material.
  *
  * A default `mkdir` takes its mode from the umask, which on Ubuntu and Fedora
- * is 0002 or 0022 -- so Karen's directories were created world-readable and,
- * under 0002, group-writable. Measured on a clean install: `~/.config/karen`,
- * `~/.config/Karen` and `~/Documents/karen` all came out 0775. The secrets file
+ * is 0002 or 0022 -- so MyRA's directories were created world-readable and,
+ * under 0002, group-writable. Measured on a clean install: `~/.config/myra`,
+ * `~/.config/MyRA` and `~/Documents/myra` all came out 0775. The secrets file
  * and settings were 0600 and so were never exposed, but meeting transcripts,
  * meeting audio, research reports and drafted documents were written with the
  * default 0644 inside those directories and could be read by any other account
@@ -34,11 +34,11 @@ export const OWNER_ONLY_DIR = 0o700;
 export const OWNER_ONLY_FILE = 0o600;
 
 /**
- * `mkdir -p`, owner-only, for a directory Karen creates.
+ * `mkdir -p`, owner-only, for a directory MyRA creates.
  *
  * A directory that already exists is left exactly as it is. That restraint is
- * deliberate: these paths are configurable, and someone who points Karen's
- * meeting folder at a directory they share on purpose should not have Karen
+ * deliberate: these paths are configurable, and someone who points MyRA's
+ * meeting folder at a directory they share on purpose should not have MyRA
  * silently change its permissions underneath them. New directories -- which is
  * every per-meeting folder, every research run -- are private from birth, which
  * is what actually protects the contents.
@@ -50,7 +50,7 @@ export async function makePrivateDir(path: string): Promise<void> {
 /**
  * As above, and tighten it even if it is already there.
  *
- * Only for directories that are unambiguously Karen's own -- the config
+ * Only for directories that are unambiguously MyRA's own -- the config
  * directory, the sessions store, the tools directory. Never for one the user
  * chose. `recursive: true` sets the mode only on levels it actually creates, so
  * an install that predates this function keeps its 0775 until something says
@@ -78,11 +78,11 @@ export async function makeOwnDir(path: string): Promise<void> {
  * runtime, which is downloaded for exactly the same reasons.
  */
 export function toolsDir(): string {
-  return process.env["KAREN_TOOLS_DIR"] ?? join(CONFIG_DIR, "tools");
+  return process.env["MYRA_TOOLS_DIR"] ?? join(CONFIG_DIR, "tools");
 }
 
 /**
- * Tighten a tree Karen already wrote, once.
+ * Tighten a tree MyRA already wrote, once.
  *
  * `makeOwnDir` fixes the root of an old install, and every writer since passes
  * an explicit mode -- but neither reaches what is already on disk one level
@@ -91,7 +91,7 @@ export function toolsDir(): string {
  * `report.md` at 0644, and no amount of care in new code will ever touch them
  * again: they are finished runs that nothing will rewrite.
  *
- * So this walks a root Karen owns and narrows what is loose. Two limits keep it
+ * So this walks a root MyRA owns and narrows what is loose. Two limits keep it
  * honest rather than enthusiastic:
  *
  *   - **Only what is actually loose.** A path with no group or other bits set

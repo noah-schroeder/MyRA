@@ -64,7 +64,7 @@ export function RailSection({
   );
 }
 
-const key = (name: string): string => `karen.rail.${name}.collapsed`;
+const key = (name: string): string => `myra.rail.${name}.collapsed`;
 
 /**
  * Whether a section is open, remembered across launches.

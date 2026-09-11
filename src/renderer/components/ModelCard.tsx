@@ -14,7 +14,7 @@
  *   3. Which file do I take?            the versions table, with plain English
  *   4. What does the author say?        the model card itself
  *
- * Two of Karen's rules survive the redesign unchanged and are the reason some
+ * Two of MyRA's rules survive the redesign unchanged and are the reason some
  * of this reads the way it does. The registry is named **with its country** in
  * the header, because for many researchers where a model came from is a matter
  * of institutional policy rather than a detail. And opening this page is a
@@ -125,15 +125,15 @@ export function ModelCard({
 
     void (async () => {
       const [detailRes, cardRes, variantRes] = await Promise.all([
-        window.karen.hfDetail(repo),
-        window.karen.hfCard(repo),
+        window.myra.hfDetail(repo),
+        window.myra.hfCard(repo),
         /* Lemonade groups a GGUF repository's quantisations and stitches its
            shards together, which is genuinely useful and worth keeping -- but
            asked about anything that is not GGUF, ONNX RyzenAI or one of its own
            Omni collections it answers with a 500. `stabilityai/sd-turbo` is the
            case that proved it, so anything else is listed from the registry. */
         recipe === "llamacpp"
-          ? window.karen.registryVariants(repo, source)
+          ? window.myra.registryVariants(repo, source)
           : Promise.resolve({ ok: true as const }),
       ]);
       if (!live) return;
@@ -293,7 +293,7 @@ export function ModelCard({
         <div className="lem-callout">
           <p className="lem-callout-title">This model’s licence has to be accepted first.</p>
           <p className="lem-callout-body">
-            The publisher gates downloads behind an agreement on their own site. Karen holds no
+            The publisher gates downloads behind an agreement on their own site. MyRA holds no
             account with the registry, so a download from here will be refused until you have
             accepted it there{detail.licenseLink ? " — the terms are linked below" : ""}.
           </p>
@@ -324,7 +324,7 @@ export function ModelCard({
           {detail.contextTokens ? (
             <div>
               <dt>Context</dt>
-              <dd title="What the model was trained for. Karen loads a smaller window by default; change it under Tune.">
+              <dd title="What the model was trained for. MyRA loads a smaller window by default; change it under Tune.">
                 {detail.contextTokens.toLocaleString()} tokens
               </dd>
             </div>
@@ -399,7 +399,7 @@ export function ModelCard({
           {variants && !bestRuns && choices.length ? (
             <p className="card-none">
               None of these will run on this machine — the smallest is still larger than its
-              memory. Karen will download one anyway if you want it.
+              memory. MyRA will download one anyway if you want it.
             </p>
           ) : null}
 
@@ -456,7 +456,7 @@ export function ModelCard({
             </div>
             {card.truncated ? (
               <p className="reg-line">
-                This card is longer than Karen shows. The rest is on the registry’s own page.
+                This card is longer than MyRA shows. The rest is on the registry’s own page.
               </p>
             ) : null}
           </>

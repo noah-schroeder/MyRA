@@ -1,7 +1,7 @@
 /**
- * Karen in the system tray, so closing the window does not stop the work.
+ * MyRA in the system tray, so closing the window does not stop the work.
  *
- * The reason this exists: once another app is talking to Karen over the API,
+ * The reason this exists: once another app is talking to MyRA over the API,
  * the window is in the way. You want the model and the gateway up and the
  * window gone -- and you want an obvious way to bring it back and an obvious
  * way to actually quit.
@@ -15,12 +15,12 @@
  *
  *   - `Tray` construction is guarded, and a failure means the window closes
  *     normally instead of hiding. Better to quit than to vanish.
- *   - The single-instance lock is the second net. Launching Karen again --
+ *   - The single-instance lock is the second net. Launching MyRA again --
  *     from the app menu, the terminal, anywhere -- raises the window that
  *     already exists rather than starting a second copy. That is the way back
  *     even if no icon is visible anywhere.
  *
- * The single-instance lock earns its place on its own, too: two Karens would
+ * The single-instance lock earns its place on its own, too: two MyRAs would
  * each start a Lemonade and fight over the API port.
  */
 
@@ -40,7 +40,7 @@ export interface TrayState {
 export interface TrayDeps {
   show: () => void;
   quit: () => void;
-  /** Drop the loaded model, freeing its memory without stopping Karen. */
+  /** Drop the loaded model, freeing its memory without stopping MyRA. */
   eject: () => void;
   state: () => TrayState;
 }
@@ -62,7 +62,7 @@ export interface TrayDeps {
 function buildMenu(deps: TrayDeps): Menu {
   const { model, apiUrl } = deps.state();
   return Menu.buildFromTemplate([
-    { label: "Open Karen", click: () => deps.show() },
+    { label: "Open MyRA", click: () => deps.show() },
     { type: "separator" },
     {
       label: model ? `Model: ${model}` : "No model loaded",
@@ -81,13 +81,13 @@ function buildMenu(deps: TrayDeps): Menu {
       enabled: false,
     },
     { type: "separator" },
-    /* The only way to actually stop Karen once the window hides, so it says
+    /* The only way to actually stop MyRA once the window hides, so it says
        what it does: not "Close", which is what the window button did. */
-    { label: "Quit Karen", click: () => deps.quit() },
+    { label: "Quit MyRA", click: () => deps.quit() },
   ]);
 }
 
-export class KarenTray {
+export class MyraTray {
   #tray: Tray | undefined;
   #deps: TrayDeps;
 
@@ -103,7 +103,7 @@ export class KarenTray {
    * AppIndicator extension enabled and libayatana-appindicator3 installed,
    * `new Tray(image)` succeeds and publishes nothing -- reproduced with a bare
    * Electron script and an opaque icon, so it is neither this app's icon nor
-   * its code. Believing construction meant an icon is what left Karen running
+   * its code. Believing construction meant an icon is what left MyRA running
    * with its window hidden and no way to reach it.
    *
    * Asked lazily and cached. Registration is asynchronous, so asking during
@@ -149,10 +149,10 @@ export class KarenTray {
       const image = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_PNG, "base64"));
       if (image.isEmpty()) return false;
       const tray = new Tray(image);
-      tray.setToolTip("Karen");
+      tray.setToolTip("MyRA");
       tray.setContextMenu(buildMenu(this.#deps));
       /* Left-click opens the window on the platforms that report it. On Linux
-         the click usually goes to the menu instead, which is why "Open Karen"
+         the click usually goes to the menu instead, which is why "Open MyRA"
          is also the first item. */
       tray.on("click", () => this.#deps.show());
       this.#tray = tray;
@@ -169,7 +169,7 @@ export class KarenTray {
       const { model, apiUrl } = this.#deps.state();
       this.#tray.setContextMenu(buildMenu(this.#deps));
       this.#tray.setToolTip(
-        apiUrl ? `Karen — serving on ${apiUrl}` : model ? `Karen — ${model} loaded` : "Karen",
+        apiUrl ? `MyRA — serving on ${apiUrl}` : model ? `MyRA — ${model} loaded` : "MyRA",
       );
     } catch {
       // A tray that has been destroyed by the desktop is not an error here.
@@ -189,7 +189,7 @@ export class KarenTray {
 /**
  * Claim the single-instance lock, wiring a second launch to raise the window.
  *
- * Returns false when another Karen already holds it, in which case the caller
+ * Returns false when another MyRA already holds it, in which case the caller
  * must quit immediately: two instances would each start a Lemonade daemon and
  * the second would fail to bind the API port, in both cases confusingly.
  */

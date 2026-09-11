@@ -22,7 +22,7 @@ import { buildIndex, scanLmStudio, scanOllama } from "../src/main/runtime/foreig
 
 const temps: string[] = [];
 async function temp(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "karen-foreign-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-foreign-"));
   temps.push(dir);
   return dir;
 }
@@ -55,7 +55,7 @@ test("an index id says which tool it came from", () => {
   assert.deepEqual(readIndexId("lmstudio__Qwen3-8B-Q4_K_M"), { source: "lmstudio", label: "Qwen3-8B-Q4_K_M" });
 });
 
-test("a model of Karen's own is not mistaken for a foreign one", () => {
+test("a model of MyRA's own is not mistaken for a foreign one", () => {
   assert.equal(readIndexId("bartowski__SmolLM2-135M-Instruct-GGUF"), undefined);
 });
 
@@ -142,7 +142,7 @@ test("a split archive is listed once, under its first part", async () => {
 
 /* ------------------------------------------------------------------ index -- */
 
-test("the index mirrors Karen's own models under their existing ids", async () => {
+test("the index mirrors MyRA's own models under their existing ids", async () => {
   const models = await temp();
   const index = join(await temp(), "models-index");
   await mkdir(join(models, "LiquidAI__LFM2.5-2.6B-GGUF"), { recursive: true });

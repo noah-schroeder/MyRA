@@ -4,7 +4,7 @@
  * Everything here is a thin pass-through to Lemonade. That is deliberate and it
  * is most of the value of the change: the handlers this file used to carry --
  * release listings, build installs, device probes, GGUF planning, per-model
- * launch flags -- were Karen reimplementing an inference stack, and each one
+ * launch flags -- were MyRA reimplementing an inference stack, and each one
  * was a place for the two halves to disagree about what was installed.
  *
  * Every handler answers `{ ok }` rather than throwing across the bridge, so a
@@ -74,13 +74,13 @@ export function installRuntimeIpc(
         signal,
       ),
     remove: (name) => runtime.api.deleteModel(name),
-    publish: (list) => send("karen:downloads", list),
+    publish: (list) => send("myra:downloads", list),
     /* A finished download is a new entry in the model list, and the page
        showing that list has no other way to learn it arrived. */
     onFinished: (name) => {
-      send("karen:models-changed");
+      send("myra:models-changed");
       /*
-       * The one moment Karen asks Hugging Face what this model is.
+       * The one moment MyRA asks Hugging Face what this model is.
        *
        * Here rather than at load time, and here rather than on a timer: the
        * bytes have just come from the same host, the user is plainly online,
@@ -121,11 +121,11 @@ export function installRuntimeIpc(
     },
   });
 
-  runtime.onChange(() => send("karen:runtime", state()));
+  runtime.onChange(() => send("myra:runtime", state()));
 
-  ipcMain.handle("karen:runtime-state", () => state());
+  ipcMain.handle("myra:runtime-state", () => state());
 
-  ipcMain.handle("karen:runtime-config", async (_e, patch: Record<string, unknown>) =>
+  ipcMain.handle("myra:runtime-config", async (_e, patch: Record<string, unknown>) =>
     runtime.update(patch));
 
   /**
@@ -135,11 +135,11 @@ export function installRuntimeIpc(
    * and then, usually, an engine of several hundred megabytes, and a promise
    * that resolves at the end of that says nothing while it matters.
    */
-  ipcMain.handle("karen:lemonade-ensure", async () => {
+  ipcMain.handle("myra:lemonade-ensure", async () => {
     try {
       await runtime.ensureLemonade({
-        onPhase: (what) => send("karen:runtime-phase", { what }),
-        onProgress: (p) => send("karen:runtime-download", {
+        onPhase: (what) => send("myra:runtime-phase", { what }),
+        onProgress: (p) => send("myra:runtime-download", {
           what: p.what,
           receivedBytes: p.receivedBytes,
           ...(p.totalBytes ? { totalBytes: p.totalBytes } : {}),
@@ -152,7 +152,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-info", async () => {
+  ipcMain.handle("myra:lemonade-info", async () => {
     try {
       await runtime.ensureLemonade();
       return { ok: true, info: await runtime.api.systemInfo() };
@@ -161,7 +161,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-install-backend", async (_e, recipe: string, backend: string) => {
+  ipcMain.handle("myra:lemonade-install-backend", async (_e, recipe: string, backend: string) => {
     try {
       await runtime.ensureLemonade();
       await runtime.api.installBackend(String(recipe), String(backend));
@@ -183,7 +183,7 @@ export function installRuntimeIpc(
    * `lemonade-info` is a loopback call the screen makes on every open, and
    * this one leaves the machine. Nothing calls it except the button.
    */
-  ipcMain.handle("karen:engine-updates-check", async () => {
+  ipcMain.handle("myra:engine-updates-check", async () => {
     try {
       return { ok: true, check: await runtime.checkEngineUpdates() };
     } catch (err) {
@@ -192,7 +192,7 @@ export function installRuntimeIpc(
   });
 
   /** Which build each backend is on, and which one Lemonade shipped with. */
-  ipcMain.handle("karen:engine-versions", async () => {
+  ipcMain.handle("myra:engine-versions", async () => {
     try {
       return { ok: true, ...(await runtime.engineVersions()) };
     } catch (err) {
@@ -207,14 +207,14 @@ export function installRuntimeIpc(
    * is on the disk rather than from what was asked for.
    */
   ipcMain.handle(
-    "karen:engine-update",
+    "myra:engine-update",
     async (_e, recipe: string, backend: string, version?: string | null) => {
       try {
         const result = await runtime.updateEngine(
           String(recipe),
           String(backend),
           version ? String(version) : undefined,
-          { onPhase: (what) => send("karen:runtime-phase", { what }) },
+          { onPhase: (what) => send("myra:runtime-phase", { what }) },
         );
         return { ok: true, ...result, info: await runtime.api.systemInfo() };
       } catch (err) {
@@ -223,7 +223,7 @@ export function installRuntimeIpc(
     },
   );
 
-  ipcMain.handle("karen:lemonade-downloads", async () => {
+  ipcMain.handle("myra:lemonade-downloads", async () => {
     try {
       return { ok: true, jobs: await runtime.api.downloads() };
     } catch {
@@ -232,7 +232,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-catalog", async () => {
+  ipcMain.handle("myra:lemonade-catalog", async () => {
     try {
       return { ok: true, catalog: await runtime.catalog() };
     } catch (err) {
@@ -240,7 +240,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-models", async () => {
+  ipcMain.handle("myra:lemonade-models", async () => {
     try {
       await runtime.ensureLemonade();
       return {
@@ -259,7 +259,7 @@ export function installRuntimeIpc(
   /* Lemonade reads `extra_models_dir` once at startup, so picking up a model
      added in LM Studio a minute ago means restarting the daemon. Explicit
      rather than automatic: it drops whatever is loaded. */
-  ipcMain.handle("karen:lemonade-rescan", async () => {
+  ipcMain.handle("myra:lemonade-rescan", async () => {
     try {
       return { ok: true, found: await runtime.rescanModels() };
     } catch (err) {
@@ -267,7 +267,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-load", async (_e, name: string) => {
+  ipcMain.handle("myra:lemonade-load", async (_e, name: string) => {
     try {
       await runtime.loadModel(String(name));
       await onModelLoaded();
@@ -277,7 +277,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-unload", async () => {
+  ipcMain.handle("myra:lemonade-unload", async () => {
     try {
       await runtime.unloadModel();
       return { ok: true };
@@ -286,7 +286,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:lemonade-pull", async (_e, name: string, checkpoint?: string) => {
+  ipcMain.handle("myra:lemonade-pull", async (_e, name: string, checkpoint?: string) => {
     try {
       await runtime.ensureLemonade();
       await runtime.api.pullModel(String(name), checkpoint ? String(checkpoint) : undefined);
@@ -309,12 +309,12 @@ export function installRuntimeIpc(
    *
    * Checked here rather than only in the pane because the renderer is not the
    * security boundary: a stale window, a restored state, or a future caller
-   * would otherwise reach ModelScope, and "Karen never contacts it" has to be
+   * would otherwise reach ModelScope, and "MyRA never contacts it" has to be
    * true of the process that holds the socket, not of one screen.
    */
   const refuse = (source: RegistrySource): { ok: false; error: string } => ({
     ok: false,
-    error: `${REGISTRY_LABEL[source]} is turned off in this build of Karen.`,
+    error: `${REGISTRY_LABEL[source]} is turned off in this build of MyRA.`,
   });
 
   /**
@@ -334,7 +334,7 @@ export function installRuntimeIpc(
    * model and the context length come from the same response and used to be
    * thrown away.
    */
-  ipcMain.handle("karen:hf-detail", async (_e, repo: unknown) => {
+  ipcMain.handle("myra:hf-detail", async (_e, repo: unknown) => {
     try {
       return { ok: true, detail: await repoDetail(String(repo ?? "")) };
     } catch (err) {
@@ -351,7 +351,7 @@ export function installRuntimeIpc(
    * anything. A repository with no README answers `{ ok: true }` and no card,
    * which is a fact rather than a failure.
    */
-  ipcMain.handle("karen:hf-card", async (_e, repo: unknown) => {
+  ipcMain.handle("myra:hf-card", async (_e, repo: unknown) => {
     try {
       const readme = await repoCard(String(repo ?? ""));
       return { ok: true, ...(readme === undefined ? {} : { card: prepareCard(readme) }) };
@@ -360,7 +360,7 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("karen:hf-browse", async (_e, q: unknown) => {
+  ipcMain.handle("myra:hf-browse", async (_e, q: unknown) => {
     const raw = (q ?? {}) as Record<string, unknown>;
     const pick = (k: string): string | undefined => {
       const v = raw[k];
@@ -393,7 +393,7 @@ export function installRuntimeIpc(
   });
 
   ipcMain.handle(
-    "karen:registry-variants",
+    "myra:registry-variants",
     async (_e, checkpoint: string, source: RegistrySource) => {
       if (!isEnabled(readSource(source))) return refuse(readSource(source));
       try {
@@ -414,7 +414,7 @@ export function installRuntimeIpc(
    * from.
    */
   ipcMain.handle(
-    "karen:registry-pull",
+    "myra:registry-pull",
     async (_e, name: string, checkpoint: string, source: RegistrySource, recipe?: string) => {
       if (!isEnabled(readSource(source))) return refuse(readSource(source));
       try {
@@ -450,20 +450,20 @@ export function installRuntimeIpc(
    * keeps the partial file so the next attempt resumes from it, a cancel asks
    * the daemon to delete what it fetched.
    */
-  ipcMain.handle("karen:downloads-list", () => downloads.list());
-  ipcMain.handle("karen:download-pause", (_e, id: string) => {
+  ipcMain.handle("myra:downloads-list", () => downloads.list());
+  ipcMain.handle("myra:download-pause", (_e, id: string) => {
     downloads.pause(String(id));
     return { ok: true };
   });
-  ipcMain.handle("karen:download-resume", (_e, id: string) => {
+  ipcMain.handle("myra:download-resume", (_e, id: string) => {
     downloads.resume(String(id));
     return { ok: true };
   });
-  ipcMain.handle("karen:download-cancel", async (_e, id: string) => {
+  ipcMain.handle("myra:download-cancel", async (_e, id: string) => {
     await downloads.cancel(String(id));
     return { ok: true };
   });
-  ipcMain.handle("karen:download-dismiss", (_e, id: string) => {
+  ipcMain.handle("myra:download-dismiss", (_e, id: string) => {
     if (id) downloads.dismiss(String(id));
     else downloads.dismissSettled();
     return { ok: true };
@@ -477,11 +477,11 @@ export function installRuntimeIpc(
    * The daemon's own validation is the only validation: it answers
    * `'ctx_size' must be a positive whole number, or -1 to size it
    * automatically` and `Unknown option 'x' for recipe 'llamacpp'`, and those
-   * sentences are better than anything Karen would compose, as well as being
+   * sentences are better than anything MyRA would compose, as well as being
    * guaranteed to match what actually gets rejected. So errors are passed
    * through rather than replaced.
    */
-  ipcMain.handle("karen:model-options", async (_e, name: string) => {
+  ipcMain.handle("myra:model-options", async (_e, name: string) => {
     try {
       await runtime.ensureLemonade();
       return { ok: true, options: await runtime.api.modelOptions(String(name)) };
@@ -491,7 +491,7 @@ export function installRuntimeIpc(
   });
 
   ipcMain.handle(
-    "karen:model-options-set",
+    "myra:model-options-set",
     async (_e, name: string, patch: Record<string, unknown>) => {
       try {
         await runtime.ensureLemonade();
@@ -503,7 +503,7 @@ export function installRuntimeIpc(
     },
   );
 
-  ipcMain.handle("karen:model-options-reset", async (_e, name: string) => {
+  ipcMain.handle("myra:model-options-reset", async (_e, name: string) => {
     try {
       await runtime.ensureLemonade();
       return { ok: true, options: await runtime.api.resetModelOptions(String(name)) };
@@ -520,7 +520,7 @@ export function installRuntimeIpc(
    * `modelDelete.ts`. The window's part is asking, and showing the warning that
    * `deletePrompt` wrote for whichever owner it turned out to be.
    */
-  ipcMain.handle("karen:lemonade-delete-model", async (_e, id: unknown) => {
+  ipcMain.handle("myra:lemonade-delete-model", async (_e, id: unknown) => {
     try {
       await runtime.ensureLemonade();
       const result = await deleteModel(String(id ?? ""), {
@@ -539,19 +539,19 @@ export function installRuntimeIpc(
   /**
    * Show a model's file in the desktop's own file manager.
    *
-   * Offered beside the delete for a model Karen does not own, because "the file
+   * Offered beside the delete for a model MyRA does not own, because "the file
    * is at <path>" is a sentence somebody should be able to check rather than
    * take on trust before agreeing to a deletion.
    */
-  ipcMain.handle("karen:model-reveal", async (_e, id: unknown) => {
+  ipcMain.handle("myra:model-reveal", async (_e, id: unknown) => {
     const model = runtime.foreignModels.find((m) => m.id === String(id ?? ""));
     const path = model?.path;
-    if (!path) return { ok: false, error: "Karen has no record of where that file is." };
+    if (!path) return { ok: false, error: "MyRA has no record of where that file is." };
     shell.showItemInFolder(path);
     return { ok: true };
   });
 
-  ipcMain.handle("karen:lemonade-stop", async () => {
+  ipcMain.handle("myra:lemonade-stop", async () => {
     await runtime.stop();
     return { ok: true };
   });

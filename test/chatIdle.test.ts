@@ -42,7 +42,7 @@ after(async () => {
 
 const endpoint = (timeoutMs: number): EndpointSettings => ({
   baseUrl,
-  envVar: "KAREN_LLM_KEY",
+  envVar: "MYRA_LLM_KEY",
   timeoutMs,
 });
 

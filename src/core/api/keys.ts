@@ -1,17 +1,17 @@
 /**
- * The keys other apps use to reach Karen.
+ * The keys other apps use to reach MyRA.
  *
- * Karen issues its own keys rather than sharing Lemonade's, and the difference
+ * MyRA issues its own keys rather than sharing Lemonade's, and the difference
  * matters: Lemonade's key is a single key with no scopes that grants
  * `/api/v1/install`, `/api/v1/pull` and `DELETE /api/v1/models/*` alongside
- * chat. A Karen key reaches only the routes in `routes.ts`, can be named, can
+ * chat. A MyRA key reaches only the routes in `routes.ts`, can be named, can
  * be revoked one at a time, and can be counted.
  *
  * ## Only the hash is stored
  *
  * The plaintext exists once, in memory, at the moment of creation, and is
  * shown to the user exactly once. What lands on disk is a SHA-256 hash, so a
- * stolen `api.json` grants nothing. This also means Karen genuinely cannot
+ * stolen `api.json` grants nothing. This also means MyRA genuinely cannot
  * show a key a second time -- the UI should say that plainly rather than
  * imply it is a policy choice.
  */
@@ -19,14 +19,14 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
- * `sk-karen-` then 32 bytes of base64url.
+ * `sk-myra-` then 32 bytes of base64url.
  *
  * The prefix is not decoration: it is what makes a leaked key greppable in a
  * log or a repository, and it tells someone who finds one in a config file
  * what it opens. 32 bytes because these are bearer tokens on a socket that may
  * be published to a LAN.
  */
-export const KEY_PREFIX = "sk-karen-";
+export const KEY_PREFIX = "sk-myra-";
 const KEY_BYTES = 32;
 
 export interface ApiKey {
@@ -67,7 +67,7 @@ export function mintKey(label: string, now = new Date()): MintedKey {
   };
 }
 
-/** `sk-karen-…a3f9`, for a list where the whole key must never appear. */
+/** `sk-myra-…a3f9`, for a list where the whole key must never appear. */
 export function displayKey(key: ApiKey): string {
   return `${KEY_PREFIX}…${key.tail}`;
 }

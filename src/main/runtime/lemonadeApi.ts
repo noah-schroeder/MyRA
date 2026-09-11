@@ -2,7 +2,7 @@
  * Talking to the Lemonade daemon.
  *
  * A thin client rather than a layer of abstraction: the daemon's API is the
- * interface, and wrapping it in Karen's own vocabulary would mean maintaining a
+ * interface, and wrapping it in MyRA's own vocabulary would mean maintaining a
  * translation for no benefit. What lives here is what a client genuinely owes
  * the caller -- authentication, a deadline, and an error that names what failed
  * rather than surfacing a bare status code.
@@ -72,7 +72,7 @@ export interface InstalledModel {
    *
    * Read but discarded until audio needed it, which was a quiet loss: without
    * labels the only way to tell a speech model from a chat one is its name, and
-   * Karen did exactly that -- `/whisper|moonshine/i` -- which is a guess that
+   * MyRA did exactly that -- `/whisper|moonshine/i` -- which is a guess that
    * misses a renamed checkpoint and would mistake a `whisper-tts` voice model
    * for a transcriber.
    */
@@ -198,11 +198,11 @@ export class LemonadeApi {
   /**
    * What an install of this backend would fetch, without fetching it.
    *
-   * The only place Karen learns which repository publishes an engine, and it
+   * The only place MyRA learns which repository publishes an engine, and it
    * has to be asked rather than tabulated: llama.cpp's Vulkan build comes from
    * `ggml-org/llama.cpp` and its CUDA build from the `lemonade-sdk/llama.cpp`
    * fork, whisper's from `lemonade-sdk/whisper.cpp-rocm` despite the name, and
-   * a second copy of that mapping in Karen would be wrong the first time
+   * a second copy of that mapping in MyRA would be wrong the first time
    * upstream moved one.
    *
    * `version` is the pin, so this answers "what would happen now" rather than
@@ -351,7 +351,7 @@ export class LemonadeApi {
    * The load settings for one model: defaults, overrides, and the merge.
    *
    * The daemon owns this store -- it is what launches llama-server, so a
-   * setting Karen kept on its own would be a preference the launch never read.
+   * setting MyRA kept on its own would be a preference the launch never read.
    */
   async modelOptions(modelName: string): Promise<ModelOptions> {
     const path = `/models/${encodeURIComponent(modelName)}/options`;
@@ -404,9 +404,9 @@ export class LemonadeApi {
    * Every model the daemon knows about.
    *
    * `size` arrives in gigabytes and is converted here, because every other
-   * size in Karen is bytes and a unit that changes at an API boundary is a bug
+   * size in MyRA is bytes and a unit that changes at an API boundary is a bug
    * waiting for a big number. `source` distinguishes a model the daemon
-   * downloaded from one it found in the directory Karen points it at.
+   * downloaded from one it found in the directory MyRA points it at.
    */
   async listModels(): Promise<InstalledModel[]> {
     /* The smaller of the two when both are given, because they can differ and

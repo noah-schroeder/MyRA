@@ -5,7 +5,7 @@
  * an index -- see [project.ts](./project.ts) for why -- and colocation is a
  * thing you ask for rather than a thing you live in. That turns out to be the
  * better shape anyway: what you want when you say "all together" is usually a
- * folder to archive or to send a co-author, and neither of those wants Karen's
+ * folder to archive or to send a co-author, and neither of those wants MyRA's
  * internal layout. They want the conversations readable, the notes and the
  * report as documents, and the pictures as pictures.
  *
@@ -27,7 +27,7 @@ export type ExportOp =
  * A member, resolved by main into whatever that store can offer.
  *
  * Deliberately a union of possibilities rather than five shapes: the five
- * stores differ in what they hold -- a conversation is text Karen renders, a
+ * stores differ in what they hold -- a conversation is text MyRA renders, a
  * run is a directory of its own audit trail -- and one optional-field record
  * keeps the layout decision in one function instead of five.
  */
@@ -142,7 +142,7 @@ export function exportPlan(
   const counts: { kind: Member["kind"]; count: number }[] = [];
   const lines: string[] = [`# ${project.name}`, ""];
   if (project.createdAt) lines.push(`Started ${readableDate(project.createdAt)}.`, "");
-  lines.push(`Exported from Karen on ${readableDate(now.toISOString())}.`, "");
+  lines.push(`Exported from MyRA on ${readableDate(now.toISOString())}.`, "");
 
   let anyMeeting = false;
   const imageNotes: string[] = [];
@@ -247,7 +247,7 @@ interface RenderableMessage {
  *
  * Three things are deliberately left out.
  *
- * **The system prompt**, which is Karen's rather than the user's, and is
+ * **The system prompt**, which is MyRA's rather than the user's, and is
  * several hundred words of instruction in front of every export.
  *
  * **Tool results**, which are the fetched pages and search results a turn
@@ -255,7 +255,7 @@ interface RenderableMessage {
  * make the export unreadable; what a person needs is that a search happened,
  * which the italic line records.
  *
- * **Reasoning**, which is not in the stored messages in the first place. Karen
+ * **Reasoning**, which is not in the stored messages in the first place. MyRA
  * never writes a model's working-out into a session, and this is one more place
  * where that has to keep being true.
  */
@@ -278,7 +278,7 @@ export function renderSession(
     if (message.role !== "assistant") continue;
 
     const text = message.content.trim();
-    if (text) out.push("**Karen**", "", text, "");
+    if (text) out.push("**MyRA**", "", text, "");
     for (const call of message.tool_calls ?? []) {
       out.push(`*(used ${call.function.name})*`, "");
     }

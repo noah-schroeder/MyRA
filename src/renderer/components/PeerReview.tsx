@@ -19,7 +19,7 @@ import type { JobSnapshot, ReviewSummary, Settings } from "../types.ts";
  *
  * Nothing about the file's LOCATION crosses to the main process -- the bytes
  * do. See main/review.ts for why that is the easy path rather than the clever
- * one, and note the second benefit: Karen never records where an unpublished
+ * one, and note the second benefit: MyRA never records where an unpublished
  * manuscript under review is kept.
  */
 
@@ -90,15 +90,15 @@ export function PeerReview({
    * already announces a load; this listens.
    */
   const askContext = useCallback(() => {
-    void window.karen.reviewContext().then((r) => setContextTokens(r.contextTokens));
+    void window.myra.reviewContext().then((r) => setContextTokens(r.contextTokens));
   }, []);
   useEffect(() => {
     askContext();
-    return window.karen.onRuntime(askContext);
+    return window.myra.onRuntime(askContext);
   }, [askContext]);
 
   const refreshList = useCallback(async () => {
-    const result = await window.karen.reviewList();
+    const result = await window.myra.reviewList();
     setReviews(result.reviews ?? []);
   }, []);
 
@@ -110,7 +110,7 @@ export function PeerReview({
    * rewritten underneath somebody who is typing in them.
    */
   const showReview = useCallback(async (id: string, fields = true): Promise<void> => {
-    const result = await window.karen.reviewOpen(id);
+    const result = await window.myra.reviewOpen(id);
     if (!result.ok || !result.review) {
       if (fields) setError(result.error ?? "That review could not be read.");
       return;
@@ -135,18 +135,18 @@ export function PeerReview({
      a page mounted four minutes into the second reviewer draws that reviewer,
      rather than sitting empty until the third begins. */
   useEffect(() => {
-    void window.karen.workState().then((snapshot) => {
+    void window.myra.workState().then((snapshot) => {
       setJob(snapshot);
       if (snapshot?.kind === "review") void showReview(snapshot.id);
     });
-    return window.karen.onWork(setJob);
+    return window.myra.onWork(setJob);
   }, [showReview]);
 
   /* Main saves after every reviewer, so the report on screen catches up one
      reviewer at a time rather than all at once at the end. */
   useEffect(
     () =>
-      window.karen.onReviews((rows) => {
+      window.myra.onReviews((rows) => {
         setReviews(rows);
         if (openedId) void showReview(openedId, false);
       }),
@@ -165,7 +165,7 @@ export function PeerReview({
     setReview("");
     try {
       const bytes = await file.arrayBuffer();
-      const result = await window.karen.reviewExtract(file.name, bytes);
+      const result = await window.myra.reviewExtract(file.name, bytes);
       if (!result.ok) {
         setError(result.error ?? "That file could not be read.");
         setNeedsPandoc(Boolean(result.needsPandoc));
@@ -219,7 +219,7 @@ export function PeerReview({
     setReview("");
     setInvented([]);
     setOpenedId(undefined);
-    const result = await window.karen.reviewRun(requests, {
+    const result = await window.myra.reviewRun(requests, {
       title,
       fileName: loaded?.name ?? "",
       studyTypeId,
@@ -235,7 +235,7 @@ export function PeerReview({
   };
 
   const remove = async (id: string): Promise<void> => {
-    await window.karen.reviewDelete(id);
+    await window.myra.reviewDelete(id);
     if (openedId === id) {
       setOpenedId(undefined);
       setReview("");
@@ -246,7 +246,7 @@ export function PeerReview({
 
   const installPandoc = async (): Promise<void> => {
     setInstalling(true);
-    const r = await window.karen.installPandoc();
+    const r = await window.myra.installPandoc();
     setInstalling(false);
     if (r.ok) {
       setNeedsPandoc(false);
@@ -263,7 +263,7 @@ export function PeerReview({
           <div>
             <h1>Peer review</h1>
             <p className="review-sub">
-              Drop a manuscript in and Karen reads it and writes a review. Nothing is uploaded
+              Drop a manuscript in and MyRA reads it and writes a review. Nothing is uploaded
               unless the model you have chosen is a hosted one.
             </p>
           </div>
@@ -363,7 +363,7 @@ export function PeerReview({
             {/* Said plainly, because the absence is deliberate and would
                 otherwise be discovered by someone expecting to re-run one. */}
             <p className="field-note">
-              Karen keeps the report and never the manuscript — it is not yours to store. To
+              MyRA keeps the report and never the manuscript — it is not yours to store. To
               review one of these again, drop the file in again.
             </p>
           </section>
@@ -452,7 +452,7 @@ export function PeerReview({
                 <button
                   type="button"
                   className="stop"
-                  onClick={() => void window.karen.reviewCancel(mine?.id)}
+                  onClick={() => void window.myra.reviewCancel(mine?.id)}
                 >
                   Stop
                 </button>
@@ -461,7 +461,7 @@ export function PeerReview({
                   type="button"
                   className="primary"
                   disabled={!fit?.fits || elsewhere}
-                  title={elsewhere ? "Karen is drafting a section. This can start when that finishes." : undefined}
+                  title={elsewhere ? "MyRA is drafting a section. This can start when that finishes." : undefined}
                   onClick={() => void run()}
                 >
                   Review it
@@ -497,7 +497,7 @@ export function PeerReview({
                 <button
                   type="button"
                   className="ghost"
-                  onClick={() => void window.karen.reviewSave(`${title || "review"}.md`, review)}
+                  onClick={() => void window.myra.reviewSave(`${title || "review"}.md`, review)}
                 >
                   Save as Markdown
                 </button>
@@ -505,7 +505,7 @@ export function PeerReview({
             </header>
             {invented.length ? (
               <p className="review-invented">
-                This review contains {invented.length === 1 ? "a reference" : "references"} Karen
+                This review contains {invented.length === 1 ? "a reference" : "references"} MyRA
                 did not give the model — {invented.slice(0, 6).join(", ")}
                 {invented.length > 6 ? ", …" : ""}. Nothing here searched the literature, so
                 {invented.length === 1 ? " it is" : " they are"} invented. Delete
@@ -553,7 +553,7 @@ function PromptPreview({
       <div className="dialog dialog-wide">
         <h2 className="dialog-title">Exactly what is sent</h2>
         <p className="dialog-message">
-          One request per reviewer, each carrying the whole manuscript. Karen sends these two
+          One request per reviewer, each carrying the whole manuscript. MyRA sends these two
           messages and nothing else; the manuscript is shown in full at the end of the second.
         </p>
         <div className="review-types">

@@ -118,7 +118,7 @@ export function renderReport(
       `date: ${localDay(record.startedAt)}`,
       `duration: ${duration(record.seconds)}`,
       `actions: ${notes.actions.length}`,
-      "tags: [meeting, karen]",
+      "tags: [meeting, myra]",
       "---",
     ].join("\n"),
   );
@@ -153,7 +153,7 @@ export function renderTranscript(record: MeetingRecord, transcript: string): str
     "---",
     `title: ${JSON.stringify(`${record.title || "Untitled meeting"} — transcript`)}`,
     `date: ${localDay(record.startedAt)}`,
-    "tags: [meeting, transcript, karen]",
+    "tags: [meeting, transcript, myra]",
     "---",
     "",
     `# ${record.title || "Untitled meeting"} — transcript`,

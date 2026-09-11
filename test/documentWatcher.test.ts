@@ -18,13 +18,13 @@ import {
   setDocumentWatcher, writeDocumentTool, type DocumentUpdate,
 } from "../src/core/agent/tools/documents.ts";
 
-/* KAREN_WORKSPACE, not KAREN_WORKSPACE_ROOT -- getting this name wrong does
+/* MYRA_WORKSPACE, not MYRA_WORKSPACE_ROOT -- getting this name wrong does
    not fail the test, it silently writes into the developer's real documents
    folder, which is exactly what it did on the first run. Each test
    gets its own and nothing lands in the developer's real documents folder. */
 function sandbox(): string {
-  const root = mkdtempSync(join(tmpdir(), "karen-docs-"));
-  process.env["KAREN_WORKSPACE"] = root;
+  const root = mkdtempSync(join(tmpdir(), "myra-docs-"));
+  process.env["MYRA_WORKSPACE"] = root;
   return root;
 }
 

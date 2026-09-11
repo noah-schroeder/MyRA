@@ -85,7 +85,7 @@ const MESSAGE_OVERHEAD = 4;
 /**
  * The part of every request that is not the conversation.
  *
- * Tool schemas go out with each call and are not small: Karen's seven tools are
+ * Tool schemas go out with each call and are not small: MyRA's seven tools are
  * about a thousand tokens of JSON, on top of roughly two hundred for the system
  * prompt. Leaving them out of the estimate made compaction fire twelve hundred
  * tokens too late -- which on a small window is the difference between summarising

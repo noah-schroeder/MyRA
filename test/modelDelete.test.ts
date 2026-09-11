@@ -4,13 +4,13 @@
  * Three acts wear one word. Lemonade removes what it downloaded; asked about
  * anything reached through `extra_models_dir` it answers 500 with
  * `Cannot delete extra models via API … Delete the file directly from: <path>`,
- * naming a path inside Karen's **index** -- a tree of symlinks rebuilt from
+ * naming a path inside MyRA's **index** -- a tree of symlinks rebuilt from
  * scratch on every start. Deleting that path removes a link and leaves the
  * gigabytes exactly where they were.
  *
  * So the delete follows the links, and these pin the two rules that follow
  * from that: the real path comes from `realpath` rather than from an id the
- * window sent, and a resolved target outside a folder Karen already knows
+ * window sent, and a resolved target outside a folder MyRA already knows
  * fails the whole delete rather than being followed.
  *
  * The user's decision is pinned here too: LM Studio's and Ollama's models are
@@ -35,7 +35,7 @@ const REFUSAL = new LemonadeApiError(
 
 /** A models folder mirrored into an index of symlinks, as the app builds it. */
 async function scaffold(): Promise<{ root: string; modelsDir: string; indexDir: string }> {
-  const root = await mkdtemp(join(tmpdir(), "karen-del-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-del-"));
   const modelsDir = join(root, "models");
   const indexDir = join(root, "index");
   await mkdir(join(modelsDir, "Mine-GGUF"), { recursive: true });
@@ -53,21 +53,21 @@ describe("who owns a model", () => {
     /* Lemonade calls every indexed model `extra_models_dir` because that is the
        only door it has, so the index's own record has to win. */
     assert.equal(ownerOf({ source: "extra_models_dir", foreign: "lmstudio" }), "lmstudio");
-    assert.equal(ownerOf({ source: "extra_models_dir" }), "karen-folder");
-    assert.equal(ownerOf({ source: "huggingface" }), "karen");
-    assert.equal(ownerOf({}), "karen");
+    assert.equal(ownerOf({ source: "extra_models_dir" }), "myra-folder");
+    assert.equal(ownerOf({ source: "huggingface" }), "myra");
+    assert.equal(ownerOf({}), "myra");
   });
 
   it("names the application in words a person recognises", () => {
     assert.equal(ownerLabel("lmstudio"), "LM Studio");
     assert.equal(ownerLabel("ollama"), "Ollama");
-    assert.equal(ownerLabel("karen-folder"), "Karen");
+    assert.equal(ownerLabel("myra-folder"), "MyRA");
   });
 });
 
 describe("what the confirmation says", () => {
-  it("asks once for a model Karen downloaded", () => {
-    const p = deletePrompt({ owner: "karen", name: "Qwen3-8B", size: "4.9 GB" });
+  it("asks once for a model MyRA downloaded", () => {
+    const p = deletePrompt({ owner: "myra", name: "Qwen3-8B", size: "4.9 GB" });
     assert.equal(p.warns, false);
     assert.equal(p.confirm, "Delete");
     assert.match(p.body, /4\.9 GB/);
@@ -95,8 +95,8 @@ describe("what the confirmation says", () => {
   });
 
   it("says when the backend has to restart, and when it does not", () => {
-    assert.equal(deletePrompt({ owner: "karen", name: "x" }).restarts, false);
-    assert.equal(deletePrompt({ owner: "karen-folder", name: "x" }).restarts, true);
+    assert.equal(deletePrompt({ owner: "myra", name: "x" }).restarts, false);
+    assert.equal(deletePrompt({ owner: "myra-folder", name: "x" }).restarts, true);
     assert.equal(deletePrompt({ owner: "ollama", name: "x" }).restarts, true);
   });
 });
@@ -112,7 +112,7 @@ describe("deleting", () => {
       rescan: async () => assert.fail("no restart is needed for the daemon's own delete"),
     });
     assert.equal(asked, "Whisper-Tiny");
-    assert.deepEqual(result, { owner: "karen", removed: ["Whisper-Tiny"], restarted: false });
+    assert.deepEqual(result, { owner: "myra", removed: ["Whisper-Tiny"], restarted: false });
   });
 
   it("follows the index's links when the daemon hands it back", async () => {
@@ -126,7 +126,7 @@ describe("deleting", () => {
       rescan: async () => { rescanned = true; },
     });
 
-    assert.equal(result.owner, "karen-folder");
+    assert.equal(result.owner, "myra-folder");
     assert.equal(result.restarted, true);
     // The real file, not the link, and the emptied directory with it.
     assert.equal(await exists(join(modelsDir, "Mine-GGUF", "mine.gguf")), false);
@@ -178,7 +178,7 @@ describe("deleting", () => {
         indexDir,
         rescan: async () => assert.fail("nothing should have been deleted"),
       }),
-      /not inside a folder Karen manages/,
+      /not inside a folder MyRA manages/,
     );
     assert.equal(await exists(elsewhere), true);
   });

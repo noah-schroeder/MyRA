@@ -22,7 +22,7 @@ const SEARCH_OUTPUT = [
 
 test("a finished tool call comes back as a finished card", () => {
   const { items } = restoreThread([
-    { role: "system", content: "you are Karen" },
+    { role: "system", content: "you are MyRA" },
     { role: "user", content: "find me some papers" },
     {
       role: "assistant",
@@ -47,7 +47,7 @@ test("a finished tool call comes back as a finished card", () => {
 test("the system prompt is never shown back to the user", () => {
   // It is ours, not the conversation's, and it is wording the user never wrote.
   const { items } = restoreThread([
-    { role: "system", content: "you are Karen, and here are your instructions" },
+    { role: "system", content: "you are MyRA, and here are your instructions" },
     { role: "user", content: "hello" },
   ]);
   assert.equal(items.length, 1);

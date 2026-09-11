@@ -26,7 +26,7 @@ import { isEnabled, readSource, type RegistrySource } from "./registry.ts";
 export { REGISTRY_HOST, REGISTRY_LABEL, REGISTRY_NAME, readSource, type RegistrySource } from "./registry.ts";
 
 /**
- * Drop catalogue entries from registries Karen does not use.
+ * Drop catalogue entries from registries MyRA does not use.
  *
  * Upstream's catalogue is not all Hugging Face: ten of its 228 entries -- the
  * whole MiniCPM family, all of them marked `suggested` and so sorted to the
@@ -82,7 +82,7 @@ type Obj = Record<string, unknown>;
 /**
  * What each label means to someone choosing a model.
  *
- * Karen's users are academics, not people shopping for inference engines, so
+ * MyRA's users are academics, not people shopping for inference engines, so
  * the grouping is by what a model DOES rather than by which engine runs it.
  */
 export const LABEL_GROUPS: { id: string; title: string; labels: string[] }[] = [

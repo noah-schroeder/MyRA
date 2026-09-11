@@ -34,7 +34,7 @@ const SHAPE = /^\d{2,5}x\d{2,5}$/;
  * Whether a size can be sent.
  *
  * Permissive about which sizes exist and strict about the shape, for the reason
- * voiceIsValid is: the shipped list is what Karen knows, not what the engine
+ * voiceIsValid is: the shipped list is what MyRA knows, not what the engine
  * accepts, and a model that takes 1152x896 should not be refused by a table in
  * this file. What is refused is anything that is not a size at all, because
  * that came from an edited settings file rather than from the picker.

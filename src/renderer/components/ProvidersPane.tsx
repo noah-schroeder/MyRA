@@ -7,11 +7,11 @@ import {
 } from "../../core/providers.ts";
 
 /**
- * Where models can come from, besides the one Karen runs itself.
+ * Where models can come from, besides the one MyRA runs itself.
  *
  * The managed local runtime is not in this list and cannot be edited out of it:
  * it is what the app IS, and a list that could be emptied down to nothing would
- * be a way to break Karen from the settings screen. Everything here is an
+ * be a way to break MyRA from the settings screen. Everything here is an
  * addition to it.
  *
  * Two decisions get made per provider, and they are different questions:
@@ -21,7 +21,7 @@ import {
  *     two hundred of them turns the picker into a directory.
  *
  * The first is checked rather than trusted. Anyone can call an endpoint local;
- * only an endpoint on this machine is local, and Karen says so where the claim
+ * only an endpoint on this machine is local, and MyRA says so where the claim
  * is made rather than saving it and warning later.
  */
 export function ProvidersPane({
@@ -57,9 +57,9 @@ export function ProvidersPane({
   return (
     <div className="pane">
       <p className="pane-lead">
-        Models Karen can use besides the ones it runs itself. A provider on this machine keeps
+        Models MyRA can use besides the ones it runs itself. A provider on this machine keeps
         conversations here; a hosted one sends them to whoever runs it, including anything already
-        in the conversation. Karen checks the address rather than taking the label's word for it.
+        in the conversation. MyRA checks the address rather than taking the label's word for it.
       </p>
 
       {/* Said once, at the top, because it applies to every key on this screen
@@ -187,7 +187,7 @@ function ProviderCard({
   const [hasKey, setHasKey] = useState<boolean | undefined>();
 
   useEffect(() => {
-    void window.karen.providerKeysPresent().then((all) => setHasKey(Boolean(all[provider.id])));
+    void window.myra.providerKeysPresent().then((all) => setHasKey(Boolean(all[provider.id])));
   }, [provider.id, keyNote]);
   const [found, setFound] = useState<string[] | undefined>();
   const [status, setStatus] = useState("");
@@ -210,7 +210,7 @@ function ProviderCard({
   const fetchModels = (): void => {
     setBusy(true);
     setStatus("Asking the endpoint…");
-    void window.karen
+    void window.myra
       .providerModels({ baseUrl, id: provider.id, ...(key ? { apiKey: key } : {}) })
       .then((r) => {
         setFound(r.models ?? []);
@@ -239,7 +239,7 @@ function ProviderCard({
    * "Why can't I see the reasoning?" answered by asking, not by guessing.
    *
    * Every explanation for a missing chain of thought -- the model did not
-   * reason, the provider withholds it, it has to be asked, Karen does not know
+   * reason, the provider withholds it, it has to be asked, MyRA does not know
    * the field name -- looks the same from the chat window. One request settles
    * it, and if asking is what helps, this turns asking on.
    */
@@ -251,7 +251,7 @@ function ProviderCard({
     }
     setChecking(true);
     setThinking(`Asking ${model} to think…`);
-    void window.karen
+    void window.myra
       .providerReasoning({ baseUrl, id: provider.id, model, ...(key ? { apiKey: key } : {}) })
       .then((r) => setThinking(r.message ?? r.error ?? "No answer."))
       .finally(() => setChecking(false));
@@ -312,8 +312,8 @@ function ProviderCard({
           /* An instruction, not an example URL.
              A host written here is a host in the source, and the destinations
              test reads the source to build the privacy report's list of places
-             Karen can reach. That list has to stay exactly true, and a vendor
-             named in a placeholder is not somewhere Karen goes until somebody
+             MyRA can reach. That list has to stay exactly true, and a vendor
+             named in a placeholder is not somewhere MyRA goes until somebody
              types it. Saying what to type is no worse than showing it. */
           placeholder="The endpoint's base URL, usually ending in /v1"
           value={baseUrl}
@@ -341,7 +341,7 @@ function ProviderCard({
           about later next to the model picker. */}
       {overridden ? (
         <p className="provider-note wrong" role="alert">
-          <strong>This address is not on this machine,</strong> so Karen will treat it as external
+          <strong>This address is not on this machine,</strong> so MyRA will treat it as external
           whatever this is set to. {provider.baseUrl.trim() ? "" : "Enter the base URL first. "}
           Conversations sent here leave your computer.
         </p>
@@ -354,7 +354,7 @@ function ProviderCard({
            combination with no explanation on screen, which reads as the app not
            having noticed. */
         <p className="provider-note">
-          This address is on this machine, but you have marked it external, so Karen will treat it
+          This address is on this machine, but you have marked it external, so MyRA will treat it
           that way and warn when it is in use.
         </p>
       ) : null}
@@ -373,7 +373,7 @@ function ProviderCard({
           onChange={(e) => setKey(e.target.value)}
           onBlur={() => {
             if (!key) return;
-            void window.karen.setProviderKey(provider.id, key).then(() => {
+            void window.myra.setProviderKey(provider.id, key).then(() => {
               setKey("");
               setKeyNote("Saved.");
             });
@@ -386,7 +386,7 @@ function ProviderCard({
           type="button"
           className="btn-sm"
           onClick={() =>
-            void window.karen.setProviderKey(provider.id, "").then(() => setKeyNote("Key removed."))
+            void window.myra.setProviderKey(provider.id, "").then(() => setKeyNote("Key removed."))
           }
         >
           Remove the stored key

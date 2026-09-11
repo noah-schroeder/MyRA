@@ -1,7 +1,7 @@
 /**
  * Where a model actually runs, and therefore where a conversation goes.
  *
- * Karen's promise is that nothing leaves the machine unless the user asked for
+ * MyRA's promise is that nothing leaves the machine unless the user asked for
  * it. Adding hosted models does not weaken that promise, but it does mean the
  * app can no longer answer "does this leave?" by knowing it never does. It has
  * to answer per provider, visibly, at the moment a model is chosen.
@@ -9,12 +9,12 @@
  * ## The one rule that is not the user's to set
  *
  * A provider is labelled local or external by the person who added it, because
- * they know what their endpoint is. But the label can only ever make Karen MORE
+ * they know what their endpoint is. But the label can only ever make MyRA MORE
  * cautious, never less: an endpoint that is not on this machine is external no
  * matter what the box says.
  *
  * That asymmetry is deliberate. A wrong "external" costs a warning nobody
- * needed. A wrong "local" is Karen telling a researcher their interview
+ * needed. A wrong "local" is MyRA telling a researcher their interview
  * transcripts stayed on their laptop while they were being posted to somebody
  * else's server — and they would have no way to find out. Those two mistakes
  * are not the same size, so they do not get the same treatment.
@@ -50,7 +50,7 @@ export interface Provider {
    * Separate from `askReasoning`, which is about seeing the reasoning; this is
    * about controlling how much of it there is. Holds a dialect id rather than
    * a boolean so that a provider checked against one shape does not silently
-   * keep its control if Karen later decides that host speaks a different one.
+   * keep its control if MyRA later decides that host speaks a different one.
    *
    * Absent until the reasoning check has sent the field and had the request
    * come back clean. Knowing what OpenAI calls the parameter is not the same
@@ -62,7 +62,7 @@ export interface Provider {
   /**
    * What each model costs, as this endpoint reported it when last asked.
    *
-   * A cache of somebody else's numbers, not a price list of Karen's own: it is
+   * A cache of somebody else's numbers, not a price list of MyRA's own: it is
    * refreshed whenever the models are fetched, and a model that is not in here
    * is shown with no price rather than with a guess.
    */
@@ -106,7 +106,7 @@ export function isExternal(provider: Provider): boolean {
 }
 
 /**
- * True when the user called it local and Karen disagrees.
+ * True when the user called it local and MyRA disagrees.
  *
  * Worth surfacing rather than silently correcting: the person believed
  * something about their setup that is not true, and the setting is the only
@@ -165,7 +165,7 @@ export function parseModelRef(stored: string): ModelRef {
  *
  * The host is the fallback for a provider that has an address but has not been
  * named yet -- it is at least a true fact about where it points. The last
- * resort is a plain word rather than the internal id, which is a slug Karen
+ * resort is a plain word rather than the internal id, which is a slug MyRA
  * generated and nobody chose.
  */
 export function providerName(provider: Pick<Provider, "label" | "baseUrl">): string {
@@ -208,7 +208,7 @@ export function providerFor(providers: Provider[], stored: string): Provider | u
  *
  * The question the warning beside the model picker answers. A provider that has
  * been deleted or disabled since the choice was made is NOT assumed safe: the
- * honest answer about a model Karen cannot account for is that it does not know
+ * honest answer about a model MyRA cannot account for is that it does not know
  * where it goes, and the caller treats that as external.
  */
 export function choiceIsExternal(providers: Provider[], stored: string): boolean {
@@ -309,7 +309,7 @@ export function isUsable(provider: Provider): boolean {
  * a credential bug rather than an aesthetic one. A provider's API key is stored
  * under `provider:<id>`. Delete the provider you had for one vendor, add
  * another for a different vendor, and the counter hands out the same id again —
- * so the new provider inherits the old one's key and Karen sends one company's
+ * so the new provider inherits the old one's key and MyRA sends one company's
  * credential to another company. Nothing on screen would show it, because the
  * key is write-only from the interface.
  *

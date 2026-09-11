@@ -79,8 +79,8 @@ test("the fields offered are the ones the recipe actually has", () => {
   assert.ok(!llama.includes("model_name"));
 });
 
-test("an option Karen has never heard of is still editable", () => {
-  // A future Lemonade adding a key must not need a Karen release to set it.
+test("an option MyRA has never heard of is still editable", () => {
+  // A future Lemonade adding a key must not need a MyRA release to set it.
   const options = parseModelOptions({
     recipe: "llamacpp",
     defaults: { some_new_knob: 7, another_flag: false },

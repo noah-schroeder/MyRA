@@ -112,11 +112,11 @@ export function installMeetingIpc(deps: MeetingDeps): void {
 
   const publish = (next: Partial<MeetingState>): void => {
     state = { ...state, ...next };
-    send("karen:meeting", state);
+    send("myra:meeting", state);
   };
 
   const refresh = async (): Promise<void> => {
-    send("karen:meetings", await listMeetings(config.current.meetingsRoot));
+    send("myra:meetings", await listMeetings(config.current.meetingsRoot));
   };
 
   const recorderFor = (): MeetingRecorder => {
@@ -131,7 +131,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
    * A meeting directory named by the renderer, checked before it is used.
    *
    * Every handler below takes a `dir` across IPC, and four of them used it
-   * unchecked -- reading from it, writing `karen.json` into it, revealing it in
+   * unchecked -- reading from it, writing `myra.json` into it, revealing it in
    * the file manager. Only `meeting-delete` compared it against the root.
    *
    * Nothing can currently reach these but our own window (there is no `innerHTML`
@@ -305,10 +305,10 @@ export function installMeetingIpc(deps: MeetingDeps): void {
 
   /* ------------------------------------------------------------- the IPC -- */
 
-  ipcMain.handle("karen:meeting-state", () => state);
-  ipcMain.handle("karen:meeting-list", () => listMeetings(config.current.meetingsRoot));
+  ipcMain.handle("myra:meeting-state", () => state);
+  ipcMain.handle("myra:meeting-list", () => listMeetings(config.current.meetingsRoot));
 
-  ipcMain.handle("karen:meeting-start", async (_e, title: string, tracks: TrackSpec[]) => {
+  ipcMain.handle("myra:meeting-start", async (_e, title: string, tracks: TrackSpec[]) => {
     const id = await recorderFor().start(String(title ?? "Meeting"), tracks);
     publish({
       phase: "recording",
@@ -320,11 +320,11 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     return id;
   });
 
-  ipcMain.handle("karen:meeting-audio", async (_e, trackId: string, pcm: ArrayBuffer) => {
+  ipcMain.handle("myra:meeting-audio", async (_e, trackId: string, pcm: ArrayBuffer) => {
     await recorderFor().write(String(trackId), Buffer.from(pcm));
   });
 
-  ipcMain.handle("karen:meeting-levels", () => recorderFor().levels());
+  ipcMain.handle("myra:meeting-levels", () => recorderFor().levels());
 
   /**
    * Stop recording, and stop there.
@@ -334,7 +334,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
    * with a different model, or never -- and taking it silently is what made a
    * failure look like a lost meeting.
    */
-  ipcMain.handle("karen:meeting-stop", async () => {
+  ipcMain.handle("myra:meeting-stop", async () => {
     const record = await recorderFor().stop();
     if (record?.dir) deps.onCreated?.(basename(record.dir));
     publish({ phase: "idle", title: undefined, tracks: undefined });
@@ -346,7 +346,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
    * The jail is applied BEFORE `attempt`, not inside it.
    *
    * `attempt` records a failure by writing the error into the meeting's own
-   * `karen.json`, so handing it an unchecked directory would turn a rejected
+   * `myra.json`, so handing it an unchecked directory would turn a rejected
    * path into a write to that path -- the failure path becoming the thing the
    * check was there to prevent.
    */
@@ -363,18 +363,18 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     return attempt(meeting, () => work(meeting));
   };
 
-  ipcMain.handle("karen:meeting-transcribe", (_e, dir: string) =>
+  ipcMain.handle("myra:meeting-transcribe", (_e, dir: string) =>
     staged(dir, async (meeting) => {
       await transcribe(meeting);
       return undefined;
     }),
   );
 
-  ipcMain.handle("karen:meeting-notes", (_e, dir: string) =>
+  ipcMain.handle("myra:meeting-notes", (_e, dir: string) =>
     staged(dir, (meeting) => takeNotes(meeting)),
   );
 
-  ipcMain.handle("karen:meeting-run", (_e, dir: string) =>
+  ipcMain.handle("myra:meeting-run", (_e, dir: string) =>
     staged(dir, async (meeting) => {
       const already = await readTranscript(meeting);
       if (!already) await transcribe(meeting);
@@ -382,12 +382,12 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     }),
   );
 
-  ipcMain.handle("karen:meeting-cancel", () => {
+  ipcMain.handle("myra:meeting-cancel", () => {
     running?.abort();
     return { ok: true };
   });
 
-  ipcMain.handle("karen:meeting-instructions", async (_e, dir: string, text: unknown) => {
+  ipcMain.handle("myra:meeting-instructions", async (_e, dir: string, text: unknown) => {
     try {
       await writeState(meetingDir(dir), { instructions: String(text ?? "") });
     } catch (err) {
@@ -397,7 +397,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("karen:meeting-read", async (_e, dir: string, which: string) => {
+  ipcMain.handle("myra:meeting-read", async (_e, dir: string, which: string) => {
     const { readFile } = await import("node:fs/promises");
     const name = which === "notes" ? NOTES_MD : TRANSCRIPT_MD;
     try {
@@ -407,7 +407,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     }
   });
 
-  ipcMain.handle("karen:meeting-reveal", async (_e, path: string) => {
+  ipcMain.handle("myra:meeting-reveal", async (_e, path: string) => {
     /*
      * Two roots are legitimate here, not one: a meeting's own folder, and the
      * vault, because that is where notes are filed when a vault is configured.
@@ -426,7 +426,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("karen:meeting-delete", async (_e, dir: string) => {
+  ipcMain.handle("myra:meeting-delete", async (_e, dir: string) => {
     let target: string;
     try {
       target = meetingDir(dir);
@@ -438,12 +438,12 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("karen:meeting-discard", async () => {
+  ipcMain.handle("myra:meeting-discard", async () => {
     await recorderFor().discard();
     // Replaced wholesale rather than patched: a discard must clear the title,
     // the progress and any error, and a partial patch would leave one behind.
     state = { phase: "idle" };
-    send("karen:meeting", state);
+    send("myra:meeting", state);
     await refresh();
   });
 }

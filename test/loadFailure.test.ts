@@ -4,7 +4,7 @@
  * Reported verbatim from a running install: dictation ended and the window
  * showed
  *
- *   Error invoking remote method 'karen:dictation-stop': TranscriptionError:
+ *   Error invoking remote method 'myra:dictation-stop': TranscriptionError:
  *   Transcription failed: 500 Internal Server Error — {"error":{"code":
  *   "model_load_error","message":"Failed to load model
  *   'Whisper-Large-v3-Turbo': whisper-server failed to start or become ready",
@@ -100,7 +100,7 @@ describe("what to say instead", () => {
 
 describe("which of the three failures this was", () => {
   /* The one that was said wrongly: whisper.cpp installed, whisper-server
-     spawned with a PID and exiting 100 ms later, and Karen answering "open
+     spawned with a PID and exiting 100 ms later, and MyRA answering "open
      Settings → Runtime to install it". The daemon knew; nothing asked it. */
   it("does not send someone to install an engine they already have", () => {
     const said = explainLoadFailure({ model: "Whisper-Large-v3-Turbo" }, {
@@ -116,12 +116,12 @@ describe("which of the three failures this was", () => {
     assert.match(said, /Settings → Runtime/);
   });
 
-  it("names the old system when Karen already had to work around it", () => {
+  it("names the old system when MyRA already had to work around it", () => {
     /* The reported case, measured: whisper-server v1.8.4 and kokoro's koko b17
        both need GLIBC_2.38; llama.cpp b10375 needs 2.34. So on a machine that
        needed a bundled C runtime for the daemon, chat works and every speech
        model exits code 1 in under a second -- and the user reasonably concludes
-       something about Karen is broken rather than something about the box. */
+       something about MyRA is broken rather than something about the box. */
     const said = explainLoadFailure({ model: "Whisper-Large-v3-Turbo" }, {
       role: "transcription",
       engine: "whispercpp",
@@ -131,9 +131,9 @@ describe("which of the three failures this was", () => {
     assert.match(said, /newer system libraries/);
     // The asymmetry is the confusing part, so it is stated rather than implied.
     assert.match(said, /chat keeps working/);
-    // Karen wraps these engines itself, so this says the wrap failed, not that
+    // MyRA wraps these engines itself, so this says the wrap failed, not that
     // the machine is out of luck -- and names the thing that retries it.
-    assert.match(said, /Restarting Karen/);
+    assert.match(said, /Restarting MyRA/);
     // Nothing to install and nothing to re-download: neither would help.
     assert.equal(/finish downloading/.test(said), false);
     assert.equal(/to install it/.test(said), false);

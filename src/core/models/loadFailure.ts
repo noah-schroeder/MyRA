@@ -36,7 +36,7 @@ export interface LoadFailure {
  *
  * Matched on the code first, since that is the field the daemon owns and the
  * one least likely to be reworded. The prose is checked too because the same
- * failure reaches Karen through the OpenAI-shaped error path of three
+ * failure reaches MyRA through the OpenAI-shaped error path of three
  * different clients, and one of them may only have the message.
  */
 export function loadFailureIn(text: string): LoadFailure | undefined {
@@ -63,7 +63,7 @@ export interface LoadContext {
   /**
    * What the daemon says about that engine on THIS machine.
    *
-   * The reason the advice cannot be one sentence. Karen told a user with
+   * The reason the advice cannot be one sentence. MyRA told a user with
    * whisper.cpp already installed to go and install whisper.cpp, because the
    * only sentence it had assumed the common case. The daemon knows which case
    * it is -- `/api/v1/system-info` reports every backend as installed,
@@ -72,7 +72,7 @@ export interface LoadContext {
    */
   engineState?: Runnable | undefined;
   /**
-   * True when Karen had to ship a C runtime for the daemon on this machine.
+   * True when MyRA had to ship a C runtime for the daemon on this machine.
    *
    * Which makes this the likeliest cause of all, and a certain one rather than
    * a guess: the engines Lemonade downloads are built against GLIBC_2.38 --
@@ -87,7 +87,7 @@ export interface LoadContext {
    * The models sitting on the graphics card, other than the one being used.
    *
    * The list, not a byte count: the daemon reports each loaded model's device
-   * but not the card's free memory, and a number Karen had to estimate would
+   * but not the card's free memory, and a number MyRA had to estimate would
    * be a worse thing to put in front of somebody than the names of the models
    * they can actually unload.
    */
@@ -120,14 +120,14 @@ export function explainLoadFailure(failure: LoadFailure, opts: LoadContext): str
       `${engine} is installed, so this is not something left undone: its server needs newer ` +
       "system libraries than this machine has, which is also why chat keeps working — " +
       "llama.cpp is built against an older system than the speech and image engines are. " +
-      "Karen adapts those engines to this machine using the C library it ships for the " +
-      "Lemonade daemon, and this failing means that did not take. Restarting Karen tries " +
+      "MyRA adapts those engines to this machine using the C library it ships for the " +
+      "Lemonade daemon, and this failing means that did not take. Restarting MyRA tries " +
       "again; Settings → Runtime has the log if it does not."
     );
   }
 
   if (engineUsable(opts.engineState)) {
-    /* The engine is there and its server exited anyway. Karen cannot see that
+    /* The engine is there and its server exited anyway. MyRA cannot see that
        server's own output -- the daemon starts it and keeps its stderr -- so
        this names the two causes that actually produce it rather than
        pretending to know which. A model file that stopped short is first
@@ -189,7 +189,7 @@ export function producedNothing(text: string): boolean {
  * it will happily hold a model of each kind and never evict one to make room
  * for another.
  *
- * Karen cannot see the card's free bytes, but it does know what is on it, and
+ * MyRA cannot see the card's free bytes, but it does know what is on it, and
  * that list IS the answer when it is not empty. Naming it beats naming a
  * backend, because unloading one speech model is a click and reinstalling an
  * engine is not.

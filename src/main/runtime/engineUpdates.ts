@@ -1,7 +1,7 @@
 /**
  * Asking, when somebody presses the button, whether a newer engine exists.
  *
- * **Only when somebody presses the button.** Karen has no auto-updater and
+ * **Only when somebody presses the button.** MyRA has no auto-updater and
  * this does not add one: nothing here runs at launch, on a timer, or after an
  * install. A runtime that changed underneath a piece of work could change an
  * answer between one run and the next, and the whole point of pinning versions
@@ -10,7 +10,7 @@
  * Two questions, answered from two different places, neither of them guessed:
  *
  *   - **Which repository publishes this engine, and under what filename?**
- *     The daemon, through `/install/dry-run`. Karen keeps no table of its own;
+ *     The daemon, through `/install/dry-run`. MyRA keeps no table of its own;
  *     see `installDryRun` for why one would already be wrong.
  *   - **What has that repository released since?** GitHub's releases API, read
  *     once per repository even when several backends share it -- llama.cpp's
@@ -43,7 +43,7 @@ export interface UpdateCheck {
   /**
    * Updates already pinned but not yet installed.
    *
-   * Reachable without anybody pressing anything: a Karen release that bumps
+   * Reachable without anybody pressing anything: a MyRA release that bumps
    * LEMONADE_VERSION ships a new version table, and every engine installed
    * under the old one sits here until it is reinstalled. Found in the
    * daemon's own report, so this costs no network at all.
@@ -60,12 +60,12 @@ export interface UpdateCheck {
 /** Injected so the check is testable without a network. */
 export type FetchJson = (url: string) => Promise<unknown>;
 
-const USER_AGENT = "Karen";
+const USER_AGENT = "MyRA";
 
 export const fetchJson: FetchJson = async (url) => {
   const res = await fetch(url, {
     headers: {
-      /* GitHub asks for a User-Agent and answers 403 without one. Karen's own
+      /* GitHub asks for a User-Agent and answers 403 without one. MyRA's own
          name and nothing else: a version string here would be the closest
          thing in the app to telemetry, since it would tell GitHub which builds
          are in use. */

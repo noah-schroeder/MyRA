@@ -8,7 +8,7 @@
  *     Cannot delete extra models via API. Models in --extra-models-dir are
  *     user-managed. Delete the file directly from: <path>
  *
- * which is a handover rather than a failure. That path is inside Karen's
+ * which is a handover rather than a failure. That path is inside MyRA's
  * **index** -- a tree of symlinks rebuilt from scratch on every start -- so
  * deleting it would remove a link and leave the gigabytes exactly where they
  * were, and the model would be back after the next rescan. What has to go is
@@ -17,10 +17,10 @@
  * Hence the two rules this file is built on:
  *
  * 1. **The real path comes from `realpath`, never from the id.** An id is a
- *    directory name in an index Karen builds, and building a delete out of
+ *    directory name in an index MyRA builds, and building a delete out of
  *    string concatenation on a name that came back from a window is how a
  *    delete ends up somewhere else.
- * 2. **A resolved target must be inside a directory Karen already knows.**
+ * 2. **A resolved target must be inside a directory MyRA already knows.**
  *    Either its own models folder, or the library of the application the index
  *    recorded this model as belonging to. A link pointing anywhere else is
  *    refused rather than followed -- there is no legitimate way for one to
@@ -29,7 +29,7 @@
  * The user asked for LM Studio's and Ollama's models to stay deletable, with a
  * warning first. The warning is [modelOwner.ts](../../core/runtime/modelOwner.ts)'s
  * job; the deleting is this one's, and it is why rule 2 is scoped to that one
- * model's own library rather than to Karen's directories alone.
+ * model's own library rather than to MyRA's directories alone.
  */
 
 import { lstat, readdir, readlink, realpath, rm, rmdir, stat } from "node:fs/promises";
@@ -51,7 +51,7 @@ export interface DeleteDeps {
   deleteViaDaemon: (id: string) => Promise<void>;
   /** What the last index build recorded, which is the only record of ownership. */
   foreign: readonly ForeignModel[];
-  /** Karen's own models folder. */
+  /** MyRA's own models folder. */
   modelsDir: string;
   /** The symlink tree the daemon is pointed at. */
   indexDir: string;
@@ -79,14 +79,14 @@ export async function deleteModel(id: string, deps: DeleteDeps): Promise<DeleteR
   if (!foreign) {
     try {
       await deps.deleteViaDaemon(id);
-      return { owner: "karen", removed: [id], restarted: false };
+      return { owner: "myra", removed: [id], restarted: false };
     } catch (err) {
       /* Anything but the handover is a real failure and is reported as one.
          Falling through on every error would turn "the daemon is not running"
          into an unexplained file deletion. */
       const message = err instanceof LemonadeApiError ? err.message : String((err as Error).message);
       if (!message.includes(EXTRA_MODEL_REFUSAL)) throw err;
-      /* The refusal is what proves this one is Karen's folder rather than the
+      /* The refusal is what proves this one is MyRA's folder rather than the
          daemon's cache. Taken from the answer rather than from the `source`
          field, because the daemon is the thing that knows. */
       owner = ownerOf({ source: "extra_models_dir" });
@@ -94,13 +94,13 @@ export async function deleteModel(id: string, deps: DeleteDeps): Promise<DeleteR
   }
 
   /* The roots this model's files are allowed to be under. For a foreign model
-     that is the library the index recorded; for anything else, Karen's own
+     that is the library the index recorded; for anything else, MyRA's own
      folder. Nothing widens this set at runtime. */
   const roots = foreign ? [dirname(await realpath(foreign.path))] : [deps.modelsDir];
   const targets = await resolveTargets(join(deps.indexDir, id), roots);
   if (!targets.length) {
     throw new Error(
-      `Karen could not find the files for ${id}. Nothing has been deleted.`,
+      `MyRA could not find the files for ${id}. Nothing has been deleted.`,
     );
   }
 
@@ -151,7 +151,7 @@ async function resolveTargets(entry: string, roots: string[]): Promise<string[]>
     if (!(await stat(target).catch(() => undefined))?.isFile()) continue;
     if (!roots.some((root) => inside(root, target))) {
       throw new Error(
-        `${target} is not inside a folder Karen manages, so it has not been deleted.`,
+        `${target} is not inside a folder MyRA manages, so it has not been deleted.`,
       );
     }
     out.push(target);

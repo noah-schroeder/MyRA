@@ -84,7 +84,7 @@ export function MessageStatsLine({ stats }: { stats: MessageStats }) {
           <span className="stats-note">
             {stats.measured
               ? "Timed by llama.cpp."
-              : "Timed by Karen's own clock — this endpoint does not report its own timings."}
+              : "Timed by MyRA's own clock — this endpoint does not report its own timings."}
           </span>
         </span>
       ) : null}

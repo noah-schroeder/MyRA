@@ -3,7 +3,7 @@
  *
  * The allowlist tests are the important ones. Lemonade's own key has no
  * scopes -- measured, it will install backends and delete models for anyone
- * holding it -- so the list of paths Karen forwards is the entire security
+ * holding it -- so the list of paths MyRA forwards is the entire security
  * boundary of this feature.
  */
 
@@ -119,10 +119,10 @@ test("the display form cannot be used as a key", () => {
 });
 
 test("all three header spellings carry a key", () => {
-  assert.equal(bearerFrom({ authorization: "Bearer sk-karen-abc" }), "sk-karen-abc");
-  assert.equal(bearerFrom({ authorization: "bearer sk-karen-abc" }), "sk-karen-abc");
-  assert.equal(bearerFrom({ "x-api-key": "sk-karen-abc" }), "sk-karen-abc");
-  assert.equal(bearerFrom({ "api-key": "sk-karen-abc" }), "sk-karen-abc");
+  assert.equal(bearerFrom({ authorization: "Bearer sk-myra-abc" }), "sk-myra-abc");
+  assert.equal(bearerFrom({ authorization: "bearer sk-myra-abc" }), "sk-myra-abc");
+  assert.equal(bearerFrom({ "x-api-key": "sk-myra-abc" }), "sk-myra-abc");
+  assert.equal(bearerFrom({ "api-key": "sk-myra-abc" }), "sk-myra-abc");
   assert.equal(bearerFrom({}), "");
 });
 

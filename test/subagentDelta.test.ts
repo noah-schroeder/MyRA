@@ -47,7 +47,7 @@ after(async () => {
 });
 
 function endpoint(): EndpointSettings {
-  return { baseUrl, envVar: "KAREN_LLM_KEY", model: "test", timeoutMs: 5_000 };
+  return { baseUrl, envVar: "MYRA_LLM_KEY", model: "test", timeoutMs: 5_000 };
 }
 
 async function run(): Promise<{ seen: [string, string][]; text: string }> {
