@@ -7,9 +7,11 @@
 TLDR: An all-in-one AI assistant for academic work, intended for non-technical users. Voice to voice, voice dictation, meeting notes, research
 synthesis, deep research, document drafting, and AI-assisted reviewing all in one place. Can connect to your Zotero library. You can use private AI models (recommended) or you can configure external models. MyRA is built on Lemonade server, so the app is an all-in-one program that includes llama.cpp, whisper, kokoro, etc. You can download local models directly from HuggingFace within the app.
 
+**Warning:** In some modes, this app gives the LLM tools that can read and write documents. You can control this with the mode selector in the chat window — leaving it on **Off** prevents the model from using these tools at all.
+
 Note: This app is 100% vibe coded. Don't use it if you're not comfortable with that. 
 
-**[Read the docs](https://noah-schroeder.github.io/myra/)** for a full walkthrough of every
+**[Read the docs](https://noah-schroeder.github.io/MyRA/)** for a full walkthrough of every
 feature, or keep reading for the pitch and the technical detail.
 
 <table>
