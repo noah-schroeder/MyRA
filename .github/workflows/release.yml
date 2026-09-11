@@ -125,6 +125,15 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
 
+          # Publishing a release from the GitHub web UI creates the tag and
+          # the release together, before this workflow ever starts -- so
+          # there is nothing left to create, only the built installers to
+          # attach to what already exists.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" artifacts/* --clobber
+            exit 0
+          fi
+
           notes="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="$tag" --jq .body)"
           { cat .github/release-body.md; echo "$notes"; } > full-notes.md
 
