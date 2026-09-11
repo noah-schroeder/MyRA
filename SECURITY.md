@@ -1,7 +1,9 @@
 # Security
 
-MyRA runs entirely on your own machine — see the README's "What leaves this
-machine" for exactly what it sends and when.
+MyRA runs locally by default, but some tools call external services you
+configure it to use — a hosted model provider, a research API, Hugging Face.
+See the README's "What leaves this machine" for exactly what it sends and
+when.
 
 ## Reporting a vulnerability
 
