@@ -2,18 +2,11 @@ node_modules/
 dist/
 out/
 release/
+vendor/
 *.tsbuildinfo
 .env
 .env.*
-vm/searxng/data/
-vm/searxng/config/settings.yml
 *.log
 
-# Local SearXNG session secret
-vm/searxng/.env
-vm/searxng/data/
-
-# SearXNG install record
-vm/searxng/installed-image.txt
-out/
-vendor/
+# This machine's local Claude Code agent state -- not project config.
+.claude/
