@@ -89,7 +89,7 @@ jobs:
       # job below, rather than three parallel jobs racing to publish.
       - run: npx electron-builder ${{ matrix.args }} --publish never
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ runner.os }}
           path: |
