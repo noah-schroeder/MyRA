@@ -1,7 +1,7 @@
 /**
- * Lemonade: the inference backend Karen runs instead of managing its own.
+ * Lemonade: the inference backend MyRA runs instead of managing its own.
  *
- * Karen used to acquire llama.cpp itself -- release assets, an OCI registry for
+ * MyRA used to acquire llama.cpp itself -- release assets, an OCI registry for
  * the CUDA build upstream does not publish, a bundled C runtime, a loader
  * sandwich. Five builds went into making one RTX 4060 work. Lemonade already
  * solves that whole problem: it ships per-architecture CUDA builds as ordinary
@@ -22,14 +22,14 @@
  *     lookup is not argv-based. Under a bundled loader `/proc/self/exe` IS the
  *     loader, so the loader must sit beside `lemond` -- exactly the placement
  *     ggml needed for its backends. See core/runtime/libc.ts.
- *   - **It broadcasts over UDP to advertise itself.** On by default. Karen
+ *   - **It broadcasts over UDP to advertise itself.** On by default. MyRA
  *     passes `--no-broadcast`, which is a privacy requirement rather than a
  *     preference: a local assistant has no business announcing itself to the
  *     network.
  */
 
 /**
- * The version Karen ships.
+ * The version MyRA ships.
  *
  * Pinned deliberately. Lemonade moves fast and its API surface is broad; an
  * upgrade should be a decision with a test run behind it, not something that
@@ -78,11 +78,11 @@ export interface LemondArgs {
 }
 
 /**
- * How Karen starts the daemon.
+ * How MyRA starts the daemon.
  *
  * `cache_dir` and `config_dir` are positional, which is what makes the whole
  * thing relocatable: nothing lands in `~/.cache/lemonade` or `~/.config/lemonade`
- * behind the user's back, and a Karen uninstall can take its own directories
+ * behind the user's back, and a MyRA uninstall can take its own directories
  * with it.
  *
  * The host is pinned to loopback here rather than left to configuration. A
@@ -104,7 +104,7 @@ export function lemondArgs(opts: LemondArgs): string[] {
  * Lemonade serves the same routes under two prefixes.
  *
  * `/api/v1` is what the running daemon answers on and what its own tooling
- * uses; `/v1` is the OpenAI-compatible alias, and is what Karen's chat and
+ * uses; `/v1` is the OpenAI-compatible alias, and is what MyRA's chat and
  * transcription clients should be pointed at because that is the shape they
  * already speak. Both were measured returning 200.
  */
@@ -174,7 +174,7 @@ export interface LemonadeHealth {
    * and was: Lemonade holds several models at once, each on its own backend
    * port, and that field names whichever was touched LAST. Measured -- load a
    * chat model, transcribe one clip, and `model_loaded` is `Whisper-Tiny`,
-   * while the chat model is still resident and still answering on 8002. Karen
+   * while the chat model is still resident and still answering on 8002. MyRA
    * routed chat by that name, so a single dictation would have pointed the
    * conversation at a speech-to-text model.
    */
@@ -200,7 +200,7 @@ export function isChatEngine(recipe?: string | undefined): boolean {
  * `type` is the daemon's own classification and beats the recipe list above,
  * because it needs no maintenance: measured on a daemon holding three models
  * at once, it reports `llm`, `transcription` and `tts`. A new speech engine
- * Karen has never heard of is therefore excluded on the day it ships, where
+ * MyRA has never heard of is therefore excluded on the day it ships, where
  * the recipe list would have admitted it until somebody noticed.
  */
 const CHAT_TYPES = new Set(["llm", "text", "chat"]);
@@ -221,7 +221,7 @@ export function isChatModel(model: { type?: string | undefined; recipe?: string 
 /**
  * Which loaded model a conversation should go to.
  *
- * `preferred` is the model Karen last loaded on purpose. It wins when it is
+ * `preferred` is the model MyRA last loaded on purpose. It wins when it is
  * still resident; otherwise the first loaded model that a chat request could
  * actually be answered by. Returning nothing is a real answer -- a daemon
  * holding only Kokoro has nothing to chat with, and saying so is better than
@@ -316,7 +316,7 @@ export function parseHealth(body: unknown): LemonadeHealth {
 }
 
 /**
- * The settings Karen pins in Lemonade's `config.json`, and why each one.
+ * The settings MyRA pins in Lemonade's `config.json`, and why each one.
  *
  * Read off the daemon's own `resources/defaults.json` rather than from the
  * documentation, because two of these defaults are not what a private assistant
@@ -328,7 +328,7 @@ export function parseHealth(body: unknown): LemonadeHealth {
  *   - `auto_check_model_updates` defaults to **true**: it contacts Hugging Face
  *     in the background to see whether models have new revisions. That is a
  *     network call the user did not ask for and cannot see, which is exactly
- *     what Karen promises not to do. Checking for updates is fine when someone
+ *     what MyRA promises not to do. Checking for updates is fine when someone
  *     presses a button; it is not fine on a timer.
  *
  * `telemetry.enabled` is already false by default, and its OTLP endpoint points
@@ -342,7 +342,7 @@ export function pinnedConfig(modelsDir?: string): Record<string, unknown> {
     auto_update_models: false,
     telemetry: { enabled: false },
     /*
-     * Where Karen's existing models already are.
+     * Where MyRA's existing models already are.
      *
      * This is the whole of the migration. Lemonade scans this directory and
      * lists what it finds as downloaded models, so a library built up under the
@@ -381,10 +381,10 @@ export function pinnedConfig(modelsDir?: string): Record<string, unknown> {
 }
 
 /**
- * Karen's settings win; anything else the daemon or the user put there stays.
+ * MyRA's settings win; anything else the daemon or the user put there stays.
  *
  * A shallow merge would drop the rest of the `telemetry` block, so the one
- * nested object is merged a level deeper. Everything Karen pins is either a
+ * nested object is merged a level deeper. Everything MyRA pins is either a
  * scalar or that block, so this is as deep as it needs to go -- and a general
  * deep merge would be more machinery than the problem has.
  */

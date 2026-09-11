@@ -1,5 +1,5 @@
 /**
- * The one place Karen talks to Zotero.
+ * The one place MyRA talks to Zotero.
  *
  * Deliberately narrow, on the same principle as hfClient: the host and the port
  * are constants, the path is built by `searchPath` from typed fields, and
@@ -71,7 +71,7 @@ async function get(path: string): Promise<unknown> {
 
   if (!res) {
     /* `undefined` is what describeFailure renders as "not reachable", and it
-       now names both addresses rather than the one Karen used to try. */
+       now names both addresses rather than the one MyRA used to try. */
     throw new ZoteroError(describeFailure(undefined));
   }
 

@@ -20,7 +20,7 @@ export interface Page {
   error?: string;
 }
 
-const UA = "Karen/0.1 (private research assistant)";
+const UA = "MyRA/0.1 (private research assistant)";
 /** Enough for the publisher → repository → CDN chains that papers really use. */
 const MAX_REDIRECTS = 5;
 

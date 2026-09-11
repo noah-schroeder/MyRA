@@ -32,160 +32,160 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 
 const api = {
   /* ---- conversation ---- */
-  send: (text: string, attachments?: unknown[]) => ipcRenderer.invoke("karen:send", text, attachments ?? []),
-  abort: () => ipcRenderer.invoke("karen:abort"),
-  onAgentEvent: (cb: (event: AgentEventPayload) => void) => on("karen:agent-event", cb),
+  send: (text: string, attachments?: unknown[]) => ipcRenderer.invoke("myra:send", text, attachments ?? []),
+  abort: () => ipcRenderer.invoke("myra:abort"),
+  onAgentEvent: (cb: (event: AgentEventPayload) => void) => on("myra:agent-event", cb),
   /** A dropped image or document, read and sized before Send is pressed. */
-  chatAttach: (name: string, bytes: ArrayBuffer) => ipcRenderer.invoke("karen:chat-attach", name, bytes),
-  chatAttachRemove: (id: string) => ipcRenderer.invoke("karen:chat-attach-remove", id),
+  chatAttach: (name: string, bytes: ArrayBuffer) => ipcRenderer.invoke("myra:chat-attach", name, bytes),
+  chatAttachRemove: (id: string) => ipcRenderer.invoke("myra:chat-attach-remove", id),
 
   /* ---- sessions ---- */
-  newSession: () => ipcRenderer.invoke("karen:new-session"),
-  listSessions: () => ipcRenderer.invoke("karen:list-sessions"),
-  openSession: (id: string) => ipcRenderer.invoke("karen:open-session", id),
-  deleteSession: (id: string) => ipcRenderer.invoke("karen:delete-session", id),
-  deleteAllSessions: () => ipcRenderer.invoke("karen:delete-all-sessions"),
+  newSession: () => ipcRenderer.invoke("myra:new-session"),
+  listSessions: () => ipcRenderer.invoke("myra:list-sessions"),
+  openSession: (id: string) => ipcRenderer.invoke("myra:open-session", id),
+  deleteSession: (id: string) => ipcRenderer.invoke("myra:delete-session", id),
+  deleteAllSessions: () => ipcRenderer.invoke("myra:delete-all-sessions"),
 
   /* ---- settings ---- */
-  getSettings: () => ipcRenderer.invoke("karen:get-settings"),
+  getSettings: () => ipcRenderer.invoke("myra:get-settings"),
   /* Settings the main process changed on its own account -- loading a local
      model stands down a hosted choice, and the bar has to hear about it. */
-  onSettings: (cb: (settings: unknown) => void) => on("karen:settings", cb),
-  updateSettings: (patch: unknown) => ipcRenderer.invoke("karen:update-settings", patch),
-  setSecret: (name: string, value: string) => ipcRenderer.invoke("karen:set-secret", name, value),
-  secretsBackend: () => ipcRenderer.invoke("karen:secrets-backend"),
+  onSettings: (cb: (settings: unknown) => void) => on("myra:settings", cb),
+  updateSettings: (patch: unknown) => ipcRenderer.invoke("myra:update-settings", patch),
+  setSecret: (name: string, value: string) => ipcRenderer.invoke("myra:set-secret", name, value),
+  secretsBackend: () => ipcRenderer.invoke("myra:secrets-backend"),
   discoverModels: (which: "llm" | "embeddings") =>
-    ipcRenderer.invoke("karen:discover-models", which),
+    ipcRenderer.invoke("myra:discover-models", which),
   testEndpoint: (which: "llm" | "embeddings") =>
-    ipcRenderer.invoke("karen:test-endpoint", which),
+    ipcRenderer.invoke("myra:test-endpoint", which),
   chooseDirectory: (opts: { title?: string; current?: string }) =>
-    ipcRenderer.invoke("karen:choose-directory", opts),
+    ipcRenderer.invoke("myra:choose-directory", opts),
   /* Every save of a written document, including the draft flow's per-section
      ones. Carries the text, so the panel showing it never races the writer. */
-  onDocument: (cb: (doc: unknown) => void) => on("karen:document", cb),
-  revealDocument: (path: string) => ipcRenderer.invoke("karen:document-reveal", path),
+  onDocument: (cb: (doc: unknown) => void) => on("myra:document", cb),
+  revealDocument: (path: string) => ipcRenderer.invoke("myra:document-reveal", path),
 
-  copy: (text: string) => ipcRenderer.invoke("karen:copy", text),
+  copy: (text: string) => ipcRenderer.invoke("myra:copy", text),
 
   /* ---- audio: the transcription and voice models ---- */
   audioModels: (role: "transcription" | "voice") =>
-    ipcRenderer.invoke("karen:audio-models", role),
-  audioLoad: (model: string) => ipcRenderer.invoke("karen:audio-load", model),
+    ipcRenderer.invoke("myra:audio-models", role),
+  audioLoad: (model: string) => ipcRenderer.invoke("myra:audio-load", model),
   /* Naming the model, so ejecting Whisper does not also drop the model the
      conversation is using. */
   /* Any model, not only a speech one: the chat menu ejects through this
      too, and a name that said "audio" would be a lie the next reader has
      to check. */
-  unloadModel: (model: string) => ipcRenderer.invoke("karen:model-unload", model),
-  onAudioProgress: (cb: (p: unknown) => void) => on("karen:audio-progress", cb),
+  unloadModel: (model: string) => ipcRenderer.invoke("myra:model-unload", model),
+  onAudioProgress: (cb: (p: unknown) => void) => on("myra:audio-progress", cb),
   /* Returns the audio itself rather than a path. The window is sandboxed and
      has no filesystem, and an utterance written to disk would leave a record of
      what was said in the one feature that is spoken and gone. */
-  speak: (text: string) => ipcRenderer.invoke("karen:audio-speak", text),
-  previewVoice: (voice?: string) => ipcRenderer.invoke("karen:audio-preview", voice),
+  speak: (text: string) => ipcRenderer.invoke("myra:audio-speak", text),
+  previewVoice: (voice?: string) => ipcRenderer.invoke("myra:audio-preview", voice),
 
   /* ---- images ---- */
-  imageModels: () => ipcRenderer.invoke("karen:image-models"),
-  imageLoad: (model: string) => ipcRenderer.invoke("karen:image-load", model),
-  onImageProgress: (cb: (p: unknown) => void) => on("karen:image-progress", cb),
+  imageModels: () => ipcRenderer.invoke("myra:image-models"),
+  imageLoad: (model: string) => ipcRenderer.invoke("myra:image-load", model),
+  onImageProgress: (cb: (p: unknown) => void) => on("myra:image-progress", cb),
   /* Returns the bytes AND files the picture. Unlike an utterance, a generated
      figure is a thing somebody wants next week -- so the gallery reads the
      folder while the window gets something it can draw immediately. */
   imageGenerate: (request: { prompt: string; negative?: string; preset?: string }) =>
-    ipcRenderer.invoke("karen:image-generate", request),
-  imageCancel: () => ipcRenderer.invoke("karen:image-cancel"),
-  imageList: () => ipcRenderer.invoke("karen:image-list"),
-  imageRead: (id: string) => ipcRenderer.invoke("karen:image-read", id),
-  imageDelete: (id: string) => ipcRenderer.invoke("karen:image-delete", id),
-  imageReveal: (id: string) => ipcRenderer.invoke("karen:image-reveal", id),
-  imageSaveCopy: (id: string) => ipcRenderer.invoke("karen:image-save-copy", id),
-  imageFolder: () => ipcRenderer.invoke("karen:image-folder"),
+    ipcRenderer.invoke("myra:image-generate", request),
+  imageCancel: () => ipcRenderer.invoke("myra:image-cancel"),
+  imageList: () => ipcRenderer.invoke("myra:image-list"),
+  imageRead: (id: string) => ipcRenderer.invoke("myra:image-read", id),
+  imageDelete: (id: string) => ipcRenderer.invoke("myra:image-delete", id),
+  imageReveal: (id: string) => ipcRenderer.invoke("myra:image-reveal", id),
+  imageSaveCopy: (id: string) => ipcRenderer.invoke("myra:image-save-copy", id),
+  imageFolder: () => ipcRenderer.invoke("myra:image-folder"),
   /* ---- projects ----
    * A project is an index over the other five stores, not a sixth store: the
    * files never move, and "all of it together" is what Export writes. */
-  projectList: () => ipcRenderer.invoke("karen:project-list"),
-  projectCreate: (name: string) => ipcRenderer.invoke("karen:project-create", name),
+  projectList: () => ipcRenderer.invoke("myra:project-list"),
+  projectCreate: (name: string) => ipcRenderer.invoke("myra:project-create", name),
   projectRename: (id: string, name: string) =>
-    ipcRenderer.invoke("karen:project-rename", id, name),
-  projectOpen: (id: string) => ipcRenderer.invoke("karen:project-open", id),
+    ipcRenderer.invoke("myra:project-rename", id, name),
+  projectOpen: (id: string) => ipcRenderer.invoke("myra:project-open", id),
   /** Everything in every store, each row naming the project it is already in. */
-  projectItems: () => ipcRenderer.invoke("karen:project-items"),
+  projectItems: () => ipcRenderer.invoke("myra:project-items"),
   projectAdd: (id: string, members: unknown) =>
-    ipcRenderer.invoke("karen:project-add", id, members),
+    ipcRenderer.invoke("myra:project-add", id, members),
   projectRemove: (id: string, members: unknown) =>
-    ipcRenderer.invoke("karen:project-remove", id, members),
+    ipcRenderer.invoke("myra:project-remove", id, members),
   /** `contents` true deletes the items as well; false keeps them where they are. */
   projectDelete: (id: string, contents: boolean) =>
-    ipcRenderer.invoke("karen:project-delete", id, contents),
-  projectSetActive: (id: string) => ipcRenderer.invoke("karen:project-active", id),
-  projectExport: (id: string) => ipcRenderer.invoke("karen:project-export", id),
-  projectReveal: (path: string) => ipcRenderer.invoke("karen:project-reveal", path),
-  onProjects: (cb: (list: unknown) => void) => on("karen:projects", cb),
+    ipcRenderer.invoke("myra:project-delete", id, contents),
+  projectSetActive: (id: string) => ipcRenderer.invoke("myra:project-active", id),
+  projectExport: (id: string) => ipcRenderer.invoke("myra:project-export", id),
+  projectReveal: (path: string) => ipcRenderer.invoke("myra:project-reveal", path),
+  onProjects: (cb: (list: unknown) => void) => on("myra:projects", cb),
 
   /* ---- paper drafter ----
    * Notes in, first-draft prose out, one section at a time. No endpoint and no
    * key of its own: it writes with whatever model the bar names. */
-  paperList: () => ipcRenderer.invoke("karen:paper-list"),
+  paperList: () => ipcRenderer.invoke("myra:paper-list"),
   paperCreate: (kind: "paper" | "section", title: string) =>
-    ipcRenderer.invoke("karen:paper-create", kind, title),
-  paperOpen: (id: string) => ipcRenderer.invoke("karen:paper-open", id),
-  paperSave: (paper: unknown) => ipcRenderer.invoke("karen:paper-save", paper),
-  paperDelete: (id: string) => ipcRenderer.invoke("karen:paper-delete", id),
+    ipcRenderer.invoke("myra:paper-create", kind, title),
+  paperOpen: (id: string) => ipcRenderer.invoke("myra:paper-open", id),
+  paperSave: (paper: unknown) => ipcRenderer.invoke("myra:paper-save", paper),
+  paperDelete: (id: string) => ipcRenderer.invoke("myra:paper-delete", id),
   /* The request is built in the window and sent whole, so the preview dialog
      renders the very object that goes to the model rather than a copy of the
      rules it was built from. */
   paperDraft: (paperId: string, sectionId: string, request: unknown) =>
-    ipcRenderer.invoke("karen:paper-draft", paperId, sectionId, request),
-  paperCancel: (id?: string) => ipcRenderer.invoke("karen:paper-cancel", id ?? null),
+    ipcRenderer.invoke("myra:paper-draft", paperId, sectionId, request),
+  paperCancel: (id?: string) => ipcRenderer.invoke("myra:paper-cancel", id ?? null),
   paperExport: (id: string, format: string) =>
-    ipcRenderer.invoke("karen:paper-export", id, format),
-  paperReveal: (path: string) => ipcRenderer.invoke("karen:paper-reveal", path),
+    ipcRenderer.invoke("myra:paper-export", id, format),
+  paperReveal: (path: string) => ipcRenderer.invoke("myra:paper-reveal", path),
   /* The record as main saved it, because main is what commits a finished
      section now -- the page reflects the file rather than owning it. */
-  onPaperChanged: (cb: (paper: unknown) => void) => on("karen:paper-changed", cb),
+  onPaperChanged: (cb: (paper: unknown) => void) => on("myra:paper-changed", cb),
 
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
-    ipcRenderer.invoke("karen:provider-models", opts),
+    ipcRenderer.invoke("myra:provider-models", opts),
   providerReasoning: (opts: { baseUrl: string; id?: string; model: string; apiKey?: string }) =>
-    ipcRenderer.invoke("karen:provider-reasoning", opts),
+    ipcRenderer.invoke("myra:provider-reasoning", opts),
   setProviderKey: (id: string, value: string) =>
-    ipcRenderer.invoke("karen:provider-key", id, value),
-  providerKeysPresent: () => ipcRenderer.invoke("karen:provider-keys-present"),
-  zoteroCollections: () => ipcRenderer.invoke("karen:zotero-collections"),
-  zoteroStatus: () => ipcRenderer.invoke("karen:zotero-status"),
-  setResearch: (config: unknown) => ipcRenderer.invoke("karen:set-research", config),
-  getResearch: () => ipcRenderer.invoke("karen:get-research"),
-  engines: () => ipcRenderer.invoke("karen:engines"),
-  mediaAccess: () => ipcRenderer.invoke("karen:media-access"),
-  requestMicrophone: () => ipcRenderer.invoke("karen:request-microphone"),
-  installPandoc: () => ipcRenderer.invoke("karen:install-pandoc"),
-  onSetupProgress: (cb: (p: unknown) => void) => on("karen:setup-progress", cb),
-  privacy: () => ipcRenderer.invoke("karen:privacy"),
+    ipcRenderer.invoke("myra:provider-key", id, value),
+  providerKeysPresent: () => ipcRenderer.invoke("myra:provider-keys-present"),
+  zoteroCollections: () => ipcRenderer.invoke("myra:zotero-collections"),
+  zoteroStatus: () => ipcRenderer.invoke("myra:zotero-status"),
+  setResearch: (config: unknown) => ipcRenderer.invoke("myra:set-research", config),
+  getResearch: () => ipcRenderer.invoke("myra:get-research"),
+  engines: () => ipcRenderer.invoke("myra:engines"),
+  mediaAccess: () => ipcRenderer.invoke("myra:media-access"),
+  requestMicrophone: () => ipcRenderer.invoke("myra:request-microphone"),
+  installPandoc: () => ipcRenderer.invoke("myra:install-pandoc"),
+  onSetupProgress: (cb: (p: unknown) => void) => on("myra:setup-progress", cb),
+  privacy: () => ipcRenderer.invoke("myra:privacy"),
 
   /* ---- meetings ----
    * Capture happens in the renderer, because device access is a Web API. The
    * renderer downsamples to mono 16 kHz s16le and pushes chunks here. */
-  meetingState: () => ipcRenderer.invoke("karen:meeting-state"),
+  meetingState: () => ipcRenderer.invoke("myra:meeting-state"),
   meetingStart: (title: string, tracks: { id: string; label: string; source?: string }[]) =>
-    ipcRenderer.invoke("karen:meeting-start", title, tracks),
+    ipcRenderer.invoke("myra:meeting-start", title, tracks),
   meetingAudio: (trackId: string, pcm: ArrayBuffer) =>
-    ipcRenderer.invoke("karen:meeting-audio", trackId, pcm),
-  meetingStop: () => ipcRenderer.invoke("karen:meeting-stop"),
-  meetingDiscard: () => ipcRenderer.invoke("karen:meeting-discard"),
-  meetingLevels: () => ipcRenderer.invoke("karen:meeting-levels"),
-  onMeeting: (cb: (state: unknown) => void) => on("karen:meeting", cb),
-  onMeetings: (cb: (list: unknown) => void) => on("karen:meetings", cb),
-  meetingList: () => ipcRenderer.invoke("karen:meeting-list"),
-  meetingTranscribe: (dir: string) => ipcRenderer.invoke("karen:meeting-transcribe", dir),
-  meetingNotes: (dir: string) => ipcRenderer.invoke("karen:meeting-notes", dir),
-  meetingRun: (dir: string) => ipcRenderer.invoke("karen:meeting-run", dir),
-  meetingCancel: () => ipcRenderer.invoke("karen:meeting-cancel"),
+    ipcRenderer.invoke("myra:meeting-audio", trackId, pcm),
+  meetingStop: () => ipcRenderer.invoke("myra:meeting-stop"),
+  meetingDiscard: () => ipcRenderer.invoke("myra:meeting-discard"),
+  meetingLevels: () => ipcRenderer.invoke("myra:meeting-levels"),
+  onMeeting: (cb: (state: unknown) => void) => on("myra:meeting", cb),
+  onMeetings: (cb: (list: unknown) => void) => on("myra:meetings", cb),
+  meetingList: () => ipcRenderer.invoke("myra:meeting-list"),
+  meetingTranscribe: (dir: string) => ipcRenderer.invoke("myra:meeting-transcribe", dir),
+  meetingNotes: (dir: string) => ipcRenderer.invoke("myra:meeting-notes", dir),
+  meetingRun: (dir: string) => ipcRenderer.invoke("myra:meeting-run", dir),
+  meetingCancel: () => ipcRenderer.invoke("myra:meeting-cancel"),
   meetingInstructions: (dir: string, text: string) =>
-    ipcRenderer.invoke("karen:meeting-instructions", dir, text),
+    ipcRenderer.invoke("myra:meeting-instructions", dir, text),
   meetingRead: (dir: string, which: "notes" | "transcript") =>
-    ipcRenderer.invoke("karen:meeting-read", dir, which),
-  meetingReveal: (path: string) => ipcRenderer.invoke("karen:meeting-reveal", path),
-  meetingDelete: (dir: string) => ipcRenderer.invoke("karen:meeting-delete", dir),
+    ipcRenderer.invoke("myra:meeting-read", dir, which),
+  meetingReveal: (path: string) => ipcRenderer.invoke("myra:meeting-reveal", path),
+  meetingDelete: (dir: string) => ipcRenderer.invoke("myra:meeting-delete", dir),
 
   /* ---- transcription runtime ----
    *
@@ -195,100 +195,100 @@ const api = {
 
   /* The renderer is the only thing that can enumerate capture devices, so it
    * reports them up rather than main asking down. */
-  reportDevices: (devices: unknown[]) => ipcRenderer.invoke("karen:report-devices", devices),
+  reportDevices: (devices: unknown[]) => ipcRenderer.invoke("myra:report-devices", devices),
 
   /* ---- dictation ---- */
-  dictationStart: () => ipcRenderer.invoke("karen:dictation-start"),
-  dictationAudio: (pcm: ArrayBuffer) => ipcRenderer.invoke("karen:dictation-audio", pcm),
-  dictationStop: () => ipcRenderer.invoke("karen:dictation-stop"),
-  dictationCancel: () => ipcRenderer.invoke("karen:dictation-cancel"),
-  onDictationText: (cb: (text: string) => void) => on("karen:dictation-text", cb),
+  dictationStart: () => ipcRenderer.invoke("myra:dictation-start"),
+  dictationAudio: (pcm: ArrayBuffer) => ipcRenderer.invoke("myra:dictation-audio", pcm),
+  dictationStop: () => ipcRenderer.invoke("myra:dictation-stop"),
+  dictationCancel: () => ipcRenderer.invoke("myra:dictation-cancel"),
+  onDictationText: (cb: (text: string) => void) => on("myra:dictation-text", cb),
 
   /* ---- runtime ----
    * The bundled llama.cpp: opt-in, driven entirely by buttons in Settings.
    * Nothing here is reachable by the model -- no tool installs a runtime,
    * downloads a model, or starts a process. */
-  runtimeState: () => ipcRenderer.invoke("karen:runtime-state"),
-  runtimeConfig: (patch: unknown) => ipcRenderer.invoke("karen:runtime-config", patch),
+  runtimeState: () => ipcRenderer.invoke("myra:runtime-state"),
+  runtimeConfig: (patch: unknown) => ipcRenderer.invoke("myra:runtime-config", patch),
   /** Why no GPU was found: the driver\u2019s own answer plus the raw probe output. */
-  lemonadeEnsure: () => ipcRenderer.invoke("karen:lemonade-ensure"),
-  lemonadeInfo: () => ipcRenderer.invoke("karen:lemonade-info"),
+  lemonadeEnsure: () => ipcRenderer.invoke("myra:lemonade-ensure"),
+  lemonadeInfo: () => ipcRenderer.invoke("myra:lemonade-info"),
   lemonadeInstallBackend: (recipe: string, backend: string) =>
-    ipcRenderer.invoke("karen:lemonade-install-backend", recipe, backend),
-  lemonadeDownloads: () => ipcRenderer.invoke("karen:lemonade-downloads"),
+    ipcRenderer.invoke("myra:lemonade-install-backend", recipe, backend),
+  lemonadeDownloads: () => ipcRenderer.invoke("myra:lemonade-downloads"),
   /* What the chosen model can be told about thinking, and the choice itself.
      Both are per model: the vocabulary belongs to the endpoint. */
-  reasoningCapability: () => ipcRenderer.invoke("karen:reasoning-capability"),
+  reasoningCapability: () => ipcRenderer.invoke("myra:reasoning-capability"),
   /* Main derives the key: three per-model records share it, and the window has
      been wrong about which one a loaded model uses before. */
-  modelPrompt: (model?: string) => ipcRenderer.invoke("karen:model-prompt", model ?? null),
+  modelPrompt: (model?: string) => ipcRenderer.invoke("myra:model-prompt", model ?? null),
   /* What the model's authors published: shown as each field's placeholder, so an
      untouched box says where its value comes from. */
-  modelFacts: (model?: string) => ipcRenderer.invoke("karen:model-facts", model ?? null),
+  modelFacts: (model?: string) => ipcRenderer.invoke("myra:model-facts", model ?? null),
   setIgnoreSuggested: (model: string | undefined, ignore: boolean) =>
-    ipcRenderer.invoke("karen:model-facts-ignore", model ?? null, ignore),
+    ipcRenderer.invoke("myra:model-facts-ignore", model ?? null, ignore),
   setModelPrompt: (model: string | undefined, value?: string) =>
-    ipcRenderer.invoke("karen:set-model-prompt", model ?? null, value ?? null),
+    ipcRenderer.invoke("myra:set-model-prompt", model ?? null, value ?? null),
   setReasoning: (dialectId: string, value?: string) =>
-    ipcRenderer.invoke("karen:set-reasoning", dialectId, value ?? null),
+    ipcRenderer.invoke("myra:set-reasoning", dialectId, value ?? null),
   /* Engine builds. `engineUpdatesCheck` is the only one of the three that
      leaves the machine, and only when a button is pressed. */
-  engineVersions: () => ipcRenderer.invoke("karen:engine-versions"),
-  engineUpdatesCheck: () => ipcRenderer.invoke("karen:engine-updates-check"),
+  engineVersions: () => ipcRenderer.invoke("myra:engine-versions"),
+  engineUpdatesCheck: () => ipcRenderer.invoke("myra:engine-updates-check"),
   engineUpdate: (recipe: string, backend: string, version?: string) =>
-    ipcRenderer.invoke("karen:engine-update", recipe, backend, version ?? null),
-  lemonadeCatalog: () => ipcRenderer.invoke("karen:lemonade-catalog"),
-  lemonadeModels: () => ipcRenderer.invoke("karen:lemonade-models"),
-  lemonadeRescan: () => ipcRenderer.invoke("karen:lemonade-rescan"),
+    ipcRenderer.invoke("myra:engine-update", recipe, backend, version ?? null),
+  lemonadeCatalog: () => ipcRenderer.invoke("myra:lemonade-catalog"),
+  lemonadeModels: () => ipcRenderer.invoke("myra:lemonade-models"),
+  lemonadeRescan: () => ipcRenderer.invoke("myra:lemonade-rescan"),
 
   /* The API server. `apiKeyCreate` is the one call in the whole bridge that
      returns a secret, and it does so exactly once. */
-  trayAvailable: () => ipcRenderer.invoke("karen:tray-available"),
-  apiState: () => ipcRenderer.invoke("karen:api-state"),
-  apiConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke("karen:api-config", patch),
-  apiStart: () => ipcRenderer.invoke("karen:api-start"),
-  apiStop: () => ipcRenderer.invoke("karen:api-stop"),
-  apiKeyCreate: (label: string) => ipcRenderer.invoke("karen:api-key-create", label),
-  apiKeyRevoke: (id: string) => ipcRenderer.invoke("karen:api-key-revoke", id),
-  apiRequests: () => ipcRenderer.invoke("karen:api-requests"),
-  apiCancel: (id: string) => ipcRenderer.invoke("karen:api-cancel", id),
-  apiClearLog: () => ipcRenderer.invoke("karen:api-clear-log"),
+  trayAvailable: () => ipcRenderer.invoke("myra:tray-available"),
+  apiState: () => ipcRenderer.invoke("myra:api-state"),
+  apiConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke("myra:api-config", patch),
+  apiStart: () => ipcRenderer.invoke("myra:api-start"),
+  apiStop: () => ipcRenderer.invoke("myra:api-stop"),
+  apiKeyCreate: (label: string) => ipcRenderer.invoke("myra:api-key-create", label),
+  apiKeyRevoke: (id: string) => ipcRenderer.invoke("myra:api-key-revoke", id),
+  apiRequests: () => ipcRenderer.invoke("myra:api-requests"),
+  apiCancel: (id: string) => ipcRenderer.invoke("myra:api-cancel", id),
+  apiClearLog: () => ipcRenderer.invoke("myra:api-clear-log"),
   onApi: (cb: (state: unknown) => void) => {
     const fn = (_e: unknown, state: unknown): void => cb(state);
-    ipcRenderer.on("karen:api", fn);
-    return () => ipcRenderer.removeListener("karen:api", fn);
+    ipcRenderer.on("myra:api", fn);
+    return () => ipcRenderer.removeListener("myra:api", fn);
   },
   onApiLog: (cb: (entries: unknown) => void) => {
     const fn = (_e: unknown, entries: unknown): void => cb(entries);
-    ipcRenderer.on("karen:api-log", fn);
-    return () => ipcRenderer.removeListener("karen:api-log", fn);
+    ipcRenderer.on("myra:api-log", fn);
+    return () => ipcRenderer.removeListener("myra:api-log", fn);
   },
-  lemonadeLoad: (name: string) => ipcRenderer.invoke("karen:lemonade-load", name),
-  lemonadeUnload: () => ipcRenderer.invoke("karen:lemonade-unload"),
+  lemonadeLoad: (name: string) => ipcRenderer.invoke("myra:lemonade-load", name),
+  lemonadeUnload: () => ipcRenderer.invoke("myra:lemonade-unload"),
   lemonadePull: (name: string, checkpoint?: string) =>
-    ipcRenderer.invoke("karen:lemonade-pull", name, checkpoint),
-  hfDetail: (repo: string) => ipcRenderer.invoke("karen:hf-detail", repo),
-  hfCard: (repo: string) => ipcRenderer.invoke("karen:hf-card", repo),
-  lemonadeDeleteModel: (id: string) => ipcRenderer.invoke("karen:lemonade-delete-model", id),
-  modelReveal: (id: string) => ipcRenderer.invoke("karen:model-reveal", id),
+    ipcRenderer.invoke("myra:lemonade-pull", name, checkpoint),
+  hfDetail: (repo: string) => ipcRenderer.invoke("myra:hf-detail", repo),
+  hfCard: (repo: string) => ipcRenderer.invoke("myra:hf-card", repo),
+  lemonadeDeleteModel: (id: string) => ipcRenderer.invoke("myra:lemonade-delete-model", id),
+  modelReveal: (id: string) => ipcRenderer.invoke("myra:model-reveal", id),
   /*
    * A manuscript, as bytes.
    *
    * The dropped file's CONTENT crosses, never its path: the renderer reads it
    * with the standard `arrayBuffer()`, so nothing here needs filesystem access
-   * and Karen never learns where a confidential manuscript is stored.
+   * and MyRA never learns where a confidential manuscript is stored.
    */
   reviewExtract: (name: string, bytes: ArrayBuffer) =>
-    ipcRenderer.invoke("karen:review-extract", name, bytes),
-  reviewContext: () => ipcRenderer.invoke("karen:review-context"),
+    ipcRenderer.invoke("myra:review-extract", name, bytes),
+  reviewContext: () => ipcRenderer.invoke("myra:review-context"),
   reviewRun: (requests: unknown, meta: unknown) =>
-    ipcRenderer.invoke("karen:review-run", requests, meta),
-  reviewCancel: (id?: string) => ipcRenderer.invoke("karen:review-cancel", id ?? null),
-  reviewSave: (name: string, text: string) => ipcRenderer.invoke("karen:review-save", name, text),
-  reviewList: () => ipcRenderer.invoke("karen:review-list"),
-  reviewOpen: (id: string) => ipcRenderer.invoke("karen:review-open", id),
-  reviewDelete: (id: string) => ipcRenderer.invoke("karen:review-delete", id),
-  onReviews: (cb: (rows: unknown) => void) => on("karen:reviews", cb),
+    ipcRenderer.invoke("myra:review-run", requests, meta),
+  reviewCancel: (id?: string) => ipcRenderer.invoke("myra:review-cancel", id ?? null),
+  reviewSave: (name: string, text: string) => ipcRenderer.invoke("myra:review-save", name, text),
+  reviewList: () => ipcRenderer.invoke("myra:review-list"),
+  reviewOpen: (id: string) => ipcRenderer.invoke("myra:review-open", id),
+  reviewDelete: (id: string) => ipcRenderer.invoke("myra:review-delete", id),
+  onReviews: (cb: (rows: unknown) => void) => on("myra:reviews", cb),
 
   /*
    * The long job that is not a chat turn, in one shape for both features.
@@ -297,32 +297,32 @@ const api = {
    * asks once and draws what has arrived so far, rather than sitting blank until
    * the next reviewer starts.
    */
-  workState: () => ipcRenderer.invoke("karen:work-state"),
-  onWork: (cb: (job: unknown) => void) => on("karen:work", cb),
-  recent: () => ipcRenderer.invoke("karen:recent"),
+  workState: () => ipcRenderer.invoke("myra:work-state"),
+  onWork: (cb: (job: unknown) => void) => on("myra:work", cb),
+  recent: () => ipcRenderer.invoke("myra:recent"),
 
   /* Every transfer, pushed whenever the list changes. Independent of any
      page: the registry lives in main precisely so a download outlives the
      screen it was started from. */
-  downloadsList: () => ipcRenderer.invoke("karen:downloads-list"),
-  downloadPause: (id: string) => ipcRenderer.invoke("karen:download-pause", id),
-  downloadResume: (id: string) => ipcRenderer.invoke("karen:download-resume", id),
-  downloadCancel: (id: string) => ipcRenderer.invoke("karen:download-cancel", id),
-  downloadDismiss: (id?: string) => ipcRenderer.invoke("karen:download-dismiss", id ?? ""),
+  downloadsList: () => ipcRenderer.invoke("myra:downloads-list"),
+  downloadPause: (id: string) => ipcRenderer.invoke("myra:download-pause", id),
+  downloadResume: (id: string) => ipcRenderer.invoke("myra:download-resume", id),
+  downloadCancel: (id: string) => ipcRenderer.invoke("myra:download-cancel", id),
+  downloadDismiss: (id?: string) => ipcRenderer.invoke("myra:download-dismiss", id ?? ""),
   onDownloads: (fn: (list: unknown) => void) => {
     const handler = (_e: unknown, list: unknown): void => fn(list);
-    ipcRenderer.on("karen:downloads", handler);
-    return () => ipcRenderer.removeListener("karen:downloads", handler);
+    ipcRenderer.on("myra:downloads", handler);
+    return () => ipcRenderer.removeListener("myra:downloads", handler);
   },
   onModelsChanged: (fn: () => void) => {
     const handler = (): void => fn();
-    ipcRenderer.on("karen:models-changed", handler);
-    return () => ipcRenderer.removeListener("karen:models-changed", handler);
+    ipcRenderer.on("myra:models-changed", handler);
+    return () => ipcRenderer.removeListener("myra:models-changed", handler);
   },
   onPullProgress: (fn: (p: unknown) => void) => {
     const handler = (_e: unknown, p: unknown): void => fn(p);
-    ipcRenderer.on("karen:pull-progress", handler);
-    return () => ipcRenderer.removeListener("karen:pull-progress", handler);
+    ipcRenderer.on("myra:pull-progress", handler);
+    return () => ipcRenderer.removeListener("myra:pull-progress", handler);
   },
   hfBrowse: (q: {
     query?: string;
@@ -330,43 +330,43 @@ const api = {
     kind?: string;
     sort?: string;
     ggufOnly?: boolean;
-  }) => ipcRenderer.invoke("karen:hf-browse", q),
+  }) => ipcRenderer.invoke("myra:hf-browse", q),
   registryVariants: (checkpoint: string, source: string) =>
-    ipcRenderer.invoke("karen:registry-variants", checkpoint, source),
+    ipcRenderer.invoke("myra:registry-variants", checkpoint, source),
   registryPull: (name: string, checkpoint: string, source: string, recipe?: string) =>
-    ipcRenderer.invoke("karen:registry-pull", name, checkpoint, source, recipe),
-  modelOptions: (name: string) => ipcRenderer.invoke("karen:model-options", name),
+    ipcRenderer.invoke("myra:registry-pull", name, checkpoint, source, recipe),
+  modelOptions: (name: string) => ipcRenderer.invoke("myra:model-options", name),
   modelOptionsSet: (name: string, patch: Record<string, unknown>) =>
-    ipcRenderer.invoke("karen:model-options-set", name, patch),
-  modelOptionsReset: (name: string) => ipcRenderer.invoke("karen:model-options-reset", name),
-  onRuntime: (cb: (state: unknown) => void) => on("karen:runtime", cb),
-  onRuntimeDownload: (cb: (p: unknown) => void) => on("karen:runtime-download", cb),
+    ipcRenderer.invoke("myra:model-options-set", name, patch),
+  modelOptionsReset: (name: string) => ipcRenderer.invoke("myra:model-options-reset", name),
+  onRuntime: (cb: (state: unknown) => void) => on("myra:runtime", cb),
+  onRuntimeDownload: (cb: (p: unknown) => void) => on("myra:runtime-download", cb),
 
   /* ---- model search ---- */
 
   /* ---- research ---- */
   /** Academic search the user runs directly. No model in the loop. */
   academicSearch: (query: string, opts: { page?: number; sort?: string }) =>
-    ipcRenderer.invoke("karen:academic-search", query, opts),
+    ipcRenderer.invoke("myra:academic-search", query, opts),
   /** Open a link in the user's own browser, never in a window of ours. */
-  openExternal: (url: string) => ipcRenderer.invoke("karen:open-external", url),
-  researchRuns: () => ipcRenderer.invoke("karen:research-runs"),
-  researchRun: (id: string) => ipcRenderer.invoke("karen:research-run", id),
-  researchSource: (id: string, n: number) => ipcRenderer.invoke("karen:research-source", id, n),
-  researchReveal: (id: string) => ipcRenderer.invoke("karen:research-reveal", id),
-  researchFootprint: (id: string) => ipcRenderer.invoke("karen:research-footprint", id),
-  researchDelete: (id: string) => ipcRenderer.invoke("karen:research-delete", id),
-  onResearchProgress: (cb: (note: string) => void) => on("karen:research-progress", cb),
-  onResearchStage: (cb: (stage: string) => void) => on("karen:research-stage", cb),
+  openExternal: (url: string) => ipcRenderer.invoke("myra:open-external", url),
+  researchRuns: () => ipcRenderer.invoke("myra:research-runs"),
+  researchRun: (id: string) => ipcRenderer.invoke("myra:research-run", id),
+  researchSource: (id: string, n: number) => ipcRenderer.invoke("myra:research-source", id, n),
+  researchReveal: (id: string) => ipcRenderer.invoke("myra:research-reveal", id),
+  researchFootprint: (id: string) => ipcRenderer.invoke("myra:research-footprint", id),
+  researchDelete: (id: string) => ipcRenderer.invoke("myra:research-delete", id),
+  onResearchProgress: (cb: (note: string) => void) => on("myra:research-progress", cb),
+  onResearchStage: (cb: (stage: string) => void) => on("myra:research-stage", cb),
   /** The run in flight, for a page that has just mounted into the middle of one. */
-  researchActive: () => ipcRenderer.invoke("karen:research-active-state"),
+  researchActive: () => ipcRenderer.invoke("myra:research-active-state"),
   /** The research run executing right now, or null. Independent of the page. */
   onResearchActive: (
     cb: (run: { id: string; stage?: string; note?: string } | null) => void,
-  ) => on("karen:research-active", cb),
+  ) => on("myra:research-active", cb),
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>
-    ipcRenderer.invoke("karen:answer-prompt", id, answer),
+    ipcRenderer.invoke("myra:answer-prompt", id, answer),
   onPrompt: (
     cb: (request: {
       id: string;
@@ -380,9 +380,9 @@ const api = {
       slots?: { key: string; label: string; hint: string }[];
       current?: Record<string, string>;
     }) => void,
-  ) => on("karen:prompt", cb),
+  ) => on("myra:prompt", cb),
 };
 
-contextBridge.exposeInMainWorld("karen", api);
+contextBridge.exposeInMainWorld("myra", api);
 
-export type KarenApi = typeof api;
+export type MyRAApi = typeof api;

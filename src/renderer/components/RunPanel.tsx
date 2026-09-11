@@ -81,7 +81,7 @@ export function RunPanel({
   const [note, setNote] = useState<string | undefined>();
 
   useEffect(() => {
-    void window.karen
+    void window.myra
       .researchRuns()
       .then((list) => {
         setRuns(list);
@@ -93,7 +93,7 @@ export function RunPanel({
   useEffect(() => {
     if (!selected) return;
     setDetail(undefined);
-    void window.karen
+    void window.myra
       .researchRun(selected)
       .then(setDetail)
       .catch((e: Error) => setError(e.message));
@@ -148,7 +148,7 @@ export function RunPanel({
             </div>
             <div className="runs-actions">
               {selected ? (
-                <button type="button" onClick={() => void window.karen.researchReveal(selected)}>
+                <button type="button" onClick={() => void window.myra.researchReveal(selected)}>
                   Open folder
                 </button>
               ) : null}
@@ -159,7 +159,7 @@ export function RunPanel({
                   onClick={() => {
                     setNote(undefined);
                     setConfirmError(undefined);
-                    void window.karen.researchFootprint(selected).then((r) => {
+                    void window.myra.researchFootprint(selected).then((r) => {
                       if (r.ok && r.footprint) setConfirming(r.footprint);
                       else setConfirmError(r.error ?? "That run could not be read.");
                     });
@@ -203,7 +203,7 @@ export function RunPanel({
                   onClick={() => {
                     setDeleting(true);
                     setConfirmError(undefined);
-                    void window.karen.researchDelete(confirming.id).then((r) => {
+                    void window.myra.researchDelete(confirming.id).then((r) => {
                       setDeleting(false);
                       if (!r.ok || !r.runs) {
                         setConfirmError(r.error ?? "That run could not be deleted.");
@@ -421,7 +421,7 @@ function Sources({ detail }: { detail: RunDetail }) {
   useEffect(() => {
     if (open === undefined) return;
     setSource(undefined);
-    void window.karen.researchSource(detail.id, open).then(setSource).catch(() => setSource(undefined));
+    void window.myra.researchSource(detail.id, open).then(setSource).catch(() => setSource(undefined));
   }, [detail.id, open]);
 
   return (

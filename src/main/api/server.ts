@@ -1,13 +1,13 @@
 /**
- * Karen's gateway: the first thing in this application that listens.
+ * MyRA's gateway: the first thing in this application that listens.
  *
- * It accepts Karen's own keys, forwards only the paths in `core/api/routes.ts`,
+ * It accepts MyRA's own keys, forwards only the paths in `core/api/routes.ts`,
  * and swaps in Lemonade's key on the way through. The two key spaces never
- * meet: a client never learns the daemon's key, so a leaked Karen key cannot
+ * meet: a client never learns the daemon's key, so a leaked MyRA key cannot
  * reach `/api/v1/install` even if the gateway's allowlist were bypassed at the
  * routing layer.
  *
- * Everything else in Karen is outbound-only, behind a default-deny filter on
+ * Everything else in MyRA is outbound-only, behind a default-deny filter on
  * the renderer. A listening socket is a real change to the threat model, which
  * is why the switch is off by default, why it binds loopback unless told
  * otherwise, why it refuses to start without a key, and why the allowlist is
@@ -136,13 +136,13 @@ export class ApiGateway {
          * message of whatever threw -- which for anything filesystem-shaped is
          * a path under the user's home directory, complete with their account
          * name. That is a disclosure to an API client, over the LAN when the
-         * LAN switch is on. The detail belongs in Karen's own log, where the
+         * LAN switch is on. The detail belongs in MyRA's own log, where the
          * person who can act on it is looking.
          */
         console.error("[api] request failed:", err);
         if (!res.headersSent) {
           sendJson(res, 500, {
-            error: { message: "Karen could not complete this request.", type: "internal_error" },
+            error: { message: "MyRA could not complete this request.", type: "internal_error" },
           });
         } else res.end();
       });
@@ -175,7 +175,7 @@ export class ApiGateway {
           ? `Something else is already using port ${String(config.port)}.` +
             (culprit ? ` ${culprit} by default — close it, or choose another port here.` : " Choose another port here.")
           : code === "EACCES"
-            ? `Port ${String(config.port)} needs privileges Karen does not have. Choose a port above 1024.`
+            ? `Port ${String(config.port)} needs privileges MyRA does not have. Choose a port above 1024.`
             : (err as Error).message;
       this.#set({ listening: false, error: message });
       return this.#status;
@@ -233,10 +233,10 @@ export class ApiGateway {
       const presented = bearerFrom(req.headers as Record<string, string | string[] | undefined>);
       key = presented ? findKey(config.keys, presented) : undefined;
       if (!key) {
-        res.setHeader("WWW-Authenticate", 'Bearer realm="Karen"');
+        res.setHeader("WWW-Authenticate", 'Bearer realm="MyRA"');
         sendJson(res, 401, {
           error: {
-            message: "Provide a Karen API key. Create one in Karen under API → Keys.",
+            message: "Provide a MyRA API key. Create one in MyRA under API → Keys.",
             type: "authentication_error",
           },
         });
@@ -252,7 +252,7 @@ export class ApiGateway {
     await this.#proxy(route, req, res, key, config);
   }
 
-  /** `/health` and the model lists, which Karen answers rather than forwards. */
+  /** `/health` and the model lists, which MyRA answers rather than forwards. */
   async #answerLocally(route: Route, res: ServerResponse): Promise<void> {
     if (route.path === "/health") {
       const up = this.#opts.upstream();
@@ -276,7 +276,7 @@ export class ApiGateway {
     }
     sendJson(res, 200, {
       object: "list",
-      data: models.map((m) => ({ id: m.id, object: "model", created: 0, owned_by: "karen" })),
+      data: models.map((m) => ({ id: m.id, object: "model", created: 0, owned_by: "myra" })),
     });
   }
 
@@ -284,7 +284,7 @@ export class ApiGateway {
    * Load the model a request asked for, when it is not the one already loaded.
    *
    * Only models already downloaded, and only when the client actually named
-   * one. A request for something Karen does not have is answered with the list
+   * one. A request for something MyRA does not have is answered with the list
    * of what it does have -- never with a download, because `pull` is not
    * reachable through this gateway and a client must not be able to spend the
    * user's bandwidth.
@@ -296,8 +296,8 @@ export class ApiGateway {
       const match = models.find((m) => m.id === wanted);
       if (!match) {
         const names = models.map((m) => m.id).slice(0, 8).join(", ");
-        return `Karen does not have a model called ${JSON.stringify(wanted)}. ` +
-          `Downloaded models: ${names || "none"}. Download it in Karen first.`;
+        return `MyRA does not have a model called ${JSON.stringify(wanted)}. ` +
+          `Downloaded models: ${names || "none"}. Download it in MyRA first.`;
       }
       if (match.loaded) return undefined;
       await this.#opts.loadModel(wanted);
@@ -308,7 +308,7 @@ export class ApiGateway {
     try {
       return await attempt;
     } catch (err) {
-      return `Karen could not load ${JSON.stringify(wanted)}: ${(err as Error).message}`;
+      return `MyRA could not load ${JSON.stringify(wanted)}: ${(err as Error).message}`;
     }
   }
 
@@ -357,8 +357,8 @@ export class ApiGateway {
       sendJson(res, 503, {
         error: {
           message: config.loadOnDemand
-            ? "No model is loaded in Karen, and none was named in the request."
-            : "No model is loaded in Karen. Open Karen, choose a model, and try again.",
+            ? "No model is loaded in MyRA, and none was named in the request."
+            : "No model is loaded in MyRA. Open MyRA, choose a model, and try again.",
           type: "service_unavailable",
         },
       });
@@ -398,7 +398,7 @@ export class ApiGateway {
 
     try {
       const headers: Record<string, string> = {
-        // Karen's key is exchanged for Lemonade's here, and only here.
+        // MyRA's key is exchanged for Lemonade's here, and only here.
         authorization: `Bearer ${upstream.apiKey}`,
       };
       const contentType = req.headers["content-type"];
@@ -471,7 +471,7 @@ export class ApiGateway {
       }
       const message = (err as Error).message;
       if (!res.headersSent) {
-        sendJson(res, 502, { error: { message: `Karen could not reach the model: ${message}` } });
+        sendJson(res, 502, { error: { message: `MyRA could not reach the model: ${message}` } });
       } else {
         res.end();
       }
@@ -504,7 +504,7 @@ function setCors(res: ServerResponse): void {
  *
  * An allowlist rather than a copy, for the same reason the routes are: the
  * upstream's `set-cookie`, or a CORS header of its own, has no business
- * reaching a client through Karen.
+ * reaching a client through MyRA.
  */
 export function passThroughHeaders(upstream: Response): Record<string, string> {
   const out: Record<string, string> = {};

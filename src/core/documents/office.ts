@@ -28,7 +28,7 @@ const CONVERT_TIMEOUT_MS = 120_000;
  * can run against whatever the machine happens to have.
  */
 export function vendorDir(): string {
-  return process.env["KAREN_VENDOR_DIR"] ?? join(process.resourcesPath ?? ".", "vendor", platform());
+  return process.env["MYRA_VENDOR_DIR"] ?? join(process.resourcesPath ?? ".", "vendor", platform());
 }
 
 /**
@@ -77,14 +77,14 @@ export function setWorkspaceRoot(dir: string | undefined): void {
  * Where the agent may read and write.
  *
  * The setting was written, shown in Settings as "Documents", and then not read
- * by anything on this path: the jail was whatever `KAREN_WORKSPACE` said or the
+ * by anything on this path: the jail was whatever `MYRA_WORKSPACE` said or the
  * hardcoded default, so pointing Documents somewhere else moved the project
  * export and left the agent writing to the old folder. The env var still wins,
  * because it is how the tests and a developer's launcher say where to work, and
  * a stored setting must not silently override the thing that started the app.
  */
 export function workspaceRoot(): string {
-  return process.env["KAREN_WORKSPACE"] ?? (chosenRoot || join(homedir(), "Documents", "karen"));
+  return process.env["MYRA_WORKSPACE"] ?? (chosenRoot || join(homedir(), "Documents", "myra"));
 }
 
 /**
@@ -187,7 +187,7 @@ export interface Engines {
  *
  * `--version` is not universal. poppler's pdftotext has no such flag and reads
  * it as a filename, so it answered "Couldn't open file '--version'" and exited
- * 1 -- which this read as absent. Karen then reported pdftotext missing on
+ * 1 -- which this read as absent. MyRA then reported pdftotext missing on
  * every machine that had it, poppler's own convention being `-v`, and printed
  * it to stderr at that.
  */

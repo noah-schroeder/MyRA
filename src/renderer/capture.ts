@@ -45,7 +45,7 @@ export async function enumerate(): Promise<AudioSource[]> {
       kind: "microphone" as const,
     }));
 
-  await window.karen.reportDevices(sources);
+  await window.myra.reportDevices(sources);
   return sources;
 }
 
@@ -98,7 +98,7 @@ export class MeetingCapture {
      * Let the browser subtract what the speakers are playing.
      *
      * Off everywhere except the hands-free mode, and that one exception is
-     * the whole reason it is a parameter. Karen speaking her own answer through
+     * the whole reason it is a parameter. MyRA speaking her own answer through
      * the speakers, into the microphone she is listening on, is heard as the
      * user interrupting -- so the loop would cut its own reply off after the
      * first syllable, every time. Meetings must keep it off for the opposite

@@ -23,7 +23,7 @@ import { resolveInJail } from "../src/core/agent/tools/documents.ts";
 import { pandocArgs } from "../src/core/documents/formats.ts";
 
 async function withJail<T>(body: (jail: string, outside: string) => Promise<T>): Promise<T> {
-  const root = await mkdtemp(join(tmpdir(), "karen-jail-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-jail-"));
   const jail = join(root, "documents");
   const outside = join(root, "outside");
   await mkdir(jail, { recursive: true });

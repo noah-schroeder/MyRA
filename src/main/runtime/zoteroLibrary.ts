@@ -10,7 +10,7 @@
  * exotic: a Zotero installed as a Flatpak or a Snap holds the port inside its
  * own network namespace, so the API is running, Zotero's settings pane says so
  * truthfully, and no other process on the machine can reach it. Before this,
- * Karen's answer to that was "Zotero does not appear to be running" -- said to
+ * MyRA's answer to that was "Zotero does not appear to be running" -- said to
  * someone looking straight at it.
  *
  * The route is never silent. The two do not search the same thing, and a user
@@ -79,7 +79,7 @@ async function either<T>(
         return value;
       } catch (dbErr) {
         throw new ZoteroError(
-          `${err.message}\n\nKaren also tried reading Zotero's database file directly, and ` +
+          `${err.message}\n\nMyRA also tried reading Zotero's database file directly, and ` +
             `that failed too: ${(dbErr as Error).message}`,
           err.status,
         );

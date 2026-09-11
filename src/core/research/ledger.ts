@@ -47,7 +47,7 @@ export function citedSoFar(): number {
  * Take a block of numbers without naming what they point at.
  *
  * For a deep run, which numbers its own report and bibliography together as one
- * self-consistent document. Karen does not renumber that document; it moves it
+ * self-consistent document. MyRA does not renumber that document; it moves it
  * clear of everything already cited, and records that those numbers are gone.
  */
 export function reserve(count: number): number {

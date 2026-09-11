@@ -256,15 +256,15 @@ function ModelsDialog({
   const wantsEmbedder = slots.some((s) => s.key === "embedder");
 
   useEffect(() => {
-    void window.karen.lemonadeModels().then((r) => setLocal(r.models ?? []));
-    void window.karen.getSettings().then((s: Settings) =>
+    void window.myra.lemonadeModels().then((r) => setLocal(r.models ?? []));
+    void window.myra.getSettings().then((s: Settings) =>
       setProviders((s.providers ?? []).filter((p) => p.enabled && p.models.length)),
     );
   }, []);
 
   useEffect(() => {
     if (!wantsEmbedder) return;
-    void window.karen.discoverModels("embeddings").then((r) => {
+    void window.myra.discoverModels("embeddings").then((r) => {
       setEmbedModels(r.models ?? []);
       /* The endpoint's own words, not a rewrite of them. "No base URL is set
          for this endpoint" and "401 Unauthorized" are different problems with

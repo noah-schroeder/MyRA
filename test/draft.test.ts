@@ -289,7 +289,7 @@ before(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
   setEndpointResolver(async () => ({
-    endpoint: { baseUrl, envVar: "KAREN_LLM_KEY", timeoutMs: 10_000 },
+    endpoint: { baseUrl, envVar: "MYRA_LLM_KEY", timeoutMs: 10_000 },
   }));
 });
 

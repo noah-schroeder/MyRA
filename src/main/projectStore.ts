@@ -54,7 +54,7 @@ export interface DeleteReport {
 }
 
 export function projectsDir(): string {
-  return process.env["KAREN_PROJECTS_DIR"] ?? join(CONFIG_DIR, "projects");
+  return process.env["MYRA_PROJECTS_DIR"] ?? join(CONFIG_DIR, "projects");
 }
 
 function pathFor(id: string): string {

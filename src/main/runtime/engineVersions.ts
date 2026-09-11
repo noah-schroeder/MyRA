@@ -1,5 +1,5 @@
 /**
- * Writing Karen's engine pins into the file Lemonade reads.
+ * Writing MyRA's engine pins into the file Lemonade reads.
  *
  * The mechanism, all of it measured against lemond 11.8.0:
  *
@@ -12,12 +12,12 @@
  *   3. `POST /install` fetches it and, unlike the file, takes effect at once:
  *      the same `/system-info` then reads `installed` at the new version.
  *
- * So the order Karen has to work in is: write the pin, restart the daemon,
+ * So the order MyRA has to work in is: write the pin, restart the daemon,
  * install. There is no shortcut, and the restart is why an update asks first
  * -- it drops whatever model is loaded.
  *
  * A pristine copy of the table is kept beside it, because the file is the only
- * record of what Lemonade itself chose and Karen overwrites it. Without the
+ * record of what Lemonade itself chose and MyRA overwrites it. Without the
  * copy the first update would make its own version look like the shipped one,
  * and "put it back the way it came" would have nothing to put back.
  */
@@ -31,7 +31,7 @@ import { mergeBackendVersions, type EnginePins } from "../../core/runtime/engine
 /** Lemonade's own table, inside the directory the daemon binary sits in. */
 export const VERSIONS_FILE = "backend_versions.json";
 /** Our copy of it as Lemonade shipped it, never written after it is made. */
-export const SHIPPED_FILE = "backend_versions.karen-shipped.json";
+export const SHIPPED_FILE = "backend_versions.myra-shipped.json";
 
 export function versionsPath(lemondDir: string): string {
   return join(lemondDir, "resources", VERSIONS_FILE);
@@ -72,7 +72,7 @@ export async function shippedVersions(
   const live = await readJson(versionsPath(lemondDir));
   if (!live) return undefined;
   await copyFile(versionsPath(lemondDir), shippedPath(lemondDir));
-  // copyFile keeps the archive's own 644; everything Karen writes is 600.
+  // copyFile keeps the archive's own 644; everything MyRA writes is 600.
   await chmod(shippedPath(lemondDir), OWNER_ONLY_FILE).catch(() => undefined);
   return live;
 }

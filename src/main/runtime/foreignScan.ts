@@ -7,7 +7,7 @@
  * real directory per model, each containing a single symlink named `*.gguf`,
  * and point the daemon at the directory holding them.
  *
- * Nothing here writes outside Karen's own index directory. The user's model
+ * Nothing here writes outside MyRA's own index directory. The user's model
  * stores are opened read-only and never modified.
  */
 
@@ -36,7 +36,7 @@ async function exists(path: string): Promise<boolean> {
  * Every `.gguf` under a directory, with its depth-first path.
  *
  * Symlinked directories are not followed. A user who has linked their model
- * store somewhere else is served by pointing Karen at the real location, and
+ * store somewhere else is served by pointing MyRA at the real location, and
  * following links here risks walking a cycle on someone's home directory.
  */
 async function findGgufs(root: string, depth = 0): Promise<string[]> {
@@ -178,7 +178,7 @@ export async function discoverForeign(extra: string[] = []): Promise<Discovery> 
 /**
  * Mirror a directory tree as real directories holding symlinked files.
  *
- * Used for Karen's own models directory, which has to appear in the index too:
+ * Used for MyRA's own models directory, which has to appear in the index too:
  * `extra_models_dir` takes one path, so the index is the only path, and a model
  * that is not mirrored into it disappears from the app. Mirroring rather than
  * renaming keeps every existing model id byte-for-byte what it was, which is
@@ -227,7 +227,7 @@ export interface IndexResult {
  *
  * Rebuilt on every start rather than kept in sync: a model deleted in LM Studio
  * leaves a dangling link, and a dangling link inside `extra_models_dir` is a
- * model that appears in Karen and fails to load. Starting from empty each time
+ * model that appears in MyRA and fails to load. Starting from empty each time
  * costs a few milliseconds of `symlink` calls and cannot drift.
  */
 export async function buildIndex(opts: {
@@ -254,7 +254,7 @@ export async function buildIndex(opts: {
   await rm(indexDir, { recursive: true, force: true });
   await mkdir(indexDir, { recursive: true });
 
-  // Karen's own library first, so its ids win any collision with a foreign one.
+  // MyRA's own library first, so its ids win any collision with a foreign one.
   if (modelsDir && (await exists(modelsDir))) await mirrorTree(modelsDir, indexDir);
 
   if (!opts.includeForeign) return { dir: indexDir, foreign: [], found: [] };
@@ -263,7 +263,7 @@ export async function buildIndex(opts: {
   const kept: ForeignModel[] = [];
   for (const model of models) {
     const dir = join(indexDir, model.id);
-    if (await exists(dir)) continue; // One of Karen's own already claimed the name.
+    if (await exists(dir)) continue; // One of MyRA's own already claimed the name.
     try {
       await mkdir(dir, { recursive: true });
       await symlink(model.path, join(dir, model.linkName));
@@ -277,7 +277,7 @@ export async function buildIndex(opts: {
      ids encode it too, but this keeps the label readable -- `llama3.2:3b`
      rather than the colon-free directory name. */
   await writeFile(
-    join(indexDir, "karen-sources.json"),
+    join(indexDir, "myra-sources.json"),
     `${JSON.stringify({ models: kept, found }, null, 2)}\n`,
     { mode: 0o600 },
   );
@@ -288,7 +288,7 @@ export async function buildIndex(opts: {
 export async function readIndexSources(indexDir: string): Promise<IndexResult> {
   const empty = { dir: indexDir, foreign: [], found: [] };
   try {
-    const raw = JSON.parse(await readFile(join(indexDir, "karen-sources.json"), "utf8"));
+    const raw = JSON.parse(await readFile(join(indexDir, "myra-sources.json"), "utf8"));
     return {
       dir: indexDir,
       foreign: Array.isArray(raw.models) ? raw.models : [],

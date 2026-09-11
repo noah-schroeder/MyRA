@@ -21,8 +21,8 @@ node --test --experimental-strip-types --no-warnings --import ./test/setup.ts \
      --test-name-pattern "escape vectors" test/jail.test.ts
 ```
 
-`test/setup.ts` must stay in the `--import` position: it points `KAREN_CONFIG_DIR`,
-`KAREN_RESEARCH_CONFIG` and `KAREN_RESEARCH_ROOT` at a temp dir *before* module load.
+`test/setup.ts` must stay in the `--import` position: it points `MYRA_CONFIG_DIR`,
+`MYRA_RESEARCH_CONFIG` and `MYRA_RESEARCH_ROOT` at a temp dir *before* module load.
 `CONFIG_DIR` in [paths.ts](src/core/paths.ts) is bound at import time, so setting those
 inside a test is too late and the test reads the developer's live app state.
 
@@ -41,7 +41,7 @@ Electron, one process tree, no daemon.
 - **`src/preload/index.ts`** — the renderer's entire view of the outside world. Built
   as **CommonJS with a `.cjs` extension** (see the comment in
   [electron.vite.config.ts](electron.vite.config.ts)); a sandboxed preload cannot be ESM,
-  and the failure is silent — every `window.karen` call is `undefined`.
+  and the failure is silent — every `window.myra` call is `undefined`.
 - **`src/renderer/`** — React 19, `sandbox: true`, `contextIsolation: true`. It makes
   **no network requests**: `onBeforeRequest` default-denies everything but the dev
   server, and blocked attempts are counted and shown in Settings.
@@ -166,7 +166,7 @@ a model that reconstructs a quote reconstructs its timestamp too, so its own `at
 believed. Unsourced claims are filed under `## Unverified` rather than stated.
 
 **The meeting directory is the record.** Each stage leaves its own artifact
-(`meeting.json`, the WAVs, `karen.json`, `transcript.json`, `transcript.md`, `notes.md`);
+(`meeting.json`, the WAVs, `myra.json`, `transcript.json`, `transcript.md`, `notes.md`);
 [store.ts](src/core/meetings/store.ts) reads a directory to decide which buttons to offer.
 Re-running notes with a different prompt must not re-run transcription, and a meeting whose
 transcription failed must not vanish while its audio sits on disk.
@@ -174,7 +174,7 @@ transcription failed must not vanish while its audio sits on disk.
 ### Projects
 
 A project is an **index, not a folder** ([project.ts](src/core/projects/project.ts)): it
-lists the six kinds of thing Karen makes — `chat | meeting | run | paper | review | image`
+lists the six kinds of thing MyRA makes — `chat | meeting | run | paper | review | image`
 — and the files never move. Adding a kind means moving six enumerations together
 (`MemberKind`/`MEMBER_KINDS`/`KIND_WORDS`/`countsOf`, render.ts's `FOLDERS`/`HEADINGS`/
 `ORDER`, `defaultStores`, and the two renderer tables); `asMembers` validates against
@@ -223,7 +223,7 @@ than one that skips it, and skipping is visible.
 
 ### Peer review
 
-Somebody sends you a manuscript to review, and Karen writes the panel's reports. It sits
+Somebody sends you a manuscript to review, and MyRA writes the panel's reports. It sits
 beside the paper drafter and keeps two of its habits — a pure prompt module, so the preview
 renders character for character what is sent, and citations **reported rather than
 repaired** — but differs in one way that matters: the prompts here are **editable**
@@ -236,7 +236,7 @@ citation in a review reaches an editor under the reviewer's name.
 **The manuscript arrives as bytes, never as a path.** The renderer reads the dropped `File`
 with `arrayBuffer()` — a web API, so the sandbox is untouched — and `pdfToText` already
 extracts from a `Uint8Array`. The alternative, `webUtils.getPathForFile`, hands main an
-arbitrary absolute path to open for the sake of a convenience; Karen never learns where a
+arbitrary absolute path to open for the sake of a convenience; MyRA never learns where a
 confidential manuscript lives ([main/review.ts](src/main/review.ts)).
 
 **One request per reviewer, and one shared block of house rules.** The reviewer's two
@@ -291,10 +291,10 @@ a report, so both features carried a `reset` flag — the same fix written twice
 which could be forgotten. With a whole-state snapshot, writing a report twice is not
 expressible.
 
-**A late subscriber gets everything.** `karen:work-state` behind an `ipcMain.handle` is what
-lets a page mounting mid-run draw the reviewer already in progress; `karen:research-active`
+**A late subscriber gets everything.** `myra:work-state` behind an `ipcMain.handle` is what
+lets a page mounting mid-run draw the reviewer already in progress; `myra:research-active`
 had no such question and sat blank until the next stage, which is why it now has
-`karen:research-active-state` beside it. The precedent is `karen:meeting-state`, not the
+`myra:research-active-state` beside it. The precedent is `myra:meeting-state`, not the
 research channel.
 
 **One at a time, across both features, and chat is deliberately outside it.** Two long
@@ -303,7 +303,7 @@ short and somebody is waiting for it. A research run stays on `inFlight` rather 
 the lease: it happens *inside* a chat turn, and folding it in would make starting a run
 refuse while a review was writing.
 
-Main owns the record too. `karen:paper-draft` commits the finished section itself, and
+Main owns the record too. `myra:paper-draft` commits the finished section itself, and
 `mergeDrafts` ([paper.ts](src/core/papers/paper.ts)) stops the page's 700 ms autosave racing
 back over it with the empty draft it still believes in — an older page copy may not blank a
 draft that exists on disk, but a non-empty draft it sends always wins, because that is the
@@ -324,7 +324,7 @@ sections on disk instead of nothing.
 Conversion is **pandoc and only pandoc** ([formats.ts](src/core/documents/formats.ts)): CSL
 styles, bibliographies and journal templates are the whole point for this audience, and it
 is one static binary where LibreOffice was a gigabyte-scale prerequisite the user installed
-themselves. Karen therefore fetches it on first run, into the user's own data directory
+themselves. MyRA therefore fetches it on first run, into the user's own data directory
 beside the model runtime ([main/tools/pandoc.ts](src/main/tools/pandoc.ts)) — from
 `releases/latest`, which is right here and wrong for llama.cpp, whose every build is a
 prerelease; checked against the sha256 the API publishes; and never an installer, since a
@@ -341,7 +341,7 @@ decided matter, with metadata they have already corrected — so it sits at the 
 rung, below anything that leaves the machine. Two ways in, in this order:
 
 1. **Zotero's local HTTP API** ([zotero.ts](src/core/library/zotero.ts)), port 23119, no
-   key. Both loopback addresses are tried — `localhost` is 127.0.0.1 *and* ::1, and Karen
+   key. Both loopback addresses are tried — `localhost` is 127.0.0.1 *and* ::1, and MyRA
    dialling only v4 reported a plainly-running Zotero as absent. Never resolved through
    `localhost` itself: that would make the address depend on `/etc/hosts`.
 2. **`zotero.sqlite` directly** ([zoteroDb.ts](src/core/library/zoteroDb.ts), executed by
@@ -365,7 +365,7 @@ installed.
 is `provider/id`, resolved through [providers.ts](src/core/providers.ts) to an endpoint.
 
 The local backend is **Lemonade**, supervised from
-[main/runtime/](src/main/runtime/manager.ts); Karen owns which model to load and the
+[main/runtime/](src/main/runtime/manager.ts); MyRA owns which model to load and the
 guarantee that nothing it starts outlives it — including `--no-broadcast`, since
 `lemond` otherwise advertises itself over UDP and a local assistant has no business
 announcing itself to the network. [api/server.ts](src/main/api/server.ts) is
@@ -373,10 +373,10 @@ the only listening socket: off by default, loopback, refuses to start without a 
 forwards only the paths in [core/api/routes.ts](src/core/api/routes.ts).
 
 Lemonade downloads its engines per recipe (`llamacpp`, `whispercpp`, `kokoro`,
-`sd-cpp`) and **starts them itself**, which is a problem Karen has to solve from the
+`sd-cpp`) and **starts them itself**, which is a problem MyRA has to solve from the
 outside: measured on the released builds, `whisper-server` v1.8.4 and kokoro's `koko`
 b17 need `GLIBC_2.38` while `llama-server` b10375 needs 2.34 — so on Ubuntu 22.04 chat
-works and every speech model exits code 1 within a tenth of a second. Karen already
+works and every speech model exits code 1 within a tenth of a second. MyRA already
 carries a newer glibc for `lemond` on such a machine, so
 [engineRuntime.ts](src/main/runtime/engineRuntime.ts) copies it into each engine's
 directory and replaces the binary with a script that `exec`s it through that loader.
@@ -399,7 +399,7 @@ models can hear or speak is read off the `labels` array on `/api/v1/models`
 was already wrong for anything renamed. A reference naming a deleted provider is an error,
 never a quiet fallback to something local: audio is a recording of a room.
 
-A provider's `local`/`external` label may only make Karen **more** cautious: an endpoint
+A provider's `local`/`external` label may only make MyRA **more** cautious: an endpoint
 that is not on this machine is external whatever the label says
 ([destinations.ts](src/core/destinations.ts) owns that rule, and the privacy report reads
 the same function).
@@ -410,16 +410,16 @@ Reasoning is separated from the answer as it arrives
 ([thinking.ts](src/core/llm/thinking.ts)). A server uses either convention: llama.cpp with
 `--jinja` extracts it into `reasoning_content` beside `content`, while some templates emit
 it inline in `<think>` or `<thinking>` tags — which you get depends on the model file, not
-on anything Karen chose, and knowing only the first spelling printed a whole chain of
+on anything MyRA chose, and knowing only the first spelling printed a whole chain of
 reasoning into the answer as prose. Inline text is held back only as far as it could still
 be part of a tag, at most eleven characters, because a tag arrives split across frames and
 passing `<` through makes the answer flicker. Reasoning is never fed back to the model.
 
-**Karen does not invent a vocabulary for "think harder."** Four vendors have four shapes —
+**MyRA does not invent a vocabulary for "think harder."** Four vendors have four shapes —
 `reasoning_effort`, an OpenRouter object, a Google budget in tokens, an Anthropic one — and
 local models have a fifth, where the switch is a variable inside the model's own chat
 template. A single Off/Brief/Deep control would have to claim that OpenAI's "low" and a
-1024-token Gemini budget are the same thing, and would put Karen's words in front of a
+1024-token Gemini budget are the same thing, and would put MyRA's words in front of a
 parameter the user may need to discuss with a sysadmin. So the control shows the field name
 and the values that endpoint actually takes
 ([reasoningDialect.ts](src/core/llm/reasoningDialect.ts)).
@@ -428,7 +428,7 @@ and the values that endpoint actually takes
 differently.** Locally the evidence is the model's own template: `POST /apply-template`
 returns the rendered prompt, so rendering the same messages with and without a switch says
 whether the template reads it ([templateProbe.ts](src/core/llm/templateProbe.ts)) —
-llama.cpp answers 200 to a request carrying `karen_nonsense_param`, so "it did not error"
+llama.cpp answers 200 to a request carrying `myra_nonsense_param`, so "it did not error"
 is never evidence here. Hosted endpoints cannot be read, only asked, so a hosted control
 appears only after the reasoning check in Settings → Providers has sent one probe carrying
 the field and had it come back clean ([reasoningProbe.ts](src/core/llm/reasoningProbe.ts),
@@ -438,7 +438,7 @@ its workings. A dialect's `preferred` — thinking on without being asked — is
 local template switch, never a hosted one, where an effort nobody chose is billed to
 somebody's account. "No control" is four states kept apart on purpose: `none` and `always`
 are findings, `unchecked` and `unknown` are the absence of one, and printing the first pair
-for the second would be Karen asserting a fact about a model that it does not have.
+for the second would be MyRA asserting a fact about a model that it does not have.
 
 Sampling is per model and rides on each request ([sampling.ts](src/core/llm/sampling.ts)),
 which is what separates it from `runtime/modelOptions.ts`: those are *load* settings that
@@ -527,7 +527,7 @@ the paper drafter, the reviewer, meetings and every research stage, and a user's
 answer in Danish" silently rewriting a PRISMA checklist is precisely the failure to prevent
 — so wiring it in anywhere else is a bug however helpful it looks. It is keyed by the same
 expression `samplingFor` uses, and main derives that key
-(`karen:model-prompt`/`karen:model-facts`) rather than the window: three per-model records
+(`myra:model-prompt`/`myra:model-facts`) rather than the window: three per-model records
 share it now, and a hosted choice is keyed `provider::model` while a local one is keyed by
 the model that actually answers.
 
@@ -590,7 +590,7 @@ for a reason worth naming rather than assuming: measured against the bundled bin
 `llama-server` already defaults `-ngl`/`--n-gpu-layers` to `auto` and ships `--fit` (default
 **on**), which "adjusts unset arguments to fit in device memory." A context that spills past
 VRAM is not the crash risk it would look like — llama.cpp's own placement logic, working from
-exact per-tensor sizes Karen does not have, is what decides which layers sit on the card and
+exact per-tensor sizes MyRA does not have, is what decides which layers sit on the card and
 which on the processor, and it degrades to CPU offload rather than failing outright. What still
 has to hold, whichever pool the budget is drawn from, is the 85% margin above and the hard
 ceiling below — those are what actually stopped the OOM, not which memory the number was
@@ -615,7 +615,7 @@ top-p, and clearing a box goes back to what the authors said rather than to noth
 
 Everything else people come to this panel for lives inside one free-text string.
 [llamaArgs.ts](src/core/runtime/llamaArgs.ts) puts typed controls over it, because the
-daemon will not: `llamacpp_args: "--parallel 1 --karen-nonsense 3"` is accepted with a 200
+daemon will not: `llamacpp_args: "--parallel 1 --myra-nonsense 3"` is accepted with a 200
 and only fails later, at load, inside a process nobody is watching. **Every token it does not
 own is preserved exactly where it stood** — the daemon's own default is `--parallel 1`, and a
 panel that silently dropped what it did not recognise would be data loss wearing a form. On
@@ -631,7 +631,7 @@ model's `config.json` said it routes between experts at all
 and `n_routed_experts`, since no family's `model_type` reliably says "moe" — Mixtral and DBRX
 do not). Left on **Auto** — the flag unset, which is also `-ngl`'s own default — `--fit` is
 what re-fits both of them every time the context changes, so "change the context and the
-layers refit themselves" is `--fit` doing its job rather than something Karen recomputes from
+layers refit themselves" is `--fit` doing its job rather than something MyRA recomputes from
 numbers it can only estimate. Pinning one by hand is respected exactly as a user-set
 `ctx_size` already is, since `--fit` only ever touches what is left unset.
 
@@ -672,14 +672,14 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `karen:*` — 176 of them, registered in
+IPC channels are all `myra:*` — 176 of them, registered in
 [main/index.ts](src/main/index.ts)'s `installIpc` and in the nine `install*Ipc` modules it
 calls (meetings, dictation, audio, images, papers, projects, runtime, api, review), and exposed
 one-by-one in the preload. Adding a capability means touching all three layers plus
 `src/renderer/types.ts`, and at that scale a channel wired in only three of the four is a
-`window.karen` call that is `undefined` at runtime.
+`window.myra` call that is `undefined` at runtime.
 
-Directories Karen creates are `0700` and files `0600` (`makePrivateDir` / `makeOwnDir` in
+Directories MyRA creates are `0700` and files `0600` (`makePrivateDir` / `makeOwnDir` in
 paths.ts) — transcripts and drafts must not be readable by another local account. A
 directory the *user* chose is never re-chmodded. [test/privacy.test.ts](test/privacy.test.ts)
 asserts this under a `0000` umask.

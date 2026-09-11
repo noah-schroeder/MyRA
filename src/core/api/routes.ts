@@ -1,5 +1,5 @@
 /**
- * What another app may reach through Karen, and nothing else.
+ * What another app may reach through MyRA, and nothing else.
  *
  * ## Why this file exists at all
  *
@@ -13,7 +13,7 @@
  *
  * So giving another app the daemon's key would give it the power to install
  * runtimes, download gigabytes, delete models, and unload the model the user
- * is talking to. Karen therefore never shares that key; it runs a gateway that
+ * is talking to. MyRA therefore never shares that key; it runs a gateway that
  * accepts its own keys and forwards only the paths below.
  *
  * ## Why it is a table and not a chain of ifs
@@ -23,11 +23,11 @@
  * a chain of conditionals scattered through a request handler cannot.
  *
  * **Default deny.** A path absent from this list is 404, including every path
- * Lemonade grows in a version Karen has not seen.
+ * Lemonade grows in a version MyRA has not seen.
  */
 
 /** Which client ecosystem a route belongs to, for the UI's setup snippets. */
-export type Dialect = "openai" | "ollama" | "anthropic" | "karen";
+export type Dialect = "openai" | "ollama" | "anthropic" | "myra";
 
 export interface Route {
   method: "GET" | "POST";
@@ -37,7 +37,7 @@ export interface Route {
   /** What it does, in the words the API page uses. */
   what: string;
   /**
-   * Answered by Karen rather than forwarded.
+   * Answered by MyRA rather than forwarded.
    *
    * Two routes qualify: `/health`, which must work without a key so a client
    * can probe, and the model lists, which are filtered so a client is not
@@ -60,8 +60,8 @@ export interface Route {
  * and serving anything a person already has.
  */
 export const ROUTES: readonly Route[] = [
-  // ---- Karen's own ----
-  { method: "GET", path: "/health", dialect: "karen", what: "Whether Karen is serving", local: true, open: true },
+  // ---- MyRA's own ----
+  { method: "GET", path: "/health", dialect: "myra", what: "Whether MyRA is serving", local: true, open: true },
 
   // ---- OpenAI ----
   { method: "GET", path: "/v1/models", dialect: "openai", what: "List models", local: true },
@@ -138,5 +138,5 @@ export function routeFor(method: string, url: string): Route | undefined {
 
 /** Every dialect that has at least one route, for the setup snippets. */
 export function dialects(): Dialect[] {
-  return [...new Set(ROUTES.map((r) => r.dialect))].filter((d) => d !== "karen");
+  return [...new Set(ROUTES.map((r) => r.dialect))].filter((d) => d !== "myra");
 }

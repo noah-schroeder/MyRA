@@ -4,7 +4,7 @@
  * Lemonade serves chat, speech, voice, embeddings and images through one API,
  * so "what is this model for" has exactly one answer available: the `labels`
  * array on `/api/v1/models`. That is the field this module is built on, and it
- * replaces the way Karen used to decide -- `/whisper|moonshine/i` against the
+ * replaces the way MyRA used to decide -- `/whisper|moonshine/i` against the
  * model id, which is a guess that was already wrong for anything renamed and
  * would have called a Kokoro voice model a transcriber the moment someone
  * published `whisper-tts`.

@@ -31,12 +31,12 @@
  * Zotero's own settings pane advertises `http://localhost:23119/api/`, and
  * "localhost" is not one address: it is 127.0.0.1 and ::1, and which one a
  * server ends up bound to depends on the resolver, the platform and — under
- * Flatpak — the sandbox. Karen dialled the v4 address alone, so a Zotero
+ * Flatpak — the sandbox. MyRA dialled the v4 address alone, so a Zotero
  * listening on the v6 one was reported as "not running" while sitting there
  * plainly running, with the checkbox ticked and the URL on screen.
  *
  * Not resolved through "localhost" itself, because that would make the address
- * Karen connects to depend on /etc/hosts. Both entries here are loopback by
+ * MyRA connects to depend on /etc/hosts. Both entries here are loopback by
  * construction, which is the property the whole feature rests on.
  */
 export const ZOTERO_HOSTS = ["127.0.0.1", "[::1]"] as const;
@@ -77,7 +77,7 @@ export type SearchMode = "everything" | "titleCreatorYear";
  *
  * `parent` is Zotero's `parentCollection`, which is the key of the collection
  * above or `false` at the top level. Held as a string-or-undefined because the
- * `false` is a Zotero encoding, not something the rest of Karen should carry.
+ * `false` is a Zotero encoding, not something the rest of MyRA should carry.
  */
 export interface ZoteroCollection {
   key: string;
@@ -242,7 +242,7 @@ export function collectionsPath(): string {
  *
  * So the extras are the part that can be dropped. Everything they do can be
  * done here instead -- the item filtering happens in `parseItems` regardless,
- * and ordering a list of twenty-five papers is not why anyone opened Karen.
+ * and ordering a list of twenty-five papers is not why anyone opened MyRA.
  */
 export type QueryTier = "full" | "plain";
 
@@ -373,7 +373,7 @@ const ABSTRACT_CHARS = 700;
  * The DOI first: it is the identifier a reader of the finished document needs,
  * and it is the one field in a Zotero record most likely to have been checked
  * by a person. `zotero://select/...` would open the item in Zotero and is
- * deliberately NOT used — Karen only ever opens http(s), and a marker that
+ * deliberately NOT used — MyRA only ever opens http(s), and a marker that
  * links to a scheme the app refuses to follow is a dead link with a hover card.
  */
 export function linkFor(item: LibraryItem): string {
@@ -504,7 +504,7 @@ export function describeFailure(status: number | undefined, body = ""): string {
    * refused without saying which part of it was refused -- and left the user
    * and me guessing at a local server that had already written down the answer.
    * The body of a local API error is Zotero's own diagnostic text about a
-   * request Karen composed; it carries none of the user's content. */
+   * request MyRA composed; it carries none of the user's content. */
   const said = body.trim().replace(/\s+/g, " ").slice(0, 300);
   return `Zotero answered ${status}${said ? `: ${said}` : " with no explanation"}.`;
 }

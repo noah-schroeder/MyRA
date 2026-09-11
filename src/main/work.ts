@@ -22,7 +22,7 @@
  *
  * **A late subscriber gets everything.** `current()` behind an IPC handler is
  * what lets a page that mounts mid-run draw the reviewer already in progress.
- * `karen:research-active` is push-only and has no such handler, which is why a
+ * `myra:research-active` is push-only and has no such handler, which is why a
  * research page opened during a long stage sits blank until the next stage
  * begins; this is deliberately not that.
  *
@@ -73,7 +73,7 @@ export interface JobInit {
  * same way whichever it is, and a second channel would be a second thing to
  * forget to unsubscribe.
  */
-export const WORK_CHANNEL = "karen:work";
+export const WORK_CHANNEL = "myra:work";
 
 /**
  * How often the snapshot is pushed while text is arriving.

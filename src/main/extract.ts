@@ -63,7 +63,7 @@ export async function extractDocument(name: string, bytes: Uint8Array): Promise<
     if (!OFFICE.has(ext)) {
       return {
         ok: false,
-        error: `Karen cannot read ${ext || "that kind of file"}. Send it a PDF, a Word file, ODT, RTF or plain text.`,
+        error: `MyRA cannot read ${ext || "that kind of file"}. Send it a PDF, a Word file, ODT, RTF or plain text.`,
       };
     }
 
@@ -80,15 +80,15 @@ export async function extractDocument(name: string, bytes: Uint8Array): Promise<
         needsPandoc: true,
         error:
           "Reading Word and ODT files needs pandoc, which is not installed yet. " +
-          "Karen can install it for you — it is a single program, fetched once.",
+          "MyRA can install it for you — it is a single program, fetched once.",
       };
     }
 
     /* Written to a temp file because pandoc reads a path, then removed. Owner
-       only, and under the system temp directory rather than anywhere Karen
+       only, and under the system temp directory rather than anywhere MyRA
        lists: this is somebody's own file, dropped in for one question, not a
-       document Karen keeps. */
-    const dir = await mkdtemp(join(tmpdir(), "karen-doc-"));
+       document MyRA keeps. */
+    const dir = await mkdtemp(join(tmpdir(), "myra-doc-"));
     const src = join(dir, `document${ext}`);
     try {
       await writeFile(src, bytes, { mode: OWNER_ONLY_FILE });
@@ -104,7 +104,7 @@ export async function extractDocument(name: string, bytes: Uint8Array): Promise<
 function finish(name: string, raw: string): Extracted {
   const text = raw.trim();
   if (!text) {
-    return { ok: false, error: "That file has no text in it that Karen could read." };
+    return { ok: false, error: "That file has no text in it that MyRA could read." };
   }
   return {
     ok: true,

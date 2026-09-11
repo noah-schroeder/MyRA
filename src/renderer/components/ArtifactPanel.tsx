@@ -7,7 +7,7 @@ import { Markdown } from "./Markdown.tsx";
 /**
  * The documents this conversation has written, beside the conversation.
  *
- * A document Karen writes used to exist only as a sentence saying it had been
+ * A document MyRA writes used to exist only as a sentence saying it had been
  * written. To read a five-page report you had to leave the app, find the file
  * and open it somewhere else -- and while it was being written, section by
  * section over several minutes, there was nothing to look at but a progress
@@ -197,7 +197,7 @@ function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
 const NO_SOURCES: Map<number, CitedSource> = new Map();
 
 async function reveal(path: string): Promise<void> {
-  await window.karen.revealDocument(path).catch(() => undefined);
+  await window.myra.revealDocument(path).catch(() => undefined);
 }
 
 /**
@@ -236,7 +236,7 @@ export function useDocuments(): {
 
   useEffect(
     () =>
-      window.karen.onDocument((doc) => {
+      window.myra.onDocument((doc) => {
         setDocs((prev) => {
           const at = prev.findIndex((d) => d.path === doc.path);
           if (at === -1) return [...prev, doc];

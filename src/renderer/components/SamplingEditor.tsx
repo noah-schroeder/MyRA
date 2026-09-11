@@ -15,7 +15,7 @@ import {
  *
  * Blank means "do not send it", not "send zero". That distinction is the whole
  * design: an unset field lets the server's own default stand, which is not the
- * same as Karen guessing what that default is and sending its guess. It is also
+ * same as MyRA guessing what that default is and sending its guess. It is also
  * why every control here has a Clear rather than a "reset to default" that
  * would have to invent the value it resets to.
  */
@@ -38,7 +38,7 @@ export function SamplingEditor({ model }: { model: string }) {
   }>({ suggested: {}, hasSuggested: false, ignoreSuggested: false });
 
   const loadFacts = useCallback(() => {
-    void window.karen.modelFacts(model).then((r) =>
+    void window.myra.modelFacts(model).then((r) =>
       setFacts({
         ...(r.repo ? { repo: r.repo } : {}),
         suggested: r.suggested,
@@ -49,7 +49,7 @@ export function SamplingEditor({ model }: { model: string }) {
   }, [model]);
 
   useEffect(() => {
-    void window.karen.getSettings().then(setSettings);
+    void window.myra.getSettings().then(setSettings);
     loadFacts();
   }, [loadFacts]);
 
@@ -66,7 +66,7 @@ export function SamplingEditor({ model }: { model: string }) {
     // model been tuned?" answer yes forever after the last field was cleared.
     if (Object.keys(next).length) all[model] = next;
     else delete all[model];
-    void window.karen.updateSettings({ sampling: all }).then(setSettings);
+    void window.myra.updateSettings({ sampling: all }).then(setSettings);
   };
 
   /* A field the authors set is worth showing even when it is advanced: it is
@@ -85,7 +85,7 @@ export function SamplingEditor({ model }: { model: string }) {
         <p>
           {tuned
             ? `${tuned} setting${tuned === 1 ? "" : "s"} set. These apply to the next reply — nothing reloads.`
-            : "Everything is left to the server's own defaults. Blank means Karen does not send that setting at all."}
+            : "Everything is left to the server's own defaults. Blank means MyRA does not send that setting at all."}
         </p>
       </header>
 
@@ -108,14 +108,14 @@ export function SamplingEditor({ model }: { model: string }) {
       {facts.hasSuggested || facts.ignoreSuggested ? (
         <p className="sampling-note">
           {facts.ignoreSuggested
-            ? "Karen is ignoring the settings this model was published with."
+            ? "MyRA is ignoring the settings this model was published with."
             : `Greyed values are what this model's authors published${facts.repo ? ` in ${facts.repo}` : ""}. ` +
               "They apply unless you type over them; clearing a box goes back to them, not to nothing."}{" "}
           <button
             type="button"
             className="sampling-clear"
             onClick={() => {
-              void window.karen.setIgnoreSuggested(model, !facts.ignoreSuggested).then(loadFacts);
+              void window.myra.setIgnoreSuggested(model, !facts.ignoreSuggested).then(loadFacts);
             }}
           >
             {facts.ignoreSuggested ? "Use them" : "Ignore them"}

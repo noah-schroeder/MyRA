@@ -17,7 +17,7 @@ import { tightenTree } from "../src/core/paths.ts";
 const mode = async (path: string): Promise<number> => (await lstat(path)).mode & 0o7777;
 
 async function tree(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "karen-tighten-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-tighten-"));
   await mkdir(join(root, "run", "papers"), { recursive: true });
   await chmod(join(root, "run"), 0o775);
   await chmod(join(root, "run", "papers"), 0o755);
@@ -51,8 +51,8 @@ test("an executable keeps its execute bit", async () => {
 
 test("a symlink is not followed, and the target keeps its permissions", async () => {
   const root = await tree();
-  const outside = await mkdtemp(join(tmpdir(), "karen-elsewhere-"));
-  await writeFile(join(outside, "shared.md"), "not Karen's\n");
+  const outside = await mkdtemp(join(tmpdir(), "myra-elsewhere-"));
+  await writeFile(join(outside, "shared.md"), "not MyRA's\n");
   await chmod(join(outside, "shared.md"), 0o644);
   await symlink(outside, join(root, "link"));
 

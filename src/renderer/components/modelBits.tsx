@@ -99,7 +99,7 @@ export function DownloadProgress({ name, job }: { name: string; job?: PullProgre
     <div className="reg-progress" role="status" aria-live="polite">
       <div className="reg-progress-head">
         {/* The daemon's own name for the file, which is what is actually
-            moving; the `user.` prefix Karen has to register under is an
+            moving; the `user.` prefix MyRA has to register under is an
             implementation detail nobody typed and nobody should read. */}
         <span className="reg-progress-name">
           {job?.file || name.replace(/^user\./, "")}

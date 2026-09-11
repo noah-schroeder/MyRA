@@ -1,5 +1,5 @@
-appId: dev.karen.app
-productName: Karen
+appId: dev.myra.app
+productName: MyRA
 # Pinned: electron-builder cannot infer the version when electron is a
 # devDependency of a package that does not list it as a direct dependency.
 electronVersion: 43.4.1
@@ -21,11 +21,11 @@ linux:
   # Semicolon-separated: electron-builder writes this straight into
   # Categories=, and the desktop.entry override does not reach that field.
   category: Office;Education;Science
-  executableName: karen
+  executableName: myra
   synopsis: A private, local-first assistant for academic work
   desktop:
     entry:
-      Name: Karen
+      Name: MyRA
       Comment: Meeting notes, research synthesis and document drafting
       Categories: Office;Education;Science;
 mac:
@@ -49,29 +49,29 @@ mac:
   # it, and shows this string in the prompt. Written for the person reading it
   # at the moment they press Record, not for a plist.
   extendInfo:
-    # Accurate rather than reassuring. Karen transcribes locally by default, but
+    # Accurate rather than reassuring. MyRA transcribes locally by default, but
     # the transcription endpoint is a setting and can be pointed at a remote
     # server -- so a flat "never leaves your computer" here would be a promise
     # the app does not always keep, in the one dialog the user cannot skip.
     NSMicrophoneUsageDescription: >-
-      Karen records meetings and takes dictation on this machine. Recordings are
+      MyRA records meetings and takes dictation on this machine. Recordings are
       kept on your computer and transcribed by whichever service you configure —
       by default, one running locally.
     # Screen Recording has no Info.plist key of its own -- macOS prompts for it
     # when the capture is attempted -- but system audio is taken through the
     # same API, and this is the only place to explain that beforehand.
     NSAudioCaptureUsageDescription: >-
-      Karen records the other side of a call so meeting notes include everyone,
+      MyRA records the other side of a call so meeting notes include everyone,
       not only you. Recordings are kept on your computer and transcribed by
       whichever service you configure — by default, one running locally.
 win:
   target: [nsis]
   icon: build/icon.png
 appImage:
-  artifactName: Karen-${version}-${arch}.AppImage
+  artifactName: MyRA-${version}-${arch}.AppImage
 deb:
-  packageName: karen
-  artifactName: karen_${version}_${arch}.deb
+  packageName: myra
+  artifactName: myra_${version}_${arch}.deb
   depends:
     - libgtk-3-0
     - libnotify4
@@ -81,7 +81,7 @@ deb:
     - xdg-utils
     - libatspi2.0-0
     - libsecret-1-0
-    # poppler's `pdftotext`, which is how Karen reads a PDF -- the research
+    # poppler's `pdftotext`, which is how MyRA reads a PDF -- the research
     # pipeline's full texts, and a manuscript dropped on the peer review page.
     # It was always required and never declared, so on a machine without it a
     # PDF produced nothing next to a message naming a package the user had no

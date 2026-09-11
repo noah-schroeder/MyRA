@@ -16,7 +16,7 @@
  *   - The sentence under the box says, in plain words, where the text is about
  *     to be sent -- while it still has not been sent.
  *
- * Karen currently enables one registry (see `ENABLED_SOURCES`), so the picker
+ * MyRA currently enables one registry (see `ENABLED_SOURCES`), so the picker
  * renders as a statement rather than a choice. The multi-registry path is kept
  * intact -- merged results stay labelled per row, and each registry reports
  * its own outcome -- because the labelling is what makes more than one safe,
@@ -64,7 +64,7 @@ export function RegistrySearch({
   machine: Machine;
   /** Model ids already on this machine, so the card can say so. */
   have: Set<string>;
-  /** Karen's own list, for the screen before anything has been searched. */
+  /** MyRA's own list, for the screen before anything has been searched. */
   catalog: CatalogEntry[];
   /** What each engine can do here, so the picks are ones that would run. */
   states: Map<string, Runnable>;
@@ -85,7 +85,7 @@ export function RegistrySearch({
   const [selected, setSelected] = useState<CardTarget | undefined>();
   const [query, setQuery] = useState("");
   /* Seeded from the enabled set, never from a stored preference: which
-     registries Karen will contact is a property of the build, not something a
+     registries MyRA will contact is a property of the build, not something a
      window can widen. */
   const [sources, setSources] = useState<Set<RegistrySource>>(new Set(ENABLED_SOURCES));
   /* Browsing state. `author` is a publisher asked for exactly; `kind` is a
@@ -170,7 +170,7 @@ export function RegistrySearch({
       setBrowsing(true);
       setBrowseError(undefined);
 
-      const res = await window.karen.hfBrowse({
+      const res = await window.myra.hfBrowse({
         ...(next.query.trim() ? { query: next.query.trim() } : {}),
         ...(next.authors.length ? { authors: next.authors } : {}),
         kind: next.kind,
@@ -307,7 +307,7 @@ export function RegistrySearch({
             <>No registry is enabled, so there is nothing to search.</>
           ) : (
             <>
-              {/* Quoting an empty box back as “…” claimed Karen would send
+              {/* Quoting an empty box back as “…” claimed MyRA would send
                   an ellipsis, which is both untrue and the sort of small
                   inaccuracy that makes the rest of the sentence -- the part
                   about what leaves this machine -- less believable. */}
@@ -545,14 +545,14 @@ export function RegistrySearch({
           {crossed ? <> Publishers were crossed, not combined.</> : null}
           {dropped ? (
             <> {dropped} publisher {dropped === 1 ? "pairing was" : "pairings were"} not
-              asked for — that many requests to one registry is more than Karen will make at
+              asked for — that many requests to one registry is more than MyRA will make at
               once. Choose fewer publishers.</>
           ) : null}
         </p>
       ) : null}
 
       {/* Its own line, and in the app's own voice rather than appended to the
-          sentence above: this one is about what Karen did to the answer after
+          sentence above: this one is about what MyRA did to the answer after
           it arrived, which is a different kind of fact from what it asked. */}
       {localNote && !browsing ? <p className="reg-line local">{localNote}</p> : null}
 
@@ -561,7 +561,7 @@ export function RegistrySearch({
           further down than the thing it was apologising for. */}
       {!ranBrowse && !browsing ? (
         <p className="reg-line">
-          A few Karen suggests, from the list that ships with it — nothing was fetched to show
+          A few MyRA suggests, from the list that ships with it — nothing was fetched to show
           these, and nothing is sent until you search.
         </p>
       ) : null}
@@ -582,7 +582,7 @@ export function RegistrySearch({
         <div className="reg-results">
           {/* Filtered to nothing is a different problem from returned nothing,
               and telling somebody the registry holds no Granite models when it
-              was Karen's own date filter that emptied the list would be a lie. */}
+              was MyRA's own date filter that emptied the list would be a lie. */}
           {!browsing && ranBrowse && models.length > 0 && !rows.length ? (
             <div className="lem-callout">
               <p className="lem-callout-title">Nothing on this page matches those filters.</p>
@@ -607,7 +607,7 @@ export function RegistrySearch({
           ) : null}
 
           {/*
-            * Before anything has been searched: Karen's own list.
+            * Before anything has been searched: MyRA's own list.
             *
             * An empty box under a screenful of controls is a page that tells a
             * person who does not already know a model's name that they have
@@ -660,7 +660,7 @@ export function RegistrySearch({
             <p className="reg-detail-hint">
               {rows.length
                 ? "Choose a model to see its licence, its versions and what its author says about it."
-                : "Search for a model, or choose one of Karen’s from the list."}
+                : "Search for a model, or choose one of MyRA’s from the list."}
             </p>
           )}
         </div>
@@ -749,7 +749,7 @@ function ResultRow({
 }
 
 /**
- * Karen's own list, for the screen before anything has been searched.
+ * MyRA's own list, for the screen before anything has been searched.
  *
  * Grouped by what a model is FOR rather than by which engine runs it, which is
  * `LABEL_GROUPS`' whole reason for existing, and filtered to what this machine

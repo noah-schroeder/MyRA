@@ -1,10 +1,10 @@
 /**
  * Models the user already downloaded with LM Studio or Ollama.
  *
- * Someone who has been running local models before Karen has tens of gigabytes
+ * Someone who has been running local models before MyRA has tens of gigabytes
  * of GGUF files on disk already. Asking them to download the same weights a
  * second time is the kind of thing that makes a tool feel like it was written
- * for its author rather than for them, so Karen finds those files and offers
+ * for its author rather than for them, so MyRA finds those files and offers
  * them alongside everything else.
  *
  * ## Why this is a directory of symlinks rather than an API call
@@ -30,7 +30,7 @@
  * copied, and nothing the user owns is moved or written to.
  */
 
-/** Where a model was found. Karen's own downloads are not "foreign". */
+/** Where a model was found. MyRA's own downloads are not "foreign". */
 export type ForeignSource = "lmstudio" | "ollama";
 
 export interface ForeignModel {
@@ -82,7 +82,7 @@ export function defaultStores(
 }
 
 /**
- * A path component safe on every platform Karen runs on.
+ * A path component safe on every platform MyRA runs on.
  *
  * Ollama writes tags as `name:tag`, and a colon is legal in a filename on Linux
  * but not on Windows. Without this the index fails to build on the one platform

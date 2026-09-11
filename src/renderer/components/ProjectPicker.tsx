@@ -49,8 +49,8 @@ export function ProjectPicker({
   useEffect(() => {
     void (async () => {
       const [items, projects] = await Promise.all([
-        window.karen.projectItems(),
-        window.karen.projectList(),
+        window.myra.projectItems(),
+        window.myra.projectList(),
       ]);
       setRows(items.items ?? []);
       setNames(new Map((projects.projects ?? []).map((p) => [p.id, p.name])));
@@ -95,7 +95,7 @@ export function ProjectPicker({
       return;
     }
     setBusy(true);
-    await window.karen.projectAdd(projectId, members);
+    await window.myra.projectAdd(projectId, members);
     setBusy(false);
     onDone();
   };

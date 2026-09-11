@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
  * hosting -- stock GNOME, including Pop!_OS, ships without one unless the
  * AppIndicator extension is installed -- construction still succeeds and the
  * icon goes nowhere. That is the worst outcome available: the window hides
- * into a tray that does not exist, and Karen is running with no way to reach
+ * into a tray that does not exist, and MyRA is running with no way to reach
  * it.
  *
  * So the question is asked of the session bus rather than of Electron: is

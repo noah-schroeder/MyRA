@@ -12,7 +12,7 @@
  * `arrayBuffer()` -- a standard web API, not filesystem access, so the sandbox
  * is untouched -- and `pdfToText` in core/research/pdf.ts already extracts from
  * a `Uint8Array`. Binary already crosses this bridge for meeting and dictation
- * audio. So Karen never learns where the manuscript lives, which is also the
+ * audio. So MyRA never learns where the manuscript lives, which is also the
  * right answer for a confidential file under review.
  */
 
@@ -165,10 +165,10 @@ export function installReviewIpc(deps: ReviewDeps): void {
   };
 
   const publish = async (): Promise<void> => {
-    send("karen:reviews", await listLive());
+    send("myra:reviews", await listLive());
   };
 
-  ipcMain.handle("karen:review-extract", async (_e, name: unknown, bytes: unknown) => {
+  ipcMain.handle("myra:review-extract", async (_e, name: unknown, bytes: unknown) => {
     const buffer = bytes as ArrayBuffer | Uint8Array | undefined;
     if (!buffer) return { ok: false, error: "Nothing was dropped." } satisfies Extracted;
     const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
@@ -194,23 +194,23 @@ export function installReviewIpc(deps: ReviewDeps): void {
    * conversation's own context meter reads it, so the two cannot disagree
    * about whether a manuscript fits. Nothing here starts anything.
    */
-  ipcMain.handle("karen:review-context", () => {
+  ipcMain.handle("myra:review-context", () => {
     const limit = deps.contextTokens();
     return { ok: true, ...(limit ? { contextTokens: limit } : {}) };
   });
 
-  ipcMain.handle("karen:review-list", async () => {
+  ipcMain.handle("myra:review-list", async () => {
     return { ok: true, reviews: await listLive() };
   });
 
-  ipcMain.handle("karen:review-open", async (_e, id: unknown) => {
+  ipcMain.handle("myra:review-open", async (_e, id: unknown) => {
     const review = await readReview(rootOf(deps), String(id ?? ""));
     return review
       ? { ok: true, review }
       : { ok: false, error: "That review could not be read." };
   });
 
-  ipcMain.handle("karen:review-delete", async (_e, id: unknown) => {
+  ipcMain.handle("myra:review-delete", async (_e, id: unknown) => {
     try {
       await deleteReview(rootOf(deps), String(id ?? ""));
       await publish();
@@ -223,11 +223,11 @@ export function installReviewIpc(deps: ReviewDeps): void {
   /**
    * Save the review where the reviewer says.
    *
-   * A save dialog as well as the record, because a review is not only Karen's
+   * A save dialog as well as the record, because a review is not only MyRA's
    * record -- it goes back to an editor, usually pasted into a submission
    * system, and the person knows where they keep this year's reviewing.
    */
-  ipcMain.handle("karen:review-save", async (_e, name: unknown, text: unknown) => {
+  ipcMain.handle("myra:review-save", async (_e, name: unknown, text: unknown) => {
     try {
       const chosen = await dialog.showSaveDialog({
         title: "Save this review",
@@ -244,7 +244,7 @@ export function installReviewIpc(deps: ReviewDeps): void {
     }
   });
 
-  ipcMain.handle("karen:review-cancel", async (_e, id: unknown) => {
+  ipcMain.handle("myra:review-cancel", async (_e, id: unknown) => {
     jobs.cancel(id ? String(id) : undefined);
     return { ok: true };
   });
@@ -268,7 +268,7 @@ export function installReviewIpc(deps: ReviewDeps): void {
    * throw the finished report away: the run carried on writing into a component
    * the window had already unmounted.
    */
-  ipcMain.handle("karen:review-run", async (_e, raw: unknown, meta: unknown) => {
+  ipcMain.handle("myra:review-run", async (_e, raw: unknown, meta: unknown) => {
     const requests = raw as ReviewRequest[];
     if (!Array.isArray(requests) || requests.length === 0) {
       return { ok: false, error: "Choose what kind of paper this is first." };
@@ -302,7 +302,7 @@ export function installReviewIpc(deps: ReviewDeps): void {
       steps: requests.length,
       label: first.reviewerLabel,
     });
-    if (!signal) return { ok: false, error: "Karen is already working on something long." };
+    if (!signal) return { ok: false, error: "MyRA is already working on something long." };
 
     const reports: { label: string; text: string }[] = [];
     try {

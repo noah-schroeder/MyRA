@@ -1,7 +1,7 @@
 /**
  * How a llama.cpp build is actually invoked.
  *
- * For every build Karen installs from a release asset this is "run the binary",
+ * For every build MyRA installs from a release asset this is "run the binary",
  * and the only help it needs is LD_LIBRARY_PATH pointing at its own directory.
  *
  * The CUDA build taken from upstream's container image can need more, because

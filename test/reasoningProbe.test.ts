@@ -57,7 +57,7 @@ const endpoint = (): EndpointSettings => ({ baseUrl, model: "m", envVar: "", tim
 const text = (content: string): unknown => ({ choices: [{ delta: { content } }] });
 
 describe("what the check can tell apart", () => {
-  it("a provider that sends reasoning in a field Karen reads", async () => {
+  it("a provider that sends reasoning in a field MyRA reads", async () => {
     behaviour = () => ({
       frames: [{ choices: [{ delta: { reasoning_content: "17 times 23" } }] }, text("391")],
     });
@@ -73,7 +73,7 @@ describe("what the check can tell apart", () => {
     });
     const report = await probeReasoning({ endpoint: endpoint() });
     assert.deepEqual(report.unread, ["thought_summary"]);
-    assert.match(describeProbe(report), /“thought_summary”, which Karen does not read yet/);
+    assert.match(describeProbe(report), /“thought_summary”, which MyRA does not read yet/);
   });
 
   it("a provider that reasons and withholds the chain", async () => {
@@ -122,7 +122,7 @@ describe("asking for it", () => {
     const asked = await probeReasoning({ endpoint: endpoint(), extra: ASK_FOR_REASONING });
     assert.deepEqual(plain.read, []);
     assert.deepEqual(asked.read, ["reasoning"]);
-    assert.match(describeProbe(plain, asked), /only when Karen asked for it/);
+    assert.match(describeProbe(plain, asked), /only when MyRA asked for it/);
   });
 
   it("puts the asking fields in the request and leaves the rest of it alone", () => {

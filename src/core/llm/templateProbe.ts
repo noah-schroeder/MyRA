@@ -2,7 +2,7 @@
  * Finding out whether a local model can be told not to think.
  *
  * llama.cpp answers 200 to a request carrying any field it has never heard of
- * -- measured: `karen_nonsense_param` came back with a normal completion. So
+ * -- measured: `myra_nonsense_param` came back with a normal completion. So
  * the usual way of establishing support, send it and see whether it errors,
  * establishes nothing here. A control built on that evidence would appear to
  * work, send its parameter faithfully, and change nothing about the answer.
@@ -19,7 +19,7 @@
  *
  *   preserve_thinking: true   ->  prompt changes (kwargs do reach the template)
  *   enable_thinking: false    ->  prompt identical (its template ignores it)
- *   karen_bogus: true         ->  prompt identical, no error
+ *   myra_bogus: true         ->  prompt identical, no error
  *
  * and every render of that template ends `<|im_start|>assistant\n<think>`,
  * hard-coded with no variable in front of it. That model cannot be told not to

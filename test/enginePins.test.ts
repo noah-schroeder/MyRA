@@ -32,7 +32,7 @@ test("a pin replaces exactly one backend and leaves its siblings alone", () => {
   assert.deepEqual(merged["whispercpp"], SHIPPED.whispercpp);
 });
 
-test("the table Karen was given is not mutated", () => {
+test("the table MyRA was given is not mutated", () => {
   mergeBackendVersions(SHIPPED, { "llamacpp:vulkan": "b10793" });
   assert.equal(SHIPPED.llamacpp.vulkan, "b10375");
 });
@@ -80,7 +80,7 @@ test("dropping a pin is how a build goes back to the shipped one", () => {
 /* ------------------------------------------------------------- on disk -- */
 
 async function fixture(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "karen-pins-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-pins-"));
   await mkdir(join(dir, "resources"), { recursive: true });
   await writeFile(versionsPath(dir), JSON.stringify(SHIPPED, null, 2));
   return dir;
@@ -127,7 +127,7 @@ test("clearing every pin restores the file Lemonade shipped", async () => {
 });
 
 test("no resources directory is a missing answer, not a crash", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "karen-pins-"));
+  const dir = await mkdtemp(join(tmpdir(), "myra-pins-"));
   try {
     assert.equal(await shippedVersions(dir), undefined);
     assert.equal(await applyEnginePins(dir, { "llamacpp:vulkan": "b1" }), undefined);

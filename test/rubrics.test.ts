@@ -17,14 +17,14 @@ import { RUBRICS, rubricDir, rubricText } from "../src/core/research/rubrics.ts"
 import { DEFAULT_RUBRICS } from "../src/core/research/rubricText.ts";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), "karen-rubrics-"));
-  const previous = process.env["KAREN_RESEARCH_RUBRICS"];
-  process.env["KAREN_RESEARCH_RUBRICS"] = join(dir, "rubrics");
+  const dir = await mkdtemp(join(tmpdir(), "myra-rubrics-"));
+  const previous = process.env["MYRA_RESEARCH_RUBRICS"];
+  process.env["MYRA_RESEARCH_RUBRICS"] = join(dir, "rubrics");
   try {
     await fn(join(dir, "rubrics"));
   } finally {
-    if (previous === undefined) delete process.env["KAREN_RESEARCH_RUBRICS"];
-    else process.env["KAREN_RESEARCH_RUBRICS"] = previous;
+    if (previous === undefined) delete process.env["MYRA_RESEARCH_RUBRICS"];
+    else process.env["MYRA_RESEARCH_RUBRICS"] = previous;
     await rm(dir, { recursive: true, force: true });
   }
 }
@@ -62,28 +62,28 @@ test("your edits win, and are never overwritten", async () => {
 });
 
 test("an unwritable config directory still yields the rubric", async () => {
-  const previous = process.env["KAREN_RESEARCH_RUBRICS"];
+  const previous = process.env["MYRA_RESEARCH_RUBRICS"];
   // A path under a regular file cannot be created, so mkdir and writeFile both
   // fail. Losing editability is acceptable; losing the rubric is not.
-  const file = join(await mkdtemp(join(tmpdir(), "karen-ro-")), "not-a-dir");
+  const file = join(await mkdtemp(join(tmpdir(), "myra-ro-")), "not-a-dir");
   await writeFile(file, "x", "utf8");
-  process.env["KAREN_RESEARCH_RUBRICS"] = join(file, "rubrics");
+  process.env["MYRA_RESEARCH_RUBRICS"] = join(file, "rubrics");
   try {
     assert.match(await rubricText("extraction"), /Quote exactly/);
   } finally {
-    if (previous === undefined) delete process.env["KAREN_RESEARCH_RUBRICS"];
-    else process.env["KAREN_RESEARCH_RUBRICS"] = previous;
+    if (previous === undefined) delete process.env["MYRA_RESEARCH_RUBRICS"];
+    else process.env["MYRA_RESEARCH_RUBRICS"] = previous;
     await rm(file, { force: true });
   }
 });
 
 test("rubricDir honours the environment override", () => {
-  const previous = process.env["KAREN_RESEARCH_RUBRICS"];
-  process.env["KAREN_RESEARCH_RUBRICS"] = "/tmp/karen-elsewhere";
+  const previous = process.env["MYRA_RESEARCH_RUBRICS"];
+  process.env["MYRA_RESEARCH_RUBRICS"] = "/tmp/myra-elsewhere";
   try {
-    assert.equal(rubricDir(), "/tmp/karen-elsewhere");
+    assert.equal(rubricDir(), "/tmp/myra-elsewhere");
   } finally {
-    if (previous === undefined) delete process.env["KAREN_RESEARCH_RUBRICS"];
-    else process.env["KAREN_RESEARCH_RUBRICS"] = previous;
+    if (previous === undefined) delete process.env["MYRA_RESEARCH_RUBRICS"];
+    else process.env["MYRA_RESEARCH_RUBRICS"] = previous;
   }
 });

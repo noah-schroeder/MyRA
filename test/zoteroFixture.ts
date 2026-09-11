@@ -93,7 +93,7 @@ export function buildLibrary(
   collections: FakeCollection[] = [],
   opts: { wal?: boolean } = {},
 ): string {
-  const dir = mkdtempSync(join(tmpdir(), "karen-zotero-"));
+  const dir = mkdtempSync(join(tmpdir(), "myra-zotero-"));
   const db = new DatabaseSync(join(dir, "zotero.sqlite"));
   if (opts.wal) db.exec("PRAGMA journal_mode=WAL");
   db.exec(SCHEMA);

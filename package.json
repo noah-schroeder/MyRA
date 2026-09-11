@@ -1,9 +1,9 @@
 {
-  "name": "karen",
+  "name": "myra",
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Karen — a private, local-first assistant for academic work",
+  "description": "MyRA — a private, local-first assistant for academic work",
   "license": "MIT",
   "main": "./out/main/index.js",
   "engines": {
@@ -42,8 +42,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/noah-schroeder/karen.git"
+    "url": "git+https://github.com/noah-schroeder/myra.git"
   },
-  "homepage": "https://github.com/noah-schroeder/karen",
-  "desktopName": "dev.karen.app.desktop"
+  "homepage": "https://github.com/noah-schroeder/myra",
+  "desktopName": "dev.myra.app.desktop"
 }

@@ -7,9 +7,9 @@
  * models have a fifth, where the switch is not an API field at all but a
  * variable inside the model's own chat template.
  *
- * Karen does not translate between them. A single Off/Brief/Deep vocabulary
+ * MyRA does not translate between them. A single Off/Brief/Deep vocabulary
  * would have to claim that OpenAI's "low" and a 1024-token Gemini budget are
- * the same thing, and they are not; worse, it would put Karen's words in front
+ * the same thing, and they are not; worse, it would put MyRA's words in front
  * of a parameter the user may need to talk about with a colleague or a
  * sysadmin. So the control shows the field name and the values that endpoint
  * actually takes, and this module is the list of what those are.
@@ -17,7 +17,7 @@
  * **Two of these are measured and three are read from documentation**, which
  * is why nothing here is sent speculatively. Against the local stack:
  *
- *   - llama.cpp answers 200 to a request carrying `karen_nonsense_param`.
+ *   - llama.cpp answers 200 to a request carrying `myra_nonsense_param`.
  *     Acceptance proves nothing at all, so "it did not error" can never be
  *     the evidence that a switch works.
  *   - `chat_template_kwargs` genuinely reaches the template: rendering the
@@ -35,7 +35,7 @@
 export interface ReasoningLevel {
   /** Exactly what goes on the wire. */
   value: string;
-  /** What the endpoint calls it. Never Karen's own word for it. */
+  /** What the endpoint calls it. Never MyRA's own word for it. */
   label: string;
   /** Plain language, for the tooltip, where a translation belongs. */
   hint: string;
@@ -49,17 +49,17 @@ export interface ReasoningDialect {
   source: string;
   levels: ReasoningLevel[];
   /**
-   * The level Karen sends when the user has not chosen one.
+   * The level MyRA sends when the user has not chosen one.
    *
    * Only ever set where sending the field is free and known-safe, which today
-   * means a local template variable Karen has watched change that model's own
+   * means a local template variable MyRA has watched change that model's own
    * rendered prompt. A hosted dialect never carries one: an effort nobody
    * asked for is billed to somebody's account, and on a strict gateway it is
    * the unknown parameter that fails the whole request.
    */
   preferred?: string | undefined;
   /**
-   * Whether Karen has seen this work, as opposed to read that it should.
+   * Whether MyRA has seen this work, as opposed to read that it should.
    *
    * `measured` dialects are discovered by rendering the model's own template
    * and observing the prompt change. `documented` ones need a probe against
@@ -108,7 +108,7 @@ const OPENROUTER: ReasoningDialect = {
  *
  * `0` switches thinking off where the model allows it; `-1` hands the budget
  * back to the model. Both are Google's own numbers and are shown as such --
- * calling -1 "automatic" in the control would be Karen inventing a word for a
+ * calling -1 "automatic" in the control would be MyRA inventing a word for a
  * value somebody may need to look up.
  */
 const GOOGLE: ReasoningDialect = {
@@ -156,10 +156,10 @@ export function dialectForHost(baseUrl: string): ReasoningDialect | undefined {
 }
 
 /**
- * Every shape Karen knows, with the hosts that speak each.
+ * Every shape MyRA knows, with the hosts that speak each.
  *
  * Hostnames, deliberately not URLs. Nothing here is ever fetched -- these are
- * lookup keys for a request Karen builds against an address the user typed --
+ * lookup keys for a request MyRA builds against an address the user typed --
  * and writing them as `https://…` literals would put four vendor endpoints
  * into the source that the privacy report scans for reachable hosts. It found
  * them, correctly, the first time this was written the other way.
@@ -257,7 +257,7 @@ export function templateDialect(name: string): ReasoningDialect | undefined {
  * The request fields for one choice, ready to merge into `extra`.
  *
  * Returns an empty object for a value the dialect does not list, rather than
- * passing it through: the values are the endpoint's, and one Karen invented
+ * passing it through: the values are the endpoint's, and one MyRA invented
  * would be the unknown parameter that breaks the request.
  */
 export function reasoningFields(

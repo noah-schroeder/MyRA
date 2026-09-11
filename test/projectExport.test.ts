@@ -129,7 +129,7 @@ describe("what gets written", () => {
 
 describe("a conversation, made readable", () => {
   const messages = [
-    { role: "system", content: "You are Karen. Cite your sources." },
+    { role: "system", content: "You are MyRA. Cite your sources." },
     { role: "user", content: "what did we decide about the budget?" },
     {
       role: "assistant",
@@ -140,12 +140,12 @@ describe("a conversation, made readable", () => {
     { role: "assistant", content: "You settled on two postdocs." },
   ];
 
-  it("keeps the turns and drops Karen's own instructions", () => {
+  it("keeps the turns and drops MyRA's own instructions", () => {
     const out = renderSession("Budget", messages, AT.toISOString());
     assert.match(out, /^# Budget/);
     assert.match(out, /what did we decide about the budget\?/);
     assert.match(out, /You settled on two postdocs\./);
-    // The system prompt is Karen's, not the user's, and is hundreds of words.
+    // The system prompt is MyRA's, not the user's, and is hundreds of words.
     assert.doesNotMatch(out, /Cite your sources/);
   });
 

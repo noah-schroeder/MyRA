@@ -6,7 +6,7 @@
  * Electron so the whole thing is reachable from the test runner.
  *
  * What was measured against Lemonade 11.8.0, because none of it is documented
- * in a form Karen could rely on:
+ * in a form MyRA could rely on:
  *
  *   - `POST /v1/audio/speech` is the route. There is no `/audio/voices` and no
  *     OpenAPI document, so the voice names are shipped (see voices.ts).
@@ -109,7 +109,7 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
      * as "That audio could not be played: the voice model returned audio/wav".
      *
      * `pcm` has nothing left to get wrong. It is 16-bit little-endian at 24 kHz
-     * on both the local daemon and OpenAI, and Karen puts a correct header in
+     * on both the local daemon and OpenAI, and MyRA puts a correct header in
      * front of it below. The two fallbacks are for an endpoint that will not
      * produce raw samples; being unable to speak at all is the worse failure.
      */
@@ -148,7 +148,7 @@ export async function speak(opts: SpeakOptions): Promise<Spoken> {
      *
      * An unknown voice comes back as `backend returned HTTP 500` with no
      * mention of the voice -- measured. Anyone who typed a voice name for an
-     * engine Karen cannot enumerate would otherwise be told the server broke.
+     * engine MyRA cannot enumerate would otherwise be told the server broke.
      */
     if (res.status >= 500 && opts.voice) {
       throw new SpeechError(

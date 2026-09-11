@@ -3,7 +3,7 @@
  *
  * The disk half of core/runtime/engineShim.ts: find what Lemonade put under
  * its `bin/` directory, ask whether this machine can actually start it, and if
- * not, copy in the C runtime Karen already fetched for `lemond` and wrap the
+ * not, copy in the C runtime MyRA already fetched for `lemond` and wrap the
  * binary so it runs through it.
  *
  * The runtime is COPIED from the daemon's own directory rather than fetched.
@@ -150,7 +150,7 @@ export interface EngineRepair {
  * Make every installed engine startable, and say what had to be done.
  *
  * Does nothing at all on a machine whose own C library is new enough, which is
- * decided by looking for the loader Karen shipped beside `lemond` -- the same
+ * decided by looking for the loader MyRA shipped beside `lemond` -- the same
  * on-disk test `launchSpec` uses to decide how to start the daemon, so the two
  * can never disagree about what kind of machine this is.
  */
@@ -167,7 +167,7 @@ export async function repairEngines(
      * An empty list means everything here is already wrapped -- a shim is a
      * shell script, so it is not an ELF executable, and the renamed binary is
      * excluded by name. Deriving it this way rather than looking for a
-     * `.karen-real` file also survives the case that would otherwise strand a
+     * `.myra-real` file also survives the case that would otherwise strand a
      * user: Lemonade upgrading an engine writes fresh binaries over the shims
      * and leaves the renamed originals behind, so a directory that merely
      * CONTAINS one is not necessarily wrapped any more.
@@ -194,7 +194,7 @@ export async function repairEngines(
  * Undo a wrap that was interrupted between its two steps.
  *
  * The binary is renamed and then the shim is written, so a crash, a full disk
- * or a kill in between leaves `whisper-server.karen-real` with nothing at
+ * or a kill in between leaves `whisper-server.myra-real` with nothing at
  * `whisper-server`. That state is worse than either end of it: the engine is
  * gone, and because `engineBinaries` skips the renamed file there is nothing
  * left for the next pass to find, so it would stay gone. Putting the binary

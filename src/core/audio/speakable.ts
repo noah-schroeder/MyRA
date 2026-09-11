@@ -4,7 +4,7 @@
  * Speaking raw Markdown is the obvious implementation and it is unusable: a
  * heading is read as "hash hash Findings", a table is read cell by cell with no
  * structure to hold it together, and a fenced code block is thirty seconds of
- * punctuation. Worse, Karen's answers carry citation markers -- "shown in
+ * punctuation. Worse, MyRA's answers carry citation markers -- "shown in
  * [3]" -- which a voice reads as a number with no referent.
  *
  * So this is not a Markdown renderer with the tags removed. It decides what is

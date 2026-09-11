@@ -15,9 +15,9 @@ import {
 import { baseLayers, layersWithHistory } from "../src/core/runtime/oci.ts";
 
 const PROBE = `
-/home/noah/.config/Karen/runtimes/llama.cpp/b10644-cuda/llama-server: /lib/x86_64-linux-gnu/libc.so.6: version \`GLIBC_2.38' not found (required by /home/noah/.config/Karen/runtimes/llama.cpp/b10644-cuda/libllama-server-impl.so)
-/home/noah/.config/Karen/runtimes/llama.cpp/b10644-cuda/llama-server: /lib/x86_64-linux-gnu/libstdc++.so.6: version \`GLIBCXX_3.4.32' not found (required by /home/noah/.config/Karen/runtimes/llama.cpp/b10644-cuda/libllama-common.so.0)
-/home/noah/.config/Karen/runtimes/llama.cpp/b10644-cuda/llama-server: /lib/x86_64-linux-gnu/libm.so.6: version \`GLIBC_2.38' not found (required by /home/noah/.config/Karen/runtimes/llama.cpp/b10644-cuda/libllama-common.so.0)
+/home/noah/.config/MyRA/runtimes/llama.cpp/b10644-cuda/llama-server: /lib/x86_64-linux-gnu/libc.so.6: version \`GLIBC_2.38' not found (required by /home/noah/.config/MyRA/runtimes/llama.cpp/b10644-cuda/libllama-server-impl.so)
+/home/noah/.config/MyRA/runtimes/llama.cpp/b10644-cuda/llama-server: /lib/x86_64-linux-gnu/libstdc++.so.6: version \`GLIBCXX_3.4.32' not found (required by /home/noah/.config/MyRA/runtimes/llama.cpp/b10644-cuda/libllama-common.so.0)
+/home/noah/.config/MyRA/runtimes/llama.cpp/b10644-cuda/llama-server: /lib/x86_64-linux-gnu/libm.so.6: version \`GLIBC_2.38' not found (required by /home/noah/.config/MyRA/runtimes/llama.cpp/b10644-cuda/libllama-common.so.0)
 `;
 
 describe("missingVersions", () => {
@@ -177,7 +177,7 @@ describe("parseMissingLibraries", () => {
   it("reads the form the loader uses when it gives up instead of tracing", () => {
     /* This is the one that was missed. The loader stops at the first missing
        library and never prints "=> not found", so a parser watching only for
-       that read four missing libraries as none -- and Karen would have decided
+       that read four missing libraries as none -- and MyRA would have decided
        the machine already had CUDA and installed a build that cannot load. */
     assert.deepEqual(parseMissingLibraries(ABORTED), ["libcudart.so.12"]);
   });

@@ -1,5 +1,5 @@
 /**
- * The one place Karen talks to Hugging Face itself.
+ * The one place MyRA talks to Hugging Face itself.
  *
  * The download and the load still go through Lemonade. What is asked here is
  * the three questions Lemonade cannot answer: what the registry holds (its own
@@ -28,7 +28,7 @@ const PATH = "/api/models";
    application is asking is ordinary manners and costs nothing the request
    itself did not already reveal. No token is ever attached -- these endpoints
    are public, and sending one would tie a browse to an account. */
-const AGENT = "Karen (local research assistant)";
+const AGENT = "MyRA (local research assistant)";
 
 /** Long enough for a hundred rows on a slow connection, short enough to fail. */
 const TIMEOUT_MS = 20_000;

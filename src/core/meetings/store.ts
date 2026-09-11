@@ -12,7 +12,7 @@
  *
  *   meeting.json      the recording — written by MeetingRecorder
  *   me.wav, them.wav  the audio
- *   karen.json        what has been done since, and the note instructions
+ *   myra.json        what has been done since, and the note instructions
  *   transcript.json   timed lines, so notes can be redone without re-transcribing
  *   transcript.md     the readable transcript
  *   notes.md          the note
@@ -30,7 +30,7 @@ import type { Line } from "./transcript.ts";
 import { OWNER_ONLY_FILE } from "../paths.ts";
 
 export const RECORD_FILE = "meeting.json";
-export const STATE_FILE = "karen.json";
+export const STATE_FILE = "myra.json";
 export const TRANSCRIPT_FILE = "transcript.json";
 export const TRANSCRIPT_MD = "transcript.md";
 export const NOTES_MD = "notes.md";
@@ -187,7 +187,7 @@ export async function deleteMeeting(dir: string): Promise<void> {
  *
  * The vault when there is one, and the meeting's own directory when there is
  * not. The previous behaviour was worse than either: with no vault configured,
- * `resolve(join("", "Karen"))` is `<working directory>/Karen`, so notes were
+ * `resolve(join("", "MyRA"))` is `<working directory>/MyRA`, so notes were
  * written next to whatever the app happened to be launched from. Nobody would
  * find them there, and on a packaged build that path is not writable.
  */

@@ -76,21 +76,21 @@ export function AudioPicker({
     ? settings?.audio.transcriptionModel ?? ""
     : settings?.audio.voiceModel ?? "";
 
-  useEffect(() => window.karen.onAudioProgress((p) => setProgress(p)), []);
+  useEffect(() => window.myra.onAudioProgress((p) => setProgress(p)), []);
 
   // Asked when the menu opens, like the chat picker: the answer changes as
   // models are downloaded, and polling for a dropdown nobody has opened is
   // work done on the chance it will be looked at.
   useEffect(() => {
     if (!open) return;
-    void window.karen.audioModels(role).then((r) => {
+    void window.myra.audioModels(role).then((r) => {
       setOptions(r.options);
       setError(r.ok ? undefined : r.error);
     });
     /* Best effort, and silent when it fails: not knowing which engines are
        installed costs a warning, while blocking the menu on it would cost the
        menu. */
-    void window.karen.lemonadeInfo().then((r) => {
+    void window.myra.lemonadeInfo().then((r) => {
       if (r.ok && r.info) setEngines(engineStates(r.info.engines));
     });
   }, [open, role]);
@@ -130,10 +130,10 @@ export function AudioPicker({
   const eject = async (option: AudioOption): Promise<void> => {
     setBusy(option.ref);
     setError(undefined);
-    const result = await window.karen.unloadModel(option.model);
+    const result = await window.myra.unloadModel(option.model);
     setBusy(undefined);
     if (!result.ok) setError(result.error);
-    void window.karen.audioModels(role).then((r) => setOptions(r.options));
+    void window.myra.audioModels(role).then((r) => setOptions(r.options));
   };
 
   /**
@@ -153,7 +153,7 @@ export function AudioPicker({
       ...settings!.audio,
       ...(role === "transcription" ? { transcriptionModel: option.ref } : { voiceModel: option.ref }),
     };
-    onSettingsChange(await window.karen.updateSettings({ audio }));
+    onSettingsChange(await window.myra.updateSettings({ audio }));
 
     if (option.where !== "local") {
       setOpen(false);
@@ -162,7 +162,7 @@ export function AudioPicker({
 
     setBusy(option.ref);
     setProgress(undefined);
-    const result = await window.karen.audioLoad(option.model);
+    const result = await window.myra.audioLoad(option.model);
     setBusy(undefined);
     setProgress(undefined);
     if (!result.ok) setError(result.error);
@@ -277,7 +277,7 @@ export function AudioPicker({
           externalWarning={
             role === "transcription"
               ? "Recordings sent here leave your computer."
-              : "Whatever Karen says aloud is sent here to be spoken."
+              : "Whatever MyRA says aloud is sent here to be spoken."
           }
           onChoose={(option) => void choose(option)}
           footer={

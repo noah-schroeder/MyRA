@@ -1,8 +1,8 @@
 /**
- * How each endpoint spells "think harder", and what Karen puts on the wire.
+ * How each endpoint spells "think harder", and what MyRA puts on the wire.
  *
  * The values here are the vendors' own. The tests that matter are the ones
- * about what is NOT sent: a value Karen invented is the unknown parameter that
+ * about what is NOT sent: a value MyRA invented is the unknown parameter that
  * turns a working chat into a 400, and this module's whole job is to make that
  * unexpressible.
  */
@@ -153,7 +153,7 @@ test("nothing is sent by default where sending costs money", () => {
     assert.equal(effectiveLevel(found, undefined), "");
   }
   // Nor for the local effort switch: how hard is the template's call to make,
-  // and Karen has no basis for overruling it.
+  // and MyRA has no basis for overruling it.
   const effort = templateDialect("reasoning_effort");
   assert.ok(effort);
   assert.equal(effectiveLevel(effort, undefined), "");

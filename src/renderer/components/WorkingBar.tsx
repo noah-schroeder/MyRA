@@ -1,7 +1,7 @@
 import { RESEARCH_STAGES, stageIndex } from "../../core/research/stages.ts";
 
 /**
- * What Karen is doing, on every page, with the button that stops it.
+ * What MyRA is doing, on every page, with the button that stops it.
  *
  * The composer carries a stop button and a progress line, and the composer is
  * hidden on every page that is not the conversation. So a deep research run --

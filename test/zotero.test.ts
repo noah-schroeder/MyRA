@@ -3,7 +3,7 @@
  *
  * Written against the documented shape of the local API rather than against a
  * running Zotero: there is none on this machine, so every claim here is about
- * how Karen handles a response, not proof that Zotero sends one. The parts that
+ * how MyRA handles a response, not proof that Zotero sends one. The parts that
  * matter are the ones where a wrong guess would be invisible -- a year read out
  * of free text, a missing abstract presented as an absent paper, and the two
  * unreachable states, which look identical and have different fixes.
@@ -249,7 +249,7 @@ test("a collection whose parent is not in the library is still shown", () => {
 
 test("a cycle in the parent chain comes out flat, not as a hang", () => {
   /* This is another program's database and the loop would be a bug there, but
-     "Karen freezes when you click Library" is not an acceptable way to find out. */
+     "MyRA freezes when you click Library" is not an acceptable way to find out. */
   const cyclic = parseCollections([
     { data: { key: "AAAAAAAA", name: "A", parentCollection: "BBBBBBBB" } },
     { data: { key: "BBBBBBBB", name: "B", parentCollection: "AAAAAAAA" } },
@@ -328,10 +328,10 @@ async function runTool(
   cols: { key: string; name: string; parent?: string }[],
   params: Record<string, unknown> = { query: "memory" },
 ): Promise<{ text: string; asked: string[] | undefined; error?: string }> {
-  const file = join(mkdtempSync(join(tmpdir(), "karen-lib-")), "research.json");
+  const file = join(mkdtempSync(join(tmpdir(), "myra-lib-")), "research.json");
   writeFileSync(file, JSON.stringify({ v: 2, category: "science", ...cfg }));
-  const previous = process.env["KAREN_RESEARCH_CONFIG"];
-  process.env["KAREN_RESEARCH_CONFIG"] = file;
+  const previous = process.env["MYRA_RESEARCH_CONFIG"];
+  process.env["MYRA_RESEARCH_CONFIG"] = file;
 
   let asked: string[] | undefined;
   setLibraryHost({
@@ -348,8 +348,8 @@ async function runTool(
     return { text: "", asked, error: err instanceof Error ? err.message : String(err) };
   } finally {
     setLibraryHost(undefined);
-    if (previous === undefined) delete process.env["KAREN_RESEARCH_CONFIG"];
-    else process.env["KAREN_RESEARCH_CONFIG"] = previous;
+    if (previous === undefined) delete process.env["MYRA_RESEARCH_CONFIG"];
+    else process.env["MYRA_RESEARCH_CONFIG"] = previous;
   }
 }
 

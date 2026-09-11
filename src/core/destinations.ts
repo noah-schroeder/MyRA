@@ -77,7 +77,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     host: "api.github.com",
-    when: "Karen sets up its local runtime or document tools, or you press Check for engine updates",
+    when: "MyRA sets up its local runtime or document tools, or you press Check for engine updates",
     sends: "Nothing but the request",
   },
   {

@@ -20,7 +20,7 @@
  *     thinking, and treating it as the end of a turn would transcribe an empty
  *     recording every 1.5 s for as long as they were quiet.
  *   - **Barge-in needs echo cancellation.** The microphone is open while the
- *     speakers are playing Karen's own voice, so without cancellation the loop
+ *     speakers are playing MyRA's own voice, so without cancellation the loop
  *     hears itself and cuts its own answer off after one syllable. That is the
  *     only reason `echoCancellation` is a parameter on the capture at all.
  */
@@ -135,7 +135,7 @@ export function useHandsFree({
      room, not of the sentence just spoken -- so a new turn keeps the level
      estimate and resets only what belongs to the turn. */
   /* The barge-in monitor's own detector: a second microphone, open at a
-     different time, listening past Karen's own voice. */
+     different time, listening past MyRA's own voice. */
   const barge = useRef<TurnState>(startTurn(Date.now()));
   const newTurn = useCallback((): void => {
     const now = Date.now();
@@ -175,7 +175,7 @@ export function useHandsFree({
    * Listen for the user talking over the answer, and cut it off when they do.
    *
    * A capture whose chunks are discarded: this is a level meter, not a
-   * recording, and nothing it hears is written down or sent anywhere. Karen's
+   * recording, and nothing it hears is written down or sent anywhere. MyRA's
    * own voice is subtracted by the browser (see echoCancellation), which is
    * what makes the threshold below mean "the user" rather than "the speakers".
    */
@@ -195,7 +195,7 @@ export function useHandsFree({
              and that one cannot be undone.
 
              Its own state, not the listening turn's. This microphone is open
-             while Karen is talking and the other one is not, so sharing would
+             while MyRA is talking and the other one is not, so sharing would
              mean two callbacks writing one estimate at different times about
              different moments. */
           const level = levelFromAmplitude(rms);

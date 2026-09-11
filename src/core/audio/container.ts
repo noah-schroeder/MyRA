@@ -56,7 +56,7 @@ export function audioMime(bytes: Uint8Array, header?: string | undefined): strin
   return "audio/mpeg";
 }
 
-/** Whether a 400 was the server objecting to the container Karen asked for. */
+/** Whether a 400 was the server objecting to the container MyRA asked for. */
 export function refusedTheFormat(status: number, body: string): boolean {
   return status === 400 && /response_format|format/i.test(body);
 }

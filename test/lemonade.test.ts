@@ -59,9 +59,9 @@ describe("lemondArgs", () => {
     assert.ok(!args.includes("0.0.0.0"));
   });
 
-  it("passes both state directories, so nothing lands outside Karen's own", () => {
+  it("passes both state directories, so nothing lands outside MyRA's own", () => {
     /* cache_dir and config_dir are positional and come last; without them the
-       daemon writes to ~/.cache/lemonade and ~/.config/lemonade, which a Karen
+       daemon writes to ~/.cache/lemonade and ~/.config/lemonade, which a MyRA
        uninstall would then leave behind. */
     assert.deepEqual(args.slice(-2), ["/c", "/g"]);
   });
@@ -124,7 +124,7 @@ describe("pinnedConfig", () => {
 });
 
 describe("mergeConfig", () => {
-  it("keeps settings Karen does not care about", () => {
+  it("keeps settings MyRA does not care about", () => {
     const out = mergeConfig({ ctx_size: 8192, models_dir: "/models" });
     assert.equal(out["ctx_size"], 8192);
     assert.equal(out["models_dir"], "/models");
@@ -209,7 +209,7 @@ describe("which loaded model a conversation goes to", () => {
   });
 
   it("trusts the type over the recipe, so a new engine needs no list", () => {
-    /* An engine Karen has never heard of, doing speech. The recipe list would
+    /* An engine MyRA has never heard of, doing speech. The recipe list would
        have admitted it; the daemon's own word excludes it on day one. */
     const future = parseHealth({
       all_models_loaded: [

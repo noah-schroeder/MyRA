@@ -1,5 +1,5 @@
 /**
- * Serving Karen's model to other apps.
+ * Serving MyRA's model to other apps.
  *
  * The job this page has to do well is narrow and concrete: **get an address
  * and a key into another program in thirty seconds.** So the address and the
@@ -7,7 +7,7 @@
  * rather than described, and everything else is below.
  *
  * The second job is to be honest about what was just turned on. This is the
- * only socket in Karen that listens, so the page says in plain words what is
+ * only socket in MyRA that listens, so the page says in plain words what is
  * reachable, by whom, and — when the network switch is on — at what address.
  */
 
@@ -21,7 +21,7 @@ const DIALECT_LABELS: Record<Dialect, string> = {
   openai: "OpenAI",
   ollama: "Ollama",
   anthropic: "Anthropic",
-  karen: "Karen",
+  myra: "MyRA",
 };
 
 type Tab = "serving" | "requests" | "keys";
@@ -38,20 +38,20 @@ export function ApiPage() {
   const [tab, setTab] = useState<Tab>("serving");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  /* Shown once, then gone: Karen stores only a hash and genuinely cannot
+  /* Shown once, then gone: MyRA stores only a hash and genuinely cannot
      produce this value again. The UI says so rather than implying a policy. */
   const [newSecret, setNewSecret] = useState<string | undefined>();
 
   const refresh = useCallback(async (): Promise<void> => {
-    setState(await window.karen.apiState());
-    const log = await window.karen.apiRequests();
+    setState(await window.myra.apiState());
+    const log = await window.myra.apiRequests();
     if (log.ok) setEntries(log.entries);
   }, []);
 
   useEffect(() => {
     void refresh();
-    const offState = window.karen.onApi((s) => setState(s));
-    const offLog = window.karen.onApiLog((e) => setEntries(e));
+    const offState = window.myra.onApi((s) => setState(s));
+    const offLog = window.myra.onApiLog((e) => setEntries(e));
     return () => {
       offState();
       offLog();
@@ -77,7 +77,7 @@ export function ApiPage() {
       <header className="lem-head">
         <h3>API</h3>
         <p>
-          Let another app use the model Karen is running — Obsidian, a notebook, a script.
+          Let another app use the model MyRA is running — Obsidian, a notebook, a script.
           Everything stays on this machine.
         </p>
       </header>
@@ -144,7 +144,7 @@ function Serving({
      assumed, so the sentence below is never the opposite of the truth. */
   const [tray, setTray] = useState(false);
   useEffect(() => {
-    void Promise.all([window.karen.getSettings(), window.karen.trayAvailable()]).then(
+    void Promise.all([window.myra.getSettings(), window.myra.trayAvailable()]).then(
       ([s, ok]) => setTray(s.keepRunningInTray && ok),
     );
   }, []);
@@ -162,20 +162,20 @@ function Serving({
             type="button"
             className={serving ? "lem-act" : "lem-act get"}
             disabled={busy || (noKeys && !serving)}
-            onClick={() => void run(() => (serving ? window.karen.apiStop() : window.karen.apiStart()))}
+            onClick={() => void run(() => (serving ? window.myra.apiStop() : window.myra.apiStart()))}
           >
             {serving ? "Stop" : "Start serving"}
           </button>
         </div>
         {noKeys ? (
           <p className="api-note">
-            Karen will not serve without a key.{" "}
+            MyRA will not serve without a key.{" "}
             <button type="button" className="link" onClick={onKeys}>Create one first</button>.
           </p>
         ) : null}
         {serving && tray ? (
           <p className="api-note">
-            Closing Karen&apos;s window will not stop this — Karen stays in your tray and keeps
+            Closing MyRA&apos;s window will not stop this — MyRA stays in your tray and keeps
             answering. Quit from the tray icon when you are done.
           </p>
         ) : null}
@@ -195,7 +195,7 @@ function Serving({
             min={1024}
             max={65535}
             value={state.config.port}
-            onChange={(e) => void run(() => window.karen.apiConfig({ port: Number(e.target.value) }))}
+            onChange={(e) => void run(() => window.myra.apiConfig({ port: Number(e.target.value) }))}
           />
         </label>
         <label className="check">
@@ -203,7 +203,7 @@ function Serving({
             type="checkbox"
             checked={state.config.lan}
             disabled={noKeys}
-            onChange={(e) => void run(() => window.karen.apiConfig({ lan: e.target.checked }))}
+            onChange={(e) => void run(() => window.myra.apiConfig({ lan: e.target.checked }))}
           />
           <span>Also serve on the local network</span>
         </label>
@@ -211,7 +211,7 @@ function Serving({
           <input
             type="checkbox"
             checked={state.config.cors}
-            onChange={(e) => void run(() => window.karen.apiConfig({ cors: e.target.checked }))}
+            onChange={(e) => void run(() => window.myra.apiConfig({ cors: e.target.checked }))}
           />
           <span>Allow browser apps (CORS)</span>
         </label>
@@ -219,15 +219,15 @@ function Serving({
           <input
             type="checkbox"
             checked={state.config.startOnLaunch}
-            onChange={(e) => void run(() => window.karen.apiConfig({ startOnLaunch: e.target.checked }))}
+            onChange={(e) => void run(() => window.myra.apiConfig({ startOnLaunch: e.target.checked }))}
           />
-          <span>Start serving when Karen opens</span>
+          <span>Start serving when MyRA opens</span>
         </label>
         <label className="check">
           <input
             type="checkbox"
             checked={state.config.loadOnDemand}
-            onChange={(e) => void run(() => window.karen.apiConfig({ loadOnDemand: e.target.checked }))}
+            onChange={(e) => void run(() => window.myra.apiConfig({ loadOnDemand: e.target.checked }))}
           />
           <span title="Only models you have already downloaded. Nothing is ever downloaded by an app.">
             Switch to the model an app asks for
@@ -235,7 +235,7 @@ function Serving({
         </label>
         {state.config.loadOnDemand ? (
           <p className="api-note">
-            An app naming a different model will change what Karen itself is using. Only models
+            An app naming a different model will change what MyRA itself is using. Only models
             you have already downloaded — nothing is fetched.
           </p>
         ) : null}
@@ -252,7 +252,7 @@ function Serving({
  *
  * Split by dialect because the dialect is the thing a person has to match to
  * the app in front of them: someone configuring Obsidian needs a base URL,
- * someone pointing an Anthropic SDK at Karen needs an environment variable,
+ * someone pointing an Anthropic SDK at MyRA needs an environment variable,
  * and neither wants to read the other's block.
  */
 function Setup({ url }: { url: string }) {
@@ -261,32 +261,32 @@ function Setup({ url }: { url: string }) {
     openai: {
       hint: "Most tools with a “custom endpoint” or “OpenAI-compatible” setting.",
       code: `Base URL:  ${url}/v1
-API key:   your Karen key
+API key:   your MyRA key
 
 curl ${url}/v1/chat/completions \\
-  -H "Authorization: Bearer YOUR_KAREN_KEY" \\
+  -H "Authorization: Bearer YOUR_MYRA_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"MODEL","messages":[{"role":"user","content":"hello"}]}'
 
 from openai import OpenAI
-client = OpenAI(base_url="${url}/v1", api_key="YOUR_KAREN_KEY")`,
+client = OpenAI(base_url="${url}/v1", api_key="YOUR_MYRA_KEY")`,
     },
     anthropic: {
       hint: "Anything built on the Anthropic SDK.",
       code: `export ANTHROPIC_BASE_URL=${url}
-export ANTHROPIC_API_KEY=YOUR_KAREN_KEY
+export ANTHROPIC_API_KEY=YOUR_MYRA_KEY
 
 curl ${url}/v1/messages \\
-  -H "x-api-key: YOUR_KAREN_KEY" \\
+  -H "x-api-key: YOUR_MYRA_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"MODEL","max_tokens":256,"messages":[{"role":"user","content":"hello"}]}'`,
     },
     ollama: {
-      hint: "Anything that expects Ollama. Point it at Karen instead of 11434.",
+      hint: "Anything that expects Ollama. Point it at MyRA instead of 11434.",
       code: `Host:  ${url}
 
 curl ${url}/api/chat \\
-  -H "Authorization: Bearer YOUR_KAREN_KEY" \\
+  -H "Authorization: Bearer YOUR_MYRA_KEY" \\
   -d '{"model":"MODEL","messages":[{"role":"user","content":"hello"}],"stream":false}'`,
     },
   };
@@ -295,8 +295,8 @@ curl ${url}/api/chat \\
   return (
     <div className="api-setup">
       <header className="lem-head sub">
-        <h4>Point an app at Karen</h4>
-        <p>Karen answers three dialects, so most tools work without a plugin.</p>
+        <h4>Point an app at MyRA</h4>
+        <p>MyRA answers three dialects, so most tools work without a plugin.</p>
       </header>
       <div className="lem-tabs">
         {(["openai", "anthropic", "ollama"] as Dialect[]).map((d) => (
@@ -324,7 +324,7 @@ curl ${url}/api/chat \\
  *
  * This exists because the interesting fact about the gateway is what it does
  * NOT forward. Lemonade's own key would let a client install runtimes and
- * delete models; a Karen key reaches this list and nothing else, and someone
+ * delete models; a MyRA key reaches this list and nothing else, and someone
  * deciding whether to publish this on their network deserves to see it.
  */
 function Surface() {
@@ -337,7 +337,7 @@ function Surface() {
       {open ? (
         <>
           <ul className="api-routes">
-            {ROUTES.filter((r) => r.dialect !== "karen").map((r) => (
+            {ROUTES.filter((r) => r.dialect !== "myra").map((r) => (
               <li key={`${r.method} ${r.path}`}>
                 <span className="lem-chip">{DIALECT_LABELS[r.dialect]}</span>
                 <code>{r.method} {r.path}</code>
@@ -379,7 +379,7 @@ function Requests({ entries, onRefresh }: { entries: RequestRecord[]; onRefresh:
                 <button
                   type="button"
                   className="lem-act"
-                  onClick={() => void window.karen.apiCancel(e.id).then(onRefresh)}
+                  onClick={() => void window.myra.apiCancel(e.id).then(onRefresh)}
                 >
                   Cancel
                 </button>
@@ -391,7 +391,7 @@ function Requests({ entries, onRefresh }: { entries: RequestRecord[]; onRefresh:
 
       <header className="lem-head sub">
         <h4>Recent</h4>
-        <p>Metadata only — Karen has no way to record what was said. Kept in memory, and gone when Karen closes.</p>
+        <p>Metadata only — MyRA has no way to record what was said. Kept in memory, and gone when MyRA closes.</p>
       </header>
 
       {done.length ? (
@@ -402,14 +402,14 @@ function Requests({ entries, onRefresh }: { entries: RequestRecord[]; onRefresh:
           <button
             type="button"
             className="lem-more"
-            onClick={() => void window.karen.apiClearLog().then(onRefresh)}
+            onClick={() => void window.myra.apiClearLog().then(onRefresh)}
           >
             Clear this list
           </button>
         </>
       ) : (
         <p className="lem-none">
-          {open.length ? "Nothing finished yet." : "Nothing has asked Karen for anything yet."}
+          {open.length ? "Nothing finished yet." : "Nothing has asked MyRA for anything yet."}
         </p>
       )}
     </section>
@@ -473,7 +473,7 @@ function Keys({
   const [confirming, setConfirming] = useState<string | undefined>();
 
   const create = async (): Promise<void> => {
-    const res = await window.karen.apiKeyCreate(label || "Unnamed key");
+    const res = await window.myra.apiKeyCreate(label || "Unnamed key");
     if (res.ok && res.secret) {
       onSecret(res.secret);
       setLabel("");
@@ -486,7 +486,7 @@ function Keys({
         <h4>Keys</h4>
         <p>
           One per app, so you can take away one app&apos;s access without touching the others.
-          Karen stores only a hash — a key is shown once and cannot be shown again.
+          MyRA stores only a hash — a key is shown once and cannot be shown again.
         </p>
       </header>
 
@@ -522,7 +522,7 @@ function Keys({
           <li key={k.id} className="lem-model">
             <div className="lem-model-id">
               <span className="lem-model-name">{k.label}</span>
-              <span className="lem-chip">sk-karen-…{k.tail}</span>
+              <span className="lem-chip">sk-myra-…{k.tail}</span>
             </div>
             <span className="api-figure">
               {k.requests} request{k.requests === 1 ? "" : "s"}
@@ -536,7 +536,7 @@ function Keys({
                 <button
                   type="button"
                   className="lem-act api-danger"
-                  onClick={() => { setConfirming(undefined); void run(() => window.karen.apiKeyRevoke(k.id)); }}
+                  onClick={() => { setConfirming(undefined); void run(() => window.myra.apiKeyRevoke(k.id)); }}
                 >
                   Revoke
                 </button>

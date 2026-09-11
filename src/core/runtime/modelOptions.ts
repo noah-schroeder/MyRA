@@ -2,7 +2,7 @@
  * Per-model load settings: how each model is started, saved per model.
  *
  * Lemonade keeps these itself, in a `recipe_options.json` it owns, reachable at
- * `GET|POST|DELETE /api/v1/models/<id>/options`. Karen does not invent a
+ * `GET|POST|DELETE /api/v1/models/<id>/options`. MyRA does not invent a
  * parallel store: the daemon is what launches llama-server, so the settings
  * have to live where the launch reads them or they would be advice rather than
  * configuration.
@@ -14,7 +14,7 @@
  * offers none of those and has `whispercpp_args` instead. Measured, not
  * assumed -- and a POST of a key the recipe does not know is rejected with
  * `Unknown option 'x' for recipe 'llamacpp'`. So the editor is built from the
- * `defaults` object the daemon returns for that model, and a field Karen has
+ * `defaults` object the daemon returns for that model, and a field MyRA has
  * never heard of still renders rather than being silently dropped.
  *
  * **Default, saved and effective are three different things.** `defaults` is
@@ -78,7 +78,7 @@ export interface OptionField {
  * Only the keys worth explaining are here. Anything else the daemon reports is
  * still editable -- `fieldsFor` falls back to the key name and the value's own
  * type -- because a version of Lemonade that adds an option should not need a
- * Karen release before it can be set.
+ * MyRA release before it can be set.
  */
 const KNOWN: Record<string, Omit<OptionField, "key" | "advanced"> & { advanced?: boolean }> = {
   ctx_size: {
@@ -131,7 +131,7 @@ const KNOWN: Record<string, Omit<OptionField, "key" | "advanced"> & { advanced?:
   auto_update: {
     label: "Check for updates",
     kind: "toggle",
-    help: "Karen leaves this off: an update check is a network call you did not ask for.",
+    help: "MyRA leaves this off: an update check is a network call you did not ask for.",
     advanced: true,
   },
   merge_args: {

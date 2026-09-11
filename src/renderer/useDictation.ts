@@ -35,7 +35,7 @@ export function useDictation(onText: (text: string) => void) {
   const startedAt = useRef(0);
   const lastSound = useRef(0);
 
-  useEffect(() => window.karen.onDictationText(onText), [onText]);
+  useEffect(() => window.myra.onDictationText(onText), [onText]);
 
   // The clock and the silence check share one timer: two would drift apart and
   // the HUD would tick while claiming nothing had been heard for a while.
@@ -57,11 +57,11 @@ export function useDictation(onText: (text: string) => void) {
     startedAt.current = Date.now();
     lastSound.current = Date.now();
     try {
-      const settings = await window.karen.getSettings();
-      await window.karen.dictationStart();
+      const settings = await window.myra.getSettings();
+      await window.myra.dictationStart();
       await session.start({
         ...(settings.dictationSource ? { micDeviceId: settings.dictationSource } : {}),
-        onChunk: (pcm) => void window.karen.dictationAudio(pcm),
+        onChunk: (pcm) => void window.myra.dictationAudio(pcm),
         onLevel: ({ peak, rms }) => {
           if (rms > SILENCE_AMPLITUDE) lastSound.current = Date.now();
           setState((s) => ({ ...s, level: levelFromAmplitude(rms), clipping: peak >= 0.99 }));
@@ -71,7 +71,7 @@ export function useDictation(onText: (text: string) => void) {
       setState({ phase: "recording", elapsedMs: 0, level: 0 });
     } catch (err) {
       await session.stop();
-      await window.karen.dictationCancel();
+      await window.myra.dictationCancel();
       setState({ ...IDLE, error: (err as Error).message });
     }
   }, []);
@@ -84,10 +84,10 @@ export function useDictation(onText: (text: string) => void) {
     setState((s) => ({ ...s, phase: "transcribing" }));
     try {
       /* The handler answers rather than rejecting, so that a transcription
-         failure reads as Karen's own sentence instead of Electron's "Error
+         failure reads as MyRA's own sentence instead of Electron's "Error
          invoking remote method" with a JSON body on the end. The catch is
          still here for the bridge itself going wrong. */
-      const result = await window.karen.dictationStop();
+      const result = await window.myra.dictationStop();
       setState(result?.ok === false ? { ...IDLE, error: result.error ?? "" } : IDLE);
     } catch (err) {
       setState({ ...IDLE, error: (err as Error).message });
@@ -97,7 +97,7 @@ export function useDictation(onText: (text: string) => void) {
   const cancel = useCallback(async () => {
     await capture.current?.stop();
     capture.current = undefined;
-    await window.karen.dictationCancel();
+    await window.myra.dictationCancel();
     setState(IDLE);
   }, []);
 

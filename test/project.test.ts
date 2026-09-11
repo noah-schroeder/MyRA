@@ -102,7 +102,7 @@ describe("pruning", () => {
   });
 
   it("does not move updatedAt, because nobody did anything", () => {
-    /* Pruning is Karen noticing, not the user acting. A project that jumped to
+    /* Pruning is MyRA noticing, not the user acting. A project that jumped to
        the top of the rail because a chat was deleted elsewhere would be
        reporting an event that did not happen. */
     const p = { ...project("x", [chat("gone")]), updatedAt: "2026-01-01T00:00:00.000Z" };

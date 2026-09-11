@@ -75,12 +75,12 @@ export function SettingsModal({
   const [vault, setVault] = useState<VaultStatus | undefined>();
 
   useEffect(() => {
-    void window.karen.getSettings().then(setSettings);
-    void window.karen.secretsBackend().then(setVault);
+    void window.myra.getSettings().then(setSettings);
+    void window.myra.secretsBackend().then(setVault);
   }, []);
 
   const patch = async (changes: Partial<Settings>): Promise<void> => {
-    const next = await window.karen.updateSettings(changes);
+    const next = await window.myra.updateSettings(changes);
     setSettings(next);
     onChange?.(next);
   };
@@ -182,7 +182,7 @@ function Review({
   return (
     <div className="pane">
       <p className="pane-note">
-        What Karen tells the model when it reviews a manuscript. Each study design has a panel of
+        What MyRA tells the model when it reviews a manuscript. Each study design has a panel of
         reviewers, and each reviewer is a separate request: the base instructions below are sent
         every time, that reviewer's own brief is added to them, and anything you type into the
         Peer review page is added after both.
@@ -197,7 +197,7 @@ function Review({
         />
       </label>
       <p className="pane-note">
-        Karen has not searched for anything at this point, so any reference the model produces
+        MyRA has not searched for anything at this point, so any reference the model produces
         here would be invented. The default text says so; if you rewrite it, keep that.
       </p>
 
@@ -257,12 +257,12 @@ function Review({
 /* ----------------------------------------------------------------- library */
 
 /**
- * Zotero, and a straight answer about whether Karen can read it.
+ * Zotero, and a straight answer about whether MyRA can read it.
  *
  * This tab exists because of one recurring report: "it says it cannot reach
  * Zotero", made by people whose Zotero is open in front of them. There are two
  * ways in and they fail for unrelated reasons — a switch inside Zotero for the
- * first, a folder Karen has not looked in for the second — and a single line
+ * first, a folder MyRA has not looked in for the second — and a single line
  * saying the library is unreachable sends everybody to fix the wrong one.
  *
  * So both are shown, always, with what each of them found. The folder picker
@@ -277,14 +277,14 @@ function Library({
   settings: Settings;
   patch: (p: Partial<Settings>) => Promise<void>;
 }) {
-  type Status = Awaited<ReturnType<typeof window.karen.zoteroStatus>>;
+  type Status = Awaited<ReturnType<typeof window.myra.zoteroStatus>>;
   const [status, setStatus] = useState<Status | undefined>();
   const [busy, setBusy] = useState(false);
 
   const check = async (): Promise<void> => {
     setBusy(true);
     try {
-      setStatus(await window.karen.zoteroStatus());
+      setStatus(await window.myra.zoteroStatus());
     } finally {
       setBusy(false);
     }
@@ -295,7 +295,7 @@ function Library({
   useEffect(() => void check(), []);
 
   const choose = async (): Promise<void> => {
-    const picked = await window.karen.chooseDirectory({
+    const picked = await window.myra.chooseDirectory({
       title: "The folder holding zotero.sqlite",
       current: settings.zoteroDataDir,
     });
@@ -310,7 +310,7 @@ function Library({
   return (
     <div className="pane">
       <p className="hint">
-        Karen reads your Zotero library two ways. It prefers Zotero&rsquo;s own local
+        MyRA reads your Zotero library two ways. It prefers Zotero&rsquo;s own local
         connection, which searches the text inside your attached PDFs. When that cannot be
         reached — a Flatpak or Snap Zotero keeps the port inside its sandbox, where nothing
         else on the machine can get at it — it reads the library file directly instead, which
@@ -336,7 +336,7 @@ function Library({
       <label className="folder">
         Zotero data folder
         <span className="hint">
-          Leave this empty unless Karen cannot find your library. Empty means it works the
+          Leave this empty unless MyRA cannot find your library. Empty means it works the
           folder out itself, asking Zotero&rsquo;s own settings first. Set it to the folder that
           holds <code>zotero.sqlite</code> — Zotero shows the path under Settings → Advanced →
           Files and Folders.
@@ -372,7 +372,7 @@ function Library({
           so it is shown rather than logged. */}
       {status?.looked?.tried?.length ? (
         <details className="zotero-looked">
-          <summary>Where Karen looked ({status.looked.tried.length})</summary>
+          <summary>Where MyRA looked ({status.looked.tried.length})</summary>
           <ul>
             {status.looked.tried.map((dir) => (
               <li key={dir}>{dir}</li>
@@ -387,7 +387,7 @@ function Library({
             </p>
           ) : (
             <p className="hint">
-              No Zotero profile was found on this machine, so Karen could not ask Zotero where
+              No Zotero profile was found on this machine, so MyRA could not ask Zotero where
               its library is.
             </p>
           )}
@@ -400,7 +400,7 @@ function Library({
 /** How the folder was arrived at, in words rather than a field name. */
 const SOURCE_WORDS: Record<string, string> = {
   setting: "the folder set here",
-  environment: "KAREN_ZOTERO_DIR",
+  environment: "MYRA_ZOTERO_DIR",
   profile: "where Zotero's own settings say the library is",
   default: "Zotero's usual location",
   search: "found by searching",
@@ -429,7 +429,7 @@ function Folders({
   patch: (p: Partial<Settings>) => Promise<void>;
 }) {
   const choose = async (key: (typeof FOLDERS)[number]["key"], label: string): Promise<void> => {
-    const picked = await window.karen.chooseDirectory({ title: label, current: settings[key] });
+    const picked = await window.myra.chooseDirectory({ title: label, current: settings[key] });
     if (picked) await patch({ [key]: picked } as Partial<Settings>);
   };
 
@@ -531,18 +531,18 @@ function AudioModelField({
     : settings.audio.voiceModel;
 
   const refresh = (): void => {
-    void window.karen.audioModels(role).then((r) => {
+    void window.myra.audioModels(role).then((r) => {
       setOptions(r.options);
       if (!r.ok) setStatus(r.error);
     });
     // Best effort: not knowing costs a warning, and waiting on it would cost
     // the list.
-    void window.karen.lemonadeInfo().then((r) => {
+    void window.myra.lemonadeInfo().then((r) => {
       if (r.ok && r.info) setEngines(engineStates(r.info.engines));
     });
   };
   useEffect(refresh, [role]);
-  useEffect(() => window.karen.onAudioProgress((p) =>
+  useEffect(() => window.myra.onAudioProgress((p) =>
     setStatus(p.bytesTotal ? `downloading — ${Math.round(p.percent)}%` : "downloading…")), []);
 
   const current = options.find((o) => o.ref === chosen);
@@ -579,7 +579,7 @@ function AudioModelField({
     if (!current) return;
     setBusy(true);
     setStatus("preparing…");
-    const result = await window.karen.audioLoad(current.model);
+    const result = await window.myra.audioLoad(current.model);
     setBusy(false);
     setStatus(result.ok ? "ready" : result.error);
     refresh();
@@ -609,7 +609,7 @@ function AudioModelField({
       <p className="hint">
         {role === "transcription"
           ? "Turns dictation and recorded meetings into text."
-          : "Reads answers aloud in speech-to-speech mode. Leave it unset and Karen stays silent."}
+          : "Reads answers aloud in speech-to-speech mode. Leave it unset and MyRA stays silent."}
       </p>
 
       <label>
@@ -693,7 +693,7 @@ function AudioModelField({
         <p className="warning" role="note">
           {role === "transcription"
             ? "Recordings — dictation and whole meetings — are sent to this provider."
-            : "Everything Karen reads aloud is sent to this provider to be spoken."}
+            : "Everything MyRA reads aloud is sent to this provider to be spoken."}
         </p>
       ) : null}
 
@@ -735,7 +735,7 @@ function VoiceField({
   const preview = async (): Promise<void> => {
     setPlaying(true);
     setStatus(undefined);
-    const result = await window.karen.previewVoice(settings.audio.voice);
+    const result = await window.myra.previewVoice(settings.audio.voice);
     if (!result.ok || !result.audio) {
       setPlaying(false);
       setStatus(result.error ?? "Nothing came back.");
@@ -804,7 +804,7 @@ function VoiceField({
       </label>
       {!voices.length ? (
         <p className="hint">
-          Karen cannot list this model’s voices — no speech server publishes them — so this is
+          MyRA cannot list this model’s voices — no speech server publishes them — so this is
           whatever name it expects. Leave it empty for its own default.
         </p>
       ) : null}
@@ -855,7 +855,7 @@ function Audio({
           name typed by hand. Transcription was the last place in the app that
           asked someone to know the shape of a server's address, and the two
           things that could answer -- the local runtime and the providers -- were
-          both already lists Karen could offer. */}
+          both already lists MyRA could offer. */}
       <AudioModelField role="transcription" settings={settings} patch={patch} />
       <AudioModelField role="voice" settings={settings} patch={patch} />
 
@@ -930,13 +930,13 @@ function Appearance({
 }) {
   const [trayOk, setTrayOk] = useState<boolean | undefined>();
   useEffect(() => {
-    void window.karen.trayAvailable().then(setTrayOk);
+    void window.myra.trayAvailable().then(setTrayOk);
   }, []);
 
   return (
     <div className="pane">
       <p className="pane-lead">
-        Karen follows the theme you pick here rather than the system one, so a desktop that
+        MyRA follows the theme you pick here rather than the system one, so a desktop that
         switches at sunset will not change the app underneath you mid-sentence.
       </p>
 
@@ -951,23 +951,23 @@ function Appearance({
             checked={settings.keepRunningInTray}
             onChange={(e) => void patch({ keepRunningInTray: e.target.checked })}
           />
-          <span>Keep Karen running when the window is closed</span>
+          <span>Keep MyRA running when the window is closed</span>
         </label>
         <p className="hint">
-          Karen stays in your tray with the model loaded and, if you are serving it, the API
+          MyRA stays in your tray with the model loaded and, if you are serving it, the API
           still answering. Quit from the tray icon. Turn this off and closing the window quits
-          Karen as it used to.
+          MyRA as it used to.
         </p>
         {/* Said plainly rather than left as a checkbox that does nothing:
             GNOME shows no status area unless an AppIndicator extension is
-            installed, and Karen closes normally when there is nowhere to go. */}
+            installed, and MyRA closes normally when there is nowhere to go. */}
         {trayOk === false ? (
           <p className="hint note">
             Your desktop is not showing tray icons, so this has no effect and closing the window
-            quits Karen — it will not vanish into a tray that is not there. GNOME, Pop!_OS
+            quits MyRA — it will not vanish into a tray that is not there. GNOME, Pop!_OS
             included, needs an extension for this:{" "}
             <code>sudo apt install gnome-shell-extension-appindicator</code>, then log out and
-            back in. Karen checks again each time it starts.
+            back in. MyRA checks again each time it starts.
           </p>
         ) : null}
       </fieldset>
@@ -1010,7 +1010,7 @@ const MODES = [
 ] as const;
 
 /**
- * Who Karen is, in the user's own words.
+ * Who MyRA is, in the user's own words.
  *
  * Only the persona: what follows it in the prompt is the tool discipline, the
  * citation rules and the untrusted-content rule, and those are not offered here
@@ -1028,7 +1028,7 @@ function Persona({
   return (
     <div className="pane">
       <p className="pane-lead">
-        The first thing every conversation tells the model. Change it to give Karen a different
+        The first thing every conversation tells the model. Change it to give MyRA a different
         voice, a field of your own, or a house style — it applies to chat, and a single model can
         be given its own from the cog beside it in the model menu.
       </p>
@@ -1043,7 +1043,7 @@ function Persona({
       </label>
 
       <p className="pane-note">
-        This replaces the description of who Karen is, and nothing else. Karen&rsquo;s own rules
+        This replaces the description of who MyRA is, and nothing else. MyRA&rsquo;s own rules
         follow it and cannot be edited from here: how to hold a tool, that a citation marker may
         only ever be one a tool actually returned, and that text inside untrusted-content markers
         is data rather than instruction. Those are what keep a reference from being invented, so
@@ -1057,7 +1057,7 @@ function Persona({
           disabled={settings.persona === DEFAULT_PERSONA}
           onClick={() => void patch({ persona: DEFAULT_PERSONA })}
         >
-          Back to Karen&rsquo;s own
+          Back to MyRA&rsquo;s own
         </button>
       </div>
 
@@ -1101,7 +1101,7 @@ function Permissions({
   return (
     <div className="pane">
       <p className="pane-lead">
-        Karen can only do what its tools allow — there is no shell, so &ldquo;run a command&rdquo; is
+        MyRA can only do what its tools allow — there is no shell, so &ldquo;run a command&rdquo; is
         not something it can express. These modes decide how much of the rest you want to see
         before it happens.
       </p>
@@ -1134,14 +1134,14 @@ function Permissions({
 /* ------------------------------------------------------------------- about */
 
 function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
-  const [engines, setEngines] = useState<Awaited<ReturnType<typeof window.karen.engines>> | undefined>();
+  const [engines, setEngines] = useState<Awaited<ReturnType<typeof window.myra.engines>> | undefined>();
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | undefined>();
   const [privacy, setPrivacy] = useState<PrivacyReport | undefined>();
 
   useEffect(() => {
-    void window.karen.engines().then(setEngines);
-    void window.karen.privacy().then(setPrivacy);
+    void window.myra.engines().then(setEngines);
+    void window.myra.privacy().then(setPrivacy);
   }, []);
 
   return (
@@ -1178,7 +1178,7 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
         </ul>
       ) : (
         <p className="hint">
-          No endpoints are configured. If you are running a model through Karen&rsquo;s own runtime,
+          No endpoints are configured. If you are running a model through MyRA&rsquo;s own runtime,
           prompts are not going anywhere.
         </p>
       )}
@@ -1258,9 +1258,9 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
                 onClick={() => {
                   setInstalling(true);
                   setInstallError(undefined);
-                  void window.karen.installPandoc().then((r) => {
+                  void window.myra.installPandoc().then((r) => {
                     setInstalling(false);
-                    if (r.ok) void window.karen.engines().then(setEngines);
+                    if (r.ok) void window.myra.engines().then(setEngines);
                     else setInstallError(r.error);
                   });
                 }}

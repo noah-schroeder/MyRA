@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { classifyBash, classifyToolCall, isInside, normalizePosixPath, RESEARCH_TOOLS } from "../src/core/risk.ts";
 import { decide } from "../src/core/policy.ts";
 
-const WS = "/home/coding/Documents/karen";
+const WS = "/home/coding/Documents/myra";
 const ctx = { workspaceRoot: WS };
 
 /* ---------------- path containment ---------------- */
@@ -21,7 +21,7 @@ test("isInside accepts the root and its descendants", () => {
 
 test("isInside rejects traversal and sibling prefixes", () => {
   assert.equal(isInside(`${WS}/../../../etc/passwd`, WS), false);
-  assert.equal(isInside("/home/coding/Documents/karen-evil/x", WS), false, "prefix must not imply containment");
+  assert.equal(isInside("/home/coding/Documents/myra-evil/x", WS), false, "prefix must not imply containment");
   assert.equal(isInside("/etc/passwd", WS), false);
 });
 
@@ -85,7 +85,7 @@ test("dangerous: package installs, publishing, service and firewall changes", ()
 });
 
 test("dangerous: touching credentials or agent config", () => {
-  for (const c of ["cat ~/.ssh/id_ed25519", "cat ~/.pi/agent/auth.json", "ls ~/.config/karen"]) {
+  for (const c of ["cat ~/.ssh/id_ed25519", "cat ~/.pi/agent/auth.json", "ls ~/.config/myra"]) {
     assert.equal(classifyBash(c).risk, "dangerous", c);
   }
 });

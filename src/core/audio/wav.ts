@@ -14,9 +14,9 @@
  * placeholder a streaming writer puts there and never goes back to patch, so
  * a decoder reading them is told to expect four gigabytes that do not exist.
  *
- * Neither is Karen's to fix upstream, and both are trivial to fix here. The
+ * Neither is MyRA's to fix upstream, and both are trivial to fix here. The
  * daemon will also hand over raw 16-bit PCM if asked, which needs no repair at
- * all -- only a header. So Karen asks for that, and keeps the repair for
+ * all -- only a header. So MyRA asks for that, and keeps the repair for
  * whatever else an endpoint might send.
  */
 
@@ -24,7 +24,7 @@
 const PCM = 1;
 const FLOAT = 3;
 
-/** What Karen asks for, and what the header below is built for. */
+/** What MyRA asks for, and what the header below is built for. */
 export const PCM_FORMAT = "pcm";
 /** Asked for next, when an endpoint will not produce raw samples. */
 export const WAV_FORMAT = "wav";

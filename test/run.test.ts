@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { ResearchRun, runId, STAGES } from "../src/core/research/run.ts";
 import { makeSourceRecord } from "../src/core/research/sources.ts";
 
-const root = () => mkdtemp(join(tmpdir(), "karen-runs-"));
+const root = () => mkdtemp(join(tmpdir(), "myra-runs-"));
 
 test("runId is dated, readable and unique per run", () => {
   const a = runId("CRISPR off-target effects in human cells");
@@ -146,7 +146,7 @@ test("the summary reports self-review rather than implying independence", async 
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const root = await mkdtemp(join(tmpdir(), "karen-selfreview-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-selfreview-"));
   try {
     const run = await ResearchRun.create("does review matter", root);
     await run.writeJson("plan.json", {
@@ -179,7 +179,7 @@ test("readRun assembles what the run actually wrote", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const root = await mkdtemp(join(tmpdir(), "karen-readrun-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-readrun-"));
   try {
     const run = await ResearchRun.create("does working memory training transfer", root);
     // A stage's OUTPUT file is its done marker, so the earlier ones have to
@@ -258,7 +258,7 @@ test("listRuns survives a half-created run directory", async () => {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const root = await mkdtemp(join(tmpdir(), "karen-listruns-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-listruns-"));
   try {
     await ResearchRun.create("a real run", root);
     // A directory with nothing in it: interrupted before question.json landed.
@@ -287,7 +287,7 @@ test("a run from before a stage existed is not reported as unfinished", async ()
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  const root = await mkdtemp(join(tmpdir(), "karen-oldrun-"));
+  const root = await mkdtemp(join(tmpdir(), "myra-oldrun-"));
   try {
     const run = await ResearchRun.create("an older run", root);
     // Everything except the stage that did not exist when this run happened.

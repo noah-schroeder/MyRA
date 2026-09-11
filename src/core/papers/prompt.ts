@@ -13,7 +13,7 @@
  *     this flow searches, so every reference a model produces here is invented
  *     by construction. The original tool had a "power-user mode" that replaced
  *     this whole prompt, guardrails included; it is deliberately not carried
- *     over. Karen's research pipeline refuses to return a draft citing a source
+ *     over. MyRA's research pipeline refuses to return a draft citing a source
  *     that does not exist, documents/draft.ts tells its section writer the same
  *     thing, and a paper drafter that could be talked out of the rule would be
  *     the one place in the app where a fabricated authority is allowed.

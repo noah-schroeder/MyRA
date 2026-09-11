@@ -1,7 +1,7 @@
 /**
  * Whether a tray icon will actually be seen.
  *
- * This decides whether closing the window hides Karen or quits it, so getting
+ * This decides whether closing the window hides MyRA or quits it, so getting
  * it wrong in the optimistic direction leaves the app running with no way to
  * reach it. The bias is therefore deliberate and tested: anything short of a
  * positive answer is treated as "no tray".
@@ -79,7 +79,7 @@ test("an item owned by this process means the icon really is showing", () => {
 });
 
 test("items that belong to other processes are not ours", () => {
-  // The observed state: two indicators registered, neither of them Karen's.
+  // The observed state: two indicators registered, neither of them MyRA's.
   const registered = statusItemRegistered(4321, "linux", (_file, args) =>
     args.includes("RegisteredStatusNotifierItems")
       ? ITEMS(":1.50@/org/ayatana/NotificationItem/software_update_available")

@@ -9,7 +9,7 @@ import {
 } from "../src/core/meetings/meeting.ts";
 
 function scratch(): string {
-  return mkdtempSync(join(tmpdir(), "karen-meetings-"));
+  return mkdtempSync(join(tmpdir(), "myra-meetings-"));
 }
 
 /** A window of `n` samples of a sine at the given amplitude, s16 mono. */

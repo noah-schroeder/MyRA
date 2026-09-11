@@ -51,7 +51,7 @@ export interface Session extends SessionMeta {
 }
 
 export function sessionsDir(): string {
-  return process.env["KAREN_SESSIONS_DIR"] ?? join(CONFIG_DIR, "sessions");
+  return process.env["MYRA_SESSIONS_DIR"] ?? join(CONFIG_DIR, "sessions");
 }
 
 /** Local calendar fields, not toISOString: a 5:29pm session must file today. */

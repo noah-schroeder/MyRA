@@ -89,7 +89,7 @@ export function PaperDrafter({
   const stored = useRef<string>("");
 
   const refresh = useCallback(async () => {
-    const result = await window.karen.paperList();
+    const result = await window.myra.paperList();
     setPapers(result.papers ?? []);
   }, []);
 
@@ -104,7 +104,7 @@ export function PaperDrafter({
     setSaving(true);
     const timer = setTimeout(() => {
       stored.current = body;
-      void window.karen.paperSave(paper).then((r) => {
+      void window.myra.paperSave(paper).then((r) => {
         setSaving(false);
         if (!r.ok) setError(r.error ?? "That paper could not be saved.");
       });
@@ -170,8 +170,8 @@ export function PaperDrafter({
   /* Asked once on mount and then pushed: the snapshot is what a page arriving
      in the middle of a section needs, and the push is the rest of it. */
   useEffect(() => {
-    void window.karen.workState().then(setJob);
-    return window.karen.onWork(setJob);
+    void window.myra.workState().then(setJob);
+    return window.myra.onWork(setJob);
   }, []);
 
   /* Main commits a finished section, so the record can change without this page
@@ -179,7 +179,7 @@ export function PaperDrafter({
      we were just told. */
   useEffect(
     () =>
-      window.karen.onPaperChanged((next) => {
+      window.myra.onPaperChanged((next) => {
         /* Guards `stored.current` too, not only `paper`: a draft finishing for
            some other paper while this one is open must not leave the autosave
            baseline pointing at a record that is not the one on screen. */
@@ -204,7 +204,7 @@ export function PaperDrafter({
     if (!paper || job) return;
     setFailed((f) => ({ ...f, [sectionId]: "" }));
     setInvented((v) => ({ ...v, [sectionId]: [] }));
-    const result = await window.karen.paperDraft(
+    const result = await window.myra.paperDraft(
       paper.id,
       sectionId,
       requestFor(paper, sectionId, { mode, instruction }),
@@ -221,7 +221,7 @@ export function PaperDrafter({
        `paper.id`, but the await gives the author time to click back to the list
        and open a different paper before it resolves, and this section's finished
        draft must not then reappear over whatever they switched to. */
-    const fresh = await window.karen.paperOpen(paper.id);
+    const fresh = await window.myra.paperOpen(paper.id);
     if (fresh.ok && fresh.paper) {
       const record = fresh.paper;
       setPaper((p) => {
@@ -236,7 +236,7 @@ export function PaperDrafter({
   /* --------------------------------------------------------------- papers */
 
   const open = useCallback(async (id: string): Promise<void> => {
-    const result = await window.karen.paperOpen(id);
+    const result = await window.myra.paperOpen(id);
     if (!result.ok || !result.paper) {
       setError(result.error ?? "That paper could not be opened.");
       return;
@@ -257,7 +257,7 @@ export function PaperDrafter({
   }, [openId, open]);
 
   const create = async (kind: PaperKind): Promise<void> => {
-    const result = await window.karen.paperCreate(kind, kind === "paper" ? "Untitled paper" : "Untitled section");
+    const result = await window.myra.paperCreate(kind, kind === "paper" ? "Untitled paper" : "Untitled section");
     if (!result.paper) return;
     stored.current = JSON.stringify(result.paper);
     setPaper(result.paper);
@@ -273,7 +273,7 @@ export function PaperDrafter({
 
   const remove = async (): Promise<void> => {
     if (!paper) return;
-    const result = await window.karen.paperDelete(paper.id);
+    const result = await window.myra.paperDelete(paper.id);
     setPapers(result.papers ?? []);
     setPaper(undefined);
     setConfirming(false);
@@ -285,9 +285,9 @@ export function PaperDrafter({
     setError(undefined);
     /* Written first, so the file on disk is the one being converted rather than
        whatever the last autosave happened to catch. */
-    await window.karen.paperSave(paper);
+    await window.myra.paperSave(paper);
     stored.current = JSON.stringify(paper);
-    const result = await window.karen.paperExport(paper.id, format);
+    const result = await window.myra.paperExport(paper.id, format);
     if (!result.ok || !result.path) {
       setError(result.error ?? "That export failed.");
       return;
@@ -436,7 +436,7 @@ export function PaperDrafter({
             <button
               type="button"
               className="ghost paper-btn"
-              onClick={() => void window.karen.paperReveal(exported)}
+              onClick={() => void window.myra.paperReveal(exported)}
             >
               Show in folder
             </button>
@@ -490,7 +490,7 @@ export function PaperDrafter({
             onMove={(delta) => edit({ sections: moveSection(paper.sections, index, delta) })}
             onDelete={() => edit({ sections: withoutSection(paper.sections, section.id) })}
             onDraft={(mode, instruction) => void draft(section.id, mode, instruction)}
-            onStop={() => void window.karen.paperCancel()}
+            onStop={() => void window.myra.paperCancel()}
             onPrompt={() => setEditing({ scope: "section", sectionId: section.id })}
             onBoxFocus={(field) => {
               box.current = { sectionId: section.id, field };

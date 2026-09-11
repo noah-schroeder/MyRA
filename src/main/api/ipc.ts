@@ -18,12 +18,12 @@ export function installApiIpc(
   api: ApiManager,
   send: (channel: string, payload?: unknown) => void,
 ): void {
-  api.onChange(() => send("karen:api", api.state));
-  api.onLog(() => send("karen:api-log", api.log.entries));
+  api.onChange(() => send("myra:api", api.state));
+  api.onLog(() => send("myra:api-log", api.log.entries));
 
-  ipcMain.handle("karen:api-state", () => api.state);
+  ipcMain.handle("myra:api-state", () => api.state);
 
-  ipcMain.handle("karen:api-config", async (_e, patch: Record<string, unknown>) => {
+  ipcMain.handle("myra:api-config", async (_e, patch: Record<string, unknown>) => {
     try {
       return { ok: true, state: await api.update(patch) };
     } catch (err) {
@@ -31,7 +31,7 @@ export function installApiIpc(
     }
   });
 
-  ipcMain.handle("karen:api-start", async () => {
+  ipcMain.handle("myra:api-start", async () => {
     try {
       const state = await api.start();
       /* A refusal is reported through the status, not thrown: "port 1234 is
@@ -42,7 +42,7 @@ export function installApiIpc(
     }
   });
 
-  ipcMain.handle("karen:api-stop", async () => {
+  ipcMain.handle("myra:api-stop", async () => {
     try {
       return { ok: true, state: await api.stop() };
     } catch (err) {
@@ -50,7 +50,7 @@ export function installApiIpc(
     }
   });
 
-  ipcMain.handle("karen:api-key-create", async (_e, label: string) => {
+  ipcMain.handle("myra:api-key-create", async (_e, label: string) => {
     try {
       const { state, secret } = await api.createKey(String(label ?? ""));
       // The only moment this value exists outside the minting function.
@@ -60,7 +60,7 @@ export function installApiIpc(
     }
   });
 
-  ipcMain.handle("karen:api-key-revoke", async (_e, id: string) => {
+  ipcMain.handle("myra:api-key-revoke", async (_e, id: string) => {
     try {
       return { ok: true, state: await api.revokeKey(String(id)) };
     } catch (err) {
@@ -68,13 +68,13 @@ export function installApiIpc(
     }
   });
 
-  ipcMain.handle("karen:api-requests", () => ({ ok: true, entries: api.log.entries }));
+  ipcMain.handle("myra:api-requests", () => ({ ok: true, entries: api.log.entries }));
 
-  ipcMain.handle("karen:api-cancel", (_e, id: string) => ({
+  ipcMain.handle("myra:api-cancel", (_e, id: string) => ({
     ok: api.cancel(String(id)),
   }));
 
-  ipcMain.handle("karen:api-clear-log", () => {
+  ipcMain.handle("myra:api-clear-log", () => {
     api.clearLog();
     return { ok: true, entries: api.log.entries };
   });

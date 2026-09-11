@@ -232,7 +232,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     if (publishing) return;
     publishing = true;
     try {
-      send("karen:projects", await summaries());
+      send("myra:projects", await summaries());
     } finally {
       publishing = false;
     }
@@ -242,15 +242,15 @@ export function installProjectIpc(deps: ProjectDeps): void {
      the window: a conversation files itself when its first turn finishes. */
   setProjectsWatcher(() => void publish());
 
-  ipcMain.handle("karen:project-list", async () => ({ ok: true, projects: await summaries() }));
+  ipcMain.handle("myra:project-list", async () => ({ ok: true, projects: await summaries() }));
 
-  ipcMain.handle("karen:project-create", async (_e, name: unknown) => {
+  ipcMain.handle("myra:project-create", async (_e, name: unknown) => {
     const project = await writeProject(newProject({ name: String(name ?? "") }));
     await publish();
     return { ok: true, project };
   });
 
-  ipcMain.handle("karen:project-rename", async (_e, id: unknown, name: unknown) => {
+  ipcMain.handle("myra:project-rename", async (_e, id: unknown, name: unknown) => {
     const project = await readProject(String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
     const next = String(name ?? "").trim() || project.name;
@@ -267,7 +267,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
    * that named a meeting differently from the Meetings page would be two
    * records of one thing.
    */
-  ipcMain.handle("karen:project-open", async (_e, id: unknown) => {
+  ipcMain.handle("myra:project-open", async (_e, id: unknown) => {
     const projects = await readAllPruned(stores);
     const project = projects.find((p) => p.id === String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
@@ -289,7 +289,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
   });
 
   /** Everything in every store, with the project it is already in named. */
-  ipcMain.handle("karen:project-items", async () => {
+  ipcMain.handle("myra:project-items", async () => {
     const projects = await readAllPruned(stores);
     const out: (ItemRow & { kind: MemberKind; project: string })[] = [];
     for (const kind of Object.keys(stores) as MemberKind[]) {
@@ -311,7 +311,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
    * The work you have done lately, whatever kind it is.
    *
    * Built from the same stores a project reads, so a row in the rail prints the
-   * title and the note its own page prints -- the property `karen:project-open`
+   * title and the note its own page prints -- the property `myra:project-open`
    * is already built on, and the reason this is here rather than in a fourth
    * lister of its own.
    *
@@ -319,7 +319,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
    * with their own shapes, and this list stands where the conversation list
    * stood. What belongs in it is the work you were in the middle of.
    */
-  ipcMain.handle("karen:recent", async () => {
+  ipcMain.handle("myra:recent", async () => {
     const kinds: MemberKind[] = ["chat", "paper", "review", "run"];
     const projects = await readAllPruned(stores);
     const out: (ItemRow & { kind: MemberKind; project: string })[] = [];
@@ -341,7 +341,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true, items: out.slice(0, RECENT_LIMIT) };
   });
 
-  ipcMain.handle("karen:project-add", async (_e, id: unknown, members: unknown) => {
+  ipcMain.handle("myra:project-add", async (_e, id: unknown, members: unknown) => {
     const wanted = asMembers(members);
     if (!wanted.length) return { ok: true };
     const projects = await readAll();
@@ -357,7 +357,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("karen:project-remove", async (_e, id: unknown, members: unknown) => {
+  ipcMain.handle("myra:project-remove", async (_e, id: unknown, members: unknown) => {
     const project = await readProject(String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
     await writeProject(removeMembers(project, asMembers(members)));
@@ -365,7 +365,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true };
   });
 
-  ipcMain.handle("karen:project-delete", async (_e, id: unknown, contents: unknown) => {
+  ipcMain.handle("myra:project-delete", async (_e, id: unknown, contents: unknown) => {
     const project = await readProject(String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
     const report = await deleteProject(project, stores, { contents: contents === true });
@@ -376,7 +376,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true, report };
   });
 
-  ipcMain.handle("karen:project-active", async (_e, id: unknown) => {
+  ipcMain.handle("myra:project-active", async (_e, id: unknown) => {
     const wanted = String(id ?? "");
     /* Checked rather than trusted: a project deleted in another window would
        otherwise be set as the destination for everything made next. */
@@ -384,7 +384,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true, settings: await config.update({ activeProject: ok ? wanted : "" }) };
   });
 
-  ipcMain.handle("karen:project-export", async (_e, id: unknown) => {
+  ipcMain.handle("myra:project-export", async (_e, id: unknown) => {
     const projects = await readAllPruned(stores);
     const project = projects.find((p) => p.id === String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
@@ -420,7 +420,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
     return { ok: true, path: root, counts };
   });
 
-  ipcMain.handle("karen:project-reveal", async (_e, path: unknown) => {
+  ipcMain.handle("myra:project-reveal", async (_e, path: unknown) => {
     shell.showItemInFolder(String(path));
     return { ok: true };
   });

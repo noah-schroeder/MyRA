@@ -100,7 +100,7 @@ const DANGEROUS: Pattern[] = [
 const SENSITIVE_PATHS: Pattern[] = [
   { re: /~\/\.ssh|\/\.ssh\//, reason: "SSH private keys" },
   { re: /~\/\.pi(\/|\b)/, reason: "pi agent configuration" },
-  { re: /\.config\/karen/, reason: "Karen configuration and secrets" },
+  { re: /\.config\/myra/, reason: "MyRA configuration and secrets" },
   { re: /\bsecrets\.enc\.json\b|\bauth\.json\b/, reason: "stored credentials" },
   { re: /~\/\.gnupg|\/\.gnupg\//, reason: "GPG private keys" },
   { re: /\/etc\/(shadow|passwd|sudoers)/, reason: "system account files" },

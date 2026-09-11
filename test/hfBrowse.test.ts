@@ -197,7 +197,7 @@ test("age reads as a person would say it", () => {
 });
 
 test("every kind now has an engine that runs it", () => {
-  /* All of these used to be marked unrunnable, which was a gap in Karen
+  /* All of these used to be marked unrunnable, which was a gap in MyRA
      rather than a fact about the models: naming the right recipe on the pull
      makes them work. */
   const byId = new Map(KINDS.map((k) => [k.id, k]));

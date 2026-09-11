@@ -1,7 +1,7 @@
 /**
  * What actually reaches the wire, versus what the stored message carries.
  *
- * `ChatMessage` grows Karen's own bookkeeping over time -- speed stats, an
+ * `ChatMessage` grows MyRA's own bookkeeping over time -- speed stats, an
  * attachment reference -- and each one is a field a strict server has never
  * heard of. `buildRequest` is where that bookkeeping is stripped back off
  * before the request leaves, so this pins that it actually happens rather

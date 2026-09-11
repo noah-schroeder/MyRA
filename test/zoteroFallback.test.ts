@@ -45,12 +45,12 @@ before(async () => {
       creators: ["Chi, Michelene"],
     },
   ]);
-  process.env["KAREN_ZOTERO_DIR"] = dir;
+  process.env["MYRA_ZOTERO_DIR"] = dir;
   forgetZoteroSnapshot();
 });
 
 after(() => {
-  delete process.env["KAREN_ZOTERO_DIR"];
+  delete process.env["MYRA_ZOTERO_DIR"];
   forgetZoteroSnapshot();
   if (dir) rmSync(dir, { recursive: true, force: true });
 });

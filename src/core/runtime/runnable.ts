@@ -44,10 +44,10 @@ export type Runnable =
    *
    * So the model runs; what it does not do is warn anyone that loading it is
    * about to spend 34 MB -- or, on CUDA, several hundred. That is the whole
-   * reason Karen installs updates deliberately instead of letting them ambush
+   * reason MyRA installs updates deliberately instead of letting them ambush
    * somebody mid-sentence.
    *
-   * Reachable without anybody touching a pin: a Karen release that bumps
+   * Reachable without anybody touching a pin: a MyRA release that bumps
    * LEMONADE_VERSION ships new recipe versions, and every engine installed
    * under the old one lands here until it is reinstalled.
    */
@@ -157,7 +157,7 @@ const ENGINE_WORDS: Record<string, string> = {
  * Returned as two lists rather than a filter, because the count of the second
  * one has to be said out loud. Hiding 95 of 168 rows silently would leave
  * someone searching for a model they can see documented elsewhere and
- * concluding Karen's list is broken.
+ * concluding MyRA's list is broken.
  */
 export function partitionByRunnable<T extends { recipe: string }>(
   entries: T[],

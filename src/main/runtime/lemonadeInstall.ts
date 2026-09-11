@@ -2,13 +2,13 @@
  * Getting the Lemonade daemon onto the machine.
  *
  * Downloaded on first use rather than shipped inside the installer, which is
- * the same bargain Karen already makes for llama.cpp: the app stays small, the
+ * the same bargain MyRA already makes for llama.cpp: the app stays small, the
  * download is visible and cancellable in the place people already expect to see
  * it, and one build works on every platform without vendoring four binaries.
  *
  * The embeddable build is deliberately the one used rather than the system
  * package. It is 18 MB, carries no telemetry, keeps all of its state in
- * directories Karen names, and a Karen uninstall takes it with it -- none of
+ * directories MyRA names, and a MyRA uninstall takes it with it -- none of
  * which is true of a snap or a .deb that installs a service.
  */
 
@@ -55,8 +55,8 @@ export async function installLemonade(opts: LemonadeInstallOptions): Promise<Lem
   const asset = embeddableAsset(process.platform, process.arch, version);
   if (!asset) {
     throw new DownloadError(
-      `Lemonade does not publish a build for ${process.platform}/${process.arch}, so Karen ` +
-        `cannot run models on this machine. You can still point Karen at an endpoint of your own.`,
+      `Lemonade does not publish a build for ${process.platform}/${process.arch}, so MyRA ` +
+        `cannot run models on this machine. You can still point MyRA at an endpoint of your own.`,
     );
   }
 

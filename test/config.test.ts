@@ -65,7 +65,7 @@ test("an endpoint written before it existed keeps its env var", async () => {
 });
 
 test("an image size the picker could not have written is not honoured", async () => {
-  /* Shape, not membership: the three sizes Karen offers are what it shows, not
+  /* Shape, not membership: the three sizes MyRA offers are what it shows, not
      what an engine accepts, so 1152x896 from a hand-edited file is fine and
      "huge" is not -- that string would go straight into a request body. */
   await withSettings({ image: { model: "sd-turbo", size: "huge" } }, async (store) => {
@@ -145,10 +145,10 @@ test("a blank persona for a model is not an entry", async () => {
   });
 });
 
-test("the persona falls back to Karen's own rather than to nothing", async () => {
+test("the persona falls back to MyRA's own rather than to nothing", async () => {
   await withSettings({ persona: 42 }, async (store) => {
     assert.equal(store.current.persona, DEFAULT_SETTINGS.persona);
-    assert.match(store.current.persona, /You are Karen/);
+    assert.match(store.current.persona, /You are Myra/);
   });
 });
 

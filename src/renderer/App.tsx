@@ -77,7 +77,7 @@ export function App() {
    */
   const [page, setPage] = useState<Page>("chat");
   /* The documents this conversation has written. Session-scoped on purpose:
-     these are what Karen made while you watched, not a file browser. */
+     these are what MyRA made while you watched, not a file browser. */
   const documents = useDocuments();
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
@@ -142,11 +142,11 @@ export function App() {
   }, [settings?.theme]);
 
   useEffect(() => {
-    void window.karen.getSettings().then(setSettings);
+    void window.myra.getSettings().then(setSettings);
     /* And whenever the main process changes them itself. Loading a local model
        stands down a hosted choice, and without this the bar goes on naming a
        model the next message will not be sent to. */
-    const stop = window.karen.onSettings(setSettings);
+    const stop = window.myra.onSettings(setSettings);
     // Enumerating once at startup is what gives the main process a device list
     // to validate meeting tracks against; only the renderer can produce one.
     void enumerate().catch(() => undefined);
@@ -156,36 +156,36 @@ export function App() {
   const activeProject = settings?.activeProject ?? "";
 
   const refreshProjects = useCallback(() => {
-    void window.karen.projectList().then((r) => setProjects(r.projects ?? []));
+    void window.myra.projectList().then((r) => setProjects(r.projects ?? []));
   }, []);
 
   useEffect(() => {
     refreshProjects();
-    return window.karen.onProjects(setProjects);
+    return window.myra.onProjects(setProjects);
   }, [refreshProjects]);
 
   /* The long job, asked once and then pushed. It is drawn on every page,
      including chat: a review running while you carry on talking to the model is
      the case this whole arrangement exists for. */
   useEffect(() => {
-    void window.karen.workState().then(setJob);
-    return window.karen.onWork(setJob);
+    void window.myra.workState().then(setJob);
+    return window.myra.onWork(setJob);
   }, []);
 
-  useEffect(() => window.karen.onPrompt(setPrompt), []);
+  useEffect(() => window.myra.onPrompt(setPrompt), []);
   /* What the daemon is holding, for the three pickers in the bar above: each
      says "None selected" unless the model it names is actually in memory. */
   const [resident, setResident] = useState<string[]>([]);
   useEffect(() => {
     const take = (r: RuntimeState): void => setResident(r.lemonade.resident ?? []);
-    void window.karen.runtimeState().then(take);
-    return window.karen.onRuntime(take);
+    void window.myra.runtimeState().then(take);
+    return window.myra.onRuntime(take);
   }, []);
 
-  useEffect(() => window.karen.onResearchProgress(setProgress), []);
+  useEffect(() => window.myra.onResearchProgress(setProgress), []);
   /* An empty stage means the run is over: the card comes down, and the plain
      progress line takes over again for whatever the turn does next. */
-  useEffect(() => window.karen.onResearchStage((s) => setStage(s || undefined)), []);
+  useEffect(() => window.myra.onResearchStage((s) => setStage(s || undefined)), []);
   /* Reported on its own channel because the two above are consumed inside the
      conversation, which is hidden on every other page. This one has to reach
      the rail and the Research runs list wherever the user happens to be. */
@@ -194,8 +194,8 @@ export function App() {
      mid-run with only the push meant the rail said nothing at all until the next
      stage began. */
   useEffect(() => {
-    void window.karen.researchActive().then(setActiveRun);
-    return window.karen.onResearchActive(setActiveRun);
+    void window.myra.researchActive().then(setActiveRun);
+    return window.myra.onResearchActive(setActiveRun);
   }, []);
   /* Subscribed here, at the top, because the counter is in the bar above every
      page and the toast floats over all of them. */
@@ -262,7 +262,7 @@ export function App() {
    * Only once the turn has finished. Speaking a partial answer means starting
    * the sentence before the model has decided how it ends, and the audio cannot
    * be taken back once it is playing -- so the loop waits, which costs a pause
-   * and never reads out something Karen then contradicts.
+   * and never reads out something MyRA then contradicts.
    */
   const lastAnswer = useMemo(() => {
     if (busy) return undefined;
@@ -308,7 +308,7 @@ export function App() {
     setAttaching(true);
     try {
       const bytes = file.type.startsWith("image/") ? await downscaleImage(file) : await file.arrayBuffer();
-      const result = await window.karen.chatAttach(file.name, bytes);
+      const result = await window.myra.chatAttach(file.name, bytes);
       if (!result.ok) {
         setAttachError(result.error ?? "That file could not be attached.");
         return;
@@ -323,7 +323,7 @@ export function App() {
 
   const removeAttachment = useCallback((att: PendingAttachment): void => {
     setPendingAttachments((prev) => prev.filter((a) => a !== att));
-    if (att.kind === "image") void window.karen.chatAttachRemove(att.id);
+    if (att.kind === "image") void window.myra.chatAttachRemove(att.id);
   }, []);
 
   const submit = useCallback(() => {
@@ -369,14 +369,14 @@ export function App() {
    */
   const clearPendingAttachments = (): void => {
     for (const att of pendingAttachments) {
-      if (att.kind === "image") void window.karen.chatAttachRemove(att.id);
+      if (att.kind === "image") void window.myra.chatAttachRemove(att.id);
     }
     setPendingAttachments([]);
     setAttachError(undefined);
   };
 
   const openSession = async (id: string): Promise<void> => {
-    const messages = (await window.karen.openSession(id)) as StoredMessage[];
+    const messages = (await window.myra.openSession(id)) as StoredMessage[];
     setSessionId(id);
     clearPendingAttachments();
     startFresh();
@@ -393,7 +393,7 @@ export function App() {
   };
 
   const newSession = async (): Promise<void> => {
-    setSessionId(await window.karen.newSession());
+    setSessionId(await window.myra.newSession());
     reset();
     documents.reset();
     clearPendingAttachments();
@@ -432,7 +432,7 @@ export function App() {
    * filing at all.
    */
   const chooseProject = async (id: string): Promise<void> => {
-    setSettings((await window.karen.projectSetActive(id)).settings);
+    setSettings((await window.myra.projectSetActive(id)).settings);
     if (!id) {
       setOpenProject(undefined);
       toChat();
@@ -444,7 +444,7 @@ export function App() {
   };
 
   const makeProject = async (): Promise<void> => {
-    const result = await window.karen.projectCreate("Untitled project");
+    const result = await window.myra.projectCreate("Untitled project");
     if (!result.project) return;
     refreshProjects();
     await chooseProject(result.project.id);
@@ -478,7 +478,7 @@ export function App() {
 
   const answer = (id: string, value: string | undefined): void => {
     setPrompt(undefined);
-    void window.karen.answerPrompt(id, value);
+    void window.myra.answerPrompt(id, value);
   };
 
   return (
@@ -492,7 +492,7 @@ export function App() {
       <aside className="rail">
         <div className="rail-brand">
           <span className="rail-mark" aria-hidden="true" />
-          Karen
+          MyRA
         </div>
 
         <nav className="rail-nav" aria-label="Sections">
@@ -669,8 +669,8 @@ export function App() {
             onOpen={() => openItem(job.kind === "review" ? "review" : "paper", job.id)}
             onStop={() =>
               void (job.kind === "review"
-                ? window.karen.reviewCancel(job.id)
-                : window.karen.paperCancel(job.id))
+                ? window.myra.reviewCancel(job.id)
+                : window.myra.paperCancel(job.id))
             }
           />
         ) : null}
@@ -828,7 +828,7 @@ export function App() {
             <div className="welcome">
               <h1>What are you working on?</h1>
               {/* Three sentences rather than three buttons: these are the
-                  things Karen does, and naming them is more use than a row of
+                  things MyRA does, and naming them is more use than a row of
                   shortcuts to panels that are already one click away. */}
               <p>
                 Ask a question, record a meeting and get it written up, or start a piece of
@@ -1058,7 +1058,7 @@ export function App() {
                          nothing else would explain it. A reply that is suddenly
                          two sentences long reads as the model having got worse
                          rather than as the mode doing its job. */
-                      : "Talk to Karen: it listens, answers aloud, and listens again. Answers are kept short, because they are spoken."
+                      : "Talk to MyRA: it listens, answers aloud, and listens again. Answers are kept short, because they are spoken."
                     : "Choose a voice first — opens Settings → Audio"
                 }
                 onClick={() => {
@@ -1070,7 +1070,7 @@ export function App() {
                     setShowSettings(true);
                     return;
                   }
-                  void window.karen
+                  void window.myra
                     .updateSettings({ audio: { ...settings.audio, speechToSpeech: !handsFree } })
                     .then(setSettings);
                 }}
@@ -1201,7 +1201,7 @@ export function App() {
         <FirstRun
           onDone={() => {
             setSettings({ ...settings, setupCompleted: true });
-            void window.karen.updateSettings({ setupCompleted: true });
+            void window.myra.updateSettings({ setupCompleted: true });
           }}
         />
       ) : null}
@@ -1217,7 +1217,7 @@ export function App() {
           onGoTo={goToTourPage}
           onDone={() => {
             setSettings({ ...settings, seenTutorial: true });
-            void window.karen.updateSettings({ seenTutorial: true });
+            void window.myra.updateSettings({ seenTutorial: true });
           }}
         />
       ) : null}

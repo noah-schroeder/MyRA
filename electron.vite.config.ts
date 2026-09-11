@@ -29,7 +29,7 @@ import { resolve } from "node:path";
  */
 function devCsp(): Plugin {
   return {
-    name: "karen:dev-csp",
+    name: "myra:dev-csp",
     apply: "serve",
     transformIndexHtml(html) {
       return html.replace(
@@ -63,7 +63,7 @@ export default defineConfig({
          * A SANDBOXED preload cannot be an ES module -- Electron loads it in a
          * context without a module loader, and an ESM preload fails with
          * "Cannot use import statement outside a module". The failure is
-         * quiet: the window still opens, and every window.karen call is
+         * quiet: the window still opens, and every window.myra call is
          * undefined, so the app looks broken rather than misconfigured.
          *
          * The extension matters too, because package.json says

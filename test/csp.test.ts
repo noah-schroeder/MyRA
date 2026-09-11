@@ -85,7 +85,7 @@ test("neither policy allows a source the other forbids", async () => {
   }
 });
 
-test("audio Karen synthesised on this machine can be played", async () => {
+test("audio MyRA synthesised on this machine can be played", async () => {
   // The renderer wraps voice audio in a Blob it made itself, from bytes that
   // arrived over IPC. Nothing about it touches the network, and without this
   // the speech feature cannot work at all.

@@ -10,7 +10,7 @@
  * Two inline spellings, because two families are in wide use: `<think>` is what
  * Qwen, DeepSeek's distills and most llama.cpp templates emit, and `<thinking>`
  * is what the Claude family writes and what several hosted gateways pass
- * through unchanged. Karen knew only the first, so against a provider using the
+ * through unchanged. MyRA knew only the first, so against a provider using the
  * second the whole chain of reasoning was printed into the answer as prose --
  * present, but not marked as reasoning and not foldable away.
  *

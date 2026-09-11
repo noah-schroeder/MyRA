@@ -1,5 +1,5 @@
 /*
- * Karen's design system.
+ * MyRA's design system.
  *
  * Deliberately not the default AI-app look: warm amber accent instead of the
  * ubiquitous blue/violet, near-black ground, tight type scale, and a real
@@ -1276,7 +1276,7 @@ body:has(.artifact-grip:active) { user-select: none; }
 .rail-add:hover { color: var(--accent-soft); background: color-mix(in srgb, var(--text) 6%, transparent); }
 
 /*
- * What Karen is doing, when the composer that usually says so is off screen.
+ * What MyRA is doing, when the composer that usually says so is off screen.
  *
  * `flex: none` for the same reason .rail-foot has it: a long history must not
  * squeeze the one control that stops a forty-minute run down to nothing.
@@ -3034,7 +3034,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 /* ==========================================================================
    Launch settings — what a model will be given, and what it costs
    ==========================================================================
-   The bar is the point, not the controls. Karen used to show a fit sized at
+   The bar is the point, not the controls. MyRA used to show a fit sized at
    8192 tokens and then launch with `-c 0`, which llama.cpp reads as the model's
    trained context per slot — so the panel and the process disagreed by a factor
    of thirty-two on a 128k model. Every control here states its cost in the same
@@ -3111,7 +3111,7 @@ p.warning { margin: 0; font-size: 12.5px; }
    Running out of context is the most confusing failure an assistant has: it
    starts forgetting the start of the conversation with nothing on screen
    having changed. The bar turns this into a gauge, and changes colour at the
-   point where Karen summarises rather than at some other number.
+   point where MyRA summarises rather than at some other number.
    ========================================================================== */
 
 .meter { display: inline-flex; align-items: center; gap: 8px; }
@@ -3136,7 +3136,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 
 /* ==========================================================================
-   First run — the two things Karen cannot ship inside itself
+   First run — the two things MyRA cannot ship inside itself
    ==========================================================================
    A sheet rather than a dialog. There is nothing useful to do in the app until
    this is answered once, so it takes the whole window and does not pretend the
@@ -3474,7 +3474,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 
    This page previously carried two class names, `.pane-block` and
    `.device-list`, that were never defined anywhere in this file: it rendered
-   as bulleted lists of unstyled buttons. It is the one screen in Karen that is
+   as bulleted lists of unstyled buttons. It is the one screen in MyRA that is
    scanned rather than read -- 228 models, fifteen engines, four verdicts -- so
    it is built as information design: state encoded in form as well as in text,
    and the summary above the detail.
@@ -3632,7 +3632,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 .lem-updatebar-bad { font-size: 11px; line-height: 1.45; color: var(--amber); }
 
 /*
- * An available build, in the amber Karen already uses for "your attention,
+ * An available build, in the amber MyRA already uses for "your attention,
  * not your alarm" -- the same weight as a backend that needs installing, and
  * deliberately not the red that means something is broken. Nothing is wrong
  * with an engine that has a newer build.
@@ -3838,7 +3838,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 /*
  * A tag, not a chip.
  *
- * The chips are Karen's verdicts and carry borders and colour because they are
+ * The chips are MyRA's verdicts and carry borders and colour because they are
  * decisions. These are facts about the model -- what it is for, whether
  * upstream suggests it -- and at two or three per row across 168 rows a border
  * apiece turns the list into a mesh. Weight comes from the text alone.
@@ -3948,7 +3948,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 
 /* Settings → Runtime wraps the same pane, and needs one grouping box for the
-   two switches that are Karen's own rather than the daemon's. `flex-start`
+   two switches that are MyRA's own rather than the daemon's. `flex-start`
    because a checkbox row that stretches to the pane's full width puts its
    label an inch from its box. */
 .pane-block { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
@@ -4162,7 +4162,7 @@ p.warning { margin: 0; font-size: 12.5px; }
  * They were 260px-wide boxes with two lines each, which gave a binary choice
  * the visual weight of the model list it sits above -- and the choice is not
  * that important. What it does need is to stay legible, because the two
- * modes differ in whether Karen touches the network at all: one reads a file
+ * modes differ in whether MyRA touches the network at all: one reads a file
  * inside the install, the other sends a query to a registry. So the subtitle
  * stays; it is the acreage that goes.
  */
@@ -4377,7 +4377,7 @@ p.warning { margin: 0; font-size: 12.5px; }
 .reg-hit-src { font-family: var(--mono); }
 .reg-hit-src.modelscope { color: var(--amber); font-weight: 600; }
 
-/* ---------- Karen's own list, before anything has been searched ---------- */
+/* ---------- MyRA's own list, before anything has been searched ---------- */
 
 .reg-picks { display: flex; flex-direction: column; gap: 5px; }
 .reg-picks-group { display: flex; flex-direction: column; gap: 5px; }
@@ -4618,7 +4618,7 @@ button.lem-model-name:hover {
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   background: var(--bg-float);
 }
-/* The louder border is for a file Karen does not own -- the one case where the
+/* The louder border is for a file MyRA does not own -- the one case where the
    button reaches outside this application. */
 .lem-confirm.warn { border-color: color-mix(in srgb, var(--red) 40%, transparent); }
 .lem-confirm-title { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text); }
@@ -4647,7 +4647,7 @@ button.lem-model-name:hover {
 }
 
 /*
- * What Karen did to the answer after it arrived.
+ * What MyRA did to the answer after it arrived.
  *
  * Its own line and its own colour, because it is a different kind of fact from
  * the sentence above it: that one says what was asked of the registry, this one
@@ -5779,7 +5779,7 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
   font-size: 12.5px; line-height: 1.5;
 }
 
-/* Who is on the panel, and how far through it Karen is. */
+/* Who is on the panel, and how far through it MyRA is. */
 .review-panel {
   padding: 11px 14px; border-radius: var(--radius-sm);
   background: var(--bg-raised); border: 1px solid var(--border);

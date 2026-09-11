@@ -1,16 +1,16 @@
 /**
  * Who a model on this machine actually belongs to, and what deleting it means.
  *
- * Three different acts wear the same button. Karen's own downloads sit in the
- * daemon's cache and it will remove them on request. Karen's models folder is
- * Karen's, and the daemon refuses to touch it -- measured, `lemond` 11.8.0
+ * Three different acts wear the same button. MyRA's own downloads sit in the
+ * daemon's cache and it will remove them on request. MyRA's models folder is
+ * MyRA's, and the daemon refuses to touch it -- measured, `lemond` 11.8.0
  * answers a delete for anything under `extra_models_dir` with
  *
  *     500 Cannot delete extra models via API. Models in --extra-models-dir are
  *     user-managed. Delete the file directly from: …
  *
  * naming the path. And the third is a file inside LM Studio's or Ollama's own
- * library, which Karen reads where it lies and never copies.
+ * library, which MyRA reads where it lies and never copies.
  *
  * That last one is the reason this is a module and not an `if` in a component.
  * A row that says "this belongs to LM Studio" beside a main process that
@@ -28,7 +28,7 @@
 
 import { SOURCE_LABELS, type ForeignSource } from "./foreign.ts";
 
-export type Owner = "karen" | "karen-folder" | "lmstudio" | "ollama";
+export type Owner = "myra" | "myra-folder" | "lmstudio" | "ollama";
 
 /**
  * Decide from what the daemon reports plus what the index recorded.
@@ -44,12 +44,12 @@ export function ownerOf(opts: {
   foreign?: ForeignSource | undefined;
 }): Owner {
   if (opts.foreign) return opts.foreign;
-  return opts.source === "extra_models_dir" ? "karen-folder" : "karen";
+  return opts.source === "extra_models_dir" ? "myra-folder" : "myra";
 }
 
-/** Which application's library a model lives in, or Karen's own. */
+/** Which application's library a model lives in, or MyRA's own. */
 export function ownerLabel(owner: Owner): string {
-  return owner === "lmstudio" || owner === "ollama" ? SOURCE_LABELS[owner] : "Karen";
+  return owner === "lmstudio" || owner === "ollama" ? SOURCE_LABELS[owner] : "MyRA";
 }
 
 export interface DeletePrompt {
@@ -102,10 +102,10 @@ export function deletePrompt(opts: {
     return {
       title: `${name} belongs to ${app}.`,
       body:
-        `Karen reads this file where it lies and has never copied it.${freed ? ` Deleting it frees ${size}.` : ""}` +
+        `MyRA reads this file where it lies and has never copied it.${freed ? ` Deleting it frees ${size}.` : ""}` +
         ` ${risk} Deleting it in ${app} instead is the tidier way.` +
         (path ? ` The file is ${path}.` : "") +
-        " Karen will restart its backend afterwards, which unloads whatever is loaded.",
+        " MyRA will restart its backend afterwards, which unloads whatever is loaded.",
       confirm: `Delete ${app}’s file`,
       warns: true,
       reveal: true,
@@ -113,12 +113,12 @@ export function deletePrompt(opts: {
     };
   }
 
-  if (owner === "karen-folder") {
+  if (owner === "myra-folder") {
     return {
       title: `Delete ${name}?`,
       body:
-        `This one is in Karen’s own models folder, and deleting it removes the file from disk.${freed}` +
-        " Karen will restart its backend afterwards, which unloads whatever is loaded." +
+        `This one is in MyRA’s own models folder, and deleting it removes the file from disk.${freed}` +
+        " MyRA will restart its backend afterwards, which unloads whatever is loaded." +
         " You can download it again later.",
       confirm: "Delete",
       warns: false,
@@ -129,7 +129,7 @@ export function deletePrompt(opts: {
 
   return {
     title: `Delete ${name}?`,
-    body: `Karen downloaded this one, and deleting it removes it from this machine.${freed} You can download it again later.`,
+    body: `MyRA downloaded this one, and deleting it removes it from this machine.${freed} You can download it again later.`,
     confirm: "Delete",
     warns: false,
     reveal: false,

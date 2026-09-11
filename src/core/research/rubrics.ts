@@ -26,8 +26,8 @@ export type RubricName = (typeof RUBRICS)[number];
 /** Where the editable copies live. */
 export function rubricDir(): string {
   return (
-    process.env["KAREN_RESEARCH_RUBRICS"] ??
-    join(process.env["HOME"] ?? homedir(), ".config", "karen", "research", "rubrics")
+    process.env["MYRA_RESEARCH_RUBRICS"] ??
+    join(process.env["HOME"] ?? homedir(), ".config", "myra", "research", "rubrics")
   );
 }
 

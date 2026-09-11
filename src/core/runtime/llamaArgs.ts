@@ -2,11 +2,11 @@
  * The llama.cpp flags worth setting, over the one string that holds them.
  *
  * `modelOptions.ts` is a view onto the daemon's own option keys and stays that
- * way -- a key Karen has never seen still renders. But the flags people actually
+ * way -- a key MyRA has never seen still renders. But the flags people actually
  * come here for are not option keys at all: Lemonade passes a single free-text
  * `llamacpp_args` string to `llama-server`, and everything from `-ngl` to
  * `--cache-type-k` lives inside it, unvalidated. Measured against lemond 11.8.0:
- * `llamacpp_args: "--parallel 1 --karen-nonsense 3"` is accepted with a 200 and
+ * `llamacpp_args: "--parallel 1 --myra-nonsense 3"` is accepted with a 200 and
  * only fails later, at load, from inside a process the user is not watching. So
  * the checking is ours to do or it does not happen.
  *
@@ -38,7 +38,7 @@ export interface FlagSpec {
    * This field's real ceiling comes from the model, not from `max` above.
    *
    * `"layers"` is the only value today: the number of transformer layers, once
-   * Karen has learned it. Kept out of `max` because that field is a static
+   * MyRA has learned it. Kept out of `max` because that field is a static
    * fact about the flag and this one is a fact about whichever model is
    * currently open -- `llamaArgs.ts` stays free of any dependency on where a
    * layer count comes from, and the renderer decides what to show when it does
@@ -47,7 +47,7 @@ export interface FlagSpec {
   sliderMax?: "layers";
   help: string;
   advanced: boolean;
-  /** Shown in red: this one interacts with something else Karen relies on. */
+  /** Shown in red: this one interacts with something else MyRA relies on. */
   warn?: string;
 }
 
@@ -106,7 +106,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
     values: ["auto", "on", "off"],
     help:
       "Faster attention where the backend supports it, and a smaller peak memory spike. " +
-      "Karen turns this on by itself on a CUDA card; \"auto\" is the daemon's own default elsewhere.",
+      "MyRA turns this on by itself on a CUDA card; \"auto\" is the daemon's own default elsewhere.",
     advanced: false,
   },
   {
@@ -116,7 +116,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
     values: ["f16", "q8_0", "q4_0"],
     help: "Quantising the KV cache roughly halves what a long context costs, for a little quality.",
     advanced: false,
-    warn: "Karen sizes the context window from this. Change it and the suggested window changes too.",
+    warn: "MyRA sizes the context window from this. Change it and the suggested window changes too.",
   },
   {
     flag: "--cache-type-v",
@@ -147,7 +147,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
     advanced: true,
     warn:
       "llama-server divides the context window between slots, so 2 halves every " +
-      "conversation's window. Karen reads the per-slot figure, so the context meter follows it down.",
+      "conversation's window. MyRA reads the per-slot figure, so the context meter follows it down.",
   },
   {
     flag: "--batch-size",
@@ -406,7 +406,7 @@ export function writeFlags(text: string, values: Record<string, string>): string
  *
  * The sizer needs it because quantising the cache is the one flag that changes
  * how long a window fits: `q8_0` halves it against `f16`, `q4_0` quarters it. So
- * a user who sets this and then asks Karen to size the context must be sized
+ * a user who sets this and then asks MyRA to size the context must be sized
  * against what they set, not against the default.
  *
  * The key half decides, because it is the half `kvCacheBytes` counts twice when

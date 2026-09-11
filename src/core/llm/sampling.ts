@@ -14,7 +14,7 @@
  * endpoint. Hosted APIs accept a much smaller one and reject the rest outright
  * — a request carrying `top_k` to an endpoint that has never heard of it comes
  * back as a 400, not as a quietly ignored field. So each field declares whether
- * it is standard, and only the standard ones are sent to a provider Karen did
+ * it is standard, and only the standard ones are sent to a provider MyRA did
  * not start.
  *
  * That is why "leave it alone" has to be expressible per field, and why the

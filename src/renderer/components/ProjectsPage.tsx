@@ -73,7 +73,7 @@ export function ProjectsPage({
   const [note, setNote] = useState<string | undefined>();
 
   const load = useCallback(async () => {
-    const result = await window.karen.projectOpen(id);
+    const result = await window.myra.projectOpen(id);
     if (!result.ok || !result.detail) {
       setError(result.error ?? "That project could not be opened.");
       return;
@@ -93,7 +93,7 @@ export function ProjectsPage({
   useEffect(() => {
     if (!detail || name === detail.project.name) return;
     const timer = setTimeout(() => {
-      void window.karen.projectRename(id, name).then(onChanged);
+      void window.myra.projectRename(id, name).then(onChanged);
     }, 600);
     return () => clearTimeout(timer);
   }, [name, detail, id, onChanged]);
@@ -102,14 +102,14 @@ export function ProjectsPage({
   const counts = countsOf(detail?.project.members ?? []);
 
   const remove = async (kind: MemberKind, ref: string): Promise<void> => {
-    await window.karen.projectRemove(id, [{ kind, ref }]);
+    await window.myra.projectRemove(id, [{ kind, ref }]);
     await load();
     onChanged();
   };
 
   const destroy = async (contents: boolean): Promise<void> => {
     setBusy(true);
-    const result = await window.karen.projectDelete(id, contents);
+    const result = await window.myra.projectDelete(id, contents);
     setBusy(false);
     setConfirming(false);
     if (!result.ok) {
@@ -135,7 +135,7 @@ export function ProjectsPage({
     setBusy(true);
     setExported(undefined);
     setError(undefined);
-    const result = await window.karen.projectExport(id);
+    const result = await window.myra.projectExport(id);
     setBusy(false);
     if (!result.ok || !result.path) {
       setError(result.error ?? "That export failed.");
@@ -231,7 +231,7 @@ export function ProjectsPage({
             <button
               type="button"
               className="ghost paper-btn"
-              onClick={() => void window.karen.projectReveal(exported)}
+              onClick={() => void window.myra.projectReveal(exported)}
             >
               Show in folder
             </button>

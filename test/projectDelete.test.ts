@@ -2,7 +2,7 @@
  * Deleting a project, which is the one action here that destroys work.
  *
  * A project is an index over five stores that have never heard of it, so
- * deleting one means asking each store to delete its own — five deletes Karen
+ * deleting one means asking each store to delete its own — five deletes MyRA
  * does not own, any of which can refuse. `deleteRun` really does refuse: it
  * declines to remove a run written to in the last ninety seconds, because that
  * looks like a run still going. If one refusal abandoned the loop, a project
@@ -50,12 +50,12 @@ function project(members: Member[]): Project {
   return { ...newProject({ name: "NSF concept note" }), members };
 }
 
-/* KAREN_PROJECTS_DIR is read on every call rather than bound at import, so a
+/* MYRA_PROJECTS_DIR is read on every call rather than bound at import, so a
    test can point it somewhere of its own. test/setup.ts already redirects
-   KAREN_CONFIG_DIR; this is the same trick one level down. */
+   MYRA_CONFIG_DIR; this is the same trick one level down. */
 async function inTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "karen-projects-"));
-  process.env["KAREN_PROJECTS_DIR"] = dir;
+  const dir = await mkdtemp(join(tmpdir(), "myra-projects-"));
+  process.env["MYRA_PROJECTS_DIR"] = dir;
   return dir;
 }
 

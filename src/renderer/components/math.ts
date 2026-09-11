@@ -2,7 +2,7 @@
  * Finding the mathematics inside a paragraph of prose.
  *
  * Academic writing is full of it: "a small overall positive effect
- * ($g^+ = 0.20$)", "$r = .29$", "$\eta^2$". Karen printed those as the literal
+ * ($g^+ = 0.20$)", "$r = .29$", "$\eta^2$". MyRA printed those as the literal
  * dollar signs and backslashes the model wrote, which is not a rendering
  * problem so much as a comprehension one -- a reader has to decode
  * `\eta^2` in their head, and a document exported that way is wrong.

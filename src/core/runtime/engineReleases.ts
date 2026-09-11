@@ -1,5 +1,5 @@
 /**
- * Which newer engine build, if any, Karen can honestly offer.
+ * Which newer engine build, if any, MyRA can honestly offer.
  *
  * The naive version of this -- take the repository's latest tag -- is wrong in
  * three different ways, and all three were hit on the first attempt against
@@ -141,7 +141,7 @@ export function assetShape(name: string, tag: string): string {
  * Exactly one, or nothing. Ambiguity here would mean guessing between two
  * builds -- a CPU one and a Vulkan one, say -- and the cost of guessing wrong
  * is somebody's chat engine replaced by something that will not start. A
- * release Karen cannot read unambiguously is simply not offered, which loses a
+ * release MyRA cannot read unambiguously is simply not offered, which loses a
  * feature rather than breaking a machine.
  */
 export function matchingAsset(release: Release, shape: string): ReleaseAsset | undefined {
@@ -204,7 +204,7 @@ export interface EngineUpdate {
 }
 
 /**
- * The newest build Karen can name a real file for, or nothing.
+ * The newest build MyRA can name a real file for, or nothing.
  *
  * Walks newest-first and stops at the first release carrying an unambiguous
  * match, rather than taking the newest release and giving up if it has none:

@@ -104,7 +104,7 @@ export interface ChatRequest {
    * Sampler fields, which vary by backend.
    *
    * Open rather than enumerated because llama.cpp's set is long and grows: the
-   * list of what Karen offers lives in llm/sampling.ts, where each field also
+   * list of what MyRA offers lives in llm/sampling.ts, where each field also
    * says whether a hosted API will accept it.
    */
   [sampler: string]: unknown;
@@ -160,7 +160,7 @@ export function buildRequest(opts: {
   return {
     ...(opts.extra ?? {}),
     ...(opts.model ? { model: opts.model } : {}),
-    /* `meta` and `attachments` are Karen's own bookkeeping, on the stored
+    /* `meta` and `attachments` are MyRA's own bookkeeping, on the stored
        record only -- a field a server does not expect can be a reason it
        refuses the whole request. An image reference is expanded into content
        parts here, right before it leaves, rather than anywhere upstream. */
@@ -507,7 +507,7 @@ async function readWhole(res: Response): Promise<ChatResult> {
  * relaying an Anthropic-shaped reply through an OpenAI-shaped API.
  *
  * All five are read because which one arrives is a property of somebody else's
- * server, not a choice Karen gets to make -- and reading one only meant that a
+ * server, not a choice MyRA gets to make -- and reading one only meant that a
  * provider using any of the others looked exactly like a provider that does no
  * reasoning at all.
  */
@@ -795,7 +795,7 @@ let endpointResolver: EndpointResolver = fromSettings;
 /**
  * Point every stage somewhere else.
  *
- * Used by the bundled runtime: when Karen is serving a model itself, the
+ * Used by the bundled runtime: when MyRA is serving a model itself, the
  * address and key are known only to the main process and change on every
  * launch, so reading them from settings on disk would find a stale port. The
  * research stages have to follow chat to the same server, or a run would talk

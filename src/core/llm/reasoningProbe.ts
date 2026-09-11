@@ -3,10 +3,10 @@
  *
  * "Why can't I see the reasoning?" has four possible answers and no way to tell
  * them apart from the outside: the model did not reason; the provider does not
- * send it; the provider sends it only when asked; or Karen is not reading the
+ * send it; the provider sends it only when asked; or MyRA is not reading the
  * field it arrives in. Guessing between those produces confident, wrong advice.
  *
- * So Karen asks. One small request, a fixed prompt with no user content in it,
+ * So MyRA asks. One small request, a fixed prompt with no user content in it,
  * and a report of what came back -- field names, not text. The report is the
  * thing: it turns an argument about what some API "should" do into a fact about
  * what this endpoint actually did.
@@ -44,10 +44,10 @@ export interface ProbeReport {
   error?: string;
   /** The status, when the endpoint refused. */
   status?: number;
-  /** Reasoning fields Karen reads that actually arrived. */
+  /** Reasoning fields MyRA reads that actually arrived. */
   read: string[];
   /**
-   * Fields that look like reasoning and that Karen does NOT read.
+   * Fields that look like reasoning and that MyRA does NOT read.
    *
    * The reason this whole probe is worth having: a provider naming its
    * reasoning something nobody else does is invisible otherwise, and shows up
@@ -62,7 +62,7 @@ export interface ProbeReport {
   reasoningTokens: number;
 }
 
-/** Field names Karen already reads, in the order chat.ts tries them. */
+/** Field names MyRA already reads, in the order chat.ts tries them. */
 const KNOWN = ["reasoning_content", "reasoning", "reasoning_details", "thinking", "thinking_blocks"];
 
 /** Anything else whose name suggests it carries reasoning. */
@@ -204,7 +204,7 @@ export async function probeReasoning(opts: {
  * Each branch says what was observed and what follows from it. None of them
  * says "the model does not reason", because that is not something this can see:
  * a provider that sends nothing and reports no tokens is a provider that told
- * Karen nothing either way.
+ * MyRA nothing either way.
  */
 export function describeProbe(plain: ProbeReport, asked?: ProbeReport): string {
   if (!plain.ok && !asked?.ok) {
@@ -216,7 +216,7 @@ export function describeProbe(plain: ProbeReport, asked?: ProbeReport): string {
   if (best.unread.length) {
     return (
       `This provider sent its reasoning in ${best.unread.map((f) => `“${f}”`).join(", ")}, which ` +
-      `Karen does not read yet${best.read.length ? ", alongside fields it does" : ""}. ` +
+      `MyRA does not read yet${best.read.length ? ", alongside fields it does" : ""}. ` +
       "Report that field name — it is a shape worth adding."
     );
   }
@@ -224,18 +224,18 @@ export function describeProbe(plain: ProbeReport, asked?: ProbeReport): string {
     return (
       `Reasoning arrived in “${best.read.join("”, “")}” (${best.chars.toLocaleString()} characters)` +
       (viaAsking
-        ? ", but only when Karen asked for it. Asking has been turned on for this provider."
-        : ". Karen shows this as the Reasoning block above each answer.")
+        ? ", but only when MyRA asked for it. Asking has been turned on for this provider."
+        : ". MyRA shows this as the Reasoning block above each answer.")
     );
   }
   if (best.inline) {
-    return "The reasoning came inline, in <thinking> tags. Karen separates those from the answer.";
+    return "The reasoning came inline, in <thinking> tags. MyRA separates those from the answer.";
   }
   if (best.reasoningTokens > 0) {
     return (
       `This provider reported ${best.reasoningTokens.toLocaleString()} reasoning tokens and sent ` +
-      "none of the text. It reasons and withholds the chain, so there is nothing for Karen to " +
-      "show — Karen says so in the conversation when it happens."
+      "none of the text. It reasons and withholds the chain, so there is nothing for MyRA to " +
+      "show — MyRA says so in the conversation when it happens."
     );
   }
   return (

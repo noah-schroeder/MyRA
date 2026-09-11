@@ -5,7 +5,7 @@
  * failure found while building these tools was a wrong assumption about a
  * response shape, not a mistake in the plumbing.
  *
- * Live-network tests are opt-in via KAREN_TEST_NETWORK=1, so the default run
+ * Live-network tests are opt-in via MYRA_TEST_NETWORK=1, so the default run
  * stays deterministic and offline.
  */
 
@@ -118,10 +118,10 @@ test("htmlToText keeps list structure as separate lines", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * Live endpoints. Opt in with KAREN_TEST_NETWORK=1.                    *
+ * Live endpoints. Opt in with MYRA_TEST_NETWORK=1.                    *
  * ------------------------------------------------------------------ */
 
-const live = process.env["KAREN_TEST_NETWORK"] === "1";
+const live = process.env["MYRA_TEST_NETWORK"] === "1";
 
 test("OpenAlex still returns the fields the formatter reads", { skip: !live }, async () => {
   const url =
@@ -172,19 +172,19 @@ import { providers } from "../src/core/research/providers.ts";
 
 
 /**
- * Put KAREN_RESEARCH_CONFIG back where test/setup.ts left it.
+ * Put MYRA_RESEARCH_CONFIG back where test/setup.ts left it.
  *
  * Deleting it instead -- which two tests here used to do -- does not restore
  * the default, it removes the isolation: the path then falls back to the real
- * ~/.config/karen/research.json, and every later test in the file starts
+ * ~/.config/myra/research.json, and every later test in the file starts
  * reading whatever the developer last clicked in the running app.
  */
 function restoreResearchConfig(): void {
-  process.env["KAREN_RESEARCH_CONFIG"] = join(process.env["KAREN_CONFIG_DIR"] ?? tmpdir(), "research.json");
+  process.env["MYRA_RESEARCH_CONFIG"] = join(process.env["MYRA_CONFIG_DIR"] ?? tmpdir(), "research.json");
 }
 
 function configFile(contents: unknown): string {
-  const dir = mkdtempSync(join(tmpdir(), "karen-research-"));
+  const dir = mkdtempSync(join(tmpdir(), "myra-research-"));
   const path = join(dir, "research.json");
   writeFileSync(path, typeof contents === "string" ? contents : JSON.stringify(contents));
   return path;
@@ -194,7 +194,7 @@ test("readResearchConfig defaults to the document rung when there is no file", (
   assert.deepEqual(readResearchConfig(join(tmpdir(), "definitely-not-here.json")), {
     // Not "off". Nothing egresses at this rung that would not egress at "off" --
     // the document tools are local and jailed -- so defaulting a rung down buys
-    // no privacy and costs the user half of what Karen is for.
+    // no privacy and costs the user half of what MyRA is for.
     mode: "assistant",
     // Not "general": that category has no provider in this build, and storing
     // it means a run asks for a backend nobody serves.
@@ -407,7 +407,7 @@ test("the mode button really removes the other research tool", async () => {
     ["web", "web_search", "academic_research"],
     ["deep", "academic_research", "web_search"],
   ] as const) {
-    process.env["KAREN_RESEARCH_CONFIG"] = configFile({ mode, category: "science" });
+    process.env["MYRA_RESEARCH_CONFIG"] = configFile({ mode, category: "science" });
     const registry = new ToolRegistry();
     for (const def of RESEARCH_TOOL_DEFS) registry.register(def);
     registry.register(readDocument);
@@ -445,7 +445,7 @@ async function registryFor(cfg: Record<string, unknown>) {
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
   const { DOCUMENT_TOOL_DEFS } = await import("../src/core/agent/tools/documents.ts");
   const { LIBRARY_TOOL_DEFS } = await import("../src/core/agent/tools/library.ts");
-  process.env["KAREN_RESEARCH_CONFIG"] = configFile(cfg);
+  process.env["MYRA_RESEARCH_CONFIG"] = configFile(cfg);
   const registry = new ToolRegistry();
   for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS]) {
     registry.register(def);
@@ -582,10 +582,10 @@ test("the GUI's time range wins over the model's, and 'any time' clears it", asy
   const { tmpdir } = await import("node:os");
   const { mkdtempSync } = await import("node:fs");
 
-  const dir = mkdtempSync(join(tmpdir(), "karen-tr-"));
+  const dir = mkdtempSync(join(tmpdir(), "myra-tr-"));
   const path = join(dir, "research.json");
-  const orig = process.env["KAREN_RESEARCH_CONFIG"];
-  process.env["KAREN_RESEARCH_CONFIG"] = path;
+  const orig = process.env["MYRA_RESEARCH_CONFIG"];
+  process.env["MYRA_RESEARCH_CONFIG"] = path;
   try {
     // Research on, no time range chosen: "any time" is a real choice and
     // overrides the model. This is the case that returned zero results.
@@ -601,8 +601,8 @@ test("the GUI's time range wins over the model's, and 'any time' clears it", asy
     assert.equal(effectiveTimeRange("year"), "year");
     assert.equal(effectiveTimeRange(undefined), "");
   } finally {
-    if (orig === undefined) delete process.env["KAREN_RESEARCH_CONFIG"];
-    else process.env["KAREN_RESEARCH_CONFIG"] = orig;
+    if (orig === undefined) delete process.env["MYRA_RESEARCH_CONFIG"];
+    else process.env["MYRA_RESEARCH_CONFIG"] = orig;
   }
 });
 
@@ -672,7 +672,7 @@ test("deep_research is not offered while no general-web backend exists", async (
   const byName = new Map(RESEARCH_TOOL_DEFS.map((d) => [d.name, d]));
 
   // In Deep, where it would otherwise be the tool of choice.
-  process.env["KAREN_RESEARCH_CONFIG"] = configFile({ mode: "deep", category: "general" });
+  process.env["MYRA_RESEARCH_CONFIG"] = configFile({ mode: "deep", category: "general" });
 
   const deep = byName.get("deep_research");
   assert.ok(deep, "deep_research should still be defined, just gated");

@@ -17,7 +17,7 @@ import { readsDocuments, readsLibrary, searches, type ResearchMode } from "../re
 import { spokenGuidance } from "./spokenPrompt.ts";
 
 /**
- * Who Karen is, before anybody changes it.
+ * Who MyRA is, before anybody changes it.
  *
  * The one part of this prompt that is the user's to replace: it describes a
  * persona rather than stating a rule, so a different one costs nothing that
@@ -25,7 +25,7 @@ import { spokenGuidance } from "./spokenPrompt.ts";
  * says -- see the note on `systemPrompt`.
  */
 export const DEFAULT_PERSONA = [
-  "You are Karen, an assistant for academic work: meeting notes, research synthesis,",
+  "You are Myra, an assistant for academic work: meeting notes, research synthesis,",
   "and document drafting. You run entirely on the user's own machine.",
 ].join("\n");
 
@@ -83,7 +83,7 @@ const SYSTEM_PROMPT: string[] = [
  * "searching is off" leaves it guessing about the half that still works.
  */
 export function systemPrompt(opts: {
-  /** The user's persona, per model or global. Empty falls back to Karen's own. */
+  /** The user's persona, per model or global. Empty falls back to MyRA's own. */
   persona?: string | undefined;
   mode: ResearchMode;
   /** Whether the answer will be spoken rather than read. */

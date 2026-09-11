@@ -200,7 +200,7 @@ export function installImageIpc(deps: ImageDeps): void {
      the same out-of-memory failure meetings avoids by transcribing serially. */
   let running: AbortController | undefined;
 
-  ipcMain.handle("karen:image-models", async () => {
+  ipcMain.handle("myra:image-models", async () => {
     try {
       return { ok: true, options: await modelOptions(deps, "image") };
     } catch (err) {
@@ -216,16 +216,16 @@ export function installImageIpc(deps: ImageDeps): void {
    * model arrives, and a promise that settles in twenty minutes is a button
    * that says nothing.
    */
-  ipcMain.handle("karen:image-load", async (_e, model: string) => {
+  ipcMain.handle("myra:image-load", async (_e, model: string) => {
     try {
-      await runtime.loadAuxModel(model, (p) => send("karen:image-progress", { model, ...p }));
+      await runtime.loadAuxModel(model, (p) => send("myra:image-progress", { model, ...p }));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
   });
 
-  ipcMain.handle("karen:image-generate", async (_e, request: GenerateRequest) => {
+  ipcMain.handle("myra:image-generate", async (_e, request: GenerateRequest) => {
     if (running) return { ok: false, error: "An image is already being generated." };
     running = new AbortController();
     try {
@@ -246,12 +246,12 @@ export function installImageIpc(deps: ImageDeps): void {
     }
   });
 
-  ipcMain.handle("karen:image-cancel", () => {
+  ipcMain.handle("myra:image-cancel", () => {
     running?.abort();
     return { ok: true };
   });
 
-  ipcMain.handle("karen:image-list", async () => {
+  ipcMain.handle("myra:image-list", async () => {
     try {
       return { ok: true, images: await listImages(deps) };
     } catch (err) {
@@ -260,7 +260,7 @@ export function installImageIpc(deps: ImageDeps): void {
   });
 
   /** One image's bytes, for a gallery row the user clicked on. */
-  ipcMain.handle("karen:image-read", async (_e, id: string) => {
+  ipcMain.handle("myra:image-read", async (_e, id: string) => {
     try {
       const record = await recordFor(deps, id);
       const bytes = await readFile(join(rootOf(deps), record.file));
@@ -270,7 +270,7 @@ export function installImageIpc(deps: ImageDeps): void {
     }
   });
 
-  ipcMain.handle("karen:image-delete", async (_e, id: string) => {
+  ipcMain.handle("myra:image-delete", async (_e, id: string) => {
     try {
       await deleteImage(deps, String(id));
       return { ok: true };
@@ -279,7 +279,7 @@ export function installImageIpc(deps: ImageDeps): void {
     }
   });
 
-  ipcMain.handle("karen:image-reveal", async (_e, id: string) => {
+  ipcMain.handle("myra:image-reveal", async (_e, id: string) => {
     try {
       const record = await recordFor(deps, id);
       shell.showItemInFolder(join(rootOf(deps), record.file));
@@ -295,7 +295,7 @@ export function installImageIpc(deps: ImageDeps): void {
    * A copy, not a move: the images folder is the record, and a figure dragged
    * into a paper should not disappear from the gallery it was found in.
    */
-  ipcMain.handle("karen:image-save-copy", async (_e, id: string) => {
+  ipcMain.handle("myra:image-save-copy", async (_e, id: string) => {
     try {
       const record = await recordFor(deps, id);
       const chosen = await dialog.showSaveDialog({
@@ -313,7 +313,7 @@ export function installImageIpc(deps: ImageDeps): void {
     }
   });
 
-  ipcMain.handle("karen:image-folder", async () => {
+  ipcMain.handle("myra:image-folder", async () => {
     try {
       const root = rootOf(deps);
       await makeOwnDir(root);

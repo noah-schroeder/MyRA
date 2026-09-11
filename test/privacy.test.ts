@@ -1,5 +1,5 @@
 /**
- * The permissions Karen writes with.
+ * The permissions MyRA writes with.
  *
  * These are asserted rather than assumed because the failure is silent: a
  * default `mkdir` takes the umask, produces 0775 on a stock Ubuntu, and nothing
@@ -25,7 +25,7 @@ let root = "";
 let umaskBefore = 0;
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), "karen-perm-"));
+  root = await mkdtemp(join(tmpdir(), "myra-perm-"));
   // The loosest realistic umask, so a test that passes here passes anywhere.
   umaskBefore = process.umask(0o000);
 });
@@ -37,7 +37,7 @@ after(async () => {
 
 const modeOf = async (path: string): Promise<number> => (await stat(path)).mode & 0o777;
 
-describe("directories Karen creates", () => {
+describe("directories MyRA creates", () => {
   it("is owner-only, whatever the umask says", async () => {
     const dir = join(root, "fresh");
     await makePrivateDir(dir);
@@ -55,7 +55,7 @@ describe("directories Karen creates", () => {
   it("leaves a directory the user chose exactly as they left it", async () => {
     /* makePrivateDir is used for content roots, which are configurable. Someone
        who deliberately shares the folder their meetings are filed in should not
-       find Karen has quietly closed it. */
+       find MyRA has quietly closed it. */
     const shared = join(root, "shared");
     await makePrivateDir(shared);
     const { chmod } = await import("node:fs/promises");
@@ -65,7 +65,7 @@ describe("directories Karen creates", () => {
   });
 });
 
-describe("directories Karen owns outright", () => {
+describe("directories MyRA owns outright", () => {
   it("is tightened even when it already exists", async () => {
     /* The upgrade path: an install from before this existed has a 0775 config
        directory, and nothing would ever narrow it without this. */
@@ -87,7 +87,7 @@ describe("directories Karen owns outright", () => {
   });
 });
 
-describe("files Karen writes", () => {
+describe("files MyRA writes", () => {
   it("is owner-only when the mode is given", async () => {
     const path = join(root, "note.md");
     await writeFile(path, "private", { encoding: "utf8", mode: OWNER_ONLY_FILE });

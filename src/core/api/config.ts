@@ -36,22 +36,22 @@ export interface ApiConfig {
    * different consequences, and refuses to turn on while no key exists.
    */
   lan: boolean;
-  /** Answer CORS preflights, so a page in a browser can call Karen. */
+  /** Answer CORS preflights, so a page in a browser can call MyRA. */
   cors: boolean;
-  /** Start serving when Karen opens. */
+  /** Start serving when MyRA opens. */
   startOnLaunch: boolean;
   /**
    * Load the model a request asks for, if it is not the one already loaded.
    *
-   * What makes Karen usable from an app where you pick a model in a dropdown:
-   * without it, every client is stuck with whatever was last chosen in Karen's
+   * What makes MyRA usable from an app where you pick a model in a dropdown:
+   * without it, every client is stuck with whatever was last chosen in MyRA's
    * own window.
    *
-   * Restricted to models already downloaded. A request naming something Karen
+   * Restricted to models already downloaded. A request naming something MyRA
    * does not have is an error, never a download -- `pull` stays unreachable,
    * so no API client can spend the user's disk or bandwidth.
    *
-   * The cost is real and worth stating: this changes the model Karen's own
+   * The cost is real and worth stating: this changes the model MyRA's own
    * chat window is using, which is why it is a switch and not a constant.
    */
   loadOnDemand: boolean;
@@ -68,7 +68,7 @@ export const API_DEFAULTS: ApiConfig = {
   keys: [],
 };
 
-/** Ports below 1024 need privileges Karen does not have and must not want. */
+/** Ports below 1024 need privileges MyRA does not have and must not want. */
 export function validPort(port: unknown): boolean {
   return typeof port === "number" && Number.isInteger(port) && port >= 1024 && port <= 65535;
 }
@@ -115,7 +115,7 @@ function isKey(v: unknown): v is ApiKey {
  */
 export function refuseReason(config: ApiConfig): string | undefined {
   if (!config.keys.length) {
-    return "Create a key first — Karen will not serve without one.";
+    return "Create a key first — MyRA will not serve without one.";
   }
   if (!validPort(config.port)) {
     return `Port ${String(config.port)} is not usable. Choose a port between 1024 and 65535.`;

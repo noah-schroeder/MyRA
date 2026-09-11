@@ -1,7 +1,7 @@
 /**
  * The engines and models Lemonade offers, and what this machine can run.
  *
- * Karen used to work all of this out itself: probe a build for devices, guess a
+ * MyRA used to work all of this out itself: probe a build for devices, guess a
  * backend from PCI vendor ids, curate a small list of chat models, and write
  * its own sentence about why a card was not being used. All of it now comes
  * from the daemon -- and comes back wider, because Lemonade serves speech,
@@ -133,7 +133,7 @@ const FIT_CHIP: Record<Verdict, { short: string; tone: string }> = {
  *
  * `tool-calling` and `omni` are terms from the model-hosting world, and this
  * page is read by people who write papers. Anything not listed falls through
- * as the label itself rather than being dropped -- a capability Karen has not
+ * as the label itself rather than being dropped -- a capability MyRA has not
  * heard of is still worth showing.
  */
 const LABEL_WORDS: Record<string, string> = {
@@ -161,7 +161,7 @@ const RUN_CHIP: Record<Runnable, { short: string; tone: string }> = {
 };
 
 /**
- * One waiting build, whichever way Karen came to know about it.
+ * One waiting build, whichever way MyRA came to know about it.
  *
  * The two sources answer the same question for the reader -- "there is a
  * different build of this and here is what it costs" -- so they share a row
@@ -299,7 +299,7 @@ function engineName(id: string): string {
  *
  * Alphabetical order put "3D generation" at the top of the grid and chat
  * models in the middle, which is exactly backwards for this audience: chat and
- * transcription are the two engines Karen's own features depend on, and the
+ * transcription are the two engines MyRA's own features depend on, and the
  * rest are there because Lemonade offers them.
  */
 const ENGINE_ORDER = [
@@ -357,7 +357,7 @@ export function LemonadePane({
      listed alongside the rest. */
   const [showBlocked, setShowBlocked] = useState(false);
   /* The curated catalogue or the registries. Two different acts -- "show me
-     what Karen suggests" and "go and look this up" -- and mixing them would
+     what MyRA suggests" and "go and look this up" -- and mixing them would
      put a box that reaches the internet next to one that does not. */
   const [mode, setMode] = useState<"mine" | "catalog" | "search">("mine");
   /* The model whose load settings are open, if any. One at a time: these are
@@ -422,10 +422,10 @@ export function LemonadePane({
 
   const refresh = useCallback(async (): Promise<void> => {
     const [infoRes, listRes, catRes, verRes] = await Promise.all([
-      window.karen.lemonadeInfo(),
-      window.karen.lemonadeModels(),
-      window.karen.lemonadeCatalog(),
-      window.karen.engineVersions(),
+      window.myra.lemonadeInfo(),
+      window.myra.lemonadeModels(),
+      window.myra.lemonadeCatalog(),
+      window.myra.engineVersions(),
     ]);
     if (verRes.ok) {
       setPins(verRes.pins);
@@ -462,7 +462,7 @@ export function LemonadePane({
     starting.current = true;
     setBusy(true);
     setPhase("Starting Lemonade");
-    const res = await window.karen.lemonadeEnsure();
+    const res = await window.myra.lemonadeEnsure();
     setBusy(false);
     setPhase(undefined);
     if (!res.ok) setError(res.error);
@@ -478,7 +478,7 @@ export function LemonadePane({
   useEffect(() => {
     if (!busy) return undefined;
     const timer = setInterval(() => {
-      void window.karen.lemonadeDownloads().then((r) => setJobs(r.jobs.filter((j) => !j.complete)));
+      void window.myra.lemonadeDownloads().then((r) => setJobs(r.jobs.filter((j) => !j.complete)));
     }, 1000);
     return () => clearInterval(timer);
   }, [busy]);
@@ -494,7 +494,7 @@ export function LemonadePane({
   const checkUpdates = async (): Promise<void> => {
     setChecking(true);
     setCheckError(undefined);
-    const res = await window.karen.engineUpdatesCheck();
+    const res = await window.myra.engineUpdatesCheck();
     setChecking(false);
     if (!res.ok || !res.check) {
       setCheckError(res.error ?? "Could not reach GitHub to ask.");
@@ -531,8 +531,8 @@ export function LemonadePane({
     await run(
       version
         ? `Moving ${engineName(recipe)} (${label}) to ${version}`
-        : `Putting ${engineName(recipe)} (${label}) back to the build Karen ships`,
-      () => window.karen.engineUpdate(recipe, backend, version),
+        : `Putting ${engineName(recipe)} (${label}) back to the build MyRA ships`,
+      () => window.myra.engineUpdate(recipe, backend, version),
     );
     /* The row goes whether or not it worked. On success it is done; on
        failure the pin was rolled back, so the offer no longer describes the
@@ -573,7 +573,7 @@ export function LemonadePane({
    */
   /* A download that finished added a model, and this page is the one showing
      the list it was added to. */
-  useEffect(() => window.karen.onModelsChanged(() => void refresh()), [refresh]);
+  useEffect(() => window.myra.onModelsChanged(() => void refresh()), [refresh]);
 
   /**
    * Fetch one version of one model.
@@ -595,7 +595,7 @@ export function LemonadePane({
          Everything after that point -- progress, pausing, cancelling, and
          noticing it arrived -- belongs to the registry in main, which is what
          lets it outlive this page. */
-      const res = await window.karen.registryPull(
+      const res = await window.myra.registryPull(
         choice.name, choice.checkpoint, source, choice.recipe,
       );
       if (!res.ok) setPullError(explainRegistryError(res.error ?? "", source));
@@ -615,7 +615,7 @@ export function LemonadePane({
   const removeModel = useCallback(
     async (id: string): Promise<void> => {
       setDeleting(undefined);
-      await run(`Deleting ${displayModelName(id)}`, () => window.karen.lemonadeDeleteModel(id));
+      await run(`Deleting ${displayModelName(id)}`, () => window.myra.lemonadeDeleteModel(id));
     },
     // `run` is redefined every render and closing over a stale one is harmless:
     // it reads no state of its own beyond the setters.
@@ -699,7 +699,7 @@ export function LemonadePane({
 
   const loadOrUnload = (id: string): void => {
     void run(id === loaded ? `Unloading ${id}` : `Loading ${id}`, () =>
-      id === loaded ? window.karen.lemonadeUnload() : window.karen.lemonadeLoad(id));
+      id === loaded ? window.myra.lemonadeUnload() : window.myra.lemonadeLoad(id));
   };
 
   return (
@@ -740,7 +740,7 @@ export function LemonadePane({
           <section className="lem-section">
             <header className="lem-head">
               <h3>This machine</h3>
-              <p>What Karen has to work with. Reported by Lemonade, not guessed.</p>
+              <p>What MyRA has to work with. Reported by Lemonade, not guessed.</p>
             </header>
 
             <div className="lem-stats">
@@ -788,7 +788,7 @@ export function LemonadePane({
             <header className="lem-head">
               <h3>Engines</h3>
               <p>
-                Each kind of model needs its engine installed once. Karen downloads them through
+                Each kind of model needs its engine installed once. MyRA downloads them through
                 Lemonade — nothing is fetched until you press a button here.
               </p>
               {/*
@@ -796,15 +796,15 @@ export function LemonadePane({
                 * as a missing feature otherwise -- "how do I update llama.cpp?
                 * I don't see a button" was the report that started this.
                 *
-                * The versions still come from the Lemonade release Karen ships
+                * The versions still come from the Lemonade release MyRA ships
                 * ({LEMONADE_VERSION}); what changed is that moving off one is
                 * now something a person can do, and still nothing that happens
                 * on its own. A runtime that updated itself underneath a piece
                 * of work could change an answer between one run and the next.
                 */}
               <p>
-                Each engine starts on the build the Lemonade release Karen ships
-                ({LEMONADE_VERSION}) names for it. Nothing here changes on its own — Karen has no
+                Each engine starts on the build the Lemonade release MyRA ships
+                ({LEMONADE_VERSION}) names for it. Nothing here changes on its own — MyRA has no
                 automatic updates and does not look for any until you ask it to.
               </p>
             </header>
@@ -889,7 +889,7 @@ export function LemonadePane({
                           onClick={() =>
                             void run(
                               `Installing ${BACKEND_LABELS[b.id] ?? b.id} for ${engineName(engine.id)}`,
-                              () => window.karen.lemonadeInstallBackend(engine.id, b.id),
+                              () => window.myra.lemonadeInstallBackend(engine.id, b.id),
                             )
                           }
                         >
@@ -933,7 +933,7 @@ export function LemonadePane({
                           disabled={busy}
                           onClick={() => void applyBuild(engine.id, b.id, undefined)}
                         >
-                          Put {BACKEND_LABELS[b.id] ?? b.id} back to {original}, the build Karen ships
+                          Put {BACKEND_LABELS[b.id] ?? b.id} back to {original}, the build MyRA ships
                         </button>
                       )];
                     })}
@@ -1079,7 +1079,7 @@ export function LemonadePane({
                 onClick={() => setMode("catalog")}
               >
                 Recommended
-                <span className="lem-mode-sub">Karen’s curated list — offline</span>
+                <span className="lem-mode-sub">MyRA’s curated list — offline</span>
               </button>
               <button
                 type="button"
@@ -1090,7 +1090,7 @@ export function LemonadePane({
               >
                 Search registries
                 {/* Listed from the enabled set rather than written out, so a
-                    registry can never be advertised here that Karen refuses
+                    registry can never be advertised here that MyRA refuses
                     to contact. */}
                 <span className="lem-mode-sub">
                   {ENABLED_SOURCES.map((s) => REGISTRY_LABEL[s]).join(" · ")}
@@ -1112,13 +1112,13 @@ export function LemonadePane({
                 onLoadOrUnload={loadOrUnload}
                 onReload={(id) =>
                   void run(`Reloading ${displayModelName(id)}`, async () => {
-                    await window.karen.lemonadeUnload();
-                    return window.karen.lemonadeLoad(id);
+                    await window.myra.lemonadeUnload();
+                    return window.myra.lemonadeLoad(id);
                   })
                 }
                 onRescan={() => {
                   setRescanning(true);
-                  void window.karen.lemonadeRescan().then(async (r) => {
+                  void window.myra.lemonadeRescan().then(async (r) => {
                     setRescanning(false);
                     if (!r.ok) setError(r.error);
                     else await refresh();
@@ -1129,7 +1129,7 @@ export function LemonadePane({
                 deleting={deleting}
                 onAskDelete={(id) => setDeleting(deleting === id ? undefined : id)}
                 onDelete={(id) => void removeModel(id)}
-                onReveal={(id) => void window.karen.modelReveal(id)}
+                onReveal={(id) => void window.myra.modelReveal(id)}
                 onOpen={setViewing}
               />
             ) : mode === "catalog" ? (
@@ -1350,7 +1350,7 @@ export function LemonadePane({
                             onClick={() =>
                               here
                                 ? loadOrUnload(m.id)
-                                : void run(`Downloading ${m.id}`, () => window.karen.lemonadePull(m.id))
+                                : void run(`Downloading ${m.id}`, () => window.myra.lemonadePull(m.id))
                             }
                           >
                             {here ? (m.id === loaded ? "Unload" : "Load") : "Download"}
@@ -1391,7 +1391,7 @@ export function LemonadePane({
                   <h4>Already on this machine</h4>
                   <p>
                     Your own model folder, plus anything LM Studio or Ollama has already
-                    downloaded. Karen reads these where they are — nothing is copied, moved or
+                    downloaded. MyRA reads these where they are — nothing is copied, moved or
                     re-downloaded.
                   </p>
                 </header>
@@ -1422,9 +1422,9 @@ export function LemonadePane({
                           </div>
                         </div>
                         {/* The registry column stays empty rather than being
-                            collapsed: these were not fetched by Karen, and
+                            collapsed: these were not fetched by MyRA, and
                             naming one would be a claim about their provenance
-                            that Karen cannot make. */}
+                            that MyRA cannot make. */}
                         <span className="lem-model-src">—</span>
                         <span className="lem-model-size">{gb(m.sizeBytes)}</span>
                         {chip ? (
@@ -1486,8 +1486,8 @@ export function LemonadePane({
                     loaded={tuning === loaded}
                     onReload={() =>
                       void run(`Reloading ${tuning}`, async () => {
-                        await window.karen.lemonadeUnload();
-                        return window.karen.lemonadeLoad(tuning);
+                        await window.myra.lemonadeUnload();
+                        return window.myra.lemonadeLoad(tuning);
                       })
                     }
                     onClose={() => setTuning(undefined)}
@@ -1497,7 +1497,7 @@ export function LemonadePane({
             ) : null}
 
             {/* The daemon reads the model folders once, when it starts. Someone
-                who downloads a model in LM Studio while Karen is open has no
+                who downloads a model in LM Studio while MyRA is open has no
                 other way to make it appear. */}
             <button
               type="button"
@@ -1505,7 +1505,7 @@ export function LemonadePane({
               disabled={busy || rescanning}
               onClick={() => {
                 setRescanning(true);
-                void window.karen.lemonadeRescan().then(async (r) => {
+                void window.myra.lemonadeRescan().then(async (r) => {
                   setRescanning(false);
                   if (!r.ok) setError(r.error);
                   else await refresh();
@@ -1537,7 +1537,7 @@ export function LemonadePane({
 /**
  * Asking before deleting, in the words that fit this particular file.
  *
- * Two shapes, decided by `deletePrompt` rather than here. For Karen's own
+ * Two shapes, decided by `deletePrompt` rather than here. For MyRA's own
  * models it is one press: the daemon removes what it downloaded, and a person
  * who pressed Delete meant Delete. For a file belonging to LM Studio or Ollama
  * the first press only explains -- what the file is, where it is, and what that
@@ -1659,7 +1659,7 @@ function MyModels({
       <div className="lem-callout">
         <p className="lem-callout-title">No models on this machine yet.</p>
         <p className="lem-callout-body">
-          Karen also reads anything LM Studio or Ollama has already downloaded, where it
+          MyRA also reads anything LM Studio or Ollama has already downloaded, where it
           lies — nothing is copied or re-downloaded. If you have some, look again; otherwise
           browse a registry and download one.
         </p>
@@ -1729,7 +1729,7 @@ function MyModels({
                 * Where the file came from, and only what is actually known.
                 *
                 * "This machine" was being printed for anything the curated
-                * catalogue did not list -- which included every model Karen had
+                * catalogue did not list -- which included every model MyRA had
                 * downloaded from Hugging Face under a name of its own, so a
                 * downloaded model claimed a local provenance it did not have.
                 * The checkpoint is the record: a repository id means a
@@ -1782,8 +1782,8 @@ function MyModels({
             {/*
               * The confirmation, in the row rather than in a dialog.
               *
-              * It has to say different things for different models -- Karen's
-              * own download, a file in Karen's folder, and a file belonging to
+              * It has to say different things for different models -- MyRA's
+              * own download, a file in MyRA's folder, and a file belonging to
               * LM Studio or Ollama are three different acts wearing one word --
               * and every one of those sentences comes from `deletePrompt`,
               * which is the same function the main process's behaviour is keyed

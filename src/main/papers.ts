@@ -137,12 +137,12 @@ export async function deletePaper(root: string, id: string): Promise<void> {
 export function installPaperIpc(deps: PaperDeps): void {
   const { jobs } = deps;
 
-  ipcMain.handle("karen:paper-list", async () => ({
+  ipcMain.handle("myra:paper-list", async () => ({
     ok: true,
     papers: await listPapers(rootOf(deps)),
   }));
 
-  ipcMain.handle("karen:paper-create", async (_e, kind: unknown, title: unknown) => {
+  ipcMain.handle("myra:paper-create", async (_e, kind: unknown, title: unknown) => {
     const paper = newPaper({
       kind: kind === "section" ? "section" : "paper",
       title: typeof title === "string" ? title : "",
@@ -152,14 +152,14 @@ export function installPaperIpc(deps: PaperDeps): void {
     return { ok: true, paper: stored };
   });
 
-  ipcMain.handle("karen:paper-open", async (_e, id: unknown) => {
+  ipcMain.handle("myra:paper-open", async (_e, id: unknown) => {
     const paper = await readPaper(rootOf(deps), String(id));
     return paper
       ? { ok: true, paper }
       : { ok: false, error: "That paper could not be read. It may have been moved or deleted." };
   });
 
-  ipcMain.handle("karen:paper-save", async (_e, raw: unknown) => {
+  ipcMain.handle("myra:paper-save", async (_e, raw: unknown) => {
     const id = (raw as { id?: unknown } | undefined)?.id;
     if (typeof id !== "string") return { ok: false, error: "That paper has no id." };
     /* Rebuilt field by field on the way in, not trusted as it arrives. The
@@ -174,12 +174,12 @@ export function installPaperIpc(deps: PaperDeps): void {
     return { ok: true, updatedAt: stored.updatedAt, paper: stored };
   });
 
-  ipcMain.handle("karen:paper-delete", async (_e, id: unknown) => {
+  ipcMain.handle("myra:paper-delete", async (_e, id: unknown) => {
     await deletePaper(rootOf(deps), String(id));
     return { ok: true, papers: await listPapers(rootOf(deps)) };
   });
 
-  ipcMain.handle("karen:paper-cancel", async (_e, id: unknown) => {
+  ipcMain.handle("myra:paper-cancel", async (_e, id: unknown) => {
     jobs.cancel(id ? String(id) : undefined);
     return { ok: true };
   });
@@ -192,7 +192,7 @@ export function installPaperIpc(deps: PaperDeps): void {
    * object, so "exactly what will be sent" is the thing that is sent rather
    * than a reconstruction of it.
    */
-  ipcMain.handle("karen:paper-draft", async (_e, paperId: unknown, sectionId: unknown, raw: unknown) => {
+  ipcMain.handle("myra:paper-draft", async (_e, paperId: unknown, sectionId: unknown, raw: unknown) => {
     const id = String(sectionId);
     const request = raw as DraftRequest;
     if (!request || typeof request !== "object") return { ok: false, error: "Nothing to draft." };
@@ -209,7 +209,7 @@ export function installPaperIpc(deps: PaperDeps): void {
       label: request.sectionName,
       sectionId: id,
     });
-    if (!signal) return { ok: false, error: "Karen is already working on something long." };
+    if (!signal) return { ok: false, error: "MyRA is already working on something long." };
 
     try {
       const resolved = await deps.llm();
@@ -248,7 +248,7 @@ export function installPaperIpc(deps: PaperDeps): void {
             sections: stored.sections.map((s) => (s.id === id ? { ...s, draft: text } : s)),
           })
         : undefined;
-      if (saved) deps.send("karen:paper-changed", saved);
+      if (saved) deps.send("myra:paper-changed", saved);
 
       /* Reported, never repaired. The prompt forbids citations and this checks;
          removing a fabricated marker would leave the sentence it supported
@@ -266,11 +266,11 @@ export function installPaperIpc(deps: PaperDeps): void {
     }
   });
 
-  ipcMain.handle("karen:paper-export", async (_e, id: unknown, formatName: unknown) => {
+  ipcMain.handle("myra:paper-export", async (_e, id: unknown, formatName: unknown) => {
     const paper = await readPaper(rootOf(deps), String(id));
     if (!paper) return { ok: false, error: "That paper could not be read." };
     const format = resolveFormat(String(formatName));
-    if (!format) return { ok: false, error: `Karen cannot write ${String(formatName)} files.` };
+    if (!format) return { ok: false, error: `MyRA cannot write ${String(formatName)} files.` };
 
     const dir = documentsDir();
     /* Markdown goes to disk first because the converters read files, not
@@ -285,7 +285,7 @@ export function installPaperIpc(deps: PaperDeps): void {
     }
   });
 
-  ipcMain.handle("karen:paper-reveal", async (_e, path: unknown) => {
+  ipcMain.handle("myra:paper-reveal", async (_e, path: unknown) => {
     shell.showItemInFolder(String(path));
     return { ok: true };
   });

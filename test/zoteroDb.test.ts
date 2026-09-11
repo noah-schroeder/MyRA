@@ -28,7 +28,7 @@ function use(
 ): string {
   const dir = buildLibrary(items, collections, opts);
   built.push(dir);
-  process.env["KAREN_ZOTERO_DIR"] = dir;
+  process.env["MYRA_ZOTERO_DIR"] = dir;
   /* The snapshot is cached against the source file's size and mtime, and two
      fixtures built in the same millisecond can collide. Tests say so. */
   forgetZoteroSnapshot();
@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 after(() => {
-  delete process.env["KAREN_ZOTERO_DIR"];
+  delete process.env["MYRA_ZOTERO_DIR"];
   for (const dir of built) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -243,14 +243,14 @@ describe("where to look", () => {
   });
 
   it("finds nothing when the named directory holds no library", () => {
-    process.env["KAREN_ZOTERO_DIR"] = "/nonexistent/nowhere";
+    process.env["MYRA_ZOTERO_DIR"] = "/nonexistent/nowhere";
     assert.equal(findZoteroDataDir(), undefined);
   });
 
   it("finds a library the sandbox put somewhere unexpected", () => {
     /* Being one directory wrong is the same as having no fallback, so when the
        fixed guesses miss, the two sandbox homes are searched. */
-    const home = mkdtempSync(join(tmpdir(), "karen-home-"));
+    const home = mkdtempSync(join(tmpdir(), "myra-home-"));
     const buried = join(home, ".var", "app", "org.zotero.Zotero", "config", "Zotero");
     mkdirSync(buried, { recursive: true });
     writeFileSync(join(buried, "zotero.sqlite"), "");
@@ -259,7 +259,7 @@ describe("where to look", () => {
     mkdirSync(join(buried, "storage", "AAAAAAAA"), { recursive: true });
 
     const realHome = process.env["HOME"];
-    delete process.env["KAREN_ZOTERO_DIR"];
+    delete process.env["MYRA_ZOTERO_DIR"];
     process.env["HOME"] = home;
     try {
       assert.equal(findZoteroDataDir(), buried);

@@ -17,7 +17,7 @@
 /**
  * As much of a model's architecture as affects the KV cache.
  *
- * Read from a GGUF header when Karen parsed those itself. Nothing supplies it
+ * Read from a GGUF header when MyRA parsed those itself. Nothing supplies it
  * now that Lemonade owns the model files -- its catalogue gives a download size
  * and no architecture -- so every estimate here currently takes the rule-of-
  * thumb path and says so via `estimated`. Kept because the exact arithmetic is
@@ -237,7 +237,7 @@ export function largestContext(
 }
 
 /**
- * How much of the card Karen is willing to plan to fill.
+ * How much of the card MyRA is willing to plan to fill.
  *
  * The overhead above is llama.cpp's; this is everything else. Measured the
  * expensive way: a probe asked lemond for a 1,000,000-token window on a model
@@ -318,10 +318,10 @@ export function autoContext(opts: {
       estimated: true,
       ...(capped !== undefined ? { cappedAt: capped } : {}),
       why: fits
-        ? `About ${floor.toLocaleString()} tokens. Karen could not read this model's shape, so ` +
+        ? `About ${floor.toLocaleString()} tokens. MyRA could not read this model's shape, so ` +
           `this is the usual default rather than a measurement.`
         : `Left as the daemon chose it: this model does not leave room for ${floor.toLocaleString()} ` +
-          `tokens on this machine, and Karen will not write down a number that stops it loading.`,
+          `tokens on this machine, and MyRA will not write down a number that stops it loading.`,
     };
   }
 

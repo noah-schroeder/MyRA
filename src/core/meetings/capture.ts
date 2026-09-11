@@ -132,7 +132,7 @@ export class Recorder {
       /*
        * `mkdtemp`, not a name we compose ourselves.
        *
-       * This used to be `karen-rec-<pid>-<Date.now()>`, which is a path anyone
+       * This used to be `myra-rec-<pid>-<Date.now()>`, which is a path anyone
        * on the machine can predict and therefore create first -- as a symlink
        * pointing wherever they like, with the recording written through it. It
        * also inherited the umask, so a meeting's raw audio sat in a shared
@@ -141,7 +141,7 @@ export class Recorder {
        * mkdtemp closes both: the suffix is random, it fails rather than reuses
        * if the name is taken, and the directory is 0700 by definition.
        */
-      this.#dir = await mkdtemp(join(tmpdir(), "karen-rec-"));
+      this.#dir = await mkdtemp(join(tmpdir(), "myra-rec-"));
       this.#owned = true;
     }
 

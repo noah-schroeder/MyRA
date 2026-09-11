@@ -8,7 +8,7 @@
  * first time anybody opened it.
  *
  * The second property is that the checking happens here at all. Measured against
- * lemond 11.8.0: `llamacpp_args: "--parallel 1 --karen-nonsense 3"` is accepted
+ * lemond 11.8.0: `llamacpp_args: "--parallel 1 --myra-nonsense 3"` is accepted
  * with a 200 and fails later, at load, inside a process nobody is watching.
  */
 
@@ -32,8 +32,8 @@ test("reads the flags it knows, under one spelling", () => {
 });
 
 test("keeps every token it does not own", () => {
-  const { unknown } = readFlags("--parallel 1 --karen-nonsense 3 --verbose");
-  assert.deepEqual(unknown, ["--karen-nonsense", "3", "--verbose"]);
+  const { unknown } = readFlags("--parallel 1 --myra-nonsense 3 --verbose");
+  assert.deepEqual(unknown, ["--myra-nonsense", "3", "--verbose"]);
 });
 
 test("the daemon's own default survives a round trip untouched", () => {
@@ -43,9 +43,9 @@ test("the daemon's own default survives a round trip untouched", () => {
 });
 
 test("an unrecognised flag survives being rewritten around", () => {
-  const before = "--karen-nonsense 3 --parallel 1 --verbose";
+  const before = "--myra-nonsense 3 --parallel 1 --verbose";
   const after = writeFlags(before, { ...readFlags(before).values, "--threads": "8" });
-  for (const token of ["--karen-nonsense", "3", "--verbose"]) {
+  for (const token of ["--myra-nonsense", "3", "--verbose"]) {
     assert.ok(after.includes(token), `${token} was dropped from ${after}`);
   }
   assert.ok(after.includes("--threads 8"));
@@ -73,7 +73,7 @@ test("a value cannot smuggle in a second flag", () => {
   /* The registry's rule is about model-chosen strings and these are the user's,
      but the narrowing is enforced anyway: nothing typed into a number or an
      enum may contain whitespace. */
-  assert.match(validFlag(spec("--threads"), "8 --karen-nonsense 3")!, /cannot contain spaces/);
+  assert.match(validFlag(spec("--threads"), "8 --myra-nonsense 3")!, /cannot contain spaces/);
   assert.match(validFlag(spec("--cache-type-k"), "q8_0 --mlock")!, /cannot contain spaces/);
 });
 

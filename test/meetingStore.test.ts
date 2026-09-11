@@ -19,7 +19,7 @@ import {
 } from "../src/core/meetings/store.ts";
 
 async function root(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "karen-meetings-"));
+  return await mkdtemp(join(tmpdir(), "myra-meetings-"));
 }
 
 async function record(dir: string, title: string, startedAt: string): Promise<void> {
@@ -118,12 +118,12 @@ test("state is merged, so one stage cannot erase another's record", async () => 
 });
 
 test("a missing meeting reads as empty state rather than throwing", async () => {
-  assert.deepEqual(await readState(join(tmpdir(), "karen-does-not-exist")), {});
+  assert.deepEqual(await readState(join(tmpdir(), "myra-does-not-exist")), {});
 });
 
 /*
  * The filing bug this replaces: with no vault configured,
- * `resolve(join("", "Karen"))` is `<working directory>/Karen`, so meeting notes
+ * `resolve(join("", "MyRA"))` is `<working directory>/MyRA`, so meeting notes
  * were written next to whatever the app was launched from — inside the repo, in
  * development, and somewhere unwritable in a packaged build.
  */

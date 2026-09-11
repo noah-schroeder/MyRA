@@ -23,7 +23,7 @@ import type { PaperSection as Section } from "../types.ts";
  *     standing rule that reasoning is not part of the record.
  *   - **Invented citations, named.** The prompt forbids them; this reports the
  *     ones that appeared anyway, and removes nothing.
- *   - **Karen's own microphone**, so dictation here is the same dictation as
+ *   - **MyRA's own microphone**, so dictation here is the same dictation as
  *     everywhere else in the app rather than a second recorder with its own
  *     model.
  */

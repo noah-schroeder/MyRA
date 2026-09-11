@@ -2,10 +2,10 @@
  * What a hosted model costs, when the provider says so.
  *
  * Only when it says so. There is no table of prices in this app and there must
- * not be: a figure Karen remembered would be wrong the week a provider changed
+ * not be: a figure MyRA remembered would be wrong the week a provider changed
  * it, and a wrong price is worse than no price -- it is the number somebody
  * budgets a grant against. Everything here comes from the endpoint's own model
- * listing, at the moment it was asked, and anything Karen cannot read is shown
+ * listing, at the moment it was asked, and anything MyRA cannot read is shown
  * as nothing rather than guessed at.
  *
  * Two shapes are read, because two are in use: OpenRouter's `pricing.prompt` /
@@ -37,7 +37,7 @@ function rate(value: unknown): number | undefined {
  * The price on one entry of a `/v1/models` listing, if there is one.
  *
  * Both halves are required. A listing with an input price and no output price
- * is one Karen cannot state the cost of, and half a price shown as a whole one
+ * is one MyRA cannot state the cost of, and half a price shown as a whole one
  * is exactly the kind of confident wrongness this module exists to avoid.
  */
 export function priceOf(entry: unknown): ModelPrice | undefined {
@@ -96,7 +96,7 @@ export function priceTitle(price: ModelPrice | undefined): string {
   return (
     `${money(price.input)} per million input tokens and ${money(price.output)} per million ` +
     "output tokens, in US dollars, as this provider reported it when its models were last " +
-    "fetched. Karen keeps no price list of its own."
+    "fetched. MyRA keeps no price list of its own."
   );
 }
 

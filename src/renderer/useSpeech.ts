@@ -1,5 +1,5 @@
 /**
- * Playing what Karen says, and knowing when it has stopped.
+ * Playing what MyRA says, and knowing when it has stopped.
  *
  * The audio arrives from the main process as bytes rather than a URL, because
  * the window is sandboxed and has no filesystem and because an utterance
@@ -84,7 +84,7 @@ export function useSpeech() {
     release();
     setState({ phase: "thinking" });
 
-    const result = await window.karen.speak(text);
+    const result = await window.myra.speak(text);
     if (mine !== generation.current) return; // Interrupted while synthesising.
 
     if (!result.ok || !result.audio) {

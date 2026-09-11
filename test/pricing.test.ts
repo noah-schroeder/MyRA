@@ -66,7 +66,7 @@ describe("saying it out loud", () => {
     assert.equal(priceLabel(undefined), "");
   });
 
-  it("says where the number came from, because it is not Karen's", () => {
+  it("says where the number came from, because it is not MyRA's", () => {
     assert.match(priceTitle({ input: 3, output: 15 }), /as this provider reported it/);
     assert.match(priceTitle({ input: 3, output: 15 }), /no price list of its own/);
     assert.equal(priceTitle(undefined), "");

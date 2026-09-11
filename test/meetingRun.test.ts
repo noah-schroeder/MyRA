@@ -29,7 +29,7 @@ const record: MeetingRecord = {
   startedAt: "2026-08-21T14:05:33.000Z",
   endedAt: "2026-08-21T15:02:10.000Z",
   seconds: 3397,
-  dir: "/home/u/Documents/karen/meetings/2026-08-21T14-05-33-weekly-project-sync",
+  dir: "/home/u/Documents/myra/meetings/2026-08-21T14-05-33-weekly-project-sync",
   tracks: [],
   failed: [],
 };

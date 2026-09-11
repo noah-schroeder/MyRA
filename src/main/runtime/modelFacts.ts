@@ -1,5 +1,5 @@
 /**
- * What Karen has learned about a model, beside what the daemon can tell it.
+ * What MyRA has learned about a model, beside what the daemon can tell it.
  *
  * Two facts, both small, both from files the model's own authors published:
  * its architecture, which is what lets `fit.ts` size a context window by
@@ -20,7 +20,7 @@
  * repository at all, and being offline all produce the same answer, and an empty
  * record for them is what stops an offline machine re-asking on every download.
  *
- * **The file is Karen's, not the model directory's.** The models directory is a
+ * **The file is MyRA's, not the model directory's.** The models directory is a
  * setting people move, and Lemonade scans it and names a model after the leaf
  * directory it finds -- a stray JSON in there is at best ignored and at worst a
  * model that does not exist.

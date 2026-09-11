@@ -30,13 +30,13 @@ export function installDictationIpc(deps: DictationDeps): void {
   const { config, send } = deps;
   let recorder: Recorder | undefined;
 
-  ipcMain.handle("karen:dictation-start", async () => {
+  ipcMain.handle("myra:dictation-start", async () => {
     await recorder?.cancel();
     recorder = new Recorder();
     await recorder.start({ maxSeconds: MAX_SECONDS });
   });
 
-  ipcMain.handle("karen:dictation-audio", async (_e, pcm: ArrayBuffer) => {
+  ipcMain.handle("myra:dictation-audio", async (_e, pcm: ArrayBuffer) => {
     await recorder?.write(Buffer.from(pcm));
   });
 
@@ -44,12 +44,12 @@ export function installDictationIpc(deps: DictationDeps): void {
    * Answered with a result, never a rejection.
    *
    * A handler that throws reaches the window as "Error invoking remote method
-   * 'karen:dictation-stop': TranscriptionError: …" with the daemon's JSON body
+   * 'myra:dictation-stop': TranscriptionError: …" with the daemon's JSON body
    * on the end — which is what a user saw after speaking a sentence. Electron
    * adds that wrapper to anything thrown across the bridge, so the only way to
    * put a plain sentence in front of somebody is to return one.
    */
-  ipcMain.handle("karen:dictation-stop", async () => {
+  ipcMain.handle("myra:dictation-stop", async () => {
     const active = recorder;
     recorder = undefined;
     if (!active) return { ok: true };
@@ -72,7 +72,7 @@ export function installDictationIpc(deps: DictationDeps): void {
         ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
         ...(settings.dictationLanguage ? { language: settings.dictationLanguage } : {}),
       });
-      if (text.trim()) send("karen:dictation-text", text.trim());
+      if (text.trim()) send("myra:dictation-text", text.trim());
       return { ok: true };
     } catch (err) {
       /* The engine, not the model, is usually what failed: Lemonade installs
@@ -94,7 +94,7 @@ export function installDictationIpc(deps: DictationDeps): void {
     }
   });
 
-  ipcMain.handle("karen:dictation-cancel", async () => {
+  ipcMain.handle("myra:dictation-cancel", async () => {
     const active = recorder;
     recorder = undefined;
     await active?.cancel();

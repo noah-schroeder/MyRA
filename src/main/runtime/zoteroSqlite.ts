@@ -35,7 +35,7 @@ import {
 import { ZoteroError, type LibraryItem, type SearchMode, type ZoteroCollection } from "../../core/library/zotero.ts";
 
 /**
- * Where a snapshot is kept: real disk, beside Karen's other state.
+ * Where a snapshot is kept: real disk, beside MyRA's other state.
  *
  * Not the system temp directory. On most Linux desktops /tmp is a tmpfs, so a
  * two-gigabyte library snapshotted there is two gigabytes of RAM per search --
@@ -86,7 +86,7 @@ function hasLibrary(dir: string): boolean {
  *
  *   1. What the user typed in Settings. Nothing overrules a person saying
  *      where their own library is.
- *   2. KAREN_ZOTERO_DIR, the same answer from a launcher or a script.
+ *   2. MYRA_ZOTERO_DIR, the same answer from a launcher or a script.
  *   3. Zotero's own `extensions.zotero.dataDir`, read from its profile. This
  *      is not a guess -- it is the value Zotero itself opens on startup -- and
  *      it is the only thing that finds a library somebody moved to another
@@ -96,7 +96,7 @@ function hasLibrary(dir: string): boolean {
  *      predicted.
  *
  * The first two are exclusive on purpose: told explicitly where the library
- * is, Karen does not go looking somewhere else and quietly read a different
+ * is, MyRA does not go looking somewhere else and quietly read a different
  * one. It reports that the named folder holds no library, which is a fact the
  * user can act on.
  */
@@ -106,7 +106,7 @@ export function locateZoteroDataDir(): DirFinding {
 
   for (const [dir, source] of [
     [chosenDir, "setting"],
-    [process.env["KAREN_ZOTERO_DIR"] ?? "", "environment"],
+    [process.env["MYRA_ZOTERO_DIR"] ?? "", "environment"],
   ] as const) {
     if (!dir) continue;
     tried.push(dir);
@@ -151,7 +151,7 @@ function readProfiles(home: string, into: { path: string; dataDir?: string }[]):
       try {
         dataDir = dataDirFromPrefs(readFileSync(join(dir, PREFS_FILE), "utf8"));
       } catch {
-        // No prefs.js in it, or unreadable: not a profile Karen can learn from.
+        // No prefs.js in it, or unreadable: not a profile MyRA can learn from.
         continue;
       }
       into.push(dataDir ? { path: dir, dataDir } : { path: dir });
@@ -322,7 +322,7 @@ export function forgetZoteroSnapshot(): void {
  * What to say when there is no library file to read either.
  *
  * Written from what was actually looked at rather than from a fixed list,
- * because the two cases need opposite advice: a Zotero whose profile Karen
+ * because the two cases need opposite advice: a Zotero whose profile MyRA
  * read and whose folder simply is not there has moved, and a machine with no
  * profile at all has no Zotero on it. Both end with the one thing the user can
  * do about it, which is a folder picker in Settings and not an environment
@@ -333,8 +333,8 @@ export function noLibraryHere(found: DirFinding, opts: { paths?: boolean } = {})
   const head = named
     ? `There is no ${ZOTERO_DB} in ${found.tried[0]}.`
     : found.profiles.length
-      ? "Zotero has run on this machine, but Karen could not find its library file."
-      : "Karen could not find a Zotero library on this machine, and found no Zotero profile either.";
+      ? "Zotero has run on this machine, but MyRA could not find its library file."
+      : "MyRA could not find a Zotero library on this machine, and found no Zotero profile either.";
   const said = found.profiles
     .filter((p) => p.dataDir)
     .map((p) => p.dataDir!)
@@ -345,7 +345,7 @@ export function noLibraryHere(found: DirFinding, opts: { paths?: boolean } = {})
      error has no such list, and names the first few. */
   const rest = found.tried.length - 3;
   return [
-    "Zotero's local API did not answer, so Karen tried to read the library file instead. " + head,
+    "Zotero's local API did not answer, so MyRA tried to read the library file instead. " + head,
     said ? `Zotero's own settings say the library is in ${said}, and it is not there now.` : "",
     opts.paths
       ? `It looked in: ${found.tried.slice(0, 3).join(", ")}${rest > 0 ? `, and ${rest} more` : ""}.`
@@ -426,7 +426,7 @@ function describeOpenFailure(err: unknown, dataDir: string): string {
       readable = false;
     }
     evidence = readable
-      ? `the file is there and is ${Math.round(info.size / 1024)} KB, and Karen can read it, ` +
+      ? `the file is there and is ${Math.round(info.size / 1024)} KB, and MyRA can read it, ` +
         "so SQLite refused it for a reason it did not report — Zotero may have it open " +
         "exclusively. Closing Zotero and pressing Check again will say whether that is it."
       : "the file is there but this account does not have permission to read it.";

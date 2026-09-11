@@ -205,7 +205,7 @@ export function explainTooOld(versions: string[]): string {
   return (
     `This CUDA build was compiled on a newer Linux than the one on this machine, so its ` +
     `libraries cannot load${which} — which is why no graphics card was found, even though ` +
-    `yours is working. Install the CUDA build again and Karen will bring the C library it ` +
+    `yours is working. Install the CUDA build again and MyRA will bring the C library it ` +
     `needs along with it.`
   );
 }

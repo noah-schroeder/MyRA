@@ -93,7 +93,7 @@ export function installAudioIpc(
 ): void {
   const { runtime, send } = deps;
 
-  ipcMain.handle("karen:audio-models", async (_e, role: AudioRole) => {
+  ipcMain.handle("myra:audio-models", async (_e, role: AudioRole) => {
     try {
       return { ok: true, options: await audioOptions(deps, role) };
     } catch (err) {
@@ -108,9 +108,9 @@ export function installAudioIpc(
    * the chat model's download is: this is where a 3.1 GB Whisper arrives, and a
    * promise that settles in twenty minutes is a button that says nothing.
    */
-  ipcMain.handle("karen:audio-load", async (_e, model: string) => {
+  ipcMain.handle("myra:audio-load", async (_e, model: string) => {
     try {
-      await runtime.loadAuxModel(model, (p) => send("karen:audio-progress", { model, ...p }));
+      await runtime.loadAuxModel(model, (p) => send("myra:audio-progress", { model, ...p }));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
@@ -133,7 +133,7 @@ export function installAudioIpc(
    * finished with the moment the meeting is written up. Naming the model is
    * what stops this taking the conversation's model down with it.
    */
-  ipcMain.handle("karen:model-unload", async (_e, model: string) => {
+  ipcMain.handle("myra:model-unload", async (_e, model: string) => {
     try {
       /* First, and unconditionally. A generation in flight holds the model
          open, and the request that follows it reloads what was just unloaded
@@ -147,7 +147,7 @@ export function installAudioIpc(
     }
   });
 
-  ipcMain.handle("karen:audio-speak", async (_e, text: string) => {
+  ipcMain.handle("myra:audio-speak", async (_e, text: string) => {
     try {
       const spoken = await speakText(deps, text);
       /* A plain Uint8Array, because a Node Buffer crosses the bridge as an
@@ -163,12 +163,12 @@ export function installAudioIpc(
   });
 
   /** A sentence in the chosen voice, for the Preview button beside it. */
-  ipcMain.handle("karen:audio-preview", async (_e, voice?: string) => {
+  ipcMain.handle("myra:audio-preview", async (_e, voice?: string) => {
     try {
       const resolved = await resolveAudio(deps, "voice", { start: true });
       const spoken = await speak({
         endpoint: resolved.endpoint,
-        text: "This is how Karen will read your answers aloud.",
+        text: "This is how MyRA will read your answers aloud.",
         ...(voice ? { voice } : {}),
         ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
       });

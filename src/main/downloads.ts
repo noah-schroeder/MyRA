@@ -155,7 +155,7 @@ export class Downloads {
    * Stop it and throw away what was fetched.
    *
    * The delete goes through the daemon rather than through a path this process
-   * works out for itself. Karen does not know where in the Hugging Face cache
+   * works out for itself. MyRA does not know where in the Hugging Face cache
    * a given checkpoint's blobs landed -- the directory carries a commit sha it
    * has never seen -- and a routine that guessed would be a routine that
    * guesses while deleting.
