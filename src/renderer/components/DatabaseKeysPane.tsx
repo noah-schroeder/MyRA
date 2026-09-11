@@ -85,7 +85,7 @@ function DatabaseKeyCard({
         {signup ? (
           <>
             {" "}
-            <a href={signup} target="_blank" rel="noreferrer">
+            <a className="linkish" href={signup} target="_blank" rel="noreferrer">
               Get a free key
             </a>
             .
