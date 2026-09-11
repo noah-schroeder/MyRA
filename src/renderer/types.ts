@@ -219,6 +219,8 @@ export interface Settings {
   /** Closing the window leaves Karen running in the tray. */
   keepRunningInTray: boolean;
   setupCompleted: boolean;
+  /** Whether the first-run tour has been shown. Settings -> About can reset it. */
+  seenTutorial: boolean;
   providers: Provider[];
   /** Who the model is told it is. Karen's rules follow it and are not editable. */
   persona: string;

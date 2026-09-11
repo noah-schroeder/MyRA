@@ -130,7 +130,7 @@ export function ResearchBar({
   };
 
   return (
-    <div className="research-bar">
+    <div className="research-bar" data-tour="composer-research">
       <div className="mode-rings" role="group" aria-label="How to search">
         <div className="mode-ring" title={LOCAL_HINT}>
           <span className="mode-ring-label">Local</span>

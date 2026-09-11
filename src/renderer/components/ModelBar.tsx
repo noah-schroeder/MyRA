@@ -317,7 +317,7 @@ export function ModelBar({
 
   return (
     <>
-    <div className="modelbar-wrap" ref={wrap}>
+    <div className="modelbar-wrap" ref={wrap} data-tour="topbar-model">
       <button
         type="button"
         className={`modelbar tone-${tone}`}

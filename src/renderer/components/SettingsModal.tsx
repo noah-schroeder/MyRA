@@ -122,7 +122,16 @@ export function SettingsModal({
           {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
           {tab === "persona" ? <Persona settings={settings} patch={patch} /> : null}
           {tab === "review" ? <Review settings={settings} patch={patch} /> : null}
-          {tab === "about" ? <About /> : null}
+          {tab === "about" ? (
+            <About
+              onReplayTutorial={() => {
+                // Closes the modal too -- the tour draws its own dim overlay,
+                // and left open behind it, Settings would sit on top of that.
+                void patch({ seenTutorial: false });
+                onClose();
+              }}
+            />
+          ) : null}
         </div>
       </div>
     </div>
@@ -1124,7 +1133,7 @@ function Permissions({
 
 /* ------------------------------------------------------------------- about */
 
-function About() {
+function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
   const [engines, setEngines] = useState<Awaited<ReturnType<typeof window.karen.engines>> | undefined>();
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | undefined>();
@@ -1137,6 +1146,17 @@ function About() {
 
   return (
     <div className="pane">
+      <h3>The tour</h3>
+      {/* The way back for anyone who skipped it the first time, or wants
+          another look -- the same reasoning as the pandoc button below,
+          for the screen this app opens with rather than the one it installs. */}
+      <p className="pane-lead">
+        A short walkthrough of where things live, shown once after setup.
+      </p>
+      <button type="button" className="btn-sm" onClick={onReplayTutorial}>
+        Show the tutorial again
+      </button>
+
       <h3>What leaves this machine</h3>
       <p className="pane-lead">
         This list is generated from the code that makes the requests, not written out by hand: a
