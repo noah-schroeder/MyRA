@@ -13,6 +13,8 @@
 
 import { ConfigStore, type EndpointSettings } from "../config.ts";
 import { splitThinking, type DeltaKind } from "./thinking.ts";
+import type { MessageStats } from "./speed.ts";
+import { expandImages, type Attachment, type ContentPart } from "./attach.ts";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -31,6 +33,34 @@ export interface ChatMessage {
   /** Present on tool messages: which call this is the result of. */
   tool_call_id?: string;
   /** Present on tool messages: the tool's name, which some servers require. */
+  name?: string;
+  /**
+   * How fast this reply came in, stored on the assistant message that
+   * produced it. Rides on the record only -- `buildRequest` strips it, since a
+   * field the server does not expect is a reason some of them refuse the
+   * whole request.
+   */
+  meta?: MessageStats;
+  /**
+   * Files dropped in with this message. A document's text is already in
+   * `content` by the time this is stored -- see attach.ts -- so only images
+   * are ever found here, kept as a reference rather than the bytes.
+   */
+  attachments?: Attachment[];
+}
+
+/**
+ * A message as it goes on the wire, which is not always the shape it is
+ * stored in. `content` widens to a content-part array only for a message
+ * carrying an image, and only inside `buildRequest` -- see attach.ts's header
+ * for why that stays contained to this one file rather than spreading through
+ * every reader of a stored conversation.
+ */
+export interface WireMessage {
+  role: ChatRole;
+  content: string | ContentPart[];
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
   name?: string;
 }
 
@@ -63,7 +93,7 @@ export function chatUrl(baseUrl: string): string {
 
 export interface ChatRequest {
   model?: string;
-  messages: ChatMessage[];
+  messages: WireMessage[];
   temperature: number;
   stream: boolean;
   /** Asks a streaming server to send token counts in a final chunk. */
@@ -114,12 +144,30 @@ export function buildRequest(opts: {
    * a way to send a different request than the one the caller asked for.
    */
   extra?: Record<string, unknown>;
+  /**
+   * Turns an attached image's id into a `data:` URI, synchronously.
+   *
+   * Absent means "no images in this request" for every caller that never
+   * attaches one -- which is every call this app makes except the live chat
+   * turn. Synchronous because this function is pure and asserted without a
+   * server: the caller resolves every image to a data URI ahead of time,
+   * outside this function, and hands over a plain lookup rather than an
+   * async read this cannot await.
+   */
+  resolveImage?: (attachmentId: string) => string | undefined;
 }): ChatRequest {
   const { temperature: tuned, ...otherSampling } = opts.sampling ?? {};
   return {
     ...(opts.extra ?? {}),
     ...(opts.model ? { model: opts.model } : {}),
-    messages: opts.messages,
+    /* `meta` and `attachments` are Karen's own bookkeeping, on the stored
+       record only -- a field a server does not expect can be a reason it
+       refuses the whole request. An image reference is expanded into content
+       parts here, right before it leaves, rather than anywhere upstream. */
+    messages: opts.messages.map(({ meta: _meta, attachments, content, ...rest }): WireMessage => ({
+      ...rest,
+      content: opts.resolveImage ? expandImages(content, attachments, opts.resolveImage) : content,
+    })),
     // Extraction and screening are not creative tasks, and a warm model
     // invents owners for action items nobody volunteered for.
     temperature: opts.temperature ?? tuned ?? 0.2,
@@ -157,6 +205,8 @@ export interface ChatOptions {
   sampling?: Record<string, number>;
   /** Extra request fields this provider needs, e.g. asking for reasoning. */
   extra?: Record<string, unknown>;
+  /** See `buildRequest`'s field of the same name. */
+  resolveImage?: (attachmentId: string) => string | undefined;
 }
 
 export interface ChatUsage {
@@ -189,6 +239,21 @@ export interface ChatResult {
   toolCalls: ToolCall[];
   /** Why the model stopped, when the server says. */
   finishReason?: string;
+  /** How long this took, and how much of that was llama.cpp's own clock. */
+  timing?: ChatTiming;
+}
+
+export interface ChatTiming {
+  /** Wall clock from request sent to stream closed. */
+  totalMs: number;
+  /** Request sent to the first content or reasoning delta. */
+  ttftMs?: number;
+  /** Server-reported prompt-processing milliseconds, when it says. */
+  promptMs?: number;
+  /** Server-reported generation milliseconds, when it says. */
+  predictedMs?: number;
+  /** True when promptMs/predictedMs came from the server, not our clock. */
+  measured: boolean;
 }
 
 const EMPTY_USAGE: ChatUsage = { input: 0, output: 0, total: 0 };
@@ -215,6 +280,28 @@ function usageFrom(raw: unknown): ChatUsage {
   const input = u?.prompt_tokens ?? 0;
   const output = u?.completion_tokens ?? 0;
   return { input, output, total: u?.total_tokens ?? input + output };
+}
+
+/** A finite, positive number, or nothing -- never a zero or a NaN standing in for one. */
+function positiveMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * llama.cpp's own `timings` object, when the server sent one.
+ *
+ * Not asked for with `timings_per_token` -- a strict server rejects a whole
+ * request over one field it does not recognise, the same reason the reasoning
+ * probe never sends a field speculatively. This only reads what arrived.
+ */
+function timingFrom(raw: unknown): { promptMs?: number; predictedMs?: number } | undefined {
+  const t = raw as { prompt_ms?: unknown; predicted_ms?: unknown } | undefined;
+  if (!t || typeof t !== "object") return undefined;
+  const promptMs = positiveMs(t.prompt_ms);
+  const predictedMs = positiveMs(t.predicted_ms);
+  return promptMs !== undefined || predictedMs !== undefined
+    ? { ...(promptMs !== undefined ? { promptMs } : {}), ...(predictedMs !== undefined ? { predictedMs } : {}) }
+    : undefined;
 }
 
 /** One chat completion. Streams when `onDelta` is supplied, otherwise not. */
@@ -246,6 +333,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
           ...(opts.tools?.length ? { tools: opts.tools } : {}),
           ...(opts.sampling ? { sampling: opts.sampling } : {}),
           ...(opts.extra ? { extra: opts.extra } : {}),
+          ...(opts.resolveImage ? { resolveImage: opts.resolveImage } : {}),
         }),
       ),
       signal,
@@ -485,10 +573,20 @@ async function readStream(
   let reasoning = "";
   let usage = EMPTY_USAGE;
   let hidden = 0;
+  const startedAt = Date.now();
+  /* The moment prose or reasoning first arrives, not the moment the request
+     was sent -- queueing and prompt processing both happen before this. */
+  let firstAt: number | undefined;
+  const markFirst = (): void => {
+    if (firstAt === undefined) firstAt = Date.now();
+  };
+  let promptMs: number | undefined;
+  let predictedMs: number | undefined;
   /* Deltas go through the splitter rather than straight out, so a model that
      writes its thinking inline is treated the same as one that puts it in its
      own field -- and the tag never reaches the transcript. */
   const split = splitThinking((piece, kind) => {
+    markFirst();
     if (kind === "thinking") reasoning += piece;
     else text += piece;
     onDelta(piece, kind);
@@ -530,6 +628,8 @@ async function readStream(
             finish_reason?: string;
           }[];
           usage?: unknown;
+          /** llama.cpp's own performance numbers, sent unasked on the final frame. */
+          timings?: unknown;
           error?: { message?: string };
         };
         try {
@@ -544,12 +644,18 @@ async function readStream(
           usage = usageFrom(parsed.usage);
           hidden = reasoningTokens(parsed.usage);
         }
+        if (parsed.timings) {
+          const t = timingFrom(parsed.timings);
+          if (t?.promptMs !== undefined) promptMs = t.promptMs;
+          if (t?.predictedMs !== undefined) predictedMs = t.predictedMs;
+        }
         const choice = parsed.choices?.[0];
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         // A server that states the reasoning separately needs no splitting:
         // it is already labelled, and it never appears in `content`.
         const thought = statedReasoning(choice?.delta);
         if (thought) {
+          markFirst();
           reasoning += thought;
           onDelta(thought, "thinking");
         }
@@ -576,6 +682,14 @@ async function readStream(
     }))
     .filter((c) => c.function.name);
 
+  const timing: ChatTiming = {
+    totalMs: Date.now() - startedAt,
+    ...(firstAt !== undefined ? { ttftMs: firstAt - startedAt } : {}),
+    ...(promptMs !== undefined ? { promptMs } : {}),
+    ...(predictedMs !== undefined ? { predictedMs } : {}),
+    measured: promptMs !== undefined || predictedMs !== undefined,
+  };
+
   return {
     text,
     ...(reasoning ? { reasoning } : {}),
@@ -583,6 +697,7 @@ async function readStream(
     usage,
     toolCalls,
     ...(finishReason ? { finishReason } : {}),
+    timing,
   };
 }
 

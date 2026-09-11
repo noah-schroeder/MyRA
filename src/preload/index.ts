@@ -32,9 +32,12 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 
 const api = {
   /* ---- conversation ---- */
-  send: (text: string) => ipcRenderer.invoke("karen:send", text),
+  send: (text: string, attachments?: unknown[]) => ipcRenderer.invoke("karen:send", text, attachments ?? []),
   abort: () => ipcRenderer.invoke("karen:abort"),
   onAgentEvent: (cb: (event: AgentEventPayload) => void) => on("karen:agent-event", cb),
+  /** A dropped image or document, read and sized before Send is pressed. */
+  chatAttach: (name: string, bytes: ArrayBuffer) => ipcRenderer.invoke("karen:chat-attach", name, bytes),
+  chatAttachRemove: (id: string) => ipcRenderer.invoke("karen:chat-attach-remove", id),
 
   /* ---- sessions ---- */
   newSession: () => ipcRenderer.invoke("karen:new-session"),
@@ -364,8 +367,20 @@ const api = {
   /** Answer a clarifying question the pipeline asked. */
   answerPrompt: (id: string, answer: string | undefined) =>
     ipcRenderer.invoke("karen:answer-prompt", id, answer),
-  onPrompt: (cb: (request: { id: string; title: string; method: "input" | "editor" | "confirm"; message?: string; prefill?: string }) => void) =>
-    on("karen:prompt", cb),
+  onPrompt: (
+    cb: (request: {
+      id: string;
+      title: string;
+      method: "input" | "editor" | "confirm" | "choice" | "models";
+      message?: string;
+      prefill?: string;
+      options?: string[];
+      multi?: boolean;
+      required?: boolean;
+      slots?: { key: string; label: string; hint: string }[];
+      current?: Record<string, string>;
+    }) => void,
+  ) => on("karen:prompt", cb),
 };
 
 contextBridge.exposeInMainWorld("karen", api);

@@ -19,7 +19,7 @@
  *     that resolve to nothing.
  */
 
-import type { CitedSource, Item, ToolItem } from "./types.ts";
+import type { CitedSource, Item, MessageStats, ToolItem } from "./types.ts";
 
 /** The stored shape. Mirrors ChatMessage in core, which the renderer cannot import. */
 export interface StoredMessage {
@@ -28,6 +28,9 @@ export interface StoredMessage {
   tool_calls?: { id: string; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
   name?: string;
+  meta?: MessageStats;
+  /** Image references on a user message. Never the bytes -- see core/llm/attach.ts. */
+  attachments?: { kind: "image" | "document"; name: string }[];
 }
 
 export interface Restored {
@@ -106,7 +109,20 @@ export function restoreThread(messages: StoredMessage[]): Restored {
     if (m.role === "system" || m.role === "tool") continue;
 
     if (m.role === "user") {
-      if (m.content?.trim()) items.push({ id: nextId(), kind: "user", text: m.content });
+      // An attachment-only turn (an image with no caption) has empty content,
+      // which used to be the only thing this guard checked -- so the whole
+      // turn vanished on reopen, image included, even though it was still
+      // stored and still sent to the model on the next turn.
+      if (m.content?.trim() || m.attachments?.length) {
+        items.push({
+          id: nextId(),
+          kind: "user",
+          text: m.content,
+          ...(m.attachments?.length
+            ? { attachments: m.attachments.map((a) => ({ kind: a.kind, name: a.name })) }
+            : {}),
+        });
+      }
       continue;
     }
 
@@ -116,6 +132,7 @@ export function restoreThread(messages: StoredMessage[]): Restored {
         kind: "assistant",
         blocks: [{ kind: "text", text: m.content }],
         streaming: false,
+        ...(m.meta ? { stats: m.meta } : {}),
       });
     }
 

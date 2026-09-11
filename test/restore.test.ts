@@ -179,6 +179,45 @@ test("malformed stored arguments lose the parameters, not the card", () => {
   assert.equal(card.name, "web_search", "the card must still say what ran");
 });
 
+test("an image-only turn -- no caption at all -- survives a reopen", () => {
+  // content is empty for a message that is only an attachment; the guard used
+  // to be `if (m.content?.trim())` alone, which dropped the entire turn --
+  // not just the chip -- so a reopened conversation showed the assistant's
+  // reply answering what looked like nothing.
+  const { items } = restoreThread([
+    { role: "user", content: "", attachments: [{ kind: "image", name: "scan.png" }] },
+    { role: "assistant", content: "That looks like a receipt." },
+  ]);
+  assert.deepEqual(items.map((i) => i.kind), ["user", "assistant"]);
+  const user = items[0]!;
+  assert.equal(user.kind, "user");
+  if (user.kind !== "user") return;
+  assert.equal(user.text, "");
+});
+
+test("an attachment chip comes back on reopen, not just the caption", () => {
+  const { items } = restoreThread([
+    {
+      role: "user",
+      content: "What does this say?",
+      attachments: [{ kind: "image", name: "scan.png" }],
+    },
+  ]);
+  const user = items[0]!;
+  assert.equal(user.kind, "user");
+  if (user.kind !== "user") return;
+  assert.equal(user.text, "What does this say?");
+  assert.deepEqual(user.attachments, [{ kind: "image", name: "scan.png" }]);
+});
+
+test("a plain message with no attachments carries none back", () => {
+  const { items } = restoreThread([{ role: "user", content: "hi" }]);
+  const user = items[0]!;
+  assert.equal(user.kind, "user");
+  if (user.kind !== "user") return;
+  assert.equal(user.attachments, undefined);
+});
+
 test("harvesting is shared with the live path, so numbering cannot drift", () => {
   // If these two ever diverge, reopening a conversation silently renumbers it.
   assert.deepEqual(

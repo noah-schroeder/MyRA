@@ -51,6 +51,28 @@ import {
 import { setPdfRenderer, engines, documentsDir, setWorkspaceRoot } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
+import type { Attachment } from "../core/llm/attach.ts";
+import { asUntrusted } from "../core/research/html.ts";
+import { hasVision } from "../core/models/roles.ts";
+import { estimateTokens } from "../core/agent/compact.ts";
+import { REPLY_TOKENS } from "../core/review/manuscript.ts";
+import { sniffImage } from "../core/images/generate.ts";
+import { extractDocument } from "./extract.ts";
+import {
+  deleteAllAttachments, deleteAttachment, deleteSessionAttachments, readImageDataUri, saveImageAttachment,
+} from "./attachments.ts";
+
+/**
+ * What the composer sends alongside the typed words: an image's saved
+ * reference, or a document's already-extracted text.
+ *
+ * Mirrors the discriminated result `karen:chat-attach` returns, minus `ok` --
+ * this is exactly what a successful attach produced, held in the renderer
+ * until Send and handed back unchanged.
+ */
+type PendingAttachment =
+  | { kind: "image"; id: string; name: string; mime: string }
+  | { kind: "document"; name: string; text: string };
 import {
   deleteAllSessions, deleteSession, listSessions, loadSession, saveSession,
   sessionId, titleFrom, type Session,
@@ -77,6 +99,7 @@ import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, deleteRun, listRuns, readRun, readRunSource, runFootprint } from "../core/research/run.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
+import { setDatabaseKeys } from "../core/research/keys.ts";
 import {
   readResearchConfig, readsDocuments, readsLibrary, researchConfigPath, researchRoot, searches,
   serializeResearchConfig,
@@ -464,10 +487,56 @@ async function approve(tool: string, params: Record<string, unknown>): Promise<b
   return answer === "yes";
 }
 
-async function handleSend(text: string): Promise<void> {
+/**
+ * Every image ever attached anywhere in this conversation, read once and
+ * turned into a synchronous lookup `buildRequest` can call.
+ *
+ * Deliberately simple: a stateless HTTP API means the whole history is resent
+ * every turn, so a model asked about an image three messages back still needs
+ * it in this request -- there is no server-side memory of having "already
+ * seen" it. Re-reading a handful of small local files each turn is cheap
+ * enough not to be worth a cache.
+ */
+async function imageResolver(
+  sessionId: string,
+  messages: ChatMessage[],
+): Promise<(id: string) => string | undefined> {
+  const wanted = new Map<string, string>();
+  for (const m of messages) {
+    for (const a of m.attachments ?? []) {
+      if (a.kind === "image" && a.mime) wanted.set(a.id, a.mime);
+    }
+  }
+  const uris = new Map<string, string>();
+  for (const [id, mime] of wanted) {
+    const uri = await readImageDataUri(sessionId, id, mime);
+    if (uri) uris.set(id, uri);
+  }
+  return (id) => uris.get(id);
+}
+
+async function handleSend(text: string, attachments: PendingAttachment[] = []): Promise<void> {
   const settings = config.current;
   const conversation = currentSession();
-  conversation.messages_.push({ role: "user", content: text });
+
+  const documents = attachments.filter((a): a is Extract<PendingAttachment, { kind: "document" }> =>
+    a.kind === "document",
+  );
+  const images = attachments.filter((a): a is Extract<PendingAttachment, { kind: "image" }> => a.kind === "image");
+  /* Inlined as ordinary words in the message, wrapped exactly as
+     read_document wraps a file it reads off disk -- somebody else's writing,
+     dropped in for one question, is untrusted the same way a fetched page is:
+     read it and cite it, but an instruction inside it is not one to act on. */
+  const documentText = documents.map((d) => asUntrusted(d.name, d.text)).join("\n\n");
+  const content = documentText ? `${documentText}\n\n${text}`.trim() : text;
+
+  conversation.messages_.push({
+    role: "user",
+    content,
+    ...(images.length
+      ? { attachments: images.map((i): Attachment => ({ id: i.id, kind: "image", name: i.name, mime: i.mime })) }
+      : {}),
+  });
   if (conversation.messages_.length === 1) conversation.title = titleFrom(conversation.messages_);
 
   inFlight?.abort();
@@ -506,10 +575,13 @@ async function handleSend(text: string): Promise<void> {
      */
     const limit = managed?.contextTokens;
 
+    const resolveImage = await imageResolver(conversation.id, conversation.messages_);
+
     const result = await runTurn({
       registry,
       endpoint,
       messages: conversation.messages_,
+      resolveImage,
       /* The ONE place a user's persona is applied -- see EndpointResolution.
          The rules that follow it are not the user's to remove: they are what
          keeps a [1] from pointing at nothing. */
@@ -648,15 +720,95 @@ function levelsFor(
 }
 
 function installIpc(): void {
-  ipcMain.handle("karen:send", async (_e, text: string) => {
-    void handleSend(String(text ?? ""));
+  ipcMain.handle("karen:send", async (_e, text: string, attachments: unknown) => {
+    void handleSend(String(text ?? ""), Array.isArray(attachments) ? (attachments as PendingAttachment[]) : []);
   });
   ipcMain.handle("karen:abort", () => {
     inFlight?.abort();
   });
 
+  /**
+   * A dropped file, read and sized before anything is sent.
+   *
+   * One channel for both kinds, because the renderer does not know which it
+   * has until the bytes are sniffed -- see extractDocument, which is tried
+   * whenever the bytes do not sniff as one of sniffImage's formats.
+   */
+  ipcMain.handle("karen:chat-attach", async (_e, name: unknown, bytes: unknown) => {
+    const buffer = bytes as ArrayBuffer | Uint8Array | undefined;
+    if (!buffer) return { ok: false, error: "Nothing was dropped." };
+    const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    const fileName = String(name ?? "file");
+
+    if (sniffImage(view)) {
+      try {
+        const saved = await saveImageAttachment(currentSession().id, view);
+        /* A local model's own labels, when one is loaded. No local model
+           loaded means either a hosted endpoint is in use or nothing has
+           loaded yet -- both report no labels at all, and `hasVision`'s own
+           rule is that no label is a reason to WARN, never a reason to
+           silently assume yes: a hosted model's vision support is exactly as
+           unknown as a local custom-labelled one's. */
+        const loaded = runtime.chatModel();
+        const installed = loaded ? await runtime.installedModels().catch(() => []) : [];
+        const canSee = hasVision(installed.find((m) => m.id === loaded?.id)?.labels);
+        return {
+          ok: true,
+          kind: "image" as const,
+          id: saved.id,
+          name: fileName,
+          mime: saved.mime,
+          bytes: saved.bytes,
+          canSee,
+          ...(canSee
+            ? {}
+            : { warning: "This model is not marked as reading images. Karen will send it anyway." }),
+        };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message || "That image could not be read." };
+      }
+    }
+
+    const extracted = await extractDocument(fileName, view);
+    if (!extracted.ok || !extracted.text) {
+      return { ok: false, error: extracted.error, ...(extracted.needsPandoc ? { needsPandoc: true } : {}) };
+    }
+    /* The same estimate compaction uses, so "does this fit" answers the
+       question the model will actually be asked -- not a rougher one that
+       disagrees with it by the time the request is built. */
+    const tokens = estimateTokens([{ role: "user", content: extracted.text }]);
+    const limit = runtime.chatEndpoint()?.contextTokens;
+    if (limit && tokens + REPLY_TOKENS > limit) {
+      return {
+        ok: false,
+        error:
+          `${fileName} is ${tokens.toLocaleString()} tokens and this model holds ` +
+          `${limit.toLocaleString()}. Raise the context window in the model's settings, or drop a ` +
+          "shorter document.",
+      };
+    }
+    return {
+      ok: true,
+      kind: "document" as const,
+      name: fileName,
+      words: extracted.words ?? 0,
+      tokens,
+      text: extracted.text,
+    };
+  });
+
+  ipcMain.handle("karen:chat-attach-remove", async (_e, id: unknown) => {
+    await deleteAttachment(currentSession().id, String(id ?? "")).catch(() => {});
+  });
+
   ipcMain.handle("karen:new-session", async () => {
-    if (session_ && session_.messages_.length) await saveSession(session_).catch(() => {});
+    if (session_ && session_.messages_.length) {
+      await saveSession(session_).catch(() => {});
+    } else if (session_) {
+      // Never saved -- an attachment dropped in and then abandoned, with no
+      // message ever sent to keep it for. Nothing else will ever clean this up.
+      await deleteSessionAttachments(session_.id).catch(() => {});
+    }
     session_ = undefined;
     // A fresh conversation starts at [1] again. Nothing on screen refers to the
     // old numbers any more, and carrying them over would start every thread at
@@ -681,10 +833,12 @@ function installIpc(): void {
   });
   ipcMain.handle("karen:delete-session", async (_e, id: string) => {
     await deleteSession(String(id));
+    await deleteSessionAttachments(String(id)).catch(() => {});
     if (session_?.id === id) session_ = undefined;
   });
   ipcMain.handle("karen:delete-all-sessions", async () => {
     await deleteAllSessions();
+    await deleteAllAttachments().catch(() => {});
     session_ = undefined;
   });
 
@@ -1638,6 +1792,7 @@ async function main(): Promise<void> {
           ...(choice.message ? { message: choice.message } : {}),
           options: choice.options,
           ...(choice.multi ? { multi: true } : {}),
+          ...(choice.required ? { required: true } : {}),
         }),
       /* One dropdown per role. The renderer fetches the model catalogue
          itself -- it already has both halves, and shipping a list of every
@@ -1980,6 +2135,12 @@ async function main(): Promise<void> {
      its own copy of the reasoning above: that divergence is what let a chosen
      provider apply everywhere except the conversation. */
   resolveEndpoint = resolveLlm;
+
+  /* The one crossing between core's database clients and main's vault: core
+     asks for a key by name and gets a string or nothing, and never learns
+     there is a keyring. Read at request time via vault.get, never cached
+     here, so a key entered in Settings works on the very next search. */
+  setDatabaseKeys((name) => vault.get(name));
 
   installIpc();
   installMeetingIpc({

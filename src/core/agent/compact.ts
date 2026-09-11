@@ -23,6 +23,7 @@
  */
 
 import type { ChatMessage } from "../llm/chat.ts";
+import { IMAGE_TOKEN_ESTIMATE } from "../llm/attach.ts";
 
 /** Compact once the conversation passes this share of the window. */
 export const COMPACT_AT = 0.75;
@@ -98,13 +99,17 @@ export function estimateFixedTokens(tools: unknown): number {
 
 export function estimateTokens(messages: ChatMessage[]): number {
   let chars = 0;
+  let images = 0;
   for (const m of messages) {
     chars += (m.content ?? "").length;
     for (const call of m.tool_calls ?? []) {
       chars += call.function.name.length + call.function.arguments.length;
     }
+    /* `content` stays a string in a stored message -- see attach.ts -- so an
+       image never shows up in `chars` at all, and would otherwise look free. */
+    images += (m.attachments ?? []).filter((a) => a.kind === "image").length;
   }
-  return Math.ceil(chars / CHARS_PER_TOKEN) + messages.length * MESSAGE_OVERHEAD;
+  return Math.ceil(chars / CHARS_PER_TOKEN) + messages.length * MESSAGE_OVERHEAD + images * IMAGE_TOKEN_ESTIMATE;
 }
 
 /** True once the conversation is close enough to the window to act. */

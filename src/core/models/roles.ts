@@ -93,6 +93,19 @@ export function isForRole(labels: readonly string[] | undefined, role: MediaRole
 }
 
 /**
+ * Whether a chat model reads images, going by the same labels the catalogue's
+ * `vision` group already declares (`LABEL_GROUPS` in runtime/catalog.ts).
+ *
+ * Not a refusal when it comes back false: a `custom`-labelled model's labels
+ * are a guess (see CUSTOM_LABEL above), and a hosted provider reports no
+ * labels at all. Both are reasons to warn before sending an image, never a
+ * reason to block it -- the composer says so and sends anyway.
+ */
+export function hasVision(labels: readonly string[] | undefined): boolean {
+  return (labels ?? []).some((label) => label === "vision" || label === "omni");
+}
+
+/**
  * What a PROVIDER's model looks like it is for, from its name alone.
  *
  * Guessing is exactly what this module's header says not to do, and the

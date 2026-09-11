@@ -50,13 +50,36 @@ export interface TextBlock { kind: "text"; text: string }
 export interface ThinkingBlock { kind: "thinking"; text: string }
 export type Block = TextBlock | ThinkingBlock;
 
-export interface UserItem { id: string; kind: "user"; text: string }
+export interface UserItem {
+  id: string;
+  kind: "user";
+  text: string;
+  /** What was attached, for the sent bubble -- name and kind only, never the bytes or the extracted text. */
+  attachments?: { kind: "image" | "document"; name: string }[];
+}
+
+/**
+ * One reply's speed. Mirrors MessageStats in core/llm/speed.ts by hand, for
+ * the reason the whole file does: the renderer cannot import across the
+ * sandbox boundary.
+ */
+export interface MessageStats {
+  promptTokens: number;
+  completionTokens: number;
+  tokensPerSecond?: number;
+  promptPerSecond?: number;
+  ttftMs?: number;
+  totalMs: number;
+  measured: boolean;
+}
 
 export interface AssistantItem {
   id: string;
   kind: "assistant";
   blocks: Block[];
   streaming?: boolean;
+  /** Absent while streaming; filled in when the "stats" event for this reply arrives. */
+  stats?: MessageStats;
 }
 
 export interface ToolItem {
@@ -361,7 +384,7 @@ export interface WhisperSnapshot {
 export interface AgentEvent {
   type:
     | "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error"
-    | "compacted" | "notice" | "done" | "error";
+    | "compacted" | "notice" | "done" | "error" | "stats";
   text?: string;
   /** For text: "thinking" is the model's reasoning, anything else is the answer. */
   kind?: "text" | "thinking";
@@ -369,6 +392,8 @@ export interface AgentEvent {
   tool?: string;
   params?: Record<string, unknown>;
   result?: string;
+  /** For "stats": how fast the reply that just finished was. One per model call. */
+  stats?: MessageStats;
 }
 
 /**
@@ -438,9 +463,25 @@ export interface ActiveRun {
   note?: string;
 }
 
+/**
+ * A dropped image or document, held in the composer between the drop and
+ * Send. Mirrors the discriminated shape `karen:chat-attach` resolves to.
+ */
+export type PendingAttachment =
+  | { kind: "image"; id: string; name: string; mime: string; bytes: number; canSee: boolean; warning?: string }
+  | { kind: "document"; name: string; words: number; tokens: number; text: string };
+
+export type ChatAttachResult =
+  | ({ ok: true } & PendingAttachment)
+  | { ok: false; error?: string; needsPandoc?: boolean };
+
 export interface KarenApi {
-  send(text: string): Promise<void>;
+  send(text: string, attachments?: PendingAttachment[]): Promise<void>;
   abort(): Promise<void>;
+  /** A dropped image or document, read and sized before Send is pressed. */
+  chatAttach(name: string, bytes: ArrayBuffer): Promise<ChatAttachResult>;
+  /** Removes a not-yet-sent image's file. A no-op for a document (nothing was saved). */
+  chatAttachRemove(id: string): Promise<void>;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   onDocument(cb: (doc: DocumentUpdate) => void): () => void;
   revealDocument(path: string): Promise<void>;
