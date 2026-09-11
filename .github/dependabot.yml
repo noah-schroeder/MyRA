@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Actions only, not npm: runtime dependencies here are a deliberate
+  # decision (see CLAUDE.md's Conventions), not something to auto-bump.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
