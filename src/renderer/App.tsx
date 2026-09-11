@@ -493,6 +493,7 @@ export function App() {
         <div className="rail-brand">
           <span className="rail-mark" aria-hidden="true" />
           MyRA
+          <span className="pill">beta</span>
         </div>
 
         <nav className="rail-nav" aria-label="Sections">
