@@ -12,9 +12,9 @@ both, merges them, and writes a report where **every claim is checked against th
 transcript**. Anything it cannot source is filed under `## Unverified` rather
 than stated.
 
-**Research.** Searches OpenAlex and arXiv directly, resolves open-access full
-text through Semantic Scholar,
-resolves open-access PDFs, and can run a full plan → search → read → verify →
+**Research.** Searches OpenAlex and arXiv directly — and PubMed and CORE once you
+add your own free key for each — resolves open-access full text through
+Semantic Scholar, and can run a full plan → search → read → verify →
 synthesise pipeline that produces a cited report.
 
 **Projects.** A folder for one piece of work: put conversations, meetings,
@@ -94,8 +94,11 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   your notes and your instructions — to whichever model the bar names, and
   nothing else. A local model means it stays here. The prompt preview shows
   exactly what would be sent, and showing it sends nothing.
-- **Scholarly searches** reach OpenAlex and arXiv. Semantic Scholar is asked only
-  whether a paper already found has an open-access PDF.
+- **Scholarly searches** reach OpenAlex and arXiv, which need no key. PubMed and
+  CORE are off until you add your own free key for each in Settings → Database
+  keys; once added, a search that includes them sends your search terms and
+  that key. Semantic Scholar is asked only whether a paper already found has an
+  open-access PDF.
 - **Pages you ask it to read** see a request from this machine.
 - **Looking for a model** reaches Hugging Face, and only when you press
   something: Search sends what you typed, opening a result asks for that
@@ -133,7 +136,7 @@ Electron main                       Renderer (sandboxed)
 │   ├─ images     prompts · sizes · where a picture is filed
 │   ├─ library    Zotero: local API, then the database file
 │   ├─ meetings   merge · prompts · verify
-│   ├─ research   OpenAlex · arXiv · S2 · hydrate · pdf
+│   ├─ research   OpenAlex · arXiv · PubMed · CORE · S2 · hydrate · pdf
 │   ├─ documents  pandoc argv · path jail
 │   └─ llm        one HTTP client, OpenAI-shaped
 └─ vendor/     pandoc, pdftotext — bundled per platform
