@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { researchRoot } from "./config.ts";
+import { databaseById, DEFAULT_DATABASES } from "./databases.ts";
 import type { SourceRecord } from "./sources.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../paths.ts";
 
@@ -493,6 +494,8 @@ export interface RunDetail {
   summary: string;
   counts: Awaited<ReturnType<ResearchRun["counts"]>>;
   queries: string[];
+  /** Which databases this run searched, by label, so the run answers "did it search PubMed?" */
+  databases: string[];
   searches: RunSearch[];
   screened: RunScreened[];
   sources: SourceRecord[];
@@ -509,7 +512,7 @@ export interface RunDetail {
 export async function readRun(id: string, root = researchRoot()): Promise<RunDetail> {
   const run = await ResearchRun.open(id, root);
   const question = await run.readJson<{ question?: string; startedAt?: string }>("question.json");
-  const plan = await run.readJson<{ queries?: string[] }>("plan.json");
+  const plan = await run.readJson<{ queries?: string[]; databases?: string[] }>("plan.json");
 
   // Screening decisions are keyed by candidate id and carry only a reason, so
   // join the candidate back on: "excluded — measures attitudes" is only useful
@@ -558,6 +561,8 @@ export async function readRun(id: string, root = researchRoot()): Promise<RunDet
     summary: await run.summary(),
     counts: await run.counts(),
     queries: plan?.queries ?? [],
+    databases: (plan?.databases?.length ? plan.databases : [...DEFAULT_DATABASES])
+      .map((id) => databaseById(id)?.label ?? id),
     searches: await run.readJsonl<RunSearch>("search-log.jsonl"),
     screened,
     sources: await run.sources(),

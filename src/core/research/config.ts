@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { isCollectionKey } from "../library/zotero.ts";
+import { DATABASES } from "./databases.ts";
 
 /** OpenAlex's "polite pool" is faster and more generously rate limited. */
 export const OPENALEX_MAILTO = process.env["KAREN_OPENALEX_MAILTO"] ?? "";
@@ -101,6 +102,11 @@ export interface ResearchConfig {
    * when a silently blank control would look like a lost setting.
    */
   collectionName?: string | undefined;
+  /**
+   * Which databases the Quick rung and Look up query, by id. Empty or absent
+   * means the keyless defaults -- see `DEFAULT_DATABASES` in databases.ts.
+   */
+  databases?: string[] | undefined;
 }
 
 /**
@@ -171,6 +177,20 @@ function collectionFields(key: unknown, name: unknown): Record<string, string> {
   return { collection: key, collectionName: label };
 }
 
+/**
+ * Which stored ids are real databases, in the order they were stored.
+ *
+ * Checked against DATABASES rather than trusted, because this file is what a
+ * hand-edited research.json reaches first -- the same reason `collectionFields`
+ * shape-checks its own two fields here as well as at the client.
+ */
+function databaseFields(value: unknown): Record<string, string[]> {
+  if (!Array.isArray(value)) return {};
+  const known = new Set<string>(DATABASES.map((d) => d.id));
+  const ids = value.filter((v): v is string => typeof v === "string" && known.has(v));
+  return ids.length ? { databases: [...new Set(ids)] } : {};
+}
+
 export function readResearchConfig(path = researchConfigPath()): ResearchConfig {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ResearchConfig> & { v?: unknown };
@@ -187,6 +207,7 @@ export function readResearchConfig(path = researchConfigPath()): ResearchConfig 
           : FALLBACK_CATEGORY,
       ...(typeof parsed.timeRange === "string" ? { timeRange: parsed.timeRange } : {}),
       ...collectionFields(parsed.collection, parsed.collectionName),
+      ...databaseFields(parsed.databases),
     };
   } catch {
     // No file yet, or corrupt: behave exactly as before the GUI existed rather
@@ -219,6 +240,7 @@ export function serializeResearchConfig(next: unknown): Record<string, unknown> 
         : FALLBACK_CATEGORY,
     ...(typeof cfg.timeRange === "string" ? { timeRange: cfg.timeRange } : {}),
     ...collectionFields(cfg.collection, cfg.collectionName),
+    ...databaseFields(cfg.databases),
   };
 }
 

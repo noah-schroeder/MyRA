@@ -10,10 +10,11 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  applyRoleAnswer, cleanOptions, DEPTH_PRESETS, DEFAULT_DEPTH, depthFromLabel, depthFromText,
-  depthLabel, embedderChoice, EMBEDDER_SLOT, joinAnswers, NO_EMBEDDER, ROLE_SLOTS,
-  SAME_MODEL_QUESTION, SINGLE_SLOT, slotAnswers, wantsSeparateModels,
+  applyRoleAnswer, cleanOptions, databaseChoice, databasesFromAnswer, DEPTH_PRESETS, DEFAULT_DEPTH,
+  depthFromLabel, depthFromText, depthLabel, embedderChoice, EMBEDDER_SLOT, JOIN, joinAnswers,
+  NO_EMBEDDER, ROLE_SLOTS, SAME_MODEL_QUESTION, SINGLE_SLOT, slotAnswers, wantsSeparateModels,
 } from "../src/core/research/questions.ts";
+import { DATABASES } from "../src/core/research/databases.ts";
 
 describe("options a model proposed", () => {
   it("keeps concrete answers, in order", () => {
@@ -178,6 +179,29 @@ describe("what the model dialog sends back", () => {
   it("sends an untouched slot as empty rather than omitting it", () => {
     // Which is how "None" clears an embedder that was configured before.
     assert.deepEqual(slotAnswers([EMBEDDER_SLOT], {}), { embedder: "" });
+  });
+});
+
+describe("which databases to search", () => {
+  it("is required, and offers only what was passed in", () => {
+    const usable = DATABASES.filter((d) => d.id === "openalex" || d.id === "pubmed");
+    const choice = databaseChoice(usable);
+    assert.equal(choice.required, true);
+    assert.equal(choice.multi, true);
+    assert.equal(choice.options.length, 2);
+    assert.match(choice.options[0]!, /^OpenAlex — /);
+    assert.match(choice.options[1]!, /^PubMed — /);
+  });
+
+  it("parses several picks back to their ids", () => {
+    const usable = DATABASES.filter((d) => d.id === "openalex" || d.id === "pubmed" || d.id === "core");
+    const { options } = databaseChoice(usable);
+    const answer = [options[0], options[2]].join(JOIN);
+    assert.deepEqual(databasesFromAnswer(answer), ["openalex", "core"]);
+  });
+
+  it("drops anything that does not match a known label", () => {
+    assert.deepEqual(databasesFromAnswer(`OpenAlex — a description${JOIN}Not a real database`), ["openalex"]);
   });
 });
 

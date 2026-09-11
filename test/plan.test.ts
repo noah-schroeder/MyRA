@@ -25,6 +25,7 @@ const plan: Plan = {
     exclude: ["animal studies"],
   },
   category: "science",
+  databases: ["openalex", "arxiv"],
   queries: ["working memory training transfer", "n-back training far transfer"],
   pages: 2,
   screenTop: 150,
@@ -209,6 +210,25 @@ test("snowball rounds accept zero and are clamped at two", () => {
 
   const bad = renderPlan(plan).replace("snowball: 0", "snowball: -1");
   assert.throws(() => parsePlan(bad, plan), (e: Error) => /0 or more/.test(e.message));
+});
+
+test("which databases were chosen survives a render and parse round trip", () => {
+  // Stored by label in the markdown, the way category already is -- a person
+  // reads this document, so "OpenAlex, PubMed" beats "openalex, pubmed".
+  const rendered = renderPlan(plan);
+  assert.match(rendered, /databases: OpenAlex, arXiv/);
+  const back = parsePlan(rendered, plan);
+  assert.deepEqual(back.databases, ["openalex", "arxiv"]);
+});
+
+test("an edited databases line is honoured, and an unrecognised name is dropped", () => {
+  const edited = renderPlan(plan).replace("databases: OpenAlex, arXiv", "databases: PubMed");
+  assert.deepEqual(parsePlan(edited, plan).databases, ["pubmed"]);
+
+  // A name that is not one of the four (a typo, or an old label) falls back
+  // to what the plan already had rather than searching nothing.
+  const nonsense = renderPlan(plan).replace("databases: OpenAlex, arXiv", "databases: Google Scholar");
+  assert.deepEqual(parsePlan(nonsense, plan).databases, plan.databases);
 });
 
 test("the scoping model's options reach the question, cleaned", () => {

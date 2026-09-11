@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { exactly } from "../../core/research/ladder.ts";
-import { databaseLabel } from "../../core/research/databases.ts";
+import { exactly, searches } from "../../core/research/ladder.ts";
+import { DATABASES, DEFAULT_DATABASES, databaseLabel } from "../../core/research/databases.ts";
 import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 
 /**
@@ -43,17 +43,17 @@ interface Rung { value: ResearchMode; label: string; hint: string }
 const LOCAL: Rung[] = [
   { value: "off", label: "Off", hint: "No tools at all. The model answers from what it knows, and cannot search, open a URL, or touch a file." },
   { value: "assistant", label: "Documents", hint: "The model can read and write in your documents folder. It still cannot reach the network." },
-  { value: "library", label: "Library", hint: "The model can also search your own Zotero library — your collected papers, on this machine. Still no network, and Zotero must be open." },
+  { value: "library", label: "Zotero", hint: "The model can also search your own Zotero library — your collected papers, on this machine. Still no network, and Zotero must be open." },
 ];
 
 const WEB: Rung[] = [
-  { value: "web", label: "Quick", hint: "The model searches OpenAlex and arXiv, and cites what it used. Seconds." },
+  { value: "web", label: "Quick", hint: "The model searches the databases chosen below, and cites what it used. Seconds." },
   { value: "deep", label: "Deep", hint: "Plan, search, read, verify and synthesise a cited report. Minutes." },
 ];
 
 const LOCAL_HINT = "Nothing leaves this machine in these three. Zotero answers on loopback, so a library search is no more of an egress than opening a file.";
-const WEB_HINT = "These reach the internet: OpenAlex, arXiv, and the pages they point at.";
-const LOOKUP_HINT = "Search OpenAlex and arXiv yourself. No model, no waiting, nothing logged.";
+const WEB_HINT = "These reach the internet: the databases chosen below, and the pages they point at.";
+const LOOKUP_HINT = "Search the databases chosen below yourself. No model, no waiting, nothing logged.";
 
 /* Scholarly is the only body of literature this build can search, so it is not
    offered as a choice; it is stored so the setting survives a future one. */
@@ -148,8 +148,8 @@ export function ResearchBar({
             * which is not the web. They search two scholarly indexes, and
             * naming them is the difference between "it looked online" and
             * something a researcher can judge the coverage of. */}
-          <span className="mode-ring-label" title={`Searches ${databaseLabel()}`}>
-            {databaseLabel()}
+          <span className="mode-ring-label" title={`Searches ${databaseLabel(config.databases)}`}>
+            {databaseLabel(config.databases)}
           </span>
           <div className="mode-ring-row" role="group" aria-label="Web: these reach the internet">
             {WEB.map(rung)}
@@ -188,6 +188,98 @@ export function ResearchBar({
           }
         />
       ) : null}
+
+      {/* Shared by Quick, Deep and Look up -- all three search the literature,
+          and it is one setting for what "the literature" means here, not
+          three. Not shown at Off/Documents/Library: those rungs do not
+          search databases at all. */}
+      {(searches(config.mode) || lookup) && !exactly(config.mode, "library") ? (
+        <DatabasePicker chosen={config.databases ?? []} onChoose={(databases) => apply({ databases })} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Which databases Quick, Deep and Look up search.
+ *
+ * A database with no key is shown, disabled, rather than hidden -- the app
+ * removed a permanently-disabled "general web" category once already because
+ * a control nobody can ever use reads as broken, and the fix there was the
+ * opposite of hiding it: it named what would fill the gap and where. This is
+ * the same call, in the other direction, for a control that CAN be used, just
+ * not yet.
+ */
+function DatabasePicker({
+  chosen,
+  onChoose,
+}: {
+  chosen: string[];
+  onChoose: (ids: string[]) => void;
+}) {
+  const [present, setPresent] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    void window.karen.secretsBackend().then((v) => setPresent(v.present ?? {}));
+  }, []);
+
+  const active = chosen.length ? chosen : [...DEFAULT_DATABASES];
+
+  const toggle = (id: string, usable: boolean): void => {
+    if (!usable) return;
+    const on = active.includes(id);
+    // Refused rather than silently falling back to the defaults: a control
+    // that changes what it searches without being asked is exactly what the
+    // Zotero picker's own stored-but-missing-collection handling exists to
+    // avoid, in the other direction.
+    if (on && active.length <= 1) return;
+    onChoose(on ? active.filter((x) => x !== id) : [...active, id]);
+  };
+
+  return (
+    <div className="database-ask">
+      <span className="database-ask-label">Databases</span>
+      {/* Built like a mode ring -- the same rounded pill row the rungs above
+          use -- because this is the same family of control (a thing to
+          switch on or off) even though it is not a privacy boundary and so
+          borrows neither the local ring's green nor the web ring's amber. */}
+      <div className="database-row" role="group" aria-label="Which databases to search">
+        {DATABASES.map((d) => {
+          const usable = !d.secret || Boolean(present[d.secret]);
+          const on = active.includes(d.id) && usable;
+          // The last ticked pill locks rather than merely refusing the
+          // click -- a control that could be switched off down to nothing
+          // should not look clickable at the moment it is not.
+          const locked = on && active.length <= 1;
+          return (
+            <button
+              key={d.id}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              disabled={locked}
+              title={
+                !usable
+                  ? "Needs a free API key — click to get one, or add it in Settings → Database keys"
+                  : locked
+                    ? "At least one database must stay chosen"
+                    : d.covers
+              }
+              className={usable ? (on ? "mode active" : "mode") : "mode needs-key"}
+              onClick={() =>
+                usable ? toggle(d.id, usable) : void window.karen.openExternal(d.signup ?? "")
+              }
+            >
+              {d.label}
+              {!usable ? (
+                <span className="database-lock" aria-hidden="true">
+                  🔒
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

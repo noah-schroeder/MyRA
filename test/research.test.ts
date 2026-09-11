@@ -276,6 +276,28 @@ test("clearing the collection back to the whole library is expressible", () => {
   assert.equal(readResearchConfig(configFile(written)).collection, undefined);
 });
 
+test("the chosen databases survive a round trip", () => {
+  const cfg = readResearchConfig(
+    configFile(serializeResearchConfig({ mode: "web", category: "science", databases: ["pubmed", "core"] })),
+  );
+  assert.deepEqual(cfg.databases, ["pubmed", "core"]);
+});
+
+test("an unrecognised database id is coerced away, not carried forward", () => {
+  // Rebuilt field by field rather than spread, like every other field here --
+  // a hand-edited research.json reaches this reader first.
+  const cfg = readResearchConfig(
+    configFile({ v: 2, mode: "web", category: "science", databases: ["openalex", "not-a-database", 5] }),
+  );
+  assert.deepEqual(cfg.databases, ["openalex"]);
+});
+
+test("an empty or absent databases field is simply absent, not an empty array", () => {
+  const cfg = readResearchConfig(configFile({ v: 2, mode: "web", category: "science", databases: [] }));
+  assert.equal("databases" in cfg, false);
+  assert.equal(readResearchConfig(configFile({ v: 2, mode: "web", category: "science" })).databases, undefined);
+});
+
 test("searches() is false for every mode that has no network tool", () => {
   assert.equal(searches("off"), false);
   // The one that matters: `mode !== "off"` was true here, which would have
@@ -536,6 +558,7 @@ test("a multi-category selection survives a round trip through the plan document
   const plan = {
     scope: { question: "q", subQuestions: ["a"], include: ["i"], exclude: ["e"] },
     category: "science,news",
+    databases: ["openalex", "arxiv"],
     queries: ["one"],
     pages: 2,
     screenTop: 50,
@@ -685,5 +708,13 @@ test("the bar names exactly the databases the search actually queries", () => {
      drop one and leave it advertised, and this fails. */
   const scholarly = providers().filter((p) => p.scholarly).map((p) => p.label);
   assert.deepEqual([...scholarly].sort(), [...SCHOLARLY_DATABASES].sort());
-  assert.equal(databaseLabel(), "OpenAlex · arXiv");
+  // Named with nothing chosen: every database this build knows about.
+  assert.equal(databaseLabel(), "OpenAlex · arXiv · PubMed · CORE");
+  // Named with a choice: only the ones actually queried, in DATABASES' order
+  // regardless of the order they were chosen in.
+  assert.equal(databaseLabel(["core", "openalex"]), "OpenAlex · CORE");
+  assert.equal(databaseLabel(["pubmed"]), "PubMed");
+  // An empty or unrecognised choice falls back to naming everything, the same
+  // as no choice at all -- there is no "nothing" to print truthfully here.
+  assert.equal(databaseLabel([]), databaseLabel());
 });

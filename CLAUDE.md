@@ -88,6 +88,29 @@ array; a gate spelled `mode !== "off"` is the bug this replaced. Two gates use `
 instead, because Quick and Deep are exclusive rather than cumulative. The ladder holds no
 `node:fs` import so the renderer can share it.
 
+### Scholarly search has no container
+
+v1 routed every query, scholarly or general, through a SearXNG instance the user had to
+install and run — the heaviest prerequisite in the project, and the weakest link for
+academic work: SearXNG flattens every result to `{url,title,content,engine}`, throwing
+away the citation graph and the open-access PDF links deep research runs on. Scholarly
+search now goes straight to the APIs: OpenAlex and arXiv need no key, PubMed and CORE do.
+[databases.ts](src/core/research/databases.ts) is the single list of the four, has no
+imports so the renderer can read it too, and a test pins it against the provider list
+actually queried — a database added or dropped shows up on the bar or the suite fails.
+[providers.ts](src/core/research/providers.ts)'s `resolveProviders` turns "these four are
+chosen" into "these of them are actually usable right now".
+
+A keyed provider ([coreApi.ts](src/core/research/coreApi.ts),
+[pubmed.ts](src/core/research/pubmed.ts)) asks
+[keys.ts](src/core/research/keys.ts) for its secret rather than reading a keyring
+directly — `src/core/` must never import `electron`, so main installs a reader thunk at
+startup, the same shape `setEndpointResolver` already uses. No reader installed means no
+key, never a request with an empty `Authorization` header read back as an outage; tests
+that never call `setDatabaseKeys` get that behaviour for free. A key is read at request
+time, never cached in `keys.ts` itself, so one entered in Settings works on the very next
+search with no restart.
+
 ### The deep-research pipeline
 
 [pipeline.ts](src/core/research/pipeline.ts) orchestrates eleven stages

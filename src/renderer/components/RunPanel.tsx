@@ -281,6 +281,9 @@ function Overview({ detail, live }: { detail: RunDetail; live?: ActiveRun | null
           " · complete"
         )}
       </p>
+      {detail.databases.length ? (
+        <p className="run-sub">Searched: {detail.databases.join(", ")}</p>
+      ) : null}
 
       {/* PRISMA-lite. Every number is the length of a file the run wrote, so
           none of it is bookkeeping that could disagree with what happened. */}

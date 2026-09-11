@@ -236,6 +236,8 @@ export class SecretVault {
       embedKey: has("embedKey"),
       bridgeToken: has("bridgeToken"),
       hfToken: has("hfToken"),
+      ncbiKey: has("ncbiKey"),
+      coreKey: has("coreKey"),
     };
   }
 

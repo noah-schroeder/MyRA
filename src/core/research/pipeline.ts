@@ -13,7 +13,9 @@
  */
 
 import { effectiveCategory, readResearchConfig } from "./config.ts";
-import { isScholarlyCategory, search, workToHit } from "./providers.ts";
+import { DATABASES, DEFAULT_DATABASES, type DatabaseInfo } from "./databases.ts";
+import { hasDatabaseKey } from "./keys.ts";
+import { isScholarlyCategory, resolveProviders, search, workToHit } from "./providers.ts";
 import { dedupe, type SearchHit } from "./types.ts";
 import { canonicalUrl } from "./html.ts";
 import { fromWork, hydrateHits, type Hydrated } from "./hydrate.ts";
@@ -35,9 +37,9 @@ import { coCitationThreshold, coCitedWorks } from "./snowball.ts";
 import { toBibtex, toCslJson } from "./export.ts";
 import { readRoleConfig, resolveRoles, writeRoleConfig } from "./roles.ts";
 import {
-  applyRoleAnswer, defaultDepth, DEPTH_PRESETS, depthFromLabel, depthFromText, depthLabel,
-  embedderChoice, EMBEDDER_SLOT, ROLE_SLOTS, SAME_MODEL_QUESTION, SINGLE_SLOT,
-  wantsSeparateModels, type Choice, type RoleSlot,
+  applyRoleAnswer, databaseChoice, databasesFromAnswer, defaultDepth, DEPTH_PRESETS,
+  depthFromLabel, depthFromText, depthLabel, embedderChoice, EMBEDDER_SLOT, ROLE_SLOTS,
+  SAME_MODEL_QUESTION, SINGLE_SLOT, wantsSeparateModels, type Choice, type RoleSlot,
 } from "./questions.ts";
 import type { ResearchRun } from "./run.ts";
 
@@ -246,6 +248,38 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
 
     /*
+     * Which databases, asked here because this is where the answer lives --
+     * on the plan, not the scope (see Scope.include, which a database name
+     * must never land in: it is fed verbatim to the screener).
+     *
+     * Only databases with a key already entered are offered, and the answer
+     * is required: a database nobody can search must not appear in a
+     * question the run cannot get past, and a run that searched nothing
+     * because every box was left unticked would look like a bug forty
+     * minutes later rather than an unanswered question.
+     */
+    const usable: DatabaseInfo[] = [];
+    for (const d of DATABASES) {
+      if (!d.secret || (await hasDatabaseKey(d.secret))) usable.push(d);
+    }
+    const storedDatabases = readResearchConfig().databases;
+    let chosenDatabases: string[] = storedDatabases?.length ? storedDatabases : [...DEFAULT_DATABASES];
+    if (ui.choose && usable.length) {
+      const answer = await ui.choose(databaseChoice(usable));
+      if (answer === undefined) throw new CancelledError("plan not approved");
+      const picked = databasesFromAnswer(answer);
+      if (picked.length) chosenDatabases = picked;
+    }
+    // Never propose a database with no key, however it was chosen before.
+    chosenDatabases = chosenDatabases.filter((id) => usable.some((d) => d.id === id));
+    // The keyless pair, not merely "the first usable one" -- DEFAULT_DATABASES
+    // exists precisely to be the sensible fallback when every previously
+    // chosen database has since lost its key (e.g. a stored choice of just
+    // "pubmed" whose ncbiKey was removed), and it is always reachable since
+    // OpenAlex and arXiv need no key at all.
+    if (chosenDatabases.length === 0) chosenDatabases = [...DEFAULT_DATABASES];
+
+    /*
      * And who does the work, always asked, always last.
      *
      * The self-review warning existed already, as a blockquote inside a
@@ -278,6 +312,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     const proposed: Plan = {
       scope,
       category: opts.category ?? effectiveCategory(undefined, "science"),
+      databases: chosenDatabases,
       queries,
       pages: depth.pages,
       screenTop: depth.screenTop,
@@ -311,6 +346,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   checkpoint("discover");
   if (!run.isDone("discover")) {
+    const { providers: chosenProviders, unavailable } = await resolveProviders(plan.databases);
+    say(`searching ${chosenProviders.map((p) => p.label).join(", ")}`);
+    // A run whose recall silently halved because a key went missing between
+    // the plan step and now must say so in its own log -- the same reason a
+    // dead search backend is logged rather than swallowed, below.
+    for (const label of unavailable) say(`${label} skipped — no API key is stored for it`);
     const seen = new Set<string>();
     /*
      * Which query found each hit, carried alongside it.
@@ -329,6 +370,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
           const outcome = await search(query, {
             categories: plan.category,
             page,
+            providers: chosenProviders,
             ...(opts.signal ? { signal: opts.signal } : {}),
           });
           /* A run that swept half the literature because a backend was down

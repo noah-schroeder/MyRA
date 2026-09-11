@@ -20,10 +20,12 @@
  */
 export type SecretName =
   | "llmKey" | "transcriptionKey" | "embedKey" | "bridgeToken" | "hfToken"
+  | "ncbiKey" | "coreKey"
   | `provider:${string}`;
 
 const NAMED: readonly string[] = [
   "llmKey", "transcriptionKey", "embedKey", "bridgeToken", "hfToken",
+  "ncbiKey", "coreKey",
 ];
 
 /**

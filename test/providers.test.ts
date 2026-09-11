@@ -179,7 +179,7 @@ test("only a known secret name may be written to the vault", async () => {
   /* The type is a compile-time promise; this handler takes a name off the IPC
      wire, where `as SecretName` asserts rather than checks. */
   const { isSecretName } = await import("../src/core/secretNames.ts");
-  for (const good of ["llmKey", "hfToken", "provider:pab12", "provider:p-1_2"]) {
+  for (const good of ["llmKey", "hfToken", "ncbiKey", "coreKey", "provider:pab12", "provider:p-1_2"]) {
     assert.equal(isSecretName(good), true, good);
   }
   for (const bad of ["", "provider:", "provider:../../etc", "provider:a b", "nonsense",

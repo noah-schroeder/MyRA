@@ -77,6 +77,20 @@ test("every backend failing is an error, not an empty result set", async () => {
   );
 });
 
+test("an explicitly empty provider list is an empty result, not a thrown error", async () => {
+  // resolveProviders returns [] with its own specific reason (e.g. "PubMed
+  // skipped — no API key is stored for it") when every chosen database has
+  // lost its key. Throwing a generic NoProviderError here discarded that
+  // reason before the caller's own message could ever be built -- only an
+  // OMITTED providers option (nothing was ever chosen) should throw.
+  const out = await search("q", { categories: "science", providers: [] });
+  assert.deepEqual(out, { hits: [], failures: [] });
+});
+
+test("no providers option at all still throws -- there is genuinely nothing configured", async () => {
+  await assert.rejects(() => search("q", { categories: "general" }), NoProviderError);
+});
+
 /* ------------------------------------------------------------ arXiv query -- */
 
 /*

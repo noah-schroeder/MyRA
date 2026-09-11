@@ -7,16 +7,22 @@
  * link: SearXNG flattens every result to {url,title,content,engine}, throwing
  * away the citation graph and the OA PDF links that deep research runs on.
  *
- * So scholarly search now goes straight to the APIs, which are keyless, need no
- * container, and return the structure intact. General web search becomes an
- * optional provider that is simply absent until the user configures one.
+ * So scholarly search now goes straight to the APIs. Two of the four --
+ * OpenAlex and arXiv -- are keyless and need no container; PubMed and CORE
+ * need a key the user supplies themselves (see keys.ts), so `resolveProviders`
+ * below is what turns "these four are chosen" into "these of them are
+ * actually usable right now". General web search remains an optional provider
+ * that is simply absent until the user configures one.
  */
 
 import { arxivSearch } from "./arxiv.ts";
-import { SCHOLARLY_DATABASES } from "./databases.ts";
+import { coreSearch, type CoreRecord } from "./coreApi.ts";
+import { DATABASES, DEFAULT_DATABASES, databaseById } from "./databases.ts";
+import { hasDatabaseKey } from "./keys.ts";
 import {
   abstractFromInverted, authorsOf, oaUrl, openAlexSearch, venueOf, type Work,
 } from "./openalex.ts";
+import { pubmedSearch, type PubmedRecord } from "./pubmed.ts";
 import {
   NoProviderError,
   dedupe,
@@ -79,7 +85,7 @@ export function isScholarlyCategory(category: string | undefined): boolean {
  */
 export function workToHit(w: Work): SearchHit | undefined {
   const url =
-    (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi\.org\//, "")}` : undefined) ??
+    (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")}` : undefined) ??
     oaUrl(w) ??
     w.id;
   if (!url || !w.title) return undefined;
@@ -101,9 +107,9 @@ export function workToHit(w: Work): SearchHit | undefined {
 
 export const openAlexProvider: SearchProvider = {
   id: "openalex",
-  /* Taken from the list the research bar prints, so the name on screen is the
-     name of the thing that was actually queried. */
-  label: SCHOLARLY_DATABASES[0],
+  /* Taken from the shared table, so the name on screen is the name of the
+     thing that was actually queried. */
+  label: databaseById("openalex")!.label,
   scholarly: true,
   timeRange: true,
   async search(query, opts = {}) {
@@ -114,7 +120,7 @@ export const openAlexProvider: SearchProvider = {
 
 export const arxivProvider: SearchProvider = {
   id: "arxiv",
-  label: SCHOLARLY_DATABASES[1],
+  label: databaseById("arxiv")!.label,
   scholarly: true,
   // The Atom API sorts by date but does not filter by it.
   timeRange: false,
@@ -130,18 +136,93 @@ export const arxivProvider: SearchProvider = {
   },
 };
 
+/**
+ * PubMed's URL preference is DOI first, same reasoning as `workToHit`: a
+ * SearchHit is flat, so its URL is the only thing hydration can identify the
+ * work by, and a non-DOI URL sends it to a fuzzy title match that can miss.
+ */
+export function pubmedToHit(r: PubmedRecord): SearchHit | undefined {
+  const url = r.doi
+    ? `https://doi.org/${r.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")}`
+    : r.pmid
+      ? `https://pubmed.ncbi.nlm.nih.gov/${r.pmid}/`
+      : undefined;
+  if (!url || !r.title) return undefined;
+  const authors = r.authors;
+  const byline = authors.length
+    ? `${authors.slice(0, 3).join(", ")}${authors.length > 3 ? " et al." : ""}. `
+    : "";
+  return {
+    url,
+    title: r.title,
+    content: `${byline}${r.venue ? `${r.venue}. ` : ""}${r.abstract}`.trim(),
+    engine: "pubmed",
+    publishedDate: r.year ? `${r.year}-01-01` : null,
+  };
+}
+
+export const pubmedProvider: SearchProvider = {
+  id: "pubmed",
+  label: databaseById("pubmed")!.label,
+  scholarly: true,
+  timeRange: true,
+  async search(query, opts = {}) {
+    const records = await pubmedSearch(query, PER_PROVIDER, opts.signal, opts.page ?? 1);
+    return records.map(pubmedToHit).filter((h): h is SearchHit => h !== undefined);
+  },
+};
+
+/**
+ * CORE's URL preference: DOI, then its own readable copy, then its landing
+ * page -- `downloadUrl` is CORE's whole value here (an open-access full text
+ * OpenAlex often only knows the existence of), so it is worth preferring over
+ * a bare id when there is no DOI to identify the work by.
+ */
+export function coreToHit(r: CoreRecord): SearchHit | undefined {
+  const url = r.doi
+    ? `https://doi.org/${r.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")}`
+    : r.downloadUrl || (r.id ? `https://core.ac.uk/works/${r.id}` : undefined);
+  if (!url || !r.title) return undefined;
+  const authors = r.authors;
+  const byline = authors.length
+    ? `${authors.slice(0, 3).join(", ")}${authors.length > 3 ? " et al." : ""}. `
+    : "";
+  return {
+    url,
+    title: r.title,
+    content: `${byline}${r.publisher ? `${r.publisher}. ` : ""}${r.abstract}`.trim(),
+    engine: "core",
+    publishedDate: r.year ? `${r.year}-01-01` : null,
+  };
+}
+
+export const coreProvider: SearchProvider = {
+  id: "core",
+  label: databaseById("core")!.label,
+  scholarly: true,
+  timeRange: false,
+  async search(query, opts = {}) {
+    const records = await coreSearch(query, PER_PROVIDER, opts.signal, opts.page ?? 1);
+    return records.map(coreToHit).filter((h): h is SearchHit => h !== undefined);
+  },
+};
+
 /*
  * The providers this build ships.
  *
- * Scholarly only, and that is why scholarly search needs no setup: both of
- * these are keyless public APIs. A general-web backend would be added here as
- * a third entry with `scholarly: false`; there was briefly a registerProvider()
- * for that, but an extension point with no extension is just unused API, and
- * adding a line to this list is the same amount of work.
+ * OpenAlex and arXiv are keyless public APIs. PubMed and CORE need a key the
+ * user supplies (see keys.ts); they are registered here unconditionally --
+ * `resolveProviders` below is what filters by whether a key actually exists,
+ * so this Map stays "everything the build knows how to query" rather than
+ * "everything queryable right now". There was briefly a registerProvider()
+ * for a general-web extension point; an extension point with no extension is
+ * just unused API, and adding a line to this list is the same amount of work.
  */
 const registry = new Map<string, SearchProvider>([
   [openAlexProvider.id, openAlexProvider],
   [arxivProvider.id, arxivProvider],
+  [pubmedProvider.id, pubmedProvider],
+  [coreProvider.id, coreProvider],
 ]);
 
 
@@ -154,6 +235,35 @@ export function providers(): SearchProvider[] {
 export function providersFor(category: string | undefined): SearchProvider[] {
   const scholarly = isScholarlyCategory(category);
   return providers().filter((p) => p.scholarly === scholarly);
+}
+
+/**
+ * Which of the chosen database ids can actually be searched right now, and
+ * which had to be dropped for want of a key.
+ *
+ * Dropped rather than refused, and named rather than counted: a database the
+ * user ticked and then lost the key for must say so, for the same reason
+ * `search()` returns its failures instead of quietly halving the sweep. An
+ * empty `chosen` means the keyless defaults, so a research.json or a plan
+ * written before this feature existed behaves exactly as it always has.
+ */
+export async function resolveProviders(
+  chosen: readonly string[],
+): Promise<{ providers: SearchProvider[]; unavailable: string[] }> {
+  const ids = chosen.length ? chosen : DEFAULT_DATABASES;
+  const resolved: SearchProvider[] = [];
+  const unavailable: string[] = [];
+  for (const id of ids) {
+    const info = DATABASES.find((d) => d.id === id);
+    const provider = registry.get(id);
+    if (!info || !provider) continue; // unknown id: ignored, not thrown on
+    if (info.secret && !(await hasDatabaseKey(info.secret))) {
+      unavailable.push(info.label);
+      continue;
+    }
+    resolved.push(provider);
+  }
+  return { providers: resolved, unavailable };
 }
 
 /**
@@ -201,6 +311,15 @@ export async function search(
 ): Promise<{ hits: SearchHit[]; failures: string[] }> {
   const chosen = opts.providers ?? providersFor(opts.categories);
   if (chosen.length === 0) {
+    /* An explicit provider list -- even an empty one -- means the caller
+       already resolved which of its chosen databases are usable (see
+       `resolveProviders`) and has its own accounting for why none survived,
+       e.g. "PubMed skipped — no API key is stored for it". Throwing a generic
+       NoProviderError here would discard that specific reason: the caller's
+       message never gets built because this function never returns. Only
+       throw when nothing was ever chosen -- there is no configured backend
+       for the category at all. */
+    if (opts.providers) return { hits: [], failures: [] };
     throw new NoProviderError(
       isScholarlyCategory(opts.categories)
         ? "No scholarly search provider is available."
