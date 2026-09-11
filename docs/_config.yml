@@ -1,7 +1,7 @@
 title: MyRA
 description: A private, local-first assistant for academic work.
 url: "https://noah-schroeder.github.io"
-baseurl: "/myra"
+baseurl: "/MyRA"
 
 remote_theme: just-the-docs/just-the-docs
 plugins:
@@ -14,8 +14,8 @@ heading_anchors: true
 
 aux_links:
   "MyRA on GitHub":
-    - "https://github.com/noah-schroeder/myra"
+    - "https://github.com/noah-schroeder/MyRA"
   "Latest release":
-    - "https://github.com/noah-schroeder/myra/releases/latest"
+    - "https://github.com/noah-schroeder/MyRA/releases/latest"
 
-footer_content: "MyRA is MIT-licensed and open source on <a href=\"https://github.com/noah-schroeder/myra\">GitHub</a>."
+footer_content: "MyRA is MIT-licensed and open source on <a href=\"https://github.com/noah-schroeder/MyRA\">GitHub</a>."
