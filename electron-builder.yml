@@ -2,7 +2,7 @@ appId: dev.karen.app
 productName: Karen
 # Pinned: electron-builder cannot infer the version when electron is a
 # devDependency of a package that does not list it as a direct dependency.
-electronVersion: 43.4.0
+electronVersion: 43.4.1
 directories:
   output: dist
   buildResources: build
@@ -12,7 +12,11 @@ files:
 asarUnpack:
   - "**/*.node"
 linux:
-  target: [deb]
+  # deb for Debian/Ubuntu; AppImage for everyone else -- it needs no package
+  # manager and no root, at the cost of the deb's declared dependencies: an
+  # AppImage can't ask apt for poppler-utils, so pdftotext falls back to
+  # whatever is already on PATH (see office.ts) or is simply absent.
+  target: [deb, AppImage]
   icon: build/icons
   # Semicolon-separated: electron-builder writes this straight into
   # Categories=, and the desktop.entry override does not reach that field.
@@ -63,6 +67,8 @@ mac:
 win:
   target: [nsis]
   icon: build/icon.png
+appImage:
+  artifactName: Karen-${version}-${arch}.AppImage
 deb:
   packageName: karen
   artifactName: karen_${version}_${arch}.deb
