@@ -58,6 +58,12 @@ not search and it **never cites** — the prompt forbids references, placeholder
 and invented sources outright, and anything citation-shaped that appears anyway
 is flagged rather than quietly removed. Work on a whole paper or on one section.
 
+**Peer review.** Meant for your own manuscript, before you submit it — drop it in
+and get back a mock review panel's take: three reviewers, including a
+methodologist matched to your study design, each write an independent report.
+A fabricated citation is reported rather than silently repaired. Every
+reviewer's prompt is fully editable, so you can tune what each one looks for.
+
 **Documents.** Drafts in Markdown and converts to Word, OpenDocument, HTML or
 PDF, jailed to a folder you choose.
 
