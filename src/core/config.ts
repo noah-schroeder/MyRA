@@ -261,13 +261,6 @@ export interface Settings {
    */
   meetingInstructions: string;
   /**
-   * Whether first-run setup has been through once.
-   *
-   * Not "is everything installed": someone who deliberately skipped the model
-   * runtime should not be met by the same screen every launch. It records that
-   * the offer was made.
-   */
-  /**
    * Closing the window leaves Karen running in the tray.
    *
    * On, because the case that motivates it is the one where a window is
@@ -279,7 +272,25 @@ export interface Settings {
    * cannot reach is worse than one that quit when you did not mean it to.
    */
   keepRunningInTray: boolean;
+  /**
+   * Whether first-run setup has been through once.
+   *
+   * Not "is everything installed": someone who deliberately skipped the model
+   * runtime should not be met by the same screen every launch. It records that
+   * the offer was made.
+   */
   setupCompleted: boolean;
+  /**
+   * Whether the first-run tour has been shown, independent of setup.
+   *
+   * A separate flag rather than folded into `setupCompleted`, because the two
+   * answer different questions -- one is "were pandoc and a runtime offered",
+   * the other is "does this person know where anything is". Someone who
+   * skipped the runtime still gets the tour once setup is dismissed, and
+   * Settings -> About can flip this back to false on its own without
+   * re-running the installer.
+   */
+  seenTutorial: boolean;
   /**
    * Extra endpoints models can be served from, beyond the managed local one.
    *
@@ -443,6 +454,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingInstructions: "",
   keepRunningInTray: true,
   setupCompleted: false,
+  seenTutorial: false,
   providers: [],
   persona: DEFAULT_PERSONA,
   systemPrompts: {},

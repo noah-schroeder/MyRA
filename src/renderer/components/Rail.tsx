@@ -97,17 +97,21 @@ export function RailButton({
   label,
   active,
   onClick,
+  tour,
 }: {
   icon: keyof typeof ICONS | string;
   label: string;
   active?: boolean;
   onClick: () => void;
+  /** A hook for the first-run tour to spotlight this button by. */
+  tour?: string;
 }) {
   return (
     <button
       type="button"
       className={active ? "rail-nav-item active" : "rail-nav-item"}
       {...(active !== undefined ? { "aria-pressed": active } : {})}
+      {...(tour ? { "data-tour": tour } : {})}
       onClick={onClick}
     >
       <svg

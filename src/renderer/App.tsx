@@ -27,6 +27,8 @@ import { LookupResults } from "./components/LookupResults.tsx";
 import { useLookup } from "./useLookup.ts";
 import { UiDialog } from "./components/UiDialog.tsx";
 import { FirstRun } from "./components/FirstRun.tsx";
+import { Tour } from "./components/Tour.tsx";
+import type { TourPage } from "../core/tour/steps.ts";
 import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
 import { useSpeech } from "./useSpeech.ts";
@@ -454,6 +456,12 @@ export function App() {
     setLookup(false);
   };
 
+  /** The tour driving navigation, the same way toChat does for one page. */
+  const goToTourPage = (p: TourPage): void => {
+    setPage(p);
+    setLookup(false);
+  };
+
   /*
    * A different conversation is a fresh start, search included.
    *
@@ -497,6 +505,7 @@ export function App() {
             icon="meeting"
             label="Meetings"
             active={page === "meetings"}
+            tour="rail-meetings"
             onClick={() => setPage((p) => (p === "meetings" ? "chat" : "meetings"))}
           />
           {/* Beside Meetings rather than beside Models: both of these are
@@ -515,6 +524,7 @@ export function App() {
             icon="paper"
             label="Paper drafter"
             active={page === "papers"}
+            tour="rail-writing"
             /* Plain navigation, not `openItem` -- so any paper opened earlier
                from the rail or a project must not still be sitting in
                `openPaper` for the drafter's next mount to resume. Without this,
@@ -533,6 +543,7 @@ export function App() {
             icon="review"
             label="Peer review"
             active={page === "review"}
+            tour="rail-writing"
             onClick={() => {
               setOpenReview(undefined);
               setPage((p) => (p === "review" ? "chat" : "review"));
@@ -545,6 +556,7 @@ export function App() {
             icon="runs"
             label="Research runs"
             active={page === "runs"}
+            tour="rail-runs"
             onClick={() => {
               setOpenRun(undefined);
               setPage((p) => (p === "runs" ? "chat" : "runs"));
@@ -557,6 +569,7 @@ export function App() {
             icon="models"
             label="Models"
             active={page === "models"}
+            tour="rail-models"
             onClick={() => setPage((p) => (p === "models" ? "chat" : "models"))}
           />
           {/* Below Models, because it serves what Models chose. */}
@@ -576,7 +589,7 @@ export function App() {
           * what makes the automatic filing predictable: the project you are
           * looking at is the project your next conversation lands in.
           */}
-        <nav className="rail-projects" aria-label="Projects">
+        <nav className="rail-projects" aria-label="Projects" data-tour="rail-projects">
           <RailSection
             label="Projects"
             open={projectsOpen}
@@ -663,7 +676,7 @@ export function App() {
         ) : null}
 
         <div className="rail-foot">
-          <RailButton icon="settings" label="Settings" onClick={() => setShowSettings(true)} />
+          <RailButton icon="settings" label="Settings" tour="rail-settings" onClick={() => setShowSettings(true)} />
         </div>
       </aside>
 
@@ -910,6 +923,7 @@ export function App() {
         <footer className="composer" hidden={page !== "chat"}>
           <div
             className={dragOver ? "composer-card over" : "composer-card"}
+            data-tour="composer"
             onDragOver={(e) => {
               if (lookup) return;
               e.preventDefault();
@@ -1086,6 +1100,7 @@ export function App() {
                     className="mic"
                     aria-label="Attach an image or a document"
                     title="Attach an image or a document"
+                    data-tour="composer-attach"
                     onClick={() => fileInput.current?.click()}
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1101,6 +1116,7 @@ export function App() {
                 aria-pressed={dictation.state.phase === "recording"}
                 aria-label={dictation.state.phase === "recording" ? "Stop dictation" : "Dictate"}
                 title={handsFree ? "Hands-free is holding the microphone" : "Dictate"}
+                data-tour="composer-dictate"
                 /* One owner of the microphone at a time. In hands-free the loop
                    starts and stops it; a second control doing the same thing
                    would leave a recording nothing is waiting on. */
@@ -1186,6 +1202,22 @@ export function App() {
           onDone={() => {
             setSettings({ ...settings, setupCompleted: true });
             void window.karen.updateSettings({ setupCompleted: true });
+          }}
+        />
+      ) : null}
+
+      {/* Chained off FirstRun rather than gated on it directly: setup can be
+          skipped and dismissed in one click, and the tour still has something
+          to show regardless of whether a local engine got installed. Also
+          reachable from Settings -> About, which resets `seenTutorial` and
+          closes itself -- the same optimistic-set-then-IPC pattern as above. */}
+      {settings && settings.setupCompleted && !settings.seenTutorial ? (
+        <Tour
+          page={page}
+          onGoTo={goToTourPage}
+          onDone={() => {
+            setSettings({ ...settings, seenTutorial: true });
+            void window.karen.updateSettings({ seenTutorial: true });
           }}
         />
       ) : null}
