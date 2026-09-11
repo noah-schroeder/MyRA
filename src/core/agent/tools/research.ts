@@ -16,7 +16,9 @@ import { readResearchConfig } from "../../research/config.ts";
 import { ResearchRun } from "../../research/run.ts";
 import { runPipeline, type PipelineUi } from "../../research/pipeline.ts";
 import { fetchPage } from "../../research/fetch.ts";
-import { isScholarlyCategory, providersFor, search, supportsTimeRange } from "../../research/providers.ts";
+import {
+  isScholarlyCategory, providersFor, resolveProviders, search, supportsTimeRange,
+} from "../../research/providers.ts";
 import { formatHits } from "../../research/types.ts";
 import { cite, citedSoFar, reserve, shiftCitations } from "../../research/ledger.ts";
 import { asUntrusted } from "../../research/html.ts";
@@ -50,8 +52,8 @@ export const webSearchTool: ToolDef = {
   name: "web_search",
   description:
     "Search for sources and return ranked results with titles, URLs and snippets. " +
-    "Scholarly categories query OpenAlex and arXiv directly. " +
-    "Returns snippets only — use fetch_page to read a result.",
+    "Scholarly categories query OpenAlex, arXiv, and PubMed and CORE when the user has " +
+    "keys for them. Returns snippets only — use fetch_page to read a result.",
   risk: "safe",
   /* Exactly this rung, not this rung and up: "Deep" swaps this tool for the
      pipeline rather than keeping both, so that asking for a report cannot be
@@ -92,8 +94,18 @@ export const webSearchTool: ToolDef = {
     const wanted = String(params["time_range"] ?? cfg.timeRange ?? "");
     const timeRange = wanted && supportsTimeRange(category) ? wanted : "";
 
+    /* Which databases to search: chosen on the research bar for scholarly
+       categories, or the built-in selection for anything else (the general
+       category has no per-database picker, since this build ships no
+       general-web provider at all -- see generalSweepPossible). */
+    const isScholarly = isScholarlyCategory(category);
+    const { providers: chosenProviders, unavailable } = isScholarly
+      ? await resolveProviders(cfg.databases ?? [])
+      : { providers: providersFor(category), unavailable: [] as string[] };
+
     const { hits, failures } = await search(query, {
       categories: category,
+      providers: chosenProviders,
       ...(timeRange ? { timeRange } : {}),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
@@ -106,6 +118,12 @@ export const webSearchTool: ToolDef = {
        of it. */
     if (failures.length) {
       notes.push(`Some sources were unreachable and are missing from these results — ${failures.join("; ")}.`);
+    }
+    if (unavailable.length) {
+      notes.push(`${unavailable.join(", ")} skipped — no API key is stored for ${unavailable.length > 1 ? "them" : "it"}.`);
+    }
+    if (isScholarly) {
+      notes.push(`Searched: ${chosenProviders.map((p) => p.label).join(", ") || "nothing (no database is available)"}.`);
     }
     const note = notes.length ? `\n\n(${notes.join(" ")})` : "";
     return {
@@ -321,9 +339,10 @@ export const academicResearchTool: ToolDef = {
   ...deepResearchTool,
   name: "academic_research",
   description:
-    "Deep research over the scholarly literature: searches OpenAlex and arXiv, then " +
-    "resolves citation counts, venues and open-access full text for what it finds. " +
-    "Takes minutes, not seconds. This is the right tool for any academic question.",
+    "Deep research over the scholarly literature: searches OpenAlex and arXiv, plus " +
+    "PubMed and CORE when the user has keys for them, then resolves citation counts, " +
+    "venues and open-access full text for what it finds. Takes minutes, not seconds. " +
+    "This is the right tool for any academic question.",
   enabled: () => exactly(mode(), "deep"),
   async handler(params, ctx) {
     return await deepRun(String(params["question"] ?? ""), "science", ctx);

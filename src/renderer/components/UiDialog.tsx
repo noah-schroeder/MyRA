@@ -201,9 +201,14 @@ function ChoiceDialog({
         </ul>
 
         <div className="dialog-actions">
-          <button type="button" className="ghost" onClick={() => onAnswer(request.id, "")}>
-            Skip
-          </button>
+          {/* Required questions have no Skip: a database name is not an
+              ambiguity somebody may not care about, and "Continue" already
+              stays disabled until something is picked. */}
+          {request.required ? null : (
+            <button type="button" className="ghost" onClick={() => onAnswer(request.id, "")}>
+              Skip
+            </button>
+          )}
           <button type="button" className="primary" disabled={!answers.length} onClick={send}>
             {multi && answers.length > 1 ? `Use these ${answers.length}` : "Continue"}
           </button>

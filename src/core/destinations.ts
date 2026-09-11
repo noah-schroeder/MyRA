@@ -45,6 +45,32 @@ export const DESTINATIONS: readonly Destination[] = [
     sends: "That paper's DOI",
   },
   {
+    host: "eutils.ncbi.nlm.nih.gov",
+    when: "PubMed is one of the databases chosen for a search, and you have added your own NCBI key",
+    sends: "The search terms, and that key",
+  },
+  {
+    host: "pubmed.ncbi.nlm.nih.gov",
+    when: "A PubMed result with no DOI is opened as its landing page",
+    sends: "Nothing but the request",
+  },
+  {
+    host: "www.ncbi.nlm.nih.gov",
+    when: "You press \"Get a free key\" for PubMed in Settings → Database keys",
+    sends: "Nothing but the request",
+  },
+  {
+    host: "api.core.ac.uk",
+    when: "CORE is one of the databases chosen for a search, and you have added your own CORE key",
+    sends: "The search terms, and that key",
+  },
+  {
+    host: "core.ac.uk",
+    when: "A CORE result with no DOI or readable copy is opened as its landing page, or you press " +
+      "\"Get a free key\" for CORE in Settings → Database keys",
+    sends: "Nothing but the request",
+  },
+  {
     host: "doi.org",
     when: "A DOI is resolved to the page it points at",
     sends: "The DOI",

@@ -244,6 +244,8 @@ export interface ResearchConfig {
   /** The Zotero collection the library rung is limited to. All of it if absent. */
   collection?: string | undefined;
   collectionName?: string | undefined;
+  /** Which databases Quick and Look up query, by id. Empty means the keyless defaults. */
+  databases?: string[] | undefined;
 }
 
 /** One row of the collection picker: nested, with its full path for the title. */
@@ -416,6 +418,8 @@ export interface PromptRequest {
   options?: string[];
   /** choice: whether several of them can be picked at once. */
   multi?: boolean;
+  /** choice: no Skip button, and Continue stays disabled until something is picked. */
+  required?: boolean;
   /** models: one dropdown per entry. */
   slots?: { key: string; label: string; hint: string }[];
   /** models: what each slot is set to now. */
@@ -905,6 +909,8 @@ export interface RunDetail extends RunSummary {
   summary: string;
   counts: { found: number; deduped: number; screened: number; read: number; cited: number };
   queries: string[];
+  /** Which databases this run searched, by label. */
+  databases: string[];
   searches: {
     at: string; query: string; category?: string; page?: number;
     results: number; newResults?: number; error?: string;

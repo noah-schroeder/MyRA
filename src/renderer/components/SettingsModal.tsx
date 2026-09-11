@@ -5,6 +5,7 @@ import type {
 import { enumerate } from "../capture.ts";
 import { RuntimePane } from "./RuntimePane.tsx";
 import { ProvidersPane } from "./ProvidersPane.tsx";
+import { DatabaseKeysPane } from "./DatabaseKeysPane.tsx";
 import { EndpointField } from "./EndpointField.tsx";
 import { voicesFor } from "../../core/audio/voices.ts";
 import { engineStates, runnable, type Runnable } from "../../core/runtime/runnable.ts";
@@ -22,7 +23,7 @@ import { DEFAULT_PERSONA } from "../../core/agent/systemPrompt.ts";
  */
 
 type Tab =
-  | "providers" | "runtime" | "library" | "storage" | "audio" | "appearance"
+  | "providers" | "runtime" | "library" | "databases" | "storage" | "audio" | "appearance"
   | "permissions" | "persona" | "review" | "about";
 
 /*
@@ -41,7 +42,8 @@ type Tab =
 const TABS: { id: Tab; label: string }[] = [
   { id: "providers", label: "Providers" },
   { id: "runtime", label: "Runtime" },
-  { id: "library", label: "Library" },
+  { id: "library", label: "Zotero" },
+  { id: "databases", label: "Database keys" },
   { id: "storage", label: "Folders" },
   { id: "audio", label: "Audio" },
   { id: "appearance", label: "Appearance" },
@@ -113,6 +115,7 @@ export function SettingsModal({
           ) : null}
           {tab === "runtime" ? <RuntimePane {...(onOpenHub ? { onOpenHub } : {})} /> : null}
           {tab === "library" ? <Library settings={settings} patch={patch} /> : null}
+          {tab === "databases" ? <DatabaseKeysPane vault={vault} /> : null}
           {tab === "storage" ? <Folders settings={settings} patch={patch} /> : null}
           {tab === "audio" ? <Audio settings={settings} patch={patch} /> : null}
           {tab === "appearance" ? <Appearance settings={settings} patch={patch} /> : null}

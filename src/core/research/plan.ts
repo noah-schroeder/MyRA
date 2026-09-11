@@ -11,6 +11,7 @@
  */
 
 import { parseCategories } from "./config.ts";
+import { DEFAULT_DATABASES, databaseByLabel, databaseById } from "./databases.ts";
 import { parseJsonReply, runSubagent, type SubagentUsage } from "../llm/chat.ts";
 import { reviewerIsSynthesist, type ResolvedRoles } from "./roles.ts";
 import type { Scope } from "./scope.ts";
@@ -19,6 +20,8 @@ export interface Plan {
   scope: Scope;
   /** Where the sweep searches: "science" or "general", comma-separated. */
   category: string;
+  /** Which databases to search, by id. Answered in the plan step; see questions.ts. */
+  databases: string[];
   /** Query variants, generated but yours to edit. */
   queries: string[];
   /** Result pages to request per query. */
@@ -73,6 +76,7 @@ export function renderPlan(plan: Plan): string {
     ``,
     `## Limits`,
     `category: ${parseCategories(plan.category).join(", ")}`,
+    `databases: ${plan.databases.map((id) => databaseById(id)?.label ?? id).join(", ")}`,
     `pages: ${plan.pages}`,
     `screen_top: ${plan.screenTop}`,
     `full_texts: ${plan.fullTexts}`,
@@ -158,6 +162,23 @@ function number(values: Map<string, string>, key: string, fallback: number, max:
   return Math.min(Math.floor(n), max);
 }
 
+/**
+ * Which databases were named in the `## Limits` block, by their labels --
+ * that block is a markdown document a person edits, so it stores "OpenAlex,
+ * PubMed" rather than ids. An unrecognised name is dropped, matching how a bad
+ * `category` is already treated; an empty or entirely-unrecognised list falls
+ * back to what the plan already had, not to nothing.
+ */
+function databases(values: Map<string, string>, previous: string[]): string[] {
+  const raw = values.get("databases");
+  if (raw === undefined) return previous;
+  const ids = raw
+    .split(",")
+    .map((label) => databaseByLabel(label)?.id)
+    .filter((id): id is NonNullable<typeof id> => id !== undefined);
+  return ids.length ? [...new Set(ids)] : previous;
+}
+
 /** Snowball rounds, where 0 means "do not traverse" rather than "invalid". */
 function rounds(values: Map<string, string>, fallback: number): number {
   const raw = values.get("snowball");
@@ -232,6 +253,7 @@ export function parsePlan(text: string, previous: Plan, knownModels?: string[]):
     },
     // Accepts whatever spacing the user typed when editing the plan by hand.
     category: parseCategories(limits.get("category") ?? "").join(",") || previous.category,
+    databases: databases(limits, previous.databases.length ? previous.databases : [...DEFAULT_DATABASES]),
     queries,
     pages: number(limits, "pages", previous.pages, 10),
     screenTop: number(limits, "screen_top", previous.screenTop, 1000),

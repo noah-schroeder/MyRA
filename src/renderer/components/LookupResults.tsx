@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { databaseById } from "../../core/research/databases.ts";
 import type { LookupState } from "../useLookup.ts";
 import type { SortBy } from "../types.ts";
 
@@ -75,8 +76,8 @@ export function LookupResults({
           <div className="search-intro">
             <h2>Search the literature yourself</h2>
             <p>
-              OpenAlex and arXiv, queried directly — no model, nothing logged, nothing ranked by
-              an advertiser.
+              Queried directly, whichever databases are chosen above — no model, nothing logged,
+              nothing ranked by an advertiser.
             </p>
             <p className="dim">
               Results carry citation counts and, where one exists, a link to the open-access full
@@ -113,6 +114,10 @@ export function LookupResults({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
+                {/* Which database this came from -- worth naming once a search
+                    can merge four of them, the way the citation trail already
+                    names an `engine` on every source. */}
+                <span className="result-source">{databaseById(r.engine)?.label ?? r.engine}</span>
               </p>
               <p className="result-links">
                 {r.citedBy !== undefined ? (

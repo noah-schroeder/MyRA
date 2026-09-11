@@ -14,6 +14,7 @@
  * means and what an answer to it is, which is the part worth testing.
  */
 
+import { databaseByLabel, type DatabaseInfo } from "./databases.ts";
 import type { Role } from "./roles.ts";
 
 /** What the UI adds to every set of options, and never receives from a model. */
@@ -25,6 +26,15 @@ export interface Choice {
   options: string[];
   /** Several answers can be true at once — criteria, mostly. */
   multi?: boolean;
+  /**
+   * No Skip button, and Continue stays disabled until something is picked.
+   *
+   * Rare: almost every question here is genuinely optional, which is the
+   * whole point of the scoping step. Which databases to search is not --
+   * a run with none ticked would search nothing and look, forty minutes
+   * later, like a bug rather than an unanswered question.
+   */
+  required?: boolean;
 }
 
 /**
@@ -174,6 +184,36 @@ export function depthFromText(answer: string, fallback: Depth): Depth {
 function clamp(n: number, low: number, high: number): number {
   if (!Number.isFinite(n)) return low;
   return Math.min(high, Math.max(low, Math.round(n)));
+}
+
+/* ----------------------------------------------------------- databases --- */
+
+/**
+ * Which databases to search, built from whichever ones are actually usable.
+ *
+ * Only databases with a key already entered are offered: a database nobody
+ * can search must not appear in a required, un-skippable question, or the
+ * run cannot be approved by a user who has not been to Settings yet.
+ */
+export function databaseChoice(available: readonly DatabaseInfo[]): Choice {
+  return {
+    title: "Which databases should this run search?",
+    message:
+      "Pick as many as apply. They cover different literatures — a clinical question is " +
+      "mostly in PubMed and a machine-learning one mostly is not.",
+    options: available.map((d) => `${d.label} — ${d.covers}`),
+    multi: true,
+    required: true,
+  };
+}
+
+/** The chosen ids, parsed back from the "Label — description" options above. */
+export function databasesFromAnswer(answer: string): string[] {
+  const ids = answer
+    .split(JOIN)
+    .map((opt) => databaseByLabel(opt.split(" — ")[0] ?? opt)?.id)
+    .filter((id): id is NonNullable<typeof id> => id !== undefined);
+  return [...new Set(ids)];
 }
 
 /* -------------------------------------------------------------- models --- */
