@@ -1,8 +1,35 @@
 # MyRA
 
-A private, local-first assistant for academic work: meeting notes, research
-synthesis, and document drafting. Everything runs on your own machine, and the
-only things that leave it are the requests you configure it to make.
+[![CI](https://github.com/noah-schroeder/myra/actions/workflows/ci.yml/badge.svg)](https://github.com/noah-schroeder/myra/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/noah-schroeder/myra)](../../releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+
+TLDR: An all-in-one AI assistant for academic work, intended for non-technical users. Voice to voice, voice dictation, meeting notes, research
+synthesis, deep research, document drafting, and AI-assisted reviewing all in one place. Can connect to your Zotero library. You can use private AI models (recommended) or you can configure external models. MyRA is built on Lemonade server, so the app is an all-in-one program that includes llama.cpp, whisper, kokoro, etc. You can download local models directly from HuggingFace within the app.
+
+Note: This app is 100% vibe coded. Don't use it if you're not comfortable with that. 
+
+**[Read the docs](https://noah-schroeder.github.io/myra/)** for a full walkthrough of every
+feature, or keep reading for the pitch and the technical detail.
+
+<table>
+<tr>
+<td width="33%"><img src="docs/assets/screenshots/chat.png" alt="MyRA's main chat view, with document and deep-research modes"></td>
+<td width="33%"><img src="docs/assets/screenshots/meeting-report.png" alt="A meeting report with an Unverified section"></td>
+<td width="33%"><img src="docs/assets/screenshots/paper-drafter.png" alt="The paper drafter, choosing between a whole paper and one section"></td>
+</tr>
+</table>
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Quick start](#quick-start)
+- [Installing it](#installing-it)
+- [Running it from source](#running-it-from-source)
+- [Configuration](#configuration)
+- [What leaves this machine](#what-leaves-this-machine)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
 
 ## What it does
 
@@ -37,6 +64,20 @@ PDF, jailed to a folder you choose.
 **Images.** Makes figures and illustrations from a description, with the model
 chosen the same way the speech ones are, and files each into a folder you own
 beside a note of what it was asked for.
+
+## Quick start
+
+1. Grab the build for your platform from [Releases](../../releases/latest) and
+   install it — see [Installing it](#installing-it) below for the one extra
+   click each OS asks for on an unsigned build.
+2. On first launch, MyRA checks for **pandoc** (document conversion) and a
+   **model runtime** and offers to fetch what's missing — nothing is sent
+   anywhere until you say so.
+3. Open **Settings → Providers** or **Models** and point MyRA at an endpoint —
+   a local one (llama.cpp, Ollama, vLLM) or a hosted API key.
+4. Start a conversation, record a meeting, or open the paper drafter. Each
+   page explains itself; the [docs](https://noah-schroeder.github.io/myra/)
+   go deeper on every one.
 
 ## Installing it
 
@@ -188,3 +229,9 @@ Two rules hold that boundary up, and neither may be relaxed:
 See [PLAN.md](PLAN.md) for the build plan and threat model, [PORT.md](PORT.md)
 for what came across from the VM-based v1, and [DECISIONS.md](DECISIONS.md) for
 the judgment calls that are still open.
+
+## Contributing
+
+Bug reports and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, and where the
+design docs above fit in.
