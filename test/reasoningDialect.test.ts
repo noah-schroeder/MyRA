@@ -84,7 +84,7 @@ test("only the switches that mean “should you think” are candidates", () => 
   // A control built by diffing any variable would have offered it as a
   // thinking switch.
   const names = THINKING_KWARGS.map((k) => k.name);
-  assert.deepEqual(names, ["enable_thinking", "reasoning_effort"]);
+  assert.deepEqual(names, ["enable_thinking", "reasoning_effort", "reasoning_strength"]);
   assert.equal(names.includes("preserve_thinking"), false);
   assert.equal(templateDialect("preserve_thinking"), undefined);
 });
