@@ -43,7 +43,7 @@ interface Rung { value: ResearchMode; label: string; hint: string }
 const LOCAL: Rung[] = [
   { value: "off", label: "Off", hint: "No tools at all. The model answers from what it knows, and cannot search, open a URL, or touch a file." },
   { value: "assistant", label: "Documents", hint: "The model can read and write in your documents folder. It still cannot reach the network." },
-  { value: "library", label: "Zotero", hint: "The model can also search your own Zotero library — your collected papers, on this machine. Still no network, and Zotero must be open." },
+  { value: "library", label: "Zotero", hint: "The model can also search your own Zotero library — your collected papers, on this machine. Still no network. If Zotero is running, that reaches the indexed text of PDFs; closed, it searches titles, abstracts, authors, tags and notes instead." },
 ];
 
 const WEB: Rung[] = [
