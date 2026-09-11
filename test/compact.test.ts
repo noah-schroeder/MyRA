@@ -175,6 +175,28 @@ test("tool call arguments are counted, not just prose", () => {
   assert.ok(estimateTokens([withArgs]) > 900, "a 4000-character argument list is not free");
 });
 
+test("an attached image is not free -- content stays a string, so it has no characters to count", () => {
+  const bare: ChatMessage = { role: "user", content: "What does this say?" };
+  const withImage: ChatMessage = {
+    ...bare,
+    attachments: [{ id: "img1", kind: "image", name: "scan.png", mime: "image/png" }],
+  };
+  assert.ok(
+    estimateTokens([withImage]) > estimateTokens([bare]) + 1000,
+    "an image attachment must cost real tokens, not ride along for free",
+  );
+});
+
+test("a document attachment does not double-count -- its text is already in content by the time it is stored", () => {
+  const withDoc: ChatMessage = {
+    role: "user",
+    content: "Some inlined paper text.",
+    attachments: [{ id: "doc1", kind: "document", name: "paper.pdf", words: 500 }],
+  };
+  const sameTextNoAttachment: ChatMessage = { role: "user", content: "Some inlined paper text." };
+  assert.equal(estimateTokens([withDoc]), estimateTokens([sameTextNoAttachment]));
+});
+
 test("a summary covers messages counted against the real transcript", () => {
   // `upTo` indexes the caller's untouched history. Getting this wrong by
   // measuring against the already-compacted list would drop real messages every

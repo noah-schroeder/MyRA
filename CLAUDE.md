@@ -448,6 +448,68 @@ OpenAI-compatible endpoint and a hosted API returns 400 for `top_k` rather than 
 An unset field is not sent at all, so the server's own default applies — a different thing
 from sending what we guess that default to be.
 
+### Speed, measured honestly
+
+`chat.ts`'s `readStream` times a reply against the clock this app already has running anyway
+— request sent, first delta arrived, stream closed — and folds in llama.cpp's own `timings`
+object when the server sends one (`prompt_ms`, `predicted_ms`), unasked: this app never sends
+`timings_per_token`, because a strict server rejects a whole request over a field it does not
+recognise, the same lesson the reasoning probe already learned.
+[speed.ts](src/core/llm/speed.ts) turns the two into the number under a reply, and its one
+rule is that a rate this app did not measure honestly is never printed: no completion tokens
+means no tok/s, not a rate of zero rounded away, and `measured` says whether the split
+between prefill and generation came from the server or from time-to-first-token standing in
+for it.
+
+One event per model call, not per turn — `AgentEvent`'s `"stats"` in
+[loop.ts](src/core/agent/loop.ts) — because a turn that calls a tool closes the bubble it was
+writing and opens a new one for what comes after, so a turn-level number would land on the
+wrong reply or have to sum times that meant different things. The same figure rides on the
+stored assistant message as `meta`, which is how it survives reopening a conversation;
+`buildRequest` strips it before anything reaches the wire, because a field the server does not
+expect is a reason some of them refuse the whole request.
+
+### Files dropped into the chat
+
+An image or a document, dropped straight into the composer — OCR and "chat with this paper"
+as an ordinary part of a conversation rather than a separate page. The two kinds are treated
+completely differently, and the difference is the whole design.
+
+**A document's text is extracted once and inlined into the message**, over `extractDocument`
+in [main/extract.ts](src/main/extract.ts) — moved out of review.ts so the chat composer does
+not depend on the peer-review module to read a file. Wrapped in the same `asUntrusted` markers
+`read_document` already uses: somebody else's paper, dropped in for one question, is untrusted
+the same way a fetched web page is. Refused rather than truncated when it will not fit, with
+both numbers, the same call peer review already makes. Nothing of the document is kept — no
+file is ever written for one.
+
+**An image cannot be inlined as text**, so its bytes go to
+`CONFIG_DIR/attachments/<sessionId>/` ([main/attachments.ts](src/main/attachments.ts)) and the
+message keeps only a reference — never inline in the session JSON, for the reason a paper's
+own manuscript is never written to disk either: `listSessions()` opens every session file just
+to read its title, and a handful of inlined photos would make the conversation rail parse
+megabytes on every listing. `ChatMessage.content` is never an array for the same reason,
+pushed further: widening it would have meant teaching every reader of a stored conversation —
+the title, the export renderer, compaction's token estimate — to handle a shape they would see
+once in a very long while, for no reader's benefit but the model's. Instead a reference is
+expanded into an OpenAI content-part array only inside `buildRequest`
+([chat.ts](src/core/llm/chat.ts), calling `expandImages` in
+[attach.ts](src/core/llm/attach.ts)), the one place that builds what actually goes on the
+wire, from a synchronous `resolveImage` lookup built by reading every image attachment in the
+conversation fresh each turn — a stateless HTTP API resends the whole history every time, so
+there is no "already seen this" to rely on, and re-reading a handful of small local files is
+cheap enough not to be worth a cache.
+
+A model with no `vision` or `omni` label is warned about, never refused: a `custom`-labelled
+model's labels are a guess (see the model catalogue section below), and a hosted provider
+reports no labels at all — both are reasons to let the user decide, not reasons to block an
+image a model might in fact be able to read.
+
+The renderer downscales an image before it ever reaches main — the only side of this app with
+a DOM — to at most 1568px on the long edge, because a phone photo is routinely 12 megapixels
+and would cost real context on every turn it stays in the conversation for no benefit a vision
+encoder can use.
+
 ### The persona, and what is not the user's to replace
 
 `systemPrompt()` lived in main and therefore had no test at all — the prompt that decides how
@@ -610,7 +672,7 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `karen:*` — 174 of them, registered in
+IPC channels are all `karen:*` — 176 of them, registered in
 [main/index.ts](src/main/index.ts)'s `installIpc` and in the nine `install*Ipc` modules it
 calls (meetings, dictation, audio, images, papers, projects, runtime, api, review), and exposed
 one-by-one in the preload. Adding a capability means touching all three layers plus

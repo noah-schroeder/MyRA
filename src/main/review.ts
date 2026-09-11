@@ -17,20 +17,16 @@
  */
 
 import { dialog, ipcMain } from "electron";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import type { ConfigStore } from "../core/config.ts";
 import type { EndpointSettings } from "../core/config.ts";
 import { runSubagent } from "../core/llm/chat.ts";
 import { citationsIn } from "../core/documents/draft.ts";
-import { pdfToText } from "../core/research/pdf.ts";
-import { engines, readAsText } from "../core/documents/office.ts";
 import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
-import {
-  fitsContext, titleFromFileName, titleOf, tooLongMessage, wordCount,
-} from "../core/review/manuscript.ts";
+import { fitsContext, tooLongMessage, wordCount } from "../core/review/manuscript.ts";
+import { extractDocument, type Extracted } from "./extract.ts";
 import {
   assembleReview, buildSystem, buildUser, type ReviewRequest,
 } from "../core/review/prompt.ts";
@@ -75,99 +71,6 @@ export interface ReviewDeps {
    * that files it also reads reviews, so importing it here would be a cycle.
    */
   onCreated?: (ref: string) => void;
-}
-
-/** What extracting a manuscript produced, or why it could not. */
-export interface Extracted {
-  ok: boolean;
-  error?: string;
-  /** Set when the failure is a missing converter the app can install itself. */
-  needsPandoc?: boolean;
-  text?: string;
-  title?: string;
-  words?: number;
-}
-
-/** Formats worth offering. Anything pandoc reads works; these are the honest ones. */
-const OFFICE = new Set([".docx", ".doc", ".odt", ".rtf", ".tex", ".md", ".markdown", ".txt", ".text"]);
-
-export function extensionOfName(name: string): string {
-  return extname(name).toLowerCase();
-}
-
-/**
- * Turn a dropped file's bytes into text.
- *
- * PDF goes through `pdfToText` rather than `readAsText`, and the difference is
- * not cosmetic: `readAsText` passes `-layout`, which preserves the physical
- * arrangement of the page, and on a two-column manuscript that means reading
- * across both columns -- every line the end of one sentence followed by the
- * middle of an unrelated one. `pdfToText` omits the flag, recovers reading order,
- * and dehyphenates. It also names a scanned PDF as such instead of returning
- * nothing.
- */
-export async function extractManuscript(name: string, bytes: Uint8Array): Promise<Extracted> {
-  const ext = extensionOfName(name);
-  try {
-    if (ext === ".pdf") {
-      const text = await pdfToText(bytes);
-      return finish(name, text);
-    }
-
-    if (!OFFICE.has(ext)) {
-      return {
-        ok: false,
-        error: `Karen cannot read ${ext || "that kind of file"}. Send it a PDF, a Word file, ODT, RTF or plain text.`,
-      };
-    }
-
-    /* Plain text needs no converter, and saying so matters: it is the fallback
-       somebody reaches for when pandoc is missing. */
-    if (ext === ".md" || ext === ".markdown" || ext === ".txt" || ext === ".text") {
-      return finish(name, new TextDecoder().decode(bytes));
-    }
-
-    const tools = await engines();
-    if (!tools.pandoc) {
-      return {
-        ok: false,
-        needsPandoc: true,
-        error:
-          "Reading Word and ODT files needs pandoc, which is not installed yet. " +
-          "Karen can install it for you — it is a single program, fetched once.",
-      };
-    }
-
-    /* Written to a temp file because pandoc reads a path, then removed. Owner
-       only, and under the system temp directory rather than anywhere Karen
-       lists: this is an unpublished manuscript belonging to someone who did not
-       choose to give it to us. */
-    const dir = await mkdtemp(join(tmpdir(), "karen-ms-"));
-    const src = join(dir, `manuscript${ext}`);
-    try {
-      await writeFile(src, bytes, { mode: OWNER_ONLY_FILE });
-      return finish(name, await readAsText(src));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  } catch (err) {
-    return { ok: false, error: (err as Error).message || "That file could not be read." };
-  }
-}
-
-function finish(name: string, raw: string): Extracted {
-  const text = raw.trim();
-  if (!text) {
-    return { ok: false, error: "That file has no text in it that Karen could read." };
-  }
-  return {
-    ok: true,
-    text,
-    /* The document's own title where there is one, the filename where there is
-       not. Both land in an editable box, so a wrong guess costs a moment. */
-    title: titleOf(text) || titleFromFileName(name),
-    words: wordCount(text),
-  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -269,7 +172,7 @@ export function installReviewIpc(deps: ReviewDeps): void {
     const buffer = bytes as ArrayBuffer | Uint8Array | undefined;
     if (!buffer) return { ok: false, error: "Nothing was dropped." } satisfies Extracted;
     const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-    return extractManuscript(String(name ?? "manuscript"), view);
+    return extractDocument(String(name ?? "manuscript"), view);
   });
 
   /**

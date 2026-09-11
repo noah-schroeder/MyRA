@@ -8,7 +8,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEvent, AssistantItem, CitedSource, Item, ToolItem, Usage } from "./types.ts";
+import type {
+  AgentEvent, AssistantItem, CitedSource, Item, PendingAttachment, ToolItem, Usage,
+} from "./types.ts";
 import { harvestSources } from "./restore.ts";
 
 let seq = 0;
@@ -74,6 +76,23 @@ export function useAgent() {
                   } satisfies AssistantItem,
                 ],
           );
+          break;
+        }
+
+        case "stats": {
+          /* Fired once per model call, right after it returns -- so this
+             always lands on the bubble `open.current` still names, before a
+             following tool call (if any) clears it. A reply that made a tool
+             call and wrote no prose of its own opened no bubble at all, and
+             the stats for it are dropped rather than attached to the wrong
+             one. */
+          const id = open.current;
+          if (id && event.stats) {
+            const stats = event.stats;
+            setItems((prev) =>
+              prev.map((i) => (i.id === id && i.kind === "assistant" ? { ...i, stats } : i)),
+            );
+          }
           break;
         }
 
@@ -177,14 +196,27 @@ export function useAgent() {
     });
   }, []);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, attachments: PendingAttachment[] = []) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // An image with no question about it is still a real message -- "what is
+    // this" is implied, not required -- so this refuses only when there is
+    // genuinely nothing to send.
+    if (!trimmed && !attachments.length) return;
     setError(undefined);
     setBusy(true);
     open.current = undefined;
-    setItems((prev) => [...prev, { id: nextId(), kind: "user", text: trimmed }]);
-    await window.karen.send(trimmed);
+    setItems((prev) => [
+      ...prev,
+      {
+        id: nextId(),
+        kind: "user",
+        text: trimmed,
+        ...(attachments.length
+          ? { attachments: attachments.map((a) => ({ kind: a.kind, name: a.name })) }
+          : {}),
+      },
+    ]);
+    await window.karen.send(trimmed, attachments);
   }, []);
 
   const abort = useCallback(() => {

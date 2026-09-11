@@ -6,6 +6,7 @@ import { Markdown } from "./components/Markdown.tsx";
 import { ArtifactPanel, useDocuments } from "./components/ArtifactPanel.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
 import { Reasoning } from "./components/Reasoning.tsx";
+import { MessageStatsLine } from "./components/MessageStats.tsx";
 import { ResearchProgress } from "./components/ResearchProgress.tsx";
 import { ApiPage } from "./components/ApiPage.tsx";
 import { SessionList } from "./components/SessionList.tsx";
@@ -37,9 +38,10 @@ import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
+import { downscaleImage } from "./downscale.ts";
 import type {
-  ActiveRun, CitedSource, JobSnapshot, MemberKind, ProjectSummary, PromptRequest, RuntimeState,
-  Settings,
+  ActiveRun, CitedSource, JobSnapshot, MemberKind, PendingAttachment, ProjectSummary, PromptRequest,
+  RuntimeState, Settings,
 } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
@@ -90,6 +92,14 @@ export function App() {
    */
   const [draft, setDraft] = useState("");
   const [queryDraft, setQueryDraft] = useState("");
+  /* Held only until Send: main already has an image's bytes on disk and a
+     document's text extracted by the time one of these exists, so this is a
+     reference and a chip's worth of display, never the file itself. */
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [attachError, setAttachError] = useState<string | undefined>();
+  const [dragOver, setDragOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [sessionId, setSessionId] = useState<string | undefined>();
   // Searching the literature yourself is a mode of the composer, not a window
   // over it: the box you type in is the same box either way, and what changes
@@ -283,16 +293,49 @@ export function App() {
   const typed = lookup ? queryDraft : draft;
   const setTyped = lookup ? setQueryDraft : setDraft;
 
+  /**
+   * A file dropped, pasted or picked, read and sized before it is ever sent.
+   *
+   * Images are downscaled here -- this is the only side of the app with a
+   * DOM -- before the bytes cross into main at all, so a 12-megapixel photo
+   * never touches disk at its original size. `chatAttach` sniffs the bytes to
+   * decide image or document; this file does not need to know which.
+   */
+  const attachFile = useCallback(async (file: File): Promise<void> => {
+    setAttachError(undefined);
+    setAttaching(true);
+    try {
+      const bytes = file.type.startsWith("image/") ? await downscaleImage(file) : await file.arrayBuffer();
+      const result = await window.karen.chatAttach(file.name, bytes);
+      if (!result.ok) {
+        setAttachError(result.error ?? "That file could not be attached.");
+        return;
+      }
+      setPendingAttachments((prev) => [...prev, result]);
+    } catch (err) {
+      setAttachError((err as Error).message || "That file could not be attached.");
+    } finally {
+      setAttaching(false);
+    }
+  }, []);
+
+  const removeAttachment = useCallback((att: PendingAttachment): void => {
+    setPendingAttachments((prev) => prev.filter((a) => a !== att));
+    if (att.kind === "image") void window.karen.chatAttachRemove(att.id);
+  }, []);
+
   const submit = useCallback(() => {
     const text = typed.trim();
-    if (!text) return;
     // A query stays in the box: you refine a search by editing it, and clearing
     // it after every Enter would mean retyping the whole thing to change a word.
     if (lookup) {
+      if (!text) return;
       void search.run(text);
       return;
     }
-    if (busy) return;
+    // An attached image with no question about it is still worth sending --
+    // "what is this" is implied -- so only an entirely empty composer refuses.
+    if ((!text && !pendingAttachments.length) || busy) return;
     setDraft("");
     /*
      * Cleared here, or the previous run's last words reappear over this one.
@@ -304,12 +347,36 @@ export function App() {
      * that finished minutes ago.
      */
     setProgress(undefined);
-    void send(text);
-  }, [typed, busy, send, lookup, search]);
+    const attachments = pendingAttachments;
+    setPendingAttachments([]);
+    void send(text, attachments);
+  }, [typed, busy, send, lookup, search, pendingAttachments]);
+
+  /**
+   * Drop whatever is sitting in the composer unsent, and delete the file
+   * behind any pending image -- the same cleanup `removeAttachment` does for
+   * one chip, done for all of them.
+   *
+   * Without this, a chip attached under the conversation being left behind
+   * survives the switch in the composer's own state, saved on disk under the
+   * OLD session's id. Sending it afterward pushes the reference into the NEW
+   * session's messages, but `imageResolver` looks for the file under the new
+   * session's directory, finds nothing, and `expandImages` degrades to plain
+   * text -- so the chip shows as sent while the model silently never sees the
+   * image, and the original file is never cleaned up either.
+   */
+  const clearPendingAttachments = (): void => {
+    for (const att of pendingAttachments) {
+      if (att.kind === "image") void window.karen.chatAttachRemove(att.id);
+    }
+    setPendingAttachments([]);
+    setAttachError(undefined);
+  };
 
   const openSession = async (id: string): Promise<void> => {
     const messages = (await window.karen.openSession(id)) as StoredMessage[];
     setSessionId(id);
+    clearPendingAttachments();
     startFresh();
     // The stored form is the model's message list; this view wants cards in the
     // order they happened, each knowing its own outcome. restoreThread does
@@ -327,6 +394,7 @@ export function App() {
     setSessionId(await window.karen.newSession());
     reset();
     documents.reset();
+    clearPendingAttachments();
     startFresh();
   };
 
@@ -760,7 +828,16 @@ export function App() {
             if (item.kind === "user") {
               return (
                 <article key={item.id} className="turn user">
-                  <p>{item.text}</p>
+                  {item.attachments?.length ? (
+                    <div className="turn-attachments">
+                      {item.attachments.map((a, i) => (
+                        <span key={i} className="composer-chip dim">
+                          {a.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {item.text ? <p>{item.text}</p> : null}
                   <CopyButton className="turn-copy" text={() => item.text} />
                 </article>
               );
@@ -784,6 +861,9 @@ export function App() {
                     <Markdown key={i} text={block.text} sources={sources} />
                   ),
                 )}
+                {/* Absent while streaming -- the numbers are not final until
+                    the reply is. */}
+                {!item.streaming && item.stats ? <MessageStatsLine stats={item.stats} /> : null}
                 {/* The answer, not the working-out. Reasoning is deliberately
                     never part of what this conversation keeps, and a copy that
                     swept it into somebody's paper would be the one route by
@@ -828,7 +908,21 @@ export function App() {
           * turn, so it belongs where that turn is written.
           */}
         <footer className="composer" hidden={page !== "chat"}>
-          <div className="composer-card">
+          <div
+            className={dragOver ? "composer-card over" : "composer-card"}
+            onDragOver={(e) => {
+              if (lookup) return;
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (lookup) return;
+              for (const file of e.dataTransfer.files) void attachFile(file);
+            }}
+          >
             {/*
               * What the loop is doing, in one line, whenever it is on.
               *
@@ -860,12 +954,42 @@ export function App() {
             {/* A research run draws its own card in the thread above; this line
                 is for everything else that reports progress. */}
             {progress && busy && !stage ? <p className="progress">{progress}</p> : null}
+            {!lookup && (pendingAttachments.length || attaching) ? (
+              <div className="composer-attachments">
+                {pendingAttachments.map((att, i) => (
+                  <span
+                    /* A document attachment carries no id -- it is inlined as
+                       text and never written to disk -- so its name alone was
+                       the key. Two documents sharing a name (the same file
+                       dropped twice, or two files from different folders)
+                       collided, letting React reuse one chip's DOM node and
+                       remove handler for the other. The index disambiguates
+                       within this one render without claiming a stable
+                       identity the value does not have. */
+                    key={att.kind === "image" ? att.id : `doc-${i}-${att.name}`}
+                    className={att.kind === "image" && !att.canSee ? "composer-chip warn" : "composer-chip"}
+                    title={att.kind === "image" ? att.warning : `${att.words.toLocaleString()} words`}
+                  >
+                    {att.name}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${att.name}`}
+                      onClick={() => removeAttachment(att)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {attaching ? <span className="composer-chip dim">Reading…</span> : null}
+              </div>
+            ) : null}
+            {!lookup && attachError ? <p className="composer-attach-error">{attachError}</p> : null}
             <textarea
               className="input"
               placeholder={
                 lookup
                   ? "Search the literature — no model in the loop"
-                  : "Ask a question, or describe what you need"
+                  : "Ask a question, or describe what you need — or drop in an image or a paper"
               }
               value={typed}
               rows={1}
@@ -874,6 +998,13 @@ export function App() {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   submit();
+                }
+              }}
+              onPaste={(e) => {
+                if (lookup) return;
+                for (const item of e.clipboardData.items) {
+                  const file = item.kind === "file" ? item.getAsFile() : null;
+                  if (file) void attachFile(file);
                 }
               }}
             />
@@ -937,6 +1068,33 @@ export function App() {
                 </svg>
               </button>
 
+              {lookup ? null : (
+                <>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    hidden
+                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt"
+                    onChange={(e) => {
+                      for (const file of e.target.files ?? []) void attachFile(file);
+                      // Reset, so choosing the same file twice fires a change event twice.
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="mic"
+                    aria-label="Attach an image or a document"
+                    title="Attach an image or a document"
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 className={dictation.state.phase === "recording" ? "mic active" : "mic"}
@@ -980,7 +1138,7 @@ export function App() {
                   type="button"
                   className="send"
                   onClick={submit}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() && !pendingAttachments.length}
                   aria-label="Send"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"

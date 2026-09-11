@@ -14,6 +14,7 @@
 
 import { chat, type ChatMessage, type ChatUsage, type ToolCall } from "../llm/chat.ts";
 import type { DeltaKind } from "../llm/thinking.ts";
+import { statsFrom, type MessageStats } from "../llm/speed.ts";
 import type { EndpointSettings } from "../config.ts";
 import { UnknownToolError, type ToolRegistry } from "./registry.ts";
 import {
@@ -30,7 +31,9 @@ import {
 export const DEFAULT_MAX_STEPS = 12;
 
 export interface AgentEvent {
-  type: "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "compacted" | "notice";
+  type:
+    | "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error" | "compacted" | "notice"
+    | "stats";
   /** For text: the delta. For tool events: a human-readable note. */
   text?: string;
   /**
@@ -45,6 +48,16 @@ export interface AgentEvent {
   tool?: string;
   params?: Record<string, unknown>;
   result?: string;
+  /**
+   * For `"stats"`: how fast the reply that just finished was.
+   *
+   * One per `chat()` call, not one per turn -- a turn that calls a tool closes
+   * the bubble it was writing and opens a new one for what comes after, so a
+   * single turn-level number would either apply to the wrong bubble or have to
+   * be summed across replies that took different amounts of time for different
+   * reasons.
+   */
+  stats?: MessageStats;
 }
 
 export interface AgentTurnOptions {
@@ -90,6 +103,8 @@ export interface AgentTurnOptions {
   compaction?: { upTo: number; summary: string };
   /** Condense a run of messages into one paragraph. Provided by the host. */
   summarise?: (messages: ChatMessage[]) => Promise<string>;
+  /** See `ChatOptions.resolveImage`. Passed to every call this turn makes. */
+  resolveImage?: (attachmentId: string) => string | undefined;
 }
 
 export interface AgentTurnResult {
@@ -248,6 +263,7 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
       ...(opts.sampling ? { sampling: opts.sampling } : {}),
       ...(opts.extra ? { extra: opts.extra } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.resolveImage ? { resolveImage: opts.resolveImage } : {}),
       ...(opts.onEvent
         ? { onDelta: (d: string, kind: DeltaKind) => opts.onEvent!({ type: "text", text: d, kind }) }
         : {}),
@@ -281,10 +297,16 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
     // window, which is what the next request has to fit alongside.
     contextTokens = reply.usage.input + reply.usage.output;
 
+    /* Per call, not per turn -- see AgentEvent.stats. Attached to the message
+       too, so it survives a save and comes back when the conversation reopens. */
+    const stats = statsFrom(reply.usage, reply.timing);
+    if (stats) opts.onEvent?.({ type: "stats", stats });
+
     const assistant: ChatMessage = {
       role: "assistant",
       content: reply.text,
       ...(reply.toolCalls.length ? { tool_calls: reply.toolCalls } : {}),
+      ...(stats ? { meta: stats } : {}),
     };
     produced.push(assistant);
 

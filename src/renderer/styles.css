@@ -707,6 +707,36 @@ kbd {
 }
 .cite-card-note { color: var(--amber); font-size: 11px; }
 
+/* The speed line under a finished reply, and its hover card -- the same
+   fixed-position, measured-from-the-trigger pattern as .cite-card above, for
+   the same reason: no portals, and the thread scrolls. */
+.stats-wrap { position: relative; display: inline-block; margin-top: 2px; }
+.stats-line {
+  font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums;
+  font-family: var(--mono); cursor: help;
+  border-bottom: 1px solid transparent;
+}
+.stats-line:hover, .stats-line:focus-visible { color: var(--text-dim); border-bottom-color: currentColor; }
+.stats-line:focus-visible { outline: none; }
+
+.stats-card {
+  position: fixed;
+  z-index: 40; width: max-content; max-width: 250px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 9px 11px;
+  background: var(--bg-float); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  font-size: 11.5px; line-height: 1.4; color: var(--text);
+  animation: cite-in var(--t-fast) ease-out;
+  pointer-events: none;
+}
+.stats-row {
+  display: flex; justify-content: space-between; gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.stats-row > span:first-child { color: var(--text-dim); }
+.stats-note { color: var(--text-faint); font-size: 10.5px; margin-top: 2px; }
+
 /* ---------------------------------------------------------------- *
  * Markdown                                                          *
  * ---------------------------------------------------------------- */
@@ -1812,6 +1842,35 @@ body:has(.artifact-grip:active) { user-select: none; }
 }
 .collection-note { color: var(--text-faint); font-size: 11px; }
 
+/* The database question, shared by Quick, Deep and Look up -- full width,
+   in the same follow-up shape as .collection-ask, but drawn as a mode ring
+   (see .reasoning-row for the precedent of borrowing that shape with its own
+   tint): this switches services on and off the way the rungs above it
+   switch rungs, so it earns the family look rather than a plain checklist. */
+.database-ask {
+  flex: 1 0 100%;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px;
+  padding-top: 2px;
+}
+.database-ask-label {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.database-row {
+  display: flex; gap: 2px; padding: 2px; flex-wrap: wrap;
+  background: var(--bg-inset); border-radius: 999px;
+  border: 1px solid var(--border);
+}
+/* Still a live control -- clicking it opens the signup page -- so it keeps
+   the pointer cursor and only reads as unavailable through the dimming and
+   the lock glyph, not through looking inert. */
+.database-row .mode.needs-key { color: var(--text-faint); opacity: 0.6; }
+.database-row .mode.needs-key:hover { opacity: 0.85; color: var(--text-dim); }
+.database-lock { margin-left: 5px; font-size: 10px; vertical-align: 1px; }
+/* The one pill that must stay on: genuinely inert, not merely muted, because
+   nothing happens if it is pressed. */
+.database-row .mode:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+
 
 .research-category {
   font: inherit; font-size: 12px;
@@ -2389,6 +2448,13 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .result-title:hover { color: var(--accent); }
 .result-meta { margin: 4px 0 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+/* Which database this came from. Worth naming once a search can merge four of
+   them; a dot rather than the meta line's own " · " join because it trails
+   the whole line rather than sitting between two of its own parts. */
+.result-source {
+  margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--border);
+  font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em;
+}
 
 .result-links {
   margin: 8px 0 0;
@@ -2538,6 +2604,31 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .composer-chip:hover { color: var(--text); border-color: var(--border-hover); }
 .composer-chip svg { opacity: 0.7; flex: none; }
+
+/* A dropped image or document, waiting to be sent -- and the same chip,
+   read-only, on the bubble once it has been. */
+.composer-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.composer-attachments .composer-chip {
+  cursor: default; max-width: 220px;
+}
+.composer-attachments .composer-chip span,
+.composer-attachments .composer-chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachments .composer-chip button {
+  all: unset; cursor: pointer; color: var(--text-faint); font-size: 13px; line-height: 1;
+  padding: 0 0 0 2px;
+}
+.composer-attachments .composer-chip button:hover { color: var(--text); }
+.composer-chip.warn { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); color: var(--amber); }
+.composer-chip.dim { color: var(--text-faint); cursor: default; }
+.composer-attach-error { margin: 0; font-size: 11.5px; color: var(--red); }
+
+/* Dragging a file over the composer. Same accent the review page's own drop
+   zone uses, so the affordance reads the same wherever it appears. */
+.composer-card.over { border-color: var(--accent-soft); background: var(--accent-wash); }
+
+/* The chip row on a sent message -- read-only, no × -- reusing the same
+   pill so an attachment reads the same before and after it is sent. */
+.turn-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 
 /* ==========================================================================
    Model hub — choosing what answers you

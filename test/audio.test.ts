@@ -14,7 +14,7 @@ import { test, describe, it } from "node:test";
 import {
   describeVoice, isKokoro, voicesFor, voiceForModel, voiceIsValid, KOKORO_VOICE_IDS, DEFAULT_VOICE,
 } from "../src/core/audio/voices.ts";
-import { fitsRole, guessRole, localFitsChat, modelNamer } from "../src/core/models/roles.ts";
+import { fitsRole, guessRole, hasVision, localFitsChat, modelNamer } from "../src/core/models/roles.ts";
 import { modelOptions } from "../src/main/models.ts";
 import {
   audioMime, refusedTheFormat, sniffAudio,
@@ -101,6 +101,17 @@ describe("which model does which job", () => {
     assert.ok(!isForRole(["tts"], "transcription"));
     assert.ok(!isForRole(["custom", "chat", "tool-calling"], "transcription"));
     assert.ok(!isForRole(undefined, "voice"));
+  });
+
+  test("vision reads the same catalogue labels the vision browse group declares", () => {
+    assert.ok(hasVision(["chat", "vision", "tool-calling"]));
+    assert.ok(hasVision(["chat", "omni"]));
+    assert.ok(!hasVision(["chat", "tool-calling"]));
+    // Unknown, not a refusal: a custom-labelled model's labels are a guess and
+    // a hosted provider reports none at all -- neither is a reason to block an
+    // image, only a reason to warn before sending it.
+    assert.ok(!hasVision(undefined));
+    assert.ok(!hasVision([]));
   });
 
   test("an image model is picked out by the same field", () => {
