@@ -221,6 +221,15 @@ export const THINKING_KWARGS: {
       { value: "high", label: "high", hint: "Reason at length before answering." },
     ],
   },
+  {
+    name: "reasoning_strength",
+    values: [
+      { value: "low", label: "low", hint: "A little reasoning before answering." },
+      { value: "medium", label: "medium", hint: "The template's middle setting." },
+      { value: "high", label: "high", hint: "Reason at length before answering." },
+      { value: "xhigh", label: "xhigh", hint: "Reason as hard as the template allows. Slowest, most output tokens." },
+    ],
+  },
 ];
 
 /**
