@@ -68,7 +68,7 @@ jobs:
 
       # electron-builder fetches its own Electron dist (per electronVersion
       # in electron-builder.yml), plus fpm/nsis/appimagetool on first run.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/electron
