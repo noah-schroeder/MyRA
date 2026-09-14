@@ -9,7 +9,7 @@
  * loop running in this same process.
  */
 
-import { app, BrowserWindow, Notification, clipboard, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import {
@@ -230,15 +230,6 @@ function installActiveRunQuestion(): void {
   ipcMain.handle("myra:research-active-state", () => activeRun ?? null);
 }
 
-/**
- * Where `audio: "loopback"` is a thing that exists.
- *
- * Electron documents loopback capture for Windows and macOS. Linux is absent,
- * and offering it there produced a request that never answered rather than a
- * capture -- see the handler in `createWindow`.
- */
-const LOOPBACK_PLATFORMS = new Set<NodeJS.Platform>(["darwin", "win32"]);
-
 /* ---------------------------------------------------------------- window -- */
 
 function createWindow(): void {
@@ -289,83 +280,64 @@ function createWindow(): void {
   });
 
   /*
-   * System audio on macOS, and the reason it is silent without this.
+   * System audio, and the reason there was none.
    *
    * The meeting recorder captures two tracks -- the microphone, and the
    * system's output, which is the only way to get the far side of a call. The
-   * renderer asks for the second with `getDisplayMedia({ video: true, audio:
-   * true })`. On Windows and Linux that is enough. On macOS Chromium hands back
-   * an audio track containing nothing but silence unless the main process
-   * explicitly grants loopback capture, which is what this handler does.
+   * renderer asks for the second with `getDisplayMedia`, and Chromium will not
+   * answer that at all unless the main process handles the request. Without
+   * this handler installed the call fails outright, which is why the recorder's
+   * "recording your side only" warning was the normal outcome rather than a
+   * rare one.
    *
-   * The failure it prevents is the quiet kind: a meeting transcript with only
-   * the user's own half of the conversation, which is precisely what the
-   * two-track design exists to avoid, and which looks like a working recording
-   * until someone reads it.
+   * Three things were then measured here, on Linux, and each one changed the
+   * shape of this handler. The first two are corrections to what the note in
+   * DISTRIBUTION.md said; a fourth finding, about gain control, belongs to the
+   * renderer and is written up beside the request itself.
    *
-   * Two things were found while writing this that the note in DISTRIBUTION.md
-   * had wrong, and both are worth stating.
+   * **Linux does have loopback capture.** Electron documents `audio:
+   * "loopback"` for Windows only, but the Chromium underneath carries
+   * `media/audio/pulse/pulse_loopback_manager.cc`, which records the default
+   * sink's monitor through PulseAudio -- which is also what PipeWire serves.
+   * Measured: a track labelled "System audio" carrying the tone that was
+   * playing, at the same level a `pw-record` of the monitor captured. No
+   * virtual audio device, no portal, no prerequisite of any kind.
    *
-   * **It was never a macOS problem.** Without a handler installed, Electron
-   * refuses `getDisplayMedia` outright -- measured here, on Linux, as an
-   * immediate `NotSupportedError`. So the meeting's second track has never
-   * worked on any platform; it failed fast on Linux and Windows and silently on
-   * macOS, and the recorder's "recording your side only" warning has been the
-   * normal outcome everywhere rather than a rare one.
+   * **The request must not ask for video.** Electron refuses the whole request
+   * if video was requested and no video stream is handed back ("Video was
+   * requested, but no video stream was provided"), and the screen was not ours
+   * to hand back: `desktopCapturer.getSources` never resolves under a Wayland
+   * session, so asking for one hung the request for as long as the deadline
+   * that used to guard it. Audio alone is answered immediately, and it is what
+   * a meeting recorder wants in any case -- MyRA records the room, never the
+   * screen. So video is refused here rather than sourced, and the renderer asks
+   * for audio only.
    *
-   * **Installing it on Linux made things worse, not better.**
-   * `desktopCapturer.getSources` never resolved on the virtio-GPU VM this was
-   * written on, so `getDisplayMedia` never settled at all and a hang replaced
-   * an error. `audio: "loopback"` is documented for Windows and macOS in any
-   * case; Linux system audio wants a PipeWire monitor source, which is a
-   * different piece of work. So Linux keeps the honest refusal and gets a
-   * warning that says what it means.
+   * **No user gesture is needed**, measured: the request is answered even with
+   * transient activation expired. So the recorder may await the microphone
+   * first without the display request going stale behind it.
    *
-   * WRITTEN BLIND. Verified on no Mac and no Windows machine. The pieces are
-   * right in principle -- Electron 43 is well past the version where Chromium
-   * adopted Apple's CoreAudio tap API -- but the interaction with Screen
-   * Recording permission is exactly the kind of thing that has to be tried.
+   * Windows and macOS are still unverified here -- see DISTRIBUTION.md. What
+   * changes for them is that the screen is no longer captured alongside the
+   * audio, which on macOS also means Screen Recording is no longer being asked
+   * for in order to record sound.
    */
-  if (LOOPBACK_PLATFORMS.has(process.platform)) {
-    window_.webContents.session.setDisplayMediaRequestHandler(
-      (_request, callback) => {
-        /* A deadline, because this is the only thing standing between the user
-           and a request that never answers. `getSources` hung indefinitely when
-           this was tried on a Linux VM with a virtio GPU -- which is what
-           scoped the whole handler to macOS -- and a Mac with Screen Recording
-           denied is a plausible place for the same shape of failure. Refusing
-           is recoverable: the recorder treats it as "record my side only" and
-           says so. */
-        let answered = false;
-        const answer = (result: Parameters<typeof callback>[0]): void => {
-          if (answered) return;
-          answered = true;
-          callback(result);
-        };
-        const timer = setTimeout(() => answer({}), 10_000);
-
-        void desktopCapturer
-          .getSources({ types: ["screen"] })
-          .then((sources) => {
-            clearTimeout(timer);
-            const screen = sources[0];
-            /*
-             * `loopback` rather than `loopbackWithMute`: the user is on a call
-             * and needs to keep hearing it. Muting their own speakers to record
-             * the other side would be an odd definition of success.
-             */
-            answer(screen ? { video: screen, audio: "loopback" } : {});
-          })
-          .catch(() => {
-            clearTimeout(timer);
-            answer({});
-          });
-      },
-      // The renderer is our own page; there is no third party to ask about
-      // here, and macOS still gates the capture behind its own permission.
-      { useSystemPicker: false },
-    );
-  }
+  window_.webContents.session.setDisplayMediaRequestHandler(
+    (request, callback) => {
+      // Refused rather than sourced; see above. A request for video is not one
+      // this app makes, and granting one would be capturing the user's screen.
+      if (request.videoRequested) return callback({});
+      /*
+       * `loopback` rather than `loopbackWithMute`: the user is on a call and
+       * needs to keep hearing it. Muting their own speakers to record the other
+       * side would be an odd definition of success.
+       */
+      callback({ audio: "loopback" });
+    },
+    // The renderer is our own page; there is no third party to ask about here,
+    // and macOS still gates the capture behind its own permission.
+    { useSystemPicker: false },
+  );
 
   // Links open in the user's browser, never in a window of ours: a page loaded
   // in-app would run with the app's origin and the app's permissions.

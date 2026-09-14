@@ -37,6 +37,7 @@ import { repairEngines } from "./engineRuntime.ts";
 import { shippedVersions } from "./engineVersions.ts";
 import { checkEngineUpdates, type UpdateCheck } from "./engineUpdates.ts";
 import { buildIndex, readIndexSources, type IndexResult } from "./foreignScan.ts";
+import { labelsWithProjector } from "../../core/runtime/foreign.ts";
 import {
   defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
 } from "./paths.ts";
@@ -801,7 +802,30 @@ export class RuntimeManager {
   /** Every model the daemon knows about, with the labels that say what each is for. */
   async installedModels(): Promise<InstalledModel[]> {
     await this.ensureLemonade();
-    return this.#api.listModels();
+    return this.#withProjectors(await this.#api.listModels());
+  }
+
+  /**
+   * Say `vision` for a found model whose projector is on disk.
+   *
+   * Here rather than at each place that draws a badge, because the same
+   * question is asked by the composer before it sends an image (`hasVision` in
+   * index.ts's `myra:chat-attach`), by the model bar and by the models page,
+   * and three readings of one model's capabilities that disagree is exactly
+   * the drift `roles.ts` exists to prevent. The daemon has no catalogue entry
+   * for anything out of `extra_models_dir` and labels it `["chat", "custom"]`
+   * -- defaults, not findings -- so an `mmproj-*.gguf` beside the weights is
+   * the better evidence and it is added to what the daemon said.
+   */
+  #withProjectors(models: InstalledModel[]): InstalledModel[] {
+    const projectors = new Map(
+      this.foreignModels.filter((m) => m.projector).map((m) => [m.id, m.projector]),
+    );
+    if (!projectors.size) return models;
+    return models.map((m) => {
+      const labels = labelsWithProjector(m.labels, projectors.get(m.id));
+      return labels ? { ...m, labels } : m;
+    });
   }
 
   /* ------------------------------------------------------------ lifecycle -- */

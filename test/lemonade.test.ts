@@ -13,6 +13,7 @@ import {
   apiBase, embeddableAsset, embeddableUrl, LEMONADE_VERSION, lemondArgs, lemondName,
   chatModelOf, chatModelToReload, mergeConfig, openAiBase, parseHealth, pinnedConfig,
 } from "../src/core/runtime/lemonade.ts";
+import { executableName } from "../src/main/runtime/download.ts";
 
 describe("embeddableAsset", () => {
   it("names the build upstream actually publishes for each platform", () => {
@@ -269,5 +270,21 @@ describe("putting the chat model back when something took it away", () => {
 
   it("stays out of it when the local backend is not the one answering", () => {
     assert.equal(chatModelToReload({ ...base, useForChat: false }), undefined);
+  });
+});
+
+describe("executableName", () => {
+  it("looks for the daemon under the name the archive actually uses", () => {
+    /* Every Windows install failed at the last step with "the Lemonade download
+       contained no daemon": lemondName() already carries the extension, and the
+       search appended a second one, so it hunted for lemond.exe.exe. */
+    assert.equal(executableName(lemondName("win32"), "win32"), "lemond.exe");
+    assert.equal(executableName(lemondName("linux"), "linux"), "lemond");
+  });
+
+  it("still adds one for a caller that passes a bare name", () => {
+    // pandoc is found this way: `pandoc-3.10.2/pandoc.exe` in the archive.
+    assert.equal(executableName("pandoc", "win32"), "pandoc.exe");
+    assert.equal(executableName("pandoc", "linux"), "pandoc");
   });
 });

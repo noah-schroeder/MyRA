@@ -23,7 +23,7 @@ import {
 } from "../../core/runtime/registry.ts";
 import type { RuntimeManager } from "./manager.ts";
 import { browseHuggingFace, repoCard, repoDetail } from "./hfClient.ts";
-import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
+import { listedId, type BrowseSort } from "../../core/runtime/hfBrowse.ts";
 import { prepareCard } from "../../core/runtime/modelCard.ts";
 import { deleteModel } from "./modelDelete.ts";
 import { Downloads } from "../downloads.ts";
@@ -91,7 +91,10 @@ export function installRuntimeIpc(
        * writing. `pollForModel` costs nothing in the ordinary case, where the
        * very first look already finds it.
        */
-      void pollForModel(name, () => runtime.api.listModels())
+      /* The id the daemon reports, which is the pull's name without its
+         required `user.` namespace -- see `listedId`. */
+      const id = listedId(name);
+      void pollForModel(id, () => runtime.api.listModels())
         .catch(() => undefined)
         .then((model) => {
           send("myra:models-changed");
@@ -104,7 +107,7 @@ export function installRuntimeIpc(
            * never become a network request -- see the note in main/review.ts
            * about a question that started behaving like one.
            */
-          void learnFacts(name, model?.checkpoint).catch(() => undefined);
+          void learnFacts(id, model?.checkpoint).catch(() => undefined);
         });
     },
   });
@@ -258,7 +261,10 @@ export function installRuntimeIpc(
       await runtime.ensureLemonade();
       return {
         ok: true,
-        models: await runtime.api.listModels(),
+        /* Not `api.listModels()`: a model found in LM Studio gets `vision`
+           added from the projector beside it, and the list on screen has to
+           agree with the answer the composer gives an attached image. */
+        models: await runtime.installedModels(),
         loaded: runtime.lemonade.status.health?.modelLoaded,
         /* Where each found model came from, so the list can say "LM Studio"
            rather than leaving a person to recognise their own filenames. */

@@ -123,13 +123,27 @@ test("the recommended variant follows the quantisation rule of thumb", () => {
   assert.equal(recommendVariant([], quantRank), undefined);
 });
 
-test("a sharded variant is pulled by its first file, not its file list", () => {
+test("a variant is pulled by its name, never by one of its files", () => {
+  /*
+   * Measured against lemond 11.8.0, and the difference is a whole feature:
+   * naming the first file fetches that file alone, and where it sits in a
+   * subdirectory -- which is where every split build is published -- the daemon
+   * resolves no path for it and drops the model from `/models` entirely, so a
+   * finished download appeared nowhere in the app. Naming the variant fetches
+   * every file in it and lists.
+   */
   const parsed = parseVariants(VARIANTS, "huggingface");
   const sharded = parsed.variants.find((v) => v.name === "BF16");
   assert.ok(sharded);
   assert.equal(
     checkpointFor("unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF", sharded),
-    "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:BF16/a-00001-of-00002.gguf",
+    "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:BF16",
+  );
+  const single = parsed.variants.find((v) => v.name === "Q4_K_M");
+  assert.ok(single);
+  assert.equal(
+    checkpointFor("unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF", single),
+    "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M",
   );
 });
 

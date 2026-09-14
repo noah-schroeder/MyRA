@@ -136,35 +136,53 @@ export class MeetingCapture {
 
     if (opts.systemAudio) {
       try {
-        const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-        // The video track is only there because some platforms refuse an
-        // audio-only capture request. Stop it immediately; nothing reads it.
-        for (const track of display.getVideoTracks()) {
-          display.removeTrack(track);
-          track.stop();
-        }
+        /*
+         * Audio with no video, and both halves of that are load-bearing.
+         *
+         * No video, because the main process answers this request with the
+         * system's own output and has no screen to hand back -- it refuses a
+         * request that asks for one, and MyRA has no business capturing a
+         * screen to record a conversation. See the handler in main/index.ts.
+         *
+         * And every piece of processing off, for a reason worse than the one
+         * the microphone has. Chromium's automatic gain control does not just
+         * pump the recording: it turns the capture device's own volume down,
+         * through the system's mixer, and leaves it there. Measured on
+         * PipeWire, a single recording took the output monitor from 1.0 to
+         * 0.000482 -- so the meeting sounded acceptable and every meeting
+         * after it recorded silence, with nothing on screen to say why. Noise
+         * suppression and echo cancellation are off for the reason they are
+         * off on the microphone: the far side of the call is the signal here,
+         * not the noise.
+         */
+        const display = await navigator.mediaDevices.getDisplayMedia({
+          video: false,
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
         if (display.getAudioTracks().length === 0) {
-          throw new Error("the chosen source was shared without audio");
+          throw new Error("the request was granted without audio");
         }
         await this.#attach("them", display, opts.onChunk);
         specs.push({ id: "them", label: "Everyone else" });
       } catch (err) {
         // A meeting missed cannot be recovered; a meeting recorded from one
         // side usually can be worked with. So warn and carry on.
-        /* The advice differs by platform because the cause does. On macOS and
-           Windows the main process grants loopback capture and what is left to
-           go wrong is a permission; on Linux there is no loopback capture to
-           grant, and the way to record the far side is to point the microphone
-           at a monitor source. Saying "this needs a virtual audio device"
-           everywhere, as this used to, was wrong on two platforms out of
-           three. */
+        /* The advice differs by platform because the cause does. On macOS the
+           capture is gated by a permission the user can grant. On Linux it is
+           not gated at all -- it goes through PulseAudio, which is what
+           PipeWire serves too -- so what is left to go wrong is that there is
+           no PulseAudio for it to go through. The advice this used to give
+           there, to pick a monitor source as the microphone in Settings, could
+           not be followed by anyone: Chromium leaves monitor sources out of
+           enumerateDevices entirely, so no such device has ever appeared in
+           that list. */
         const advice =
           navigator.userAgent.includes("Mac OS X")
             ? "On macOS, check System Settings → Privacy & Security → Screen Recording."
             : navigator.userAgent.includes("Windows")
               ? "Windows records whatever is playing; check that something is."
-              : "On Linux, choose a monitor source as the microphone in Settings to record " +
-                "the other side of a call.";
+              : "On Linux this needs PipeWire or PulseAudio, which a desktop normally " +
+                "already runs.";
         opts.onWarning?.(
           `Recording your side only — system audio was not captured (${(err as Error).message}). ` +
             advice,
@@ -191,7 +209,17 @@ export class MeetingCapture {
       // below, which is the worse implementation. Resolved against the
       // document so it works under both the dev server and file://.
       await context.audioWorklet.addModule(new URL("pcm-worklet.js", document.baseURI).href);
-      const worklet = new AudioWorkletNode(context, "pcm-worklet");
+      /* Mono, stated rather than assumed. The worklet reads the first channel
+         only, and the system-audio track arrives in stereo -- so left on its
+         own would be the recording, and anything panned to the right side of a
+         call would be missing from it. Explicit here makes the graph downmix
+         first, which is what the ScriptProcessor below already gets from being
+         built with one input channel. */
+      const worklet = new AudioWorkletNode(context, "pcm-worklet", {
+        channelCount: 1,
+        channelCountMode: "explicit",
+        channelInterpretation: "speakers",
+      });
       worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => onChunk(id, event.data);
       node = worklet;
     } catch {
