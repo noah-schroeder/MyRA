@@ -203,14 +203,43 @@ export class Downloads {
     if (!entry) return;
     const { controller } = entry;
     try {
-      await this.#deps.pull({
-        name: entry.record.name,
-        checkpoint: entry.record.checkpoint,
-        source: entry.record.source,
-        recipe: entry.record.recipe,
-        signal: controller.signal,
-        onProgress: (p) => this.#observe(id, p),
-      });
+      /*
+       * One `pull` is not always the whole repository.
+       *
+       * Reported and observed together: a repository fetched as several
+       * files streamed progress for the first of them and then went quiet --
+       * no more bytes, no more "file 2 of 3" -- while the daemon kept fetching
+       * the rest as work this connection was never told about, and every file
+       * still landed on disk correctly. So the stream closing is not, on its
+       * own, proof the whole transfer is finished; `entry.record` already
+       * says whether the last file this connection heard about was the last
+       * file the transfer has, and a repeated `pull` resumes from wherever the
+       * partial file was left (see the module docstring) rather than starting
+       * over.
+       *
+       * Bounded by `totalFiles` making genuine progress each attempt, not by
+       * a fixed count: if the daemon really does hand every file's progress
+       * to a fresh connection this asks again until `fileIndex` reaches it,
+       * and if a retry reports no further progress at all -- the theory above
+       * being wrong, or something else entirely -- this stops rather than
+       * hammering the daemon for a file it is never going to describe.
+       */
+      /* -1, so the very first attempt's fileIndex (1, at worst) always counts
+         as progress and is never mistaken for a retry that achieved nothing. */
+      let sinceLastAttempt = -1;
+      for (;;) {
+        await this.#deps.pull({
+          name: entry.record.name,
+          checkpoint: entry.record.checkpoint,
+          source: entry.record.source,
+          recipe: entry.record.recipe,
+          signal: controller.signal,
+          onProgress: (p) => this.#observe(id, p),
+        });
+        const { totalFiles, fileIndex } = entry.record;
+        if (totalFiles <= 1 || fileIndex >= totalFiles || fileIndex <= sinceLastAttempt) break;
+        sinceLastAttempt = fileIndex;
+      }
       /* Filled in rather than left at whatever the last frame said. The
          daemon's final progress event reports 0 bytes for a transfer it has
          just completed, so a finished row read "0 B of 138 MB" beside a full

@@ -13,7 +13,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  activeCount, bytesLabel, etaLabel, fraction, newDownload, observe, rate, statusLine,
+  activeCount, bytesLabel, etaLabel, fraction, newDownload, observe, pollForModel, rate, statusLine,
 } from "../src/core/downloads/download.ts";
 import { Downloads, type DownloadDeps } from "../src/main/downloads.ts";
 
@@ -249,5 +249,127 @@ describe("the list", () => {
     const d = reg.start(base);
     reg.dismiss(d.id);
     assert.equal(reg.list().length, 1);
+  });
+});
+
+describe("a repository fetched as several files", () => {
+  it("asks again when a connection closes before the last file, and stops once it reaches it", async () => {
+    // The shape actually observed against a real daemon: each connection
+    // streams exactly one file's progress and then closes on its own, well
+    // before the whole repository is on disk.
+    let calls = 0;
+    const deps: DownloadDeps = {
+      pull: async ({ onProgress }) => {
+        calls += 1;
+        onProgress({ file: `part-${calls}.gguf`, fileIndex: calls, totalFiles: 3, bytesDone: calls, bytesTotal: 3 });
+      },
+      remove: async () => {},
+      publish: () => {},
+    };
+    const reg = new Downloads(deps);
+    reg.start(base);
+    await settle();
+
+    assert.equal(calls, 3);
+    assert.equal(reg.list()[0]?.state, "done");
+  });
+
+  it("does not ask again once one connection already covered every file", async () => {
+    let calls = 0;
+    const deps: DownloadDeps = {
+      pull: async ({ onProgress }) => {
+        calls += 1;
+        onProgress({ file: "model.gguf", fileIndex: 3, totalFiles: 3, bytesDone: 3, bytesTotal: 3 });
+      },
+      remove: async () => {},
+      publish: () => {},
+    };
+    const reg = new Downloads(deps);
+    reg.start(base);
+    await settle();
+
+    assert.equal(calls, 1);
+    assert.equal(reg.list()[0]?.state, "done");
+  });
+
+  it("stops retrying, rather than looping forever, once a retry reports no further progress", async () => {
+    let calls = 0;
+    const deps: DownloadDeps = {
+      pull: async ({ onProgress }) => {
+        calls += 1;
+        // Stuck on file 1 of 3 every time -- the theory that a fresh
+        // connection hands out the next file's progress does not hold here,
+        // and this must not spin asking forever.
+        onProgress({ file: "part-1.gguf", fileIndex: 1, totalFiles: 3, bytesDone: 1, bytesTotal: 3 });
+      },
+      remove: async () => {},
+      publish: () => {},
+    };
+    const reg = new Downloads(deps);
+    reg.start(base);
+    await settle();
+
+    assert.equal(calls, 2); // the original attempt, and exactly one retry
+    // Given up on rather than left stuck: the files were observed to land
+    // correctly even when MyRA stopped watching, so this still settles done.
+    assert.equal(reg.list()[0]?.state, "done");
+  });
+
+  it("single-file downloads never trigger a second connection", async () => {
+    const h = harness();
+    const reg = new Downloads(h.deps);
+    reg.start(base);
+    h.emit()(500, 1_000);
+    h.finish()();
+    await settle();
+    assert.equal(reg.list()[0]?.state, "done");
+    // harness()'s pull is reassigned by every call it receives; if a second
+    // one had been made, h.emit()/h.finish() above would be targeting stale
+    // closures from the first and this settle would still be pending.
+  });
+});
+
+describe("waiting for the daemon's index to catch up", () => {
+  it("costs nothing when the model is already there", async () => {
+    const sleeps: number[] = [];
+    const found = await pollForModel(
+      "Qwen3-30B",
+      async () => [{ id: "Qwen3-30B" }],
+      { sleep: async (ms) => { sleeps.push(ms); } },
+    );
+    assert.deepEqual(found, { id: "Qwen3-30B" });
+    assert.deepEqual(sleeps, []); // no retry, so no wait was ever needed
+  });
+
+  it("retries until the daemon's own list catches up", async () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    const found = await pollForModel(
+      "Qwen3-30B",
+      async () => {
+        calls += 1;
+        // Not there for the first two looks -- exactly the shape of a
+        // multi-file pull whose stream has closed before the daemon has
+        // finished indexing every shard it just wrote.
+        return calls < 3 ? [] : [{ id: "Qwen3-30B" }];
+      },
+      { sleep: async (ms) => { sleeps.push(ms); } },
+    );
+    assert.deepEqual(found, { id: "Qwen3-30B" });
+    assert.equal(calls, 3);
+    // Growing waits, not a fixed poll interval hammering the daemon.
+    assert.deepEqual(sleeps, [1000, 2000]);
+  });
+
+  it("gives up rather than waiting forever for a model that never appears", async () => {
+    const sleeps: number[] = [];
+    const found = await pollForModel(
+      "Qwen3-30B",
+      async () => [],
+      { attempts: 3, sleep: async (ms) => { sleeps.push(ms); } },
+    );
+    assert.equal(found, undefined);
+    // One fewer wait than attempts: no point sleeping after the last look.
+    assert.deepEqual(sleeps, [1000, 2000]);
   });
 });

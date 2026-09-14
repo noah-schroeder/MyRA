@@ -155,6 +155,38 @@ export function anyFailed(list: readonly Download[]): boolean {
   return list.some((d) => d.state === "failed");
 }
 
+/**
+ * Wait for a just-finished pull to actually be there, rather than assuming it
+ * already is.
+ *
+ * `Downloads.#run` considers a transfer done the instant the daemon's SSE
+ * stream closes, which is a fact about the HTTP connection, not a promise
+ * about the daemon's own model index having caught up with what it just
+ * wrote to disk -- especially plausible for a repository fetched as several
+ * files, where the stream can only close once, after the last of them. A
+ * page told to refresh before that catch-up finishes reads an old list and
+ * shows nothing for a model whose bytes are already sitting on disk.
+ *
+ * Retried rather than delayed by a fixed amount: the ordinary case is that
+ * the model is already there, and a fixed pause would cost every download
+ * that time for a race that mostly does not happen. `list` and `sleep` are
+ * injected so this is testable without a daemon or a real clock.
+ */
+export async function pollForModel<M extends { id: string }>(
+  id: string,
+  list: () => Promise<M[]>,
+  opts: { attempts?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<M | undefined> {
+  const attempts = opts.attempts ?? 5;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const found = (await list()).find((m) => m.id === id);
+    if (found) return found;
+    if (attempt < attempts - 1) await sleep(1000 * (attempt + 1));
+  }
+  return undefined;
+}
+
 /* ------------------------------------------------------------------ *
  * Labels                                                              *
  *                                                                     *

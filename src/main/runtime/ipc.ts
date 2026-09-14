@@ -27,6 +27,7 @@ import type { BrowseSort } from "../../core/runtime/hfBrowse.ts";
 import { prepareCard } from "../../core/runtime/modelCard.ts";
 import { deleteModel } from "./modelDelete.ts";
 import { Downloads } from "../downloads.ts";
+import { pollForModel } from "../../core/downloads/download.ts";
 import { learnFacts } from "./modelFacts.ts";
 
 /**
@@ -78,21 +79,33 @@ export function installRuntimeIpc(
     /* A finished download is a new entry in the model list, and the page
        showing that list has no other way to learn it arrived. */
     onFinished: (name) => {
-      send("myra:models-changed");
       /*
-       * The one moment MyRA asks Hugging Face what this model is.
+       * Confirmed present before the page is told to look, not the instant
+       * the transfer's own HTTP stream closes.
        *
-       * Here rather than at load time, and here rather than on a timer: the
-       * bytes have just come from the same host, the user is plainly online,
-       * and they are waiting for this model anyway. A load must never become a
-       * network request -- see the note in main/review.ts about a question that
-       * started behaving like one.
+       * That stream closing is a fact about the connection, and for a
+       * repository pulled as several files it can only close once -- after
+       * the last of them -- which is exactly the case that left "My models"
+       * showing nothing for a model whose bytes were already on disk: the
+       * daemon's own index had not caught up with what it had just finished
+       * writing. `pollForModel` costs nothing in the ordinary case, where the
+       * very first look already finds it.
        */
-      void runtime.api
-        .listModels()
-        .then((models) => models.find((m) => m.id === name))
-        .then((model) => learnFacts(name, model?.checkpoint))
-        .catch(() => undefined);
+      void pollForModel(name, () => runtime.api.listModels())
+        .catch(() => undefined)
+        .then((model) => {
+          send("myra:models-changed");
+          /*
+           * The one moment MyRA asks Hugging Face what this model is.
+           *
+           * Here rather than at load time, and here rather than on a timer:
+           * the bytes have just come from the same host, the user is plainly
+           * online, and they are waiting for this model anyway. A load must
+           * never become a network request -- see the note in main/review.ts
+           * about a question that started behaving like one.
+           */
+          void learnFacts(name, model?.checkpoint).catch(() => undefined);
+        });
     },
   });
   const state = (): unknown => ({
