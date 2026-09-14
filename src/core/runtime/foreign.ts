@@ -43,6 +43,17 @@ export interface ForeignModel {
   path: string;
   /** The name the symlink takes inside the index directory. */
   linkName: string;
+  /**
+   * The vision projector sitting beside the weights, when there is one.
+   *
+   * The only local evidence that a found model reads images. Lemonade has no
+   * catalogue entry for anything registered out of `extra_models_dir`, so it
+   * supplies defaults -- `["chat", "custom"]`, measured -- and a Qwen2.5-VL
+   * pulled down in LM Studio arrives with no `vision` label whatever it can
+   * actually do. An `mmproj-*.gguf` next to the weights is a fact on disk,
+   * which is better evidence than a default, so it is what the badge reads.
+   */
+  projector?: string;
 }
 
 export const SOURCE_LABELS: Record<ForeignSource, string> = {
@@ -236,6 +247,41 @@ export function isGguf(name: string): boolean {
   return name.toLowerCase().endsWith(".gguf");
 }
 
+/** A vision projector, by the name every packager gives one. */
+export function isProjector(name: string): boolean {
+  return /(^|[-._])mmproj/i.test(name);
+}
+
+/**
+ * The projector belonging to a set of weights, out of one directory listing.
+ *
+ * Sorted rather than "whatever readdir returned first", so that a repository
+ * holding both `mmproj-F16.gguf` and `mmproj-Q8_0.gguf` reports the same
+ * answer on every scan -- this decides what a person sees on a badge, and a
+ * badge that comes and goes between two launches is worse than no badge.
+ */
+export function pickProjector(names: readonly string[]): string | undefined {
+  return [...names].filter(isProjector).filter(isGguf).sort()[0];
+}
+
+/**
+ * Whether a found model's own labels should say it reads images.
+ *
+ * Added to the daemon's list rather than replacing it: everything else the
+ * daemon says about the model stays true, and `vision` is the label the rest
+ * of the app already reads (`hasVision` in core/models/roles.ts), so no
+ * consumer needs to learn a second spelling of the same fact.
+ */
+export function labelsWithProjector(
+  labels: readonly string[] | undefined,
+  projector: string | undefined,
+): string[] | undefined {
+  if (!projector) return labels ? [...labels] : undefined;
+  const said = labels ?? [];
+  if (said.includes("vision") || said.includes("omni")) return [...said];
+  return [...said, "vision"];
+}
+
 /**
  * Files that are part of a model but are not the model.
  *
@@ -244,7 +290,7 @@ export function isGguf(name: string): boolean {
  * listed once, under their first part, for the same reason.
  */
 export function isAuxiliaryGguf(name: string): boolean {
-  if (/(^|[-._])mmproj/i.test(name)) return true;
+  if (isProjector(name)) return true;
   const split = /-(\d{5})-of-(\d{5})\.gguf$/i.exec(name);
   return split ? split[1] !== "00001" : false;
 }

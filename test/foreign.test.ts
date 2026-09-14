@@ -15,8 +15,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 
 import {
-  blobFile, defaultStores, indexId, isAuxiliaryGguf, ollamaLabel, ollamaModelDigest,
-  readIndexId, safeSegment,
+  blobFile, defaultStores, indexId, isAuxiliaryGguf, labelsWithProjector, ollamaLabel,
+  ollamaModelDigest, pickProjector, readIndexId, safeSegment,
 } from "../src/core/runtime/foreign.ts";
 import { buildIndex, scanLmStudio, scanOllama } from "../src/main/runtime/foreignScan.ts";
 
@@ -132,6 +132,59 @@ test("a vision projector is not offered as a model of its own", async () => {
   assert.ok(isAuxiliaryGguf("mmproj-model-f16.gguf"));
   assert.ok(isAuxiliaryGguf("Qwen2-VL-7B.mmproj-f16.gguf"));
   assert.ok(!isAuxiliaryGguf("Qwen3-8B-Q4_K_M.gguf"));
+});
+
+test("a vision model found in LM Studio carries the projector beside it", async () => {
+  const root = await temp();
+  const dir = join(root, "unsloth", "Qwen2.5-VL-7B-Instruct-GGUF");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"), "w");
+  await writeFile(join(dir, "mmproj-F16.gguf"), "p");
+  const found = await scanLmStudio(root);
+  /* Still one model: the projector is evidence about the weights, never an
+     entry of its own. */
+  assert.equal(found.length, 1);
+  assert.equal(found[0]?.projector, join(dir, "mmproj-F16.gguf"));
+});
+
+test("a model with no projector beside it claims nothing", async () => {
+  const root = await temp();
+  const dir = join(root, "bartowski", "Qwen3-8B-GGUF");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "Qwen3-8B-Q4_K_M.gguf"), "w");
+  const found = await scanLmStudio(root);
+  assert.equal(found[0]?.projector, undefined);
+});
+
+test("a projector in another model's directory is not borrowed", async () => {
+  const root = await temp();
+  const seeing = join(root, "unsloth", "Qwen2.5-VL-7B-GGUF");
+  const blind = join(root, "bartowski", "Qwen3-8B-GGUF");
+  await mkdir(seeing, { recursive: true });
+  await mkdir(blind, { recursive: true });
+  await writeFile(join(seeing, "Qwen2.5-VL-7B-Q4_K_M.gguf"), "w");
+  await writeFile(join(seeing, "mmproj-F16.gguf"), "p");
+  await writeFile(join(blind, "Qwen3-8B-Q4_K_M.gguf"), "w");
+  const found = await scanLmStudio(root);
+  const byLabel = new Map(found.map((m) => [m.label, m.projector]));
+  assert.ok(byLabel.get("Qwen2.5-VL-7B-Q4_K_M"));
+  assert.equal(byLabel.get("Qwen3-8B-Q4_K_M"), undefined);
+});
+
+test("two projectors in one directory resolve to the same one on every scan", () => {
+  const names = ["mmproj-Q8_0.gguf", "mmproj-F16.gguf", "model-Q4_K_M.gguf"];
+  assert.equal(pickProjector(names), "mmproj-F16.gguf");
+  assert.equal(pickProjector([...names].reverse()), "mmproj-F16.gguf");
+});
+
+test("a projector adds vision to what the daemon said, and nothing else", () => {
+  assert.deepEqual(labelsWithProjector(["chat", "custom"], "/m/mmproj.gguf"), ["chat", "custom", "vision"]);
+  // No projector, no claim -- the daemon's own list is passed through.
+  assert.deepEqual(labelsWithProjector(["chat", "custom"], undefined), ["chat", "custom"]);
+  // Nothing is said twice when the daemon already knew.
+  assert.deepEqual(labelsWithProjector(["chat", "vision"], "/m/mmproj.gguf"), ["chat", "vision"]);
+  assert.deepEqual(labelsWithProjector(["chat", "omni"], "/m/mmproj.gguf"), ["chat", "omni"]);
+  assert.equal(labelsWithProjector(undefined, undefined), undefined);
 });
 
 test("a split archive is listed once, under its first part", async () => {

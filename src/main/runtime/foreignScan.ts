@@ -13,11 +13,11 @@
 
 import { lstat, mkdir, readdir, readFile, readlink, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 import {
   blobFile, defaultStores, indexId, isAuxiliaryGguf, isGguf, ollamaLabel, ollamaModelDigest,
-  type ForeignModel, type ForeignSource,
+  pickProjector, type ForeignModel, type ForeignSource,
 } from "../../core/runtime/foreign.ts";
 
 /** Deep enough for `publisher/repo/quant/file.gguf`, shallow enough to stay quick. */
@@ -51,7 +51,7 @@ async function findGgufs(root: string, depth = 0): Promise<string[]> {
   for (const entry of entries) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) out.push(...(await findGgufs(path, depth + 1)));
-    else if (entry.isFile() && isGguf(entry.name) && !isAuxiliaryGguf(entry.name)) out.push(path);
+    else if (entry.isFile() && isGguf(entry.name)) out.push(path);
   }
   return out;
 }
@@ -65,16 +65,35 @@ async function findGgufs(root: string, depth = 0): Promise<string[]> {
  */
 export async function scanLmStudio(root: string): Promise<ForeignModel[]> {
   const files = await findGgufs(root);
-  return files.map((path) => {
-    const label = path.split(/[/\\]/).pop()?.replace(/\.gguf$/i, "") ?? "model";
-    return {
-      id: indexId("lmstudio", label),
-      label,
-      source: "lmstudio" as ForeignSource,
-      path,
-      linkName: `${label}.gguf`,
-    };
-  });
+
+  /* The projector is found by looking at what else is in the directory the
+     weights are in, which is why the walk above keeps the auxiliary files it
+     used to drop on sight. A vision repository holds `model-Q4_K_M.gguf` and
+     `mmproj-F16.gguf` side by side, and the second is the only thing on this
+     machine that says the first can read an image: a model registered out of
+     `extra_models_dir` has no catalogue entry, so the daemon labels it
+     `["chat", "custom"]` whatever it is. */
+  const byDir = new Map<string, string[]>();
+  for (const path of files) {
+    const dir = dirname(path);
+    byDir.set(dir, [...(byDir.get(dir) ?? []), basename(path)]);
+  }
+
+  return files
+    .filter((path) => !isAuxiliaryGguf(basename(path)))
+    .map((path) => {
+      const label = basename(path).replace(/\.gguf$/i, "");
+      const dir = dirname(path);
+      const projector = pickProjector(byDir.get(dir) ?? []);
+      return {
+        id: indexId("lmstudio", label),
+        label,
+        source: "lmstudio" as ForeignSource,
+        path,
+        linkName: `${label}.gguf`,
+        ...(projector ? { projector: join(dir, projector) } : {}),
+      };
+    });
 }
 
 /**

@@ -258,7 +258,10 @@ export function installRuntimeIpc(
       await runtime.ensureLemonade();
       return {
         ok: true,
-        models: await runtime.api.listModels(),
+        /* Not `api.listModels()`: a model found in LM Studio gets `vision`
+           added from the projector beside it, and the list on screen has to
+           agree with the answer the composer gives an attached image. */
+        models: await runtime.installedModels(),
         loaded: runtime.lemonade.status.health?.modelLoaded,
         /* Where each found model came from, so the list can say "LM Studio"
            rather than leaving a person to recognise their own filenames. */
