@@ -137,6 +137,27 @@ const ANTHROPIC: ReasoningDialect = {
 };
 
 /**
+ * Mistral's own shape, and a narrower one than the rest.
+ *
+ * `reasoning_effort` is the same field name OpenAI uses, on a different host
+ * with a different vocabulary -- documented for `mistral-small-latest` and
+ * `mistral-medium-3-5` as exactly two values, not four. There is no "low" or
+ * "medium" to send; a model asked for one would either reject the request or
+ * silently treat it as something MyRA never measured, and the dialect only
+ * offers what the docs actually list.
+ */
+const MISTRAL: ReasoningDialect = {
+  id: "mistral-effort",
+  param: "reasoning_effort",
+  source: "Mistral",
+  evidence: "documented",
+  levels: [
+    { value: "none", label: "none", hint: "Think minimally; the thinking chunk is left out of the reply." },
+    { value: "high", label: "high", hint: "A full thinking chunk before the answer. Slower, more output tokens." },
+  ],
+};
+
+/**
  * Which vendor's shape an endpoint speaks, by the host it answers on.
  *
  * Host rather than model name: the field belongs to the API, not to the
@@ -169,6 +190,7 @@ const DIALECTS: { hosts: string[]; dialect: ReasoningDialect }[] = [
   { hosts: ["openrouter.ai"], dialect: OPENROUTER },
   { hosts: ["api.anthropic.com"], dialect: ANTHROPIC },
   { hosts: ["generativelanguage.googleapis.com"], dialect: GOOGLE },
+  { hosts: ["api.mistral.ai"], dialect: MISTRAL },
 ];
 
 /** The dialect a stored choice belongs to, by the id it was stored under. */
@@ -178,6 +200,23 @@ export function dialectById(id: string): ReasoningDialect | undefined {
 }
 
 /* --------------------------------------------------------------- local -- */
+
+/**
+ * The effort words in use across local templates, low to high.
+ *
+ * Shared by `reasoning_effort` and `reasoning_strength` rather than written
+ * twice: every template seen so far that reads either name draws from this
+ * same vocabulary, "xhigh" included -- Qwen3.8 reads it under the
+ * `reasoning_effort` name, GLM-family templates have been seen reading it
+ * under `reasoning_strength`. Which of the four a given template actually
+ * accepts is for the probe to find out, not for this list to guess.
+ */
+const EFFORT_LEVELS: ReasoningLevel[] = [
+  { value: "low", label: "low", hint: "A little reasoning before answering." },
+  { value: "medium", label: "medium", hint: "The template's middle setting." },
+  { value: "high", label: "high", hint: "Reason at length before answering." },
+  { value: "xhigh", label: "xhigh", hint: "Reason as hard as the template allows. Slowest, most output tokens." },
+];
 
 /**
  * Template variables that mean "should you think", and only those.
@@ -215,20 +254,19 @@ export const THINKING_KWARGS: {
   },
   {
     name: "reasoning_effort",
-    values: [
-      { value: "low", label: "low", hint: "A little reasoning before answering." },
-      { value: "medium", label: "medium", hint: "The template's middle setting." },
-      { value: "high", label: "high", hint: "Reason at length before answering." },
-    ],
+    /* Four candidates offered, not three: Qwen3.8's own template validates
+       `reasoning_effort` against exactly {low, medium, xhigh} and raises an
+       exception on "high", which earlier only offering {low, medium, high}
+       turned into a request that 400s the moment someone picked the top of
+       the list. `findTemplateSwitches` probes every candidate against the
+       model's own template and keeps only the ones that do not error, so a
+       template with a narrower vocabulary than this list is not a problem --
+       offering a value here is not a promise that every template accepts it. */
+    values: EFFORT_LEVELS,
   },
   {
     name: "reasoning_strength",
-    values: [
-      { value: "low", label: "low", hint: "A little reasoning before answering." },
-      { value: "medium", label: "medium", hint: "The template's middle setting." },
-      { value: "high", label: "high", hint: "Reason at length before answering." },
-      { value: "xhigh", label: "xhigh", hint: "Reason as hard as the template allows. Slowest, most output tokens." },
-    ],
+    values: EFFORT_LEVELS,
   },
 ];
 
@@ -237,17 +275,27 @@ export const THINKING_KWARGS: {
  *
  * `measured`, because the only way this is ever constructed is by rendering
  * the model's own template twice and seeing the prompt change.
+ *
+ * `levels` narrows the candidate list to the ones actually confirmed against
+ * THIS model's template -- see `findTemplateSwitches`. Omitting it (the
+ * `dialectById` path, reconstructing a dialect from a stored choice rather
+ * than from a fresh probe) falls back to the full candidate list, which is
+ * safe there: the value being looked up was already chosen from a control
+ * that only ever offered confirmed levels in the first place.
  */
-export function templateDialect(name: string): ReasoningDialect | undefined {
+export function templateDialect(name: string, levels?: ReasoningLevel[]): ReasoningDialect | undefined {
   const known = THINKING_KWARGS.find((k) => k.name === name);
   if (!known) return undefined;
+  const offered = levels ?? known.values;
   return {
     id: `template:${name}`,
     param: name,
     source: "this model's chat template",
     evidence: "measured",
-    levels: known.values,
-    ...(known.preferred ? { preferred: known.preferred } : {}),
+    levels: offered,
+    ...(known.preferred && offered.some((l) => l.value === known.preferred)
+      ? { preferred: known.preferred }
+      : {}),
   };
 }
 
@@ -265,7 +313,9 @@ export function reasoningFields(
   value: string,
 ): Record<string, unknown> {
   if (!dialect.levels.some((l) => l.value === value)) return {};
-  if (dialect.id === "openai-effort") return { reasoning_effort: value };
+  if (dialect.id === "openai-effort" || dialect.id === "mistral-effort") {
+    return { reasoning_effort: value };
+  }
   if (dialect.id === "openrouter-reasoning") {
     return value === "off"
       ? { reasoning: { enabled: false } }

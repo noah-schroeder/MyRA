@@ -57,9 +57,15 @@ export type RenderPrompt = (body: Record<string, unknown>) => Promise<string | u
  * are returned in THINKING_KWARGS order, so the coarse switch is drawn above
  * the fine one.
  *
- * Each variable stops at its own first difference. One level proving the
- * template reads the name is the whole finding; rendering the rest would be
- * three more round trips to learn nothing.
+ * Every candidate value is rendered now, not just the first that differs from
+ * baseline. That used to be enough -- one level proving the template reads the
+ * name was treated as proof the rest of the static list worked too -- until
+ * Qwen3.8: its template validates `reasoning_effort` against exactly
+ * `{low, medium, xhigh}` and raises a template exception on `"high"`, which
+ * `low` alone could never reveal. A value that errors comes back as
+ * `undefined` from `render` and is left out of the offered list; a value that
+ * renders without erroring is offered whether or not it happens to match the
+ * one that first proved the template reads this name at all.
  *
  * A baseline that will not render means the answer is "unknown", not "no": an
  * endpoint that cannot be asked has told us nothing, and reporting that as an
@@ -72,6 +78,8 @@ export async function findTemplateSwitches(render: RenderPrompt): Promise<Reason
 
   const found: ReasoningDialect[] = [];
   for (const kwarg of THINKING_KWARGS) {
+    const accepted: typeof kwarg.values = [];
+    let differs = false;
     for (const level of kwarg.values) {
       const raw: unknown =
         level.value === "true" ? true : level.value === "false" ? false : level.value;
@@ -79,11 +87,17 @@ export async function findTemplateSwitches(render: RenderPrompt): Promise<Reason
         messages: PROBE_MESSAGES,
         chat_template_kwargs: { [kwarg.name]: raw },
       });
-      if (rendered !== undefined && rendered !== baseline) {
-        const dialect = templateDialect(kwarg.name);
-        if (dialect) found.push(dialect);
-        break;
-      }
+      if (rendered === undefined) continue; // this value errors; never offered
+      accepted.push(level);
+      if (rendered !== baseline) differs = true;
+    }
+    // Proof the template reads this name at all still takes one level moving
+    // the prompt -- otherwise every "accepted" value could just be one this
+    // particular template silently ignores, the same way an unknown field
+    // does on the hosted side.
+    if (differs && accepted.length) {
+      const dialect = templateDialect(kwarg.name, accepted);
+      if (dialect) found.push(dialect);
     }
   }
   return found;

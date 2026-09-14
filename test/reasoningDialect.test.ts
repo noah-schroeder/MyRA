@@ -53,6 +53,20 @@ test("OpenRouter's off is a switch, not an effort", () => {
   assert.deepEqual(reasoningFields(or, "high"), { reasoning: { effort: "high" } });
 });
 
+test("Mistral's own two-value vocabulary, not OpenAI's four", () => {
+  // Same field name as OpenAI, `reasoning_effort` -- and a completely
+  // different, narrower, documented vocabulary: `mistral-small-latest` and
+  // `mistral-medium-3-5` take only "none" and "high", not "low" or "medium".
+  const mistral = dialectForHost("https://api.mistral.ai/v1");
+  assert.ok(mistral);
+  assert.equal(mistral.param, "reasoning_effort");
+  assert.deepEqual(mistral.levels.map((l) => l.value), ["none", "high"]);
+  assert.deepEqual(reasoningFields(mistral, "high"), { reasoning_effort: "high" });
+  // OpenAI's words, not Mistral's -- never sent to this endpoint.
+  assert.deepEqual(reasoningFields(mistral, "low"), {});
+  assert.deepEqual(reasoningFields(mistral, "minimal"), {});
+});
+
 test("Google's budget goes out as a number, nested where it belongs", () => {
   const g = dialectForHost("https://generativelanguage.googleapis.com/v1beta/openai");
   assert.ok(g);
@@ -128,6 +142,51 @@ test("an endpoint that cannot be asked is unknown, not unsupported", async () =>
   assert.deepEqual(await findTemplateSwitches(async () => undefined), []);
 });
 
+test("a value one template rejects does not block its siblings", async () => {
+  // Qwen3.8's own chat_template.jinja validates reasoning_effort against
+  // exactly {low, medium, xhigh} and calls raise_exception(...) on "high" --
+  // which `low` alone proving the template reads the name could never reveal,
+  // back when finding one difference was treated as proof the whole static
+  // list worked. A render that errors comes back as `undefined`; that value
+  // is left off the offered list while its siblings still are.
+  const found = await findTemplateSwitches(async (body) => {
+    const kwargs = (body["chat_template_kwargs"] ?? {}) as Record<string, unknown>;
+    const effort = kwargs["reasoning_effort"];
+    if (effort === "high") return undefined; // raise_exception(...)
+    return effort !== undefined ? `PROMPT+${String(effort)}` : "PROMPT";
+  });
+  assert.deepEqual(found.map((d) => d.param), ["reasoning_effort"]);
+  assert.deepEqual(found[0]?.levels.map((l) => l.value), ["low", "medium", "xhigh"]);
+});
+
+test("a value every template rejects is not a switch that was found", async () => {
+  // If EVERY candidate for a name errors, there is no accepted value left to
+  // prove the template reads it with, and the kwarg is not reported at all --
+  // as opposed to being reported with an empty menu of levels.
+  const found = await findTemplateSwitches(async (body) => {
+    const kwargs = (body["chat_template_kwargs"] ?? {}) as Record<string, unknown>;
+    return "reasoning_effort" in kwargs ? undefined : "PROMPT";
+  });
+  assert.deepEqual(found, []);
+});
+
+test("a narrowed dialect refuses the value it was narrowed to exclude", () => {
+  // The payoff of the fix above: a control built from the accepted subset
+  // does not merely hide "high" from the menu, it is the same `reasoningFields`
+  // guard every other dialect gets, so nothing upstream can put it on the wire
+  // by way of a stale stored choice either.
+  const dialect = templateDialect("reasoning_effort", [
+    { value: "low", label: "low", hint: "" },
+    { value: "medium", label: "medium", hint: "" },
+    { value: "xhigh", label: "xhigh", hint: "" },
+  ]);
+  assert.ok(dialect);
+  assert.deepEqual(reasoningFields(dialect, "high"), {});
+  assert.deepEqual(reasoningFields(dialect, "xhigh"), {
+    chat_template_kwargs: { reasoning_effort: "xhigh" },
+  });
+});
+
 /* ------------------------------------------------------- the default -- */
 
 test("a model that can think is asked to, unless the user says otherwise", () => {
@@ -147,6 +206,7 @@ test("nothing is sent by default where sending costs money", () => {
     "https://openrouter.ai/api/v1",
     "https://api.anthropic.com/v1",
     "https://generativelanguage.googleapis.com/v1beta/openai",
+    "https://api.mistral.ai/v1",
   ]) {
     const found = dialectForHost(url);
     assert.ok(found);
@@ -209,6 +269,7 @@ test("a stored dialect id resolves back to the same dialect", () => {
     "https://openrouter.ai/api/v1",
     "https://api.anthropic.com/v1",
     "https://generativelanguage.googleapis.com/v1beta/openai",
+    "https://api.mistral.ai/v1",
   ]) {
     const found = dialectForHost(url);
     assert.ok(found);
