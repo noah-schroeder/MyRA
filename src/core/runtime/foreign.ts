@@ -44,6 +44,16 @@ export interface ForeignModel {
   /** The name the symlink takes inside the index directory. */
   linkName: string;
   /**
+   * The rest of a split model, when this is the first part of one.
+   *
+   * Absolute paths, linked into the same directory under their own filenames.
+   * llama.cpp is handed the first part and works out the others by name from
+   * the directory it is in -- so linking part one alone produced an index entry
+   * that listed perfectly and could never load, and the daemon reported a third
+   * of the model's real size beside it.
+   */
+  parts?: string[];
+  /**
    * The vision projector sitting beside the weights, when there is one.
    *
    * The only local evidence that a found model reads images. Lemonade has no
@@ -291,6 +301,27 @@ export function labelsWithProjector(
  */
 export function isAuxiliaryGguf(name: string): boolean {
   if (isProjector(name)) return true;
-  const split = /-(\d{5})-of-(\d{5})\.gguf$/i.exec(name);
-  return split ? split[1] !== "00001" : false;
+  const split = SHARD.exec(name);
+  return split ? split[2] !== "00001" : false;
+}
+
+const SHARD = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
+
+/**
+ * The name a split model goes by, with the part numbering taken off.
+ *
+ * `Model-Q4_K_M-00001-of-00003.gguf` is one model called `Model-Q4_K_M`, and
+ * it is what the index directory is named after -- the daemon names a model
+ * after the directory, so leaving the numbering on put `…-00001-of-00003` on
+ * screen as the name of a model that is nothing of the sort.
+ */
+export function shardStem(name: string): string | undefined {
+  const m = SHARD.exec(name);
+  return m?.[1];
+}
+
+/** Whether two filenames are parts of the same split model. */
+export function sameShardSet(a: string, b: string): boolean {
+  const stem = shardStem(a);
+  return stem !== undefined && stem === shardStem(b);
 }

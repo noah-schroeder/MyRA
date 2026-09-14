@@ -16,7 +16,7 @@ import { after, test } from "node:test";
 
 import {
   blobFile, defaultStores, indexId, isAuxiliaryGguf, labelsWithProjector, ollamaLabel,
-  ollamaModelDigest, pickProjector, readIndexId, safeSegment,
+  ollamaModelDigest, pickProjector, readIndexId, safeSegment, sameShardSet, shardStem,
 } from "../src/core/runtime/foreign.ts";
 import { buildIndex, scanLmStudio, scanOllama } from "../src/main/runtime/foreignScan.ts";
 
@@ -191,6 +191,48 @@ test("a split archive is listed once, under its first part", async () => {
   assert.ok(!isAuxiliaryGguf("big-model-00001-of-00003.gguf"));
   assert.ok(isAuxiliaryGguf("big-model-00002-of-00003.gguf"));
   assert.ok(isAuxiliaryGguf("big-model-00003-of-00003.gguf"));
+});
+
+test("a split model is named for the set, and keeps every part", async () => {
+  const store = await temp();
+  const dir = join(store, "unsloth", "Big-GGUF");
+  await mkdir(dir, { recursive: true });
+  for (const n of ["00001", "00002", "00003"]) {
+    await writeFile(join(dir, `Big-Q4_K_M-${n}-of-00003.gguf`), "w");
+  }
+
+  const found = await scanLmStudio(store);
+  assert.equal(found.length, 1);
+  const model = found[0]!;
+  // Not `Big-Q4_K_M-00001-of-00003`, which is a filename rather than a model.
+  assert.equal(model.label, "Big-Q4_K_M");
+  // The first part keeps its own name: llama.cpp finds the others from it.
+  assert.equal(model.linkName, "Big-Q4_K_M-00001-of-00003.gguf");
+  assert.deepEqual(model.parts, [
+    join(dir, "Big-Q4_K_M-00002-of-00003.gguf"),
+    join(dir, "Big-Q4_K_M-00003-of-00003.gguf"),
+  ]);
+
+  /* And the whole set reaches the index: linking the first part alone is what
+     produced an entry that listed, reported a third of the model's size, and
+     could never load. */
+  const index = join(await temp(), "models-index");
+  await buildIndex({ indexDir: index, modelsDir: "", extraDirs: [store], includeForeign: true });
+  const inside = await readdir(join(index, model.id));
+  assert.deepEqual(inside.sort(), [
+    "Big-Q4_K_M-00001-of-00003.gguf",
+    "Big-Q4_K_M-00002-of-00003.gguf",
+    "Big-Q4_K_M-00003-of-00003.gguf",
+  ]);
+});
+
+test("the parts of a split model are told apart from another set beside them", () => {
+  assert.equal(shardStem("Big-Q4_K_M-00002-of-00003.gguf"), "Big-Q4_K_M");
+  assert.equal(shardStem("Big-Q4_K_M.gguf"), undefined);
+  assert.ok(sameShardSet("Big-Q4_K_M-00001-of-00003.gguf", "Big-Q4_K_M-00003-of-00003.gguf"));
+  // Two quantisations split into the same directory are two models.
+  assert.ok(!sameShardSet("Big-Q4_K_M-00001-of-00003.gguf", "Big-Q8_0-00002-of-00003.gguf"));
+  assert.ok(!sameShardSet("Big-Q4_K_M.gguf", "Big-Q4_K_M.gguf"));
 });
 
 /* ------------------------------------------------------------------ index -- */

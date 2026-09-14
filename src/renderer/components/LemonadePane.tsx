@@ -40,10 +40,10 @@ import { groupCatalog, repoOf, type CatalogEntry } from "../../core/runtime/cata
 import { CURATED_CHAT } from "../../core/runtime/curatedChat.ts";
 import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
-import { pullCheckpoint, pulledId } from "../../core/runtime/hfBrowse.ts";
+import { pulledId } from "../../core/runtime/hfBrowse.ts";
 import {
-  ENABLED_SOURCES, explainRegistryError, recommendVariant, REGISTRY_HOST, REGISTRY_LABEL,
-  registryRepoUrl, type RegistrySource, type RepoVariants,
+  checkpointFor, ENABLED_SOURCES, explainRegistryError, recommendVariant, REGISTRY_HOST,
+  REGISTRY_LABEL, registryRepoUrl, type RegistrySource, type RepoVariants,
 } from "../../core/runtime/registry.ts";
 import { deletePrompt, ownerOf } from "../../core/runtime/modelOwner.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
@@ -618,7 +618,7 @@ export function LemonadePane({
    * Fetch one version of one model.
    *
    * Two things here were wrong once and are the reason the button never worked,
-   * so both are settled in `pullName` and `pullCheckpoint` rather than here.
+   * so both are settled in `pullName` and `checkpointFor` rather than here.
    * The name needs a `user.` prefix or Lemonade refuses a pull that supplies
    * its own checkpoint, and the recipe has to come from what the registry says
    * the model is FOR -- `/pull/variants` reports `llamacpp` for any repository
@@ -727,7 +727,7 @@ export function LemonadePane({
         labels: variants.suggestedLabels.length ? variants.suggestedLabels : ["chat"],
         suggested: true,
         source: "huggingface",
-        checkpoint: pullCheckpoint(repo, best.primaryFile),
+        checkpoint: checkpointFor(repo, best),
         ...(best.sizeBytes !== undefined ? { sizeBytes: best.sizeBytes } : {}),
       });
     }

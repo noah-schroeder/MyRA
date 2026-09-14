@@ -518,7 +518,21 @@ export function pullCheckpoint(repo: string, file?: string): string {
  * model already downloaded said Download.
  */
 export function pulledId(repo: string, variant?: string): string {
-  return pullName(repo, variant).replace(/^user\./, "");
+  return listedId(pullName(repo, variant));
+}
+
+/**
+ * The same conversion, for a name a pull already carries.
+ *
+ * Main starts a download under `pullName`'s `user.` name and then has to find
+ * the model the daemon made of it -- to know it has appeared, and to file the
+ * facts learned about it under the key everything else uses, which is the id at
+ * load time. Looking for the `user.` name found nothing either time: the wait
+ * for the model to show up always ran its retries out, and a downloaded model's
+ * shape was recorded under a key no reader of it ever asks for.
+ */
+export function listedId(name: string): string {
+  return name.replace(/^user\./, "");
 }
 
 /**

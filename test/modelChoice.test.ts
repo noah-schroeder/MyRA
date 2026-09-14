@@ -18,7 +18,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { quantRank } from "../src/core/runtime/fit.ts";
-import { pulledId, pullName } from "../src/core/runtime/hfBrowse.ts";
+import { listedId, pulledId, pullName } from "../src/core/runtime/hfBrowse.ts";
 import { isDynamic, quantOf } from "../src/core/runtime/quants.ts";
 import { recommendVariant, type RepoVariant } from "../src/core/runtime/registry.ts";
 
@@ -128,6 +128,15 @@ describe("the id a download will be listed under", () => {
        `/models` under exactly that shape. */
     assert.equal(pullName("ggml-org/embeddinggemma-300M-GGUF", "Q8_0"), "user.embeddinggemma-300M-GGUF-Q8_0");
     assert.equal(pulledId("ggml-org/embeddinggemma-300M-GGUF", "Q8_0"), "embeddinggemma-300M-GGUF-Q8_0");
+  });
+
+  it("is what main looks the finished download up by", () => {
+    /* Both lookups after a pull used the `user.` name and so found nothing:
+       the wait for the model to appear ran its retries out every time, and the
+       shape learned from the registry was filed under a key nothing reads. */
+    assert.equal(listedId("user.embeddinggemma-300M-GGUF-Q8_0"), "embeddinggemma-300M-GGUF-Q8_0");
+    // A name that never had the namespace is already the listed id.
+    assert.equal(listedId("SmolLM2-135M-Instruct-GGUF"), "SmolLM2-135M-Instruct-GGUF");
   });
 
   it("flattens the same way the name does, so the two cannot disagree", () => {

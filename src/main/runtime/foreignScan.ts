@@ -17,7 +17,7 @@ import { basename, dirname, join, relative } from "node:path";
 
 import {
   blobFile, defaultStores, indexId, isAuxiliaryGguf, isGguf, ollamaLabel, ollamaModelDigest,
-  pickProjector, type ForeignModel, type ForeignSource,
+  pickProjector, sameShardSet, shardStem, type ForeignModel, type ForeignSource,
 } from "../../core/runtime/foreign.ts";
 
 /** Deep enough for `publisher/repo/quant/file.gguf`, shallow enough to stay quick. */
@@ -82,15 +82,28 @@ export async function scanLmStudio(root: string): Promise<ForeignModel[]> {
   return files
     .filter((path) => !isAuxiliaryGguf(basename(path)))
     .map((path) => {
-      const label = basename(path).replace(/\.gguf$/i, "");
+      const name = basename(path);
       const dir = dirname(path);
+      /* A split model is one model, named for the set rather than for the part
+         that happens to be first, and carrying its other parts with it. */
+      const stem = shardStem(name);
+      const label = stem ?? name.replace(/\.gguf$/i, "");
+      const parts = stem === undefined
+        ? []
+        : (byDir.get(dir) ?? [])
+            .filter((other) => other !== name && sameShardSet(other, name))
+            .sort((a, b) => a.localeCompare(b, "en", { numeric: true }))
+            .map((other) => join(dir, other));
       const projector = pickProjector(byDir.get(dir) ?? []);
       return {
         id: indexId("lmstudio", label),
         label,
         source: "lmstudio" as ForeignSource,
         path,
-        linkName: `${label}.gguf`,
+        /* A part keeps its own filename: llama.cpp is given the first one and
+           finds the rest by name, so renaming it breaks the set. */
+        linkName: stem ? name : `${label}.gguf`,
+        ...(parts.length ? { parts } : {}),
         ...(projector ? { projector: join(dir, projector) } : {}),
       };
     });
@@ -286,6 +299,9 @@ export async function buildIndex(opts: {
     try {
       await mkdir(dir, { recursive: true });
       await symlink(model.path, join(dir, model.linkName));
+      /* The rest of a split model, under their own names and beside the first
+         part, because that is where llama.cpp looks for them. */
+      for (const part of model.parts ?? []) await symlink(part, join(dir, basename(part)));
       kept.push(model);
     } catch {
       await rm(dir, { recursive: true, force: true }).catch(() => {});

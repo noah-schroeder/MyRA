@@ -137,7 +137,10 @@ export function explainRegistryError(message: string, source: RegistrySource): s
 export interface RepoVariant {
   /** `Q4_K_M`, `UD-Q4_K_XL`, `BF16`… */
   name: string;
-  /** The file to name in a pull; the others come with it. */
+  /**
+   * The first file of the set, which is what a shown size or a file count is
+   * about. Not what a pull names -- see `checkpointFor`.
+   */
   primaryFile: string;
   files: string[];
   sizeBytes?: number | undefined;
@@ -190,14 +193,30 @@ export function parseVariants(raw: unknown, fallback: RegistrySource): RepoVaria
 }
 
 /**
- * The checkpoint string a pull wants: `org/repo:file.gguf`.
+ * The checkpoint string a pull wants: `org/repo:VARIANT`.
  *
- * Sharded variants name their first file, which is how llama.cpp finds the
- * rest -- naming the whole set here would produce a checkpoint no endpoint
- * accepts.
+ * **The variant's name, never its first file.** Both forms are accepted and
+ * they behave completely differently, measured against lemond 11.8.0:
+ *
+ *   - `repo:UD-Q4_K_M/model-00001-of-00003.gguf` fetches **that one file** and
+ *     nothing else -- the pull stream reports `total_files: 1` and stops -- so a
+ *     split model arrives as its first shard and can never load. Worse, when the
+ *     file sits in a subdirectory the daemon then logs
+ *     `Updated 'user.X' downloaded=1, resolved_path=` with nothing after the
+ *     `=`, and the model is **absent from `/models` altogether**, before and
+ *     after a restart. That is the whole of the bug where a multi-part download
+ *     finished, its bytes verified on disk, and nothing appeared in My models,
+ *     in the picker, or as a Downloaded badge on the card it was started from --
+ *     all three read the same list.
+ *   - `repo:UD-Q4_K_M` fetches **every file in the variant**, in one pull
+ *     reporting `total_files: 3`, and resolves to a real path, so the model is
+ *     listed.
+ *
+ * Which is also why the size on the row is the variant's total: what is fetched
+ * is the set, not the file that names it.
  */
 export function checkpointFor(repo: string, variant: RepoVariant): string {
-  return `${repo}:${variant.primaryFile}`;
+  return `${repo}:${variant.name}`;
 }
 
 /**

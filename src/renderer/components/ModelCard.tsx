@@ -33,6 +33,7 @@ import type { PreparedCard } from "../../core/runtime/modelCard.ts";
 import { readableName } from "../../core/runtime/modelNames.ts";
 import { isDynamic, quantOf } from "../../core/runtime/quants.ts";
 import {
+  checkpointFor,
   explainRegistryError,
   recommendVariant,
   REGISTRY_HOST,
@@ -67,8 +68,15 @@ export interface CardTarget {
 interface Choice {
   /** What the row is called: `Q4_K_M`, or a filename for a non-GGUF model. */
   label: string;
-  /** The file to fetch, when one has to be named. */
-  file?: string | undefined;
+  /**
+   * What a pull is told to fetch.
+   *
+   * Built here rather than at the button, because the two sources of a choice
+   * want different forms: a variant is named by its own name, so the daemon
+   * fetches every file in it (see `checkpointFor`), while a file listed from
+   * the registry directly has only its path to give.
+   */
+  checkpoint: string;
   sizeBytes?: number | undefined;
   /**
    * The name a pull registers under, and the id the daemon then lists.
@@ -189,7 +197,7 @@ export function ModelCard({
     if (variants?.variants.length) {
       return variants.variants.map((v) => ({
         label: v.name,
-        ...(v.primaryFile ? { file: v.primaryFile } : {}),
+        checkpoint: checkpointFor(repo, v),
         ...(v.sizeBytes !== undefined ? { sizeBytes: v.sizeBytes } : {}),
         pullAs: pullName(repo, v.name),
         installedAs: pulledId(repo, v.name),
@@ -199,7 +207,7 @@ export function ModelCard({
     if (!detail) return [];
     return loadableFiles(detail.files, recipe).map((f) => ({
       label: f.path,
-      file: f.path,
+      checkpoint: pullCheckpoint(repo, f.path),
       ...(f.sizeBytes !== undefined ? { sizeBytes: f.sizeBytes } : {}),
       pullAs: pullName(repo, leafOf(f.path)),
       installedAs: pulledId(repo, leafOf(f.path)),
@@ -409,7 +417,7 @@ export function ModelCard({
                 picked &&
                 onDownload({
                   name: picked.pullAs,
-                  checkpoint: pullCheckpoint(repo, picked.file),
+                  checkpoint: picked.checkpoint,
                   recipe,
                 })
               }
