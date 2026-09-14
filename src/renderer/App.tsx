@@ -284,9 +284,25 @@ export function App() {
     ...(settings?.dictationSource ? { micDeviceId: settings.dictationSource } : {}),
   });
 
+  /*
+   * Smooth for a message arriving in the conversation on screen; instant for
+   * opening a different one.
+   *
+   * Both went through `scrollIntoView({ behavior: "smooth" })` keyed only on
+   * `items.length`, so switching sessions animated the same way a reply
+   * streaming in does -- the old conversation's messages were still on screen
+   * when the scroll began, and it visibly slid past however many of them were
+   * there down to the bottom of the newly opened one, instead of the new
+   * conversation just being where you left it. `openSession` and `newSession`
+   * both change `sessionId` in the same tick they replace `items`, which is
+   * what this reads to tell the two cases apart.
+   */
+  const scrolledSession = useRef(sessionId);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [items.length]);
+    const switched = scrolledSession.current !== sessionId;
+    scrolledSession.current = sessionId;
+    bottom.current?.scrollIntoView({ behavior: switched ? "auto" : "smooth", block: "end" });
+  }, [items.length, sessionId]);
 
   useEffect(() => {
     if (!busy) setSessionsKey((k) => k + 1);

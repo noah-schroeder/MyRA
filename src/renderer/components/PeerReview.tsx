@@ -277,6 +277,14 @@ export function PeerReview({
           </div>
         </header>
 
+        <div className="lem-callout">
+          <p className="lem-callout-title">Use this on your own work.</p>
+          <p className="lem-callout-body">
+            This is intended solely for reviewing your own work. Don't use it to peer review
+            other people's papers unless they've given you explicit permission.
+          </p>
+        </div>
+
         {/* The drop zone stays on the page after a file is loaded, smaller, so
             reviewing a second manuscript does not mean hunting for the control
             that started the first. */}
@@ -509,7 +517,7 @@ export function PeerReview({
                 did not give the model — {invented.slice(0, 6).join(", ")}
                 {invented.length > 6 ? ", …" : ""}. Nothing here searched the literature, so
                 {invented.length === 1 ? " it is" : " they are"} invented. Delete
-                {invented.length === 1 ? " it" : " them"} before sending this to an editor.
+                {invented.length === 1 ? " it" : " them"} before you rely on this review.
               </p>
             ) : null}
             <Markdown text={review} sources={new Map()} />
