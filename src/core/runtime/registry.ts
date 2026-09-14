@@ -74,6 +74,25 @@ export const REGISTRY_HOST: Record<RegistrySource, string> = {
 };
 
 /**
+ * The repository's own page on the registry it came from.
+ *
+ * Distinct from the in-app card: that is the README, fetched and reduced to
+ * something `Markdown.tsx` can render safely. This is a plain link out, for
+ * someone who wants the licence, the discussion tab or the file browser as
+ * the publisher actually laid it out -- nothing this app reduces on the way.
+ *
+ * Hugging Face only, `undefined` for anything else -- ModelScope is disabled
+ * everywhere in this app (`ENABLED_SOURCES`) and a link MyRA hands someone is
+ * still MyRA vouching for the address. Writing `https://modelscope.cn` as a
+ * literal here would also be a new host for the privacy report to explain, for
+ * a button nobody can currently reach; see `dialectForHost` in
+ * `reasoningDialect.ts` for the same call made the same way.
+ */
+export function registryRepoUrl(source: RegistrySource, repo: string): string | undefined {
+  return source === "huggingface" ? `https://huggingface.co/${repo}` : undefined;
+}
+
+/**
  * Read a source from stored or API data, defaulting to Hugging Face.
  *
  * The catalogue states `source` only when it is *not* Hugging Face, so the

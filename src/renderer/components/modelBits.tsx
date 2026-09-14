@@ -10,8 +10,51 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { hasTools, hasVision } from "../../core/models/roles.ts";
 import type { Verdict } from "../../core/runtime/fit.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
+
+/**
+ * Vision and tool-calling, as icons rather than words.
+ *
+ * Both are already sayable as text -- `LemonadePane`'s `LABEL_WORDS` spells
+ * them "Reads images" and "Tools" -- but a model list that also shows
+ * "Reasoning", "Code" and half a dozen other labels only has room to show a
+ * few of them before a `.slice(...)` cuts the rest, and vision or tool-calling
+ * is exactly the fact that must not be the one dropped: it decides whether an
+ * attached image or a tool call does anything at all. So these two get a
+ * fixed, always-shown slot of their own on every list a chat model appears in.
+ */
+export function CapabilityIcons({ labels }: { labels: readonly string[] | undefined }) {
+  const vision = hasVision(labels);
+  const tools = hasTools(labels);
+  if (!vision && !tools) return null;
+  return (
+    <span className="cap-icons">
+      {vision ? (
+        <span className="cap-icon" title="Reads images and documents" aria-label="Vision">
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+            <path
+              d="M1 8s2.6-4.5 7-4.5 7 4.5 7 4.5-2.6 4.5-7 4.5S1 8 1 8Z"
+              fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"
+            />
+            <circle cx="8" cy="8" r="1.7" fill="currentColor" />
+          </svg>
+        </span>
+      ) : null}
+      {tools ? (
+        <span className="cap-icon" title="Can call tools" aria-label="Tool calling">
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+            <path
+              d="M11.8 2.3a2.9 2.9 0 0 0-3.6 3.6L2.7 11.4a1 1 0 0 0 1.4 1.4L9.6 7.3a2.9 2.9 0 0 0 3.6-3.6l-1.9 1.9-1.4-1.4Z"
+              fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round"
+            />
+          </svg>
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export const FIT_CHIP: Record<Verdict, { short: string; tone: string }> = {
   gpu: { short: "Fits on GPU", tone: "good" },

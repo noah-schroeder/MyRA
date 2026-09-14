@@ -106,6 +106,18 @@ export function hasVision(labels: readonly string[] | undefined): boolean {
 }
 
 /**
+ * Whether a chat model can call a tool, going by the same label the catalogue
+ * already writes (`tool-calling`, see LemonadePane's `LABEL_WORDS`).
+ *
+ * Same caveats as `hasVision`: a `custom`-labelled model's labels are a guess
+ * and a hosted provider reports none at all, so this is a badge to show, never
+ * a gate on whether the agent loop offers a model its tools.
+ */
+export function hasTools(labels: readonly string[] | undefined): boolean {
+  return (labels ?? []).some((label) => label === "tool-calling");
+}
+
+/**
  * What a PROVIDER's model looks like it is for, from its name alone.
  *
  * Guessing is exactly what this module's header says not to do, and the

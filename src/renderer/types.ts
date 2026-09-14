@@ -1129,6 +1129,8 @@ export interface LocalModel {
   source?: string;
   shape?: { layers?: number; contextLength?: number; hasChatTemplate?: boolean; architecture?: string };
   fit?: ModelFit;
+  /** The daemon's own labels, so the picker can badge vision and tool-calling. */
+  labels?: string[];
 }
 
 export interface HfSearchResult {

@@ -31,20 +31,23 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 import { RegistrySearch } from "./RegistrySearch.tsx";
 import { ModelCard, type CardTarget } from "./ModelCard.tsx";
-import { DownloadProgress, gb } from "./modelBits.tsx";
+import { CapabilityIcons, DownloadProgress, gb } from "./modelBits.tsx";
 import { useDownloads } from "./Downloads.tsx";
 import { fraction } from "../../core/downloads/download.ts";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 
 import { groupCatalog, repoOf, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import { CURATED_CHAT } from "../../core/runtime/curatedChat.ts";
 import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
+import { pullCheckpoint, pulledId } from "../../core/runtime/hfBrowse.ts";
 import {
-  ENABLED_SOURCES, explainRegistryError, REGISTRY_HOST, REGISTRY_LABEL, type RegistrySource,
+  ENABLED_SOURCES, explainRegistryError, recommendVariant, REGISTRY_HOST, REGISTRY_LABEL,
+  registryRepoUrl, type RegistrySource, type RepoVariants,
 } from "../../core/runtime/registry.ts";
 import { deletePrompt, ownerOf } from "../../core/runtime/modelOwner.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
-import { fitModel, type Machine, type Verdict } from "../../core/runtime/fit.ts";
+import { fitModel, quantRank, type Machine, type Verdict } from "../../core/runtime/fit.ts";
 import {
   engineStates, engineUsable, partitionByRunnable, runnable, type Runnable,
 } from "../../core/runtime/runnable.ts";
@@ -356,6 +359,42 @@ export function LemonadePane({
      counted out loud -- see `runnable.ts` for why they are not simply
      listed alongside the rest. */
   const [showBlocked, setShowBlocked] = useState(false);
+  /* MyRA's own picks for chat and writing -- real Hugging Face repositories,
+     resolved against the registry once, independent of which group tab is
+     showing, so switching to Chat and writing does not have to wait. See
+     curatedChat.ts for why this one group does not come from Lemonade's
+     bundled catalogue the way the rest of this tab does. */
+  const [chatVariants, setChatVariants] = useState<{
+    results: Map<string, RepoVariants>;
+    failed: string[];
+    loading: boolean;
+  }>({ results: new Map(), failed: [], loading: true });
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const settled = await Promise.all(
+        CURATED_CHAT.map(async (repo) => {
+          try {
+            const res = await window.myra.registryVariants(repo, "huggingface");
+            return res.ok && res.variants ? { repo, variants: res.variants } : { repo, failed: true as const };
+          } catch {
+            return { repo, failed: true as const };
+          }
+        }),
+      );
+      if (!live) return;
+      const results = new Map<string, RepoVariants>();
+      const failed: string[] = [];
+      for (const s of settled) {
+        if ("variants" in s) results.set(s.repo, s.variants);
+        else failed.push(s.repo);
+      }
+      setChatVariants({ results, failed, loading: false });
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
   /* The curated catalogue or the registries. Two different acts -- "show me
      what MyRA suggests" and "go and look this up" -- and mixing them would
      put a box that reaches the internet next to one that does not. */
@@ -666,9 +705,38 @@ export function LemonadePane({
   const installedEngines = useMemo(() => new Set(readyEngines), [readyEngines]);
 
   const active = groups.find((g) => g.id === group) ?? groups[0];
+
+  /* Which quantisation to show for each pick, decided here rather than baked
+     into the fetch above -- so a machine's memory (read asynchronously, and
+     possibly after this component has already mounted) does not need a
+     second round trip to the registry once it is known. */
+  const chatPicks = useMemo<CatalogEntry[]>(() => {
+    const tier = (bytes: number): number => {
+      if (!machine.ramBytes) return 1;
+      const { verdict } = fitModel(bytes, machine);
+      return verdict === "gpu" ? 0 : verdict === "too-large" ? Infinity : 1;
+    };
+    const entries: CatalogEntry[] = [];
+    for (const repo of CURATED_CHAT) {
+      const variants = chatVariants.results.get(repo);
+      const best = variants ? recommendVariant(variants.variants, quantRank, tier) : undefined;
+      if (!variants || !best) continue;
+      entries.push({
+        id: pulledId(repo, best.name),
+        recipe: "llamacpp",
+        labels: variants.suggestedLabels.length ? variants.suggestedLabels : ["chat"],
+        suggested: true,
+        source: "huggingface",
+        checkpoint: pullCheckpoint(repo, best.primaryFile),
+        ...(best.sizeBytes !== undefined ? { sizeBytes: best.sizeBytes } : {}),
+      });
+    }
+    return entries;
+  }, [chatVariants, machine.ramBytes, machine.vramBytes]);
+
   const { rows, blockedCount } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = active?.entries ?? [];
+    let list = active?.id === "chat" ? chatPicks : (active?.entries ?? []);
     if (q) list = list.filter((m) => m.id.toLowerCase().includes(q));
     if (onlyMine) list = list.filter((m) => have.has(m.id));
 
@@ -695,7 +763,7 @@ export function LemonadePane({
       ),
       blockedCount: blocked.length,
     };
-  }, [active, query, onlyMine, have, states, showBlocked]);
+  }, [active, chatPicks, query, onlyMine, have, states, showBlocked]);
 
   const loadOrUnload = (id: string): void => {
     void run(id === loaded ? `Unloading ${id}` : `Loading ${id}`, () =>
@@ -1153,7 +1221,7 @@ export function LemonadePane({
                       "168" over a list of 73 is a number the user can check
                       by scrolling, and it fails that check. */}
                   <span className="lem-tab-count">
-                    {partitionByRunnable(g.entries, states).usable.length}
+                    {partitionByRunnable(g.id === "chat" ? chatPicks : g.entries, states).usable.length}
                   </span>
                 </button>
                 ))}
@@ -1164,7 +1232,7 @@ export function LemonadePane({
                   <input
                     type="search"
                     className="lem-search"
-                    placeholder={`Search ${partitionByRunnable(active.entries, states).usable.length} ${active.title.toLowerCase()} models`}
+                    placeholder={`Search ${partitionByRunnable(active.id === "chat" ? chatPicks : active.entries, states).usable.length} ${active.title.toLowerCase()} models`}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     aria-label={`Search ${active.title}`}
@@ -1185,6 +1253,22 @@ export function LemonadePane({
               <>
                 {GROUP_HINT[active.id] ? (
                   <p className="lem-group-hint">{GROUP_HINT[active.id]}</p>
+                ) : null}
+
+                {/* These, unlike every other group on this tab, are asked of
+                    the registry rather than read from a file shipped inside
+                    Lemonade -- so unlike the rest of this tab, they can be
+                    slow or fail. Said once, here, rather than left for a
+                    dimmed row to explain silently. */}
+                {active.id === "chat" && chatVariants.loading ? (
+                  <p className="lem-group-hint">Checking Hugging Face for MyRA's picks…</p>
+                ) : null}
+                {active.id === "chat" && !chatVariants.loading && chatVariants.failed.length ? (
+                  <p className="lem-group-hint">
+                    Hugging Face did not answer for {chatVariants.failed.length === 1
+                      ? "one pick"
+                      : `${chatVariants.failed.length} picks`}: {chatVariants.failed.join(", ")}.
+                  </p>
                 ) : null}
 
                 {/* Column headings, because the row is now a table and a
@@ -1247,6 +1331,7 @@ export function LemonadePane({
                                   repo: repoOf(m.checkpoint) ?? "",
                                   recipe: m.recipe,
                                   source: m.source,
+                                  labels: m.labels,
                                 })
                               }
                             >
@@ -1256,6 +1341,7 @@ export function LemonadePane({
                             <span className="lem-model-name">{m.id}</span>
                           )}
                           <div className="lem-model-meta">
+                            <CapabilityIcons labels={m.labels} />
                             {/*
                               * No "Suggested" badge, though the sort still
                               * uses it.
@@ -1269,12 +1355,15 @@ export function LemonadePane({
                               * that do differ. It stays a sort key, where it
                               * is genuinely useful, and stops being a badge.
                               */}
-                            {/* "chat" is the group heading already, and the
-                                engine ids -- llamacpp, whispercpp -- are the
+                            {/* "chat" is the group heading already, the engine
+                                ids -- llamacpp, whispercpp -- are the
                                 implementation detail this page exists to keep
-                                people from having to learn. */}
+                                people from having to learn, and vision/
+                                tool-calling have their own icon just above. */}
                             {m.labels
-                              .filter((l) => l !== "chat" && !ENGINE_IMPL[l] && !ENGINE_LABELS[l])
+                              .filter((l) =>
+                                l !== "chat" && l !== "vision" && l !== "omni" && l !== "tool-calling"
+                                && !ENGINE_IMPL[l] && !ENGINE_LABELS[l])
                               .slice(0, 3)
                               .map((l) => (
                                 <span key={l} className="lem-tag">{LABEL_WORDS[l] ?? l}</span>
@@ -1347,22 +1436,38 @@ export function LemonadePane({
                                leaving a dead button. */
                             disabled={busy || (!here && verdict.state === "unsupported")}
                             title={verdict.state === "unsupported" ? verdict.reason : undefined}
-                            onClick={() =>
-                              here
-                                ? loadOrUnload(m.id)
-                                : void run(`Downloading ${m.id}`, () => window.myra.lemonadePull(m.id))
-                            }
+                            onClick={() => {
+                              if (here) {
+                                loadOrUnload(m.id);
+                                return;
+                              }
+                              /* Chat and writing is not Lemonade's catalogue -- there is no
+                                 pre-registered id for the daemon to pull by. Every other
+                                 group's rows name a checkpoint Lemonade already knows about
+                                 the way `RegistrySearch`'s own results do: through the card,
+                                 which is what already resolves a repository to a download. */
+                              const repo = active?.id === "chat" ? repoOf(m.checkpoint) : undefined;
+                              if (repo) {
+                                setViewing({ repo, recipe: m.recipe, source: m.source, labels: m.labels });
+                                return;
+                              }
+                              void run(`Downloading ${m.id}`, () => window.myra.lemonadePull(m.id));
+                            }}
                           >
-                            {here ? (m.id === loaded ? "Unload" : "Load") : "Download"}
+                            {here ? (m.id === loaded ? "Unload" : "Load") : active?.id === "chat" ? "View" : "Download"}
                           </button>
                         </div>
                       </li>
                       </Fragment>
                     );
                   })}
-                  {rows.length === 0 ? (
+                  {rows.length === 0 && !(active?.id === "chat" && chatVariants.loading) ? (
                     <li className="lem-none">
-                      {query ? `Nothing matching \u201c${query}\u201d.` : "Nothing downloaded in this group yet."}
+                      {query
+                        ? `Nothing matching \u201c${query}\u201d.`
+                        : active?.id === "chat"
+                          ? "Hugging Face did not answer for any of MyRA's picks. Try again shortly."
+                          : "Nothing downloaded in this group yet."}
                     </li>
                   ) : null}
                 </ul>
@@ -1641,20 +1746,29 @@ function MyModels({
   /** Undefined for a model with no repository behind it -- an imported file. */
   onOpen: (target: CardTarget) => void;
 }) {
-  /* Loaded first, then the rest by size. The loaded model is the one every
-     other row is compared against, and it is the one whose settings someone
-     has come here to change. */
-  const rows = useMemo(
-    () =>
-      [...installed].sort(
-        (a, b) =>
-          Number(b.id === loaded) - Number(a.id === loaded) ||
-          (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0),
-      ),
-    [installed, loaded],
+  const [query, setQuery] = useState("");
+
+  /* One place for "what is this model called," shared by the sort, the
+     search, and the row itself, so the three can never disagree. */
+  const nameFor = (id: string): string => foreign.get(id)?.label ?? displayModelName(id);
+
+  /* Alphabetical by that name, not by id or download size -- an LM Studio
+     model's id carries a bookkeeping prefix (`lmstudio__LFM2.5-8B-A1B`) that
+     would sort it under "L" for the tool that found it. The loaded model no
+     longer sorts first: it already carries its own "Loaded" tag wherever it
+     falls. */
+  const sorted = useMemo(
+    () => [...installed].sort((a, b) => nameFor(a.id).localeCompare(nameFor(b.id))),
+    [installed, foreign],
   );
 
-  if (!rows.length) {
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter((m) => m.id.toLowerCase().includes(q) || nameFor(m.id).toLowerCase().includes(q));
+  }, [sorted, query, foreign]);
+
+  if (!sorted.length) {
     return (
       <div className="lem-callout">
         <p className="lem-callout-title">No models on this machine yet.</p>
@@ -1682,6 +1796,17 @@ function MyModels({
         settings that model loads with — context window, backend, extra arguments.
       </p>
 
+      <div className="lem-filters">
+        <input
+          type="search"
+          className="lem-search"
+          placeholder={`Search ${sorted.length} models on this machine`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search your models"
+        />
+      </div>
+
       <div className="lem-cols" aria-hidden="true">
         <span>Model</span>
         <span>Where from</span>
@@ -1694,10 +1819,11 @@ function MyModels({
         {rows.map((m) => {
           const from = foreign.get(m.id);
           const known = catalog.find((c) => c.id === m.id);
-          const name = from?.label ?? displayModelName(m.id);
+          const name = nameFor(m.id);
           const fit = m.sizeBytes && machine.ramBytes ? fitModel(m.sizeBytes, machine) : undefined;
           const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
           const repo = repoOf(m.checkpoint);
+          const hfUrl = repo ? registryRepoUrl("huggingface", repo) : undefined;
           return (
             <Fragment key={m.id}>
             <li className={m.id === loaded ? "lem-model loaded" : "lem-model"}>
@@ -1710,7 +1836,12 @@ function MyModels({
                     type="button"
                     className="lem-model-name link"
                     title={`What ${name} is, on the registry it came from`}
-                    onClick={() => onOpen({ repo, recipe: m.recipe ?? "llamacpp", source: "huggingface" })}
+                    onClick={() =>
+                      onOpen({
+                        repo, recipe: m.recipe ?? "llamacpp", source: "huggingface",
+                        ...(known?.labels ? { labels: known.labels } : {}),
+                      })
+                    }
                   >
                     {name}
                   </button>
@@ -1718,9 +1849,25 @@ function MyModels({
                   <span className="lem-model-name" title={from?.path ?? m.id}>{name}</span>
                 )}
                 <div className="lem-model-meta">
+                  <CapabilityIcons labels={known?.labels} />
+                  {/* The registry's own page, separate from the button above:
+                      that one opens MyRA's reduced in-app card, this one
+                      leaves for the real thing -- licence in full, discussion
+                      tab, file browser -- for a model already on disk. */}
+                  {hfUrl ? (
+                    <a
+                      className="lem-tag link"
+                      href={hfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Open ${name} on ${REGISTRY_HOST.huggingface}`}
+                    >
+                      Hugging Face ↗
+                    </a>
+                  ) : null}
                   {m.id === loaded ? <span className="lem-tag accent">Loaded</span> : null}
                   {known?.labels
-                    .filter((l) => l !== "chat")
+                    .filter((l) => l !== "chat" && l !== "vision" && l !== "omni" && l !== "tool-calling")
                     .slice(0, 2)
                     .map((l) => <span key={l} className="lem-tag">{l}</span>)}
                 </div>
@@ -1808,6 +1955,9 @@ function MyModels({
             </Fragment>
           );
         })}
+        {rows.length === 0 ? (
+          <li className="lem-none">{`Nothing matching “${query}”.`}</li>
+        ) : null}
       </ul>
 
       {/*

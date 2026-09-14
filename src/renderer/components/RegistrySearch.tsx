@@ -32,6 +32,7 @@ import { parameterLabel, publisherOf, readableName } from "../../core/runtime/mo
 import { partitionByRunnable, type Runnable } from "../../core/runtime/runnable.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import { repoOf } from "../../core/runtime/catalog.ts";
+import { CapabilityIcons } from "./modelBits.tsx";
 import { ModelCard } from "./ModelCard.tsx";
 
 import {
@@ -115,6 +116,25 @@ export function RegistrySearch({
   const [refining, setRefining] = useState(false);
 
   const chosen = useMemo(() => ENABLED_SOURCES.filter((s) => sources.has(s)), [sources]);
+
+  /**
+   * Labels for a searched repository, when it also happens to be one of
+   * MyRA's own curated entries.
+   *
+   * Hugging Face's search API returns no such field -- `tags` is a publisher's
+   * own free-text list, not the daemon's `chat`/`vision`/`tool-calling`
+   * vocabulary -- so this is never guessed from a search hit's name or tags.
+   * It is only ever read off a catalogue entry that names the same repository,
+   * the same fact `Picks` already shows for its own rows.
+   */
+  const catalogByRepo = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const entry of catalog) {
+      const repo = repoOf(entry.checkpoint);
+      if (repo && !map.has(repo)) map.set(repo, entry.labels);
+    }
+    return map;
+  }, [catalog]);
 
   /**
    * Add or remove one publisher, keeping the rest, and re-run the browse.
@@ -639,6 +659,7 @@ export function RegistrySearch({
                 recipe={recipe}
                 installedEngines={installedEngines}
                 on={selected?.repo === model.id}
+                labels={catalogByRepo.get(model.id)}
                 onOpen={setSelected}
               />
             );
@@ -689,6 +710,7 @@ function ResultRow({
   recipe,
   installedEngines,
   on,
+  labels,
   onOpen,
 }: {
   model: HfModel;
@@ -696,6 +718,8 @@ function ResultRow({
   recipe: string;
   installedEngines?: ReadonlySet<string> | undefined;
   on: boolean;
+  /** Read off a matching catalogue entry, if this repository is one of them. */
+  labels?: string[] | undefined;
   onOpen: (target: CardTarget) => void;
 }) {
   const can = loadable(model, recipe, installedEngines);
@@ -709,10 +733,11 @@ function ResultRow({
       className={on ? "reg-hit on" : "reg-hit"}
       title={model.id}
       aria-current={on}
-      onClick={() => onOpen({ repo: model.id, recipe, source })}
+      onClick={() => onOpen({ repo: model.id, recipe, source, ...(labels ? { labels } : {}) })}
     >
       <span className="reg-hit-top">
         <span className="reg-hit-name">{readableName(model.id)}</span>
+        <CapabilityIcons labels={labels} />
         {/* Only where it says something. "Ready" on every row is noise, and a
             row that cannot run is the one fact worth interrupting for. */}
         {can === "ready" ? null : (
@@ -804,10 +829,13 @@ function Picks({
                 type="button"
                 className={selected === repo ? "reg-hit on" : "reg-hit"}
                 title={entry.checkpoint ?? entry.id}
-                onClick={() => onOpen({ repo, recipe: entry.recipe, source: entry.source })}
+                onClick={() =>
+                  onOpen({ repo, recipe: entry.recipe, source: entry.source, labels: entry.labels })
+                }
               >
                 <span className="reg-hit-top">
                   <span className="reg-hit-name">{readableName(entry.id)}</span>
+                  <CapabilityIcons labels={entry.labels} />
                   {have.has(entry.id) ? <span className="lem-chip dim">Downloaded</span> : null}
                 </span>
                 <span className="reg-hit-sub">

@@ -38,12 +38,13 @@ import {
   REGISTRY_HOST,
   REGISTRY_LABEL,
   REGISTRY_NAME,
+  registryRepoUrl,
   type RegistrySource,
   type RepoVariants,
 } from "../../core/runtime/registry.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import { Markdown } from "./Markdown.tsx";
-import { compactNumber, DownloadProgress, FIT_CHIP, gb } from "./modelBits.tsx";
+import { CapabilityIcons, compactNumber, DownloadProgress, FIT_CHIP, gb } from "./modelBits.tsx";
 
 /** What the page needs to know to open, gathered by whoever opened it. */
 export interface CardTarget {
@@ -52,6 +53,14 @@ export interface CardTarget {
   /** The engine that will run it, decided by the list this came from. */
   recipe: string;
   source: RegistrySource;
+  /**
+   * The catalogue's own labels, when whoever opened this knew them.
+   *
+   * Only MyRA's curated catalogue carries these -- a raw search hit has no
+   * such field on the registry's own API -- so this is absent rather than
+   * guessed for a repository found by typing into the search box.
+   */
+  labels?: string[];
 }
 
 /** A file offered for download, whichever endpoint described it. */
@@ -96,7 +105,7 @@ export function ModelCard({
   onDownload: (choice: { name: string; checkpoint: string; recipe: string }) => void;
   onBack: () => void;
 }) {
-  const { repo, recipe, source } = target;
+  const { repo, recipe, source, labels } = target;
   const [detail, setDetail] = useState<RepoDetail | undefined>();
   const [card, setCard] = useState<PreparedCard | undefined>();
   const [variants, setVariants] = useState<RepoVariants | undefined>();
@@ -234,6 +243,7 @@ export function ModelCard({
 
   const [owner, name] = splitRepo(repo);
   const updated = age(detail?.lastModified);
+  const registryUrl = registryRepoUrl(source, repo);
 
   return (
     <section className="lem-section card">
@@ -257,6 +267,22 @@ export function ModelCard({
           <span className={`reg-hit-src ${source}`} title={REGISTRY_NAME[source]}>
             {REGISTRY_LABEL[source]}
           </span>
+          <CapabilityIcons labels={labels} />
+          {/* The repository's own page, not MyRA's reduced card below --
+              the licence in full, the discussion tab, the file browser. One
+              click to keep once a model is downloaded, not just while
+              browsing: `LemonadePane`'s installed list links here too. */}
+          {registryUrl ? (
+            <a
+              className="lem-update-notes"
+              href={registryUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open ${repo} on ${REGISTRY_HOST[source]}`}
+            >
+              View on {REGISTRY_NAME[source]} ↗
+            </a>
+          ) : null}
           {detail?.license ? (
             <span className="lem-chip" title="The licence the publisher declared">
               {detail.license}

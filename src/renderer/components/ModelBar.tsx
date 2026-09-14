@@ -10,6 +10,7 @@ import {
 } from "../../core/providers.ts";
 import { priceLabel, priceTitle } from "../../core/pricing.ts";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
+import { CapabilityIcons } from "./modelBits.tsx";
 import type { Machine } from "../../core/runtime/fit.ts";
 
 /**
@@ -144,7 +145,11 @@ export function ModelBar({
             .filter((m) => localFitsChat(m.id, m.labels))
             /* `path` stays the real id -- it is what `load` is called with --
                while `name` is what a person recognises. */
-            .map((m) => ({ path: m.id, name: displayModelName(m.id) })),
+            .map((m) => ({
+              path: m.id,
+              name: displayModelName(m.id),
+              ...(m.labels ? { labels: m.labels } : {}),
+            })),
         ));
     }
   }, [open]);
@@ -571,6 +576,7 @@ export function ModelBar({
                     >
                       <span className="modelmenu-name">{shorten(m.name)}</span>
                       <span className="modelmenu-meta">
+                        <CapabilityIcons labels={m.labels} />
                         {m.size ? gb(m.size) : null}
                         {isActive && local ? <span className="pill on">loaded</span> : null}
                         {isActive && loading ? <span className="pill warn">loading</span> : null}

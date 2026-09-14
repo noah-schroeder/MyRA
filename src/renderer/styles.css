@@ -3858,6 +3858,12 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .lem-tag.accent { color: var(--accent); }
 
+/* Vision and tool-calling, always in their own slot rather than fighting the
+   tags above for space -- see CapabilityIcons in modelBits.tsx. */
+.cap-icons { display: inline-flex; align-items: center; gap: 4px; color: var(--text-faint); flex: none; }
+.cap-icon { display: inline-flex; }
+.cap-icon svg { display: block; }
+
 /*
  * The registry, as a column rather than a badge beside the name.
  *
