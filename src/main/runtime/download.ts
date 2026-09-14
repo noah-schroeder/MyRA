@@ -157,10 +157,26 @@ export async function extractArchive(archive: string, destDir: string): Promise<
   });
 }
 
+/**
+ * The filename to look for on this platform.
+ *
+ * `.exe` is added for a caller that passes a bare name, and NOT added again for
+ * one that already knows the platform's filename. `lemondName()` returns
+ * `lemond.exe` on Windows, so the unconditional suffix searched for
+ * `lemond.exe.exe`: the install failed on every Windows machine, after a
+ * successful download and a successful unpack, with "the Lemonade download
+ * contained no daemon".
+ */
+export function executableName(name: string, platform: string = process.platform): string {
+  if (platform !== "win32") return name;
+  return name.toLowerCase().endsWith(".exe") ? name : `${name}.exe`;
+}
+
 /** Find a named executable anywhere under a directory. Archives vary in layout. */
 export async function findExecutable(dir: string, name: string): Promise<string | undefined> {
   const { readdir } = await import("node:fs/promises");
-  const wanted = process.platform === "win32" ? `${name}.exe` : name;
+  const win = process.platform === "win32";
+  const wanted = executableName(name);
   const stack = [dir];
   while (stack.length) {
     const current = stack.pop()!;
@@ -173,7 +189,10 @@ export async function findExecutable(dir: string, name: string): Promise<string 
     for (const entry of entries) {
       const path = join(current, entry.name);
       if (entry.isDirectory()) stack.push(path);
-      else if (entry.name === wanted) return path;
+      // Case-insensitively on Windows, where the filesystem is: an archive
+      // holding `Lemond.exe` is the same file the launcher would run.
+      else if (entry.name === wanted || (win && entry.name.toLowerCase() === wanted.toLowerCase()))
+        return path;
     }
   }
   return undefined;
