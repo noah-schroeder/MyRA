@@ -1094,30 +1094,69 @@ export function App() {
               </div>
             ) : null}
             {!lookup && attachError ? <p className="composer-attach-error">{attachError}</p> : null}
-            <textarea
-              className="input"
-              placeholder={
-                lookup
-                  ? "Search the literature — no model in the loop"
-                  : "Ask a question, or describe what you need — or drop in an image or a paper"
-              }
-              value={typed}
-              rows={1}
-              onChange={(e) => setTyped(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
+            <div className="composer-input-row">
+              {/*
+                * Left of the text, not in the toolbar underneath it.
+                *
+                * Attaching a file is something you reach for before or while
+                * typing the question it belongs to, not after — the common
+                * shape for a chat composer puts it beside the cursor rather
+                * than in a row of controls that answer a different kind of
+                * question (research depth, dictation, send).
+                */}
+              {lookup ? null : (
+                <>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    hidden
+                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt"
+                    onChange={(e) => {
+                      for (const file of e.target.files ?? []) void attachFile(file);
+                      // Reset, so choosing the same file twice fires a change event twice.
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="mic"
+                    aria-label="Attach an image or a document"
+                    title="Attach an image or a document"
+                    data-tour="composer-attach"
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                </>
+              )}
+              <textarea
+                className="input"
+                placeholder={
+                  lookup
+                    ? "Search the literature — no model in the loop"
+                    : "Ask a question, or describe what you need — or drop in an image or a paper"
                 }
-              }}
-              onPaste={(e) => {
-                if (lookup) return;
-                for (const item of e.clipboardData.items) {
-                  const file = item.kind === "file" ? item.getAsFile() : null;
-                  if (file) void attachFile(file);
-                }
-              }}
-            />
+                value={typed}
+                rows={1}
+                onChange={(e) => setTyped(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                onPaste={(e) => {
+                  if (lookup) return;
+                  for (const item of e.clipboardData.items) {
+                    const file = item.kind === "file" ? item.getAsFile() : null;
+                    if (file) void attachFile(file);
+                  }
+                }}
+              />
+            </div>
 
             <div className="composer-tools">
               <ResearchBar
@@ -1166,34 +1205,6 @@ export function App() {
                 </svg>
               </button>
 
-              {lookup ? null : (
-                <>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    hidden
-                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt"
-                    onChange={(e) => {
-                      for (const file of e.target.files ?? []) void attachFile(file);
-                      // Reset, so choosing the same file twice fires a change event twice.
-                      e.target.value = "";
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="mic"
-                    aria-label="Attach an image or a document"
-                    title="Attach an image or a document"
-                    data-tour="composer-attach"
-                    onClick={() => fileInput.current?.click()}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
-                  </button>
-                </>
-              )}
               <button
                 type="button"
                 className={dictation.state.phase === "recording" ? "mic active" : "mic"}
