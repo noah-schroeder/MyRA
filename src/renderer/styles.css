@@ -1662,6 +1662,17 @@ body:has(.artifact-grip:active) { user-select: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .session.current .session-title { color: var(--accent-soft); }
+
+/* Right-clicking a chat's name swaps the open button for this, in place --
+   same box, same padding, so the row does not jump while you type. */
+.session-rename {
+  flex: 1; min-width: 0;
+  background: var(--bg-float); border: 1px solid var(--accent-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text); font: inherit; font-size: 12.5px;
+  padding: 7px 9px; margin: 1px 0;
+}
+.session-rename:focus { outline: none; border-color: var(--accent-soft); }
 .session-meta { font-size: 11px; color: var(--text-faint); }
 
 /* Hidden until hover or focus: a delete control on every row, always visible,

@@ -39,162 +39,187 @@ export function useAgent() {
   const [sources, setSources] = useState<Map<number, CitedSource>>(new Map());
   /** The assistant item currently being streamed into. */
   const open = useRef<string | undefined>(undefined);
+  /**
+   * The conversation on screen right now, if it is one `reset` or `resume`
+   * has named.
+   *
+   * Every event used to be applied to whatever `items` currently held, with
+   * nothing saying which conversation it was actually for -- so switching to
+   * a different conversation while the first one was still generating fed
+   * its deltas into the newly opened one instead. Left `undefined` until a
+   * session is explicitly opened or created, so the very first message of a
+   * fresh conversation -- which has gone through neither -- is not filtered
+   * against an id nothing has set yet.
+   */
+  const currentSessionId = useRef<string | undefined>(undefined);
+
+  /** The reducer proper, shared by the live subscription below and `resume`,
+   *  which replays a session's own past events through the same logic. */
+  const apply = useCallback((event: AgentEvent) => {
+    switch (event.type) {
+      case "text": {
+        if (!event.text) break;
+        const text = event.text;
+        const kind = event.kind === "thinking" ? "thinking" : "text";
+        /*
+         * The id is decided here, not inside the updater.
+         *
+         * `open.current` used to be assigned in the middle of `setItems`, and
+         * React invokes updaters twice in development -- so two deltas
+         * arriving in one batch could each create their own bubble, splitting
+         * a single reply into two messages part-way through the first word.
+         * A state updater has to be a pure function of `prev`; the ref is a
+         * side effect and belongs out here with the other side effects.
+         */
+        if (open.current === undefined) open.current = nextId();
+        const id = open.current;
+        setItems((prev) =>
+          prev.some((i) => i.id === id)
+            ? prev.map((i) =>
+                i.id !== id || i.kind !== "assistant"
+                  ? i
+                  : { ...i, blocks: append(i.blocks, text, kind) },
+              )
+            : [
+                ...prev,
+                {
+                  id,
+                  kind: "assistant",
+                  blocks: [{ kind, text }],
+                  streaming: true,
+                } satisfies AssistantItem,
+              ],
+        );
+        break;
+      }
+
+      case "stats": {
+        /* Fired once per model call, right after it returns -- so this
+           always lands on the bubble `open.current` still names, before a
+           following tool call (if any) clears it. A reply that made a tool
+           call and wrote no prose of its own opened no bubble at all, and
+           the stats for it are dropped rather than attached to the wrong
+           one. */
+        const id = open.current;
+        if (id && event.stats) {
+          const stats = event.stats;
+          setItems((prev) =>
+            prev.map((i) => (i.id === id && i.kind === "assistant" ? { ...i, stats } : i)),
+          );
+        }
+        break;
+      }
+
+      case "tool_start": {
+        // A tool call ends the assistant message it was requested from: the
+        // next text belongs after the card, not before it.
+        open.current = undefined;
+        const card: ToolItem = {
+          id: nextId(),
+          kind: "tool",
+          toolCallId: event.toolCallId ?? "",
+          name: event.tool ?? "tool",
+          args: event.params ?? {},
+          output: "",
+          status: "running",
+        };
+        setItems((prev) => [...prev, card]);
+        break;
+      }
+
+      case "tool_update":
+        setItems((prev) =>
+          prev.map((i) =>
+            i.kind === "tool" && i.toolCallId === event.toolCallId
+              ? { ...i, update: event.text ?? "" }
+              : i,
+          ),
+        );
+        break;
+
+      case "tool_end": {
+        const harvested = harvestSources(event.result);
+        if (harvested.length) {
+          setSources((prev) => {
+            const next = new Map(prev);
+            for (const s of harvested) next.set(s.n, s);
+            return next;
+          });
+        }
+        setItems((prev) =>
+          prev.map((i) =>
+            i.kind === "tool" && i.toolCallId === event.toolCallId
+              ? { ...i, status: "ok" as const, output: event.result ?? "" }
+              : i,
+          ),
+        );
+        break;
+      }
+
+      case "tool_error":
+        setItems((prev) =>
+          prev.map((i) =>
+            i.kind === "tool" && i.toolCallId === event.toolCallId
+              ? { ...i, status: "error" as const, output: event.text ?? "failed" }
+              : i,
+          ),
+        );
+        break;
+
+      /* Older messages were summarised to make room. Said out loud, because
+         a model that silently forgot the first half of a conversation is
+         indistinguishable from one that is broken.
+
+         "notice" is the same idea for anything else the app needs to say in
+         the transcript rather than about it -- a provider that withholds its
+         reasoning, for one. Same shape, same place, so it reads as part of
+         the conversation and not as an error. */
+      case "notice":
+      case "compacted":
+        setItems((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), kind: "notice" as const, text: event.text ?? "" },
+        ]);
+        break;
+
+      case "done": {
+        setBusy(false);
+        open.current = undefined;
+        setItems((prev) =>
+          prev.map((i) =>
+            i.kind === "assistant"
+              ? { ...i, streaming: false }
+              : settle(i),
+          ),
+        );
+        try {
+          if (event.result) setUsage(JSON.parse(event.result) as Usage);
+        } catch {
+          // Usage is a nicety; a malformed figure is not worth an error.
+        }
+        break;
+      }
+
+      case "error":
+        setBusy(false);
+        open.current = undefined;
+        setItems((prev) => prev.map(settle));
+        setError(event.text ?? "Something went wrong.");
+        break;
+    }
+  }, []);
 
   useEffect(() => {
     return window.myra.onAgentEvent((event: AgentEvent) => {
-      switch (event.type) {
-        case "text": {
-          if (!event.text) break;
-          const text = event.text;
-          const kind = event.kind === "thinking" ? "thinking" : "text";
-          /*
-           * The id is decided here, not inside the updater.
-           *
-           * `open.current` used to be assigned in the middle of `setItems`, and
-           * React invokes updaters twice in development -- so two deltas
-           * arriving in one batch could each create their own bubble, splitting
-           * a single reply into two messages part-way through the first word.
-           * A state updater has to be a pure function of `prev`; the ref is a
-           * side effect and belongs out here with the other side effects.
-           */
-          if (open.current === undefined) open.current = nextId();
-          const id = open.current;
-          setItems((prev) =>
-            prev.some((i) => i.id === id)
-              ? prev.map((i) =>
-                  i.id !== id || i.kind !== "assistant"
-                    ? i
-                    : { ...i, blocks: append(i.blocks, text, kind) },
-                )
-              : [
-                  ...prev,
-                  {
-                    id,
-                    kind: "assistant",
-                    blocks: [{ kind, text }],
-                    streaming: true,
-                  } satisfies AssistantItem,
-                ],
-          );
-          break;
-        }
-
-        case "stats": {
-          /* Fired once per model call, right after it returns -- so this
-             always lands on the bubble `open.current` still names, before a
-             following tool call (if any) clears it. A reply that made a tool
-             call and wrote no prose of its own opened no bubble at all, and
-             the stats for it are dropped rather than attached to the wrong
-             one. */
-          const id = open.current;
-          if (id && event.stats) {
-            const stats = event.stats;
-            setItems((prev) =>
-              prev.map((i) => (i.id === id && i.kind === "assistant" ? { ...i, stats } : i)),
-            );
-          }
-          break;
-        }
-
-        case "tool_start": {
-          // A tool call ends the assistant message it was requested from: the
-          // next text belongs after the card, not before it.
-          open.current = undefined;
-          const card: ToolItem = {
-            id: nextId(),
-            kind: "tool",
-            toolCallId: event.toolCallId ?? "",
-            name: event.tool ?? "tool",
-            args: event.params ?? {},
-            output: "",
-            status: "running",
-          };
-          setItems((prev) => [...prev, card]);
-          break;
-        }
-
-        case "tool_update":
-          setItems((prev) =>
-            prev.map((i) =>
-              i.kind === "tool" && i.toolCallId === event.toolCallId
-                ? { ...i, update: event.text ?? "" }
-                : i,
-            ),
-          );
-          break;
-
-        case "tool_end": {
-          const harvested = harvestSources(event.result);
-          if (harvested.length) {
-            setSources((prev) => {
-              const next = new Map(prev);
-              for (const s of harvested) next.set(s.n, s);
-              return next;
-            });
-          }
-          setItems((prev) =>
-            prev.map((i) =>
-              i.kind === "tool" && i.toolCallId === event.toolCallId
-                ? { ...i, status: "ok" as const, output: event.result ?? "" }
-                : i,
-            ),
-          );
-          break;
-        }
-
-        case "tool_error":
-          setItems((prev) =>
-            prev.map((i) =>
-              i.kind === "tool" && i.toolCallId === event.toolCallId
-                ? { ...i, status: "error" as const, output: event.text ?? "failed" }
-                : i,
-            ),
-          );
-          break;
-
-        /* Older messages were summarised to make room. Said out loud, because
-           a model that silently forgot the first half of a conversation is
-           indistinguishable from one that is broken.
-
-           "notice" is the same idea for anything else the app needs to say in
-           the transcript rather than about it -- a provider that withholds its
-           reasoning, for one. Same shape, same place, so it reads as part of
-           the conversation and not as an error. */
-        case "notice":
-        case "compacted":
-          setItems((prev) => [
-            ...prev,
-            { id: crypto.randomUUID(), kind: "notice" as const, text: event.text ?? "" },
-          ]);
-          break;
-
-        case "done": {
-          setBusy(false);
-          open.current = undefined;
-          setItems((prev) =>
-            prev.map((i) =>
-              i.kind === "assistant"
-                ? { ...i, streaming: false }
-                : settle(i),
-            ),
-          );
-          try {
-            if (event.result) setUsage(JSON.parse(event.result) as Usage);
-          } catch {
-            // Usage is a nicety; a malformed figure is not worth an error.
-          }
-          break;
-        }
-
-        case "error":
-          setBusy(false);
-          open.current = undefined;
-          setItems((prev) => prev.map(settle));
-          setError(event.text ?? "Something went wrong.");
-          break;
+      /* A conversation whose id has been set is the only one live events are
+         applied to; one tagged for some other conversation is dropped rather
+         than drawn on top of whatever is on screen. */
+      if (currentSessionId.current && event.sessionId && event.sessionId !== currentSessionId.current) {
+        return;
       }
+      apply(event);
     });
-  }, []);
+  }, [apply]);
 
   const send = useCallback(async (text: string, attachments: PendingAttachment[] = []) => {
     const trimmed = text.trim();
@@ -224,14 +249,37 @@ export function useAgent() {
     setBusy(false);
   }, []);
 
-  const reset = useCallback((restored: Item[] = [], restoredSources?: Map<number, CitedSource>) => {
-    setItems(restored);
-    setSources(restoredSources ?? new Map());
-    setUsage(undefined);
-    setError(undefined);
-    setBusy(false);
-    open.current = undefined;
-  }, []);
+  const reset = useCallback(
+    (restored: Item[] = [], restoredSources?: Map<number, CitedSource>, sessionId?: string) => {
+      currentSessionId.current = sessionId;
+      setItems(restored);
+      setSources(restoredSources ?? new Map());
+      setUsage(undefined);
+      setError(undefined);
+      setBusy(false);
+      open.current = undefined;
+    },
+    [],
+  );
+
+  /**
+   * Catch up on a conversation whose own turn is still running.
+   *
+   * Called right after `reset` has shown its saved messages, with whatever
+   * that turn has emitted so far -- the same events a subscriber who never
+   * left would have received, replayed through the same reducer. Without
+   * this, reopening it mid-turn showed only what was on disk when the turn
+   * started, indistinguishable from the reply having stopped.
+   */
+  const resume = useCallback(
+    (sessionId: string, events: AgentEvent[]) => {
+      currentSessionId.current = sessionId;
+      setBusy(true);
+      open.current = undefined;
+      for (const event of events) apply(event);
+    },
+    [apply],
+  );
 
   /**
    * Put the error away.
@@ -243,7 +291,7 @@ export function useAgent() {
    */
   const dismissError = useCallback(() => setError(undefined), []);
 
-  return { items, busy, usage, error, sources, send, abort, reset, dismissError };
+  return { items, busy, usage, error, sources, send, abort, reset, resume, dismissError };
 }
 
 /*

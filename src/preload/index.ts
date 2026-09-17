@@ -21,6 +21,9 @@ export interface AgentEventPayload {
   tool?: string;
   params?: Record<string, unknown>;
   result?: string;
+  /** The conversation this event belongs to, so a renderer looking at a
+   *  different one can tell it is not for them. */
+  sessionId?: string;
 }
 
 /** Subscribe to a main→renderer channel, returning an unsubscribe. */
@@ -43,6 +46,10 @@ const api = {
   newSession: () => ipcRenderer.invoke("myra:new-session"),
   listSessions: () => ipcRenderer.invoke("myra:list-sessions"),
   openSession: (id: string) => ipcRenderer.invoke("myra:open-session", id),
+  renameSession: (id: string, title: string) => ipcRenderer.invoke("myra:rename-session", id, title),
+  /** Whatever conversation is still generating right now, and every event it
+   *  has emitted so far -- so reopening it mid-turn can catch up. */
+  liveTurn: () => ipcRenderer.invoke("myra:live-turn"),
   deleteSession: (id: string) => ipcRenderer.invoke("myra:delete-session", id),
   deleteAllSessions: () => ipcRenderer.invoke("myra:delete-all-sessions"),
 

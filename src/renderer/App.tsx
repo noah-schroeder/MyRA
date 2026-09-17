@@ -60,7 +60,7 @@ const PAGE_FOR: Record<MemberKind, Page> = {
 };
 
 export function App() {
-  const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
+  const { items, busy, usage, error, sources, send, abort, reset, resume, dismissError } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   /* Which tab Settings opens on, when something sent you there for a reason. */
@@ -402,15 +402,22 @@ export function App() {
     // arrived as a separate message, and recovering the sources so the [n]
     // markers in the restored prose still resolve.
     const { items: restored, sources: restoredSources } = restoreThread(messages);
-    reset(restored, restoredSources);
+    reset(restored, restoredSources, id);
+    /* This conversation's own turn may still be running -- switched away from
+       and back to mid-reply, say. `reset` above showed only what was on disk
+       when the turn started; this catches the view up on everything it has
+       said since, the same way a tab that never left would have seen it. */
+    const live = await window.myra.liveTurn();
+    if (live && live.sessionId === id) resume(id, live.events);
     /* The panel showed what THIS conversation wrote. Carrying it into another
        one would attribute a document to a thread that never produced it. */
     documents.reset();
   };
 
   const newSession = async (): Promise<void> => {
-    setSessionId(await window.myra.newSession());
-    reset();
+    const id = await window.myra.newSession();
+    setSessionId(id);
+    reset([], undefined, id);
     documents.reset();
     clearPendingAttachments();
     startFresh();

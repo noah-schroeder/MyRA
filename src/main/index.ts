@@ -185,6 +185,31 @@ let quitting = false;
 let tray: MyraTray | undefined;
 let session_: Session | undefined;
 let inFlight: AbortController | undefined;
+/**
+ * The conversation object the turn in flight is writing into, kept
+ * independently of `session_`.
+ *
+ * `session_` is what the renderer is currently looking at, and switching
+ * conversations mid-turn moves it elsewhere -- `myra:open-session` used to
+ * reassign `session_` to a copy freshly read from disk even when the id
+ * matched the one still generating, so returning to it handed back a version
+ * missing the message that turn was about to save, and the next `saveSession`
+ * from that stale copy overwrote the finished reply the turn itself had
+ * already written. Keeping the live object reachable by id, independent of
+ * where `session_` has wandered off to, is what lets a session reopened
+ * mid-turn resume from the real thing instead of a stale read.
+ */
+let inFlightConversation: Session | undefined;
+/**
+ * What actually crosses to the renderer over `myra:agent-event`: every event
+ * the agent loop itself can emit, plus the two this file adds once the loop
+ * has finished -- the loop reports completion by returning or throwing
+ * rather than emitting, so `AgentEvent` alone does not name them.
+ */
+type ChatEvent = AgentEvent | { type: "done"; result: string } | { type: "error"; text: string };
+/** Every event this turn has emitted so far, replayed to a session reopened
+ *  while its own turn is still running -- see `myra:live-turn`. */
+let liveEvents: ChatEvent[] = [];
 /*
  * Which research run is executing right now.
  *
@@ -513,6 +538,17 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
 
   inFlight?.abort();
   inFlight = new AbortController();
+  inFlightConversation = conversation;
+  liveEvents = [];
+  /* Tagged with the conversation it belongs to, and kept, so a session
+     reopened mid-turn (`myra:live-turn`) can replay exactly what a
+     subscriber who never left would have seen. Untagged events used to be
+     applied to whatever conversation happened to be on screen, which is how
+     one conversation's reply could bleed into another's. */
+  const emit = (event: ChatEvent): void => {
+    liveEvents.push(event);
+    send("myra:agent-event", { ...event, sessionId: conversation.id });
+  };
   /* One deep research run per turn. The model is otherwise free to call the
      tool again after reading its own report, and did -- three times on one
      question, each from zero, so the scoping questions and the plan came back
@@ -567,7 +603,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       ...(extra ? { extra } : {}),
       signal: inFlight.signal,
       approve,
-      onEvent: (event: AgentEvent) => send("myra:agent-event", event),
+      onEvent: emit,
       ...(limit ? { contextLimit: limit } : {}),
       contextUsed: conversation.contextTokens ?? 0,
       ...(conversation.compaction ? { compaction: conversation.compaction } : {}),
@@ -597,7 +633,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
     conversation.messages_.push(...result.messages);
     conversation.contextTokens = result.contextTokens;
     if (result.compaction) conversation.compaction = result.compaction;
-    send("myra:agent-event", {
+    emit({
       type: "done",
       result: JSON.stringify({
         ...result.usage,
@@ -606,7 +642,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       }),
     });
   } catch (err) {
-    send("myra:agent-event", { type: "error", text: (err as Error).message });
+    emit({ type: "error", text: (err as Error).message });
   } finally {
     conversation.messages = conversation.messages_.length;
     await saveSession(conversation).catch(() => {});
@@ -621,6 +657,8 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      */
     void fileInActiveProject(config, "chat", conversation.id);
     inFlight = undefined;
+    inFlightConversation = undefined;
+    liveEvents = [];
     /* Whatever the turn was doing, it is not doing it any more -- including a
        run that threw rather than reaching its last stage. */
     activeRun = undefined;
@@ -790,8 +828,21 @@ function installIpc(): void {
   });
   ipcMain.handle("myra:list-sessions", () => listSessions());
   ipcMain.handle("myra:open-session", async (_e, id: string) => {
+    const wanted = String(id);
+    /* A turn for this exact conversation is running right now. The live
+       object already holds whatever it has written so far -- a disk read
+       would hand back a version missing exactly that, and `session_` a
+       second later would be a stale copy the turn's own finished save can no
+       longer reach. */
+    if (inFlightConversation?.id === wanted) {
+      session_ = inFlightConversation;
+      resumeCitations(
+        session_.messages_.filter((m) => m.role === "tool").map((m) => String(m.content ?? "")),
+      );
+      return session_.messages_;
+    }
     if (session_ && session_.messages_.length) await saveSession(session_).catch(() => {});
-    const loaded = await loadSession(String(id));
+    const loaded = await loadSession(wanted);
     if (loaded) session_ = loaded;
     /* Above whatever this thread already printed, not from one: the renderer
        rebuilds its source table from the stored tool output, so numbers on
@@ -802,6 +853,34 @@ function installIpc(): void {
         .map((m) => String(m.content ?? "")),
     );
     return loaded?.messages_ ?? [];
+  });
+  /* What a session reopened mid-turn needs to catch up: which conversation is
+     still generating, and every event it has produced so far, in order. The
+     renderer's own live subscription tags future events the same way, so a
+     session opened here and one that never left agree on everything from this
+     point on. */
+  ipcMain.handle("myra:live-turn", () => {
+    return inFlightConversation
+      ? { sessionId: inFlightConversation.id, events: liveEvents }
+      : undefined;
+  });
+  ipcMain.handle("myra:rename-session", async (_e, id: unknown, title: unknown) => {
+    const wanted = String(id);
+    const t = String(title ?? "").trim();
+    if (!t) return { ok: false, error: "A conversation needs a title." };
+    /* Mutated and saved in place, on whichever object actually holds this
+       conversation right now -- the live one if its turn is still running,
+       `session_` if it is merely the one on screen, a fresh read otherwise --
+       for the same reason `open-session` above does not always reload from
+       disk: a stale copy saved back would either race the turn's own save or
+       simply not be this conversation's freshest state. */
+    const live = inFlightConversation?.id === wanted ? inFlightConversation : undefined;
+    const current = session_?.id === wanted ? session_ : undefined;
+    const target = live ?? current ?? (await loadSession(wanted));
+    if (!target) return { ok: false, error: "That conversation could not be found." };
+    target.title = t;
+    await saveSession(target).catch(() => {});
+    return { ok: true };
   });
   ipcMain.handle("myra:delete-session", async (_e, id: string) => {
     await deleteSession(String(id));

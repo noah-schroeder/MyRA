@@ -396,6 +396,9 @@ export interface AgentEvent {
   result?: string;
   /** For "stats": how fast the reply that just finished was. One per model call. */
   stats?: MessageStats;
+  /** The conversation this event belongs to, so a renderer looking at a
+   *  different one can tell it is not for them. */
+  sessionId?: string;
 }
 
 /**
@@ -491,6 +494,11 @@ export interface MyRAApi {
   newSession(): Promise<string>;
   listSessions(): Promise<SessionSummary[]>;
   openSession(id: string): Promise<unknown[]>;
+  renameSession(id: string, title: string): Promise<{ ok: boolean; error?: string }>;
+  /** The conversation still generating right now, if any, and everything it
+   *  has said so far -- so opening it mid-turn can resume instead of showing
+   *  a conversation that looks stalled. */
+  liveTurn(): Promise<{ sessionId: string; events: AgentEvent[] } | undefined>;
   deleteSession(id: string): Promise<void>;
   deleteAllSessions(): Promise<void>;
 
