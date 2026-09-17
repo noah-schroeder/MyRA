@@ -6,6 +6,7 @@ import { MeetingCapture, CaptureError } from "../capture.ts";
 import { parseModelRef } from "../../core/providers.ts";
 import { litSegments, segmentClass } from "./meterBars.ts";
 import { Markdown } from "./Markdown.tsx";
+import { AudioPicker } from "./AudioPicker.tsx";
 
 /**
  * Meetings: recording one, and everything that happens to it afterwards.
@@ -71,7 +72,16 @@ function when(iso: string): string {
   return `${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}, ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-export function MeetingsPage({ settings, onClose }: { settings: Settings; onClose: () => void }) {
+export function MeetingsPage({
+  settings, resident, onSettingsChange, onOpenSettings, onClose,
+}: {
+  settings: Settings;
+  /** Every model the daemon is holding, so the transcription picker can say whether this is one. */
+  resident: string[];
+  onSettingsChange: (s: Settings) => void;
+  onOpenSettings: () => void;
+  onClose: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("record");
   const [state, setState] = useState<MeetingState>({ phase: "idle" });
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
@@ -245,6 +255,20 @@ export function MeetingsPage({ settings, onClose }: { settings: Settings; onClos
         </div>
       ) : tab === "setup" ? (
         <div className="meetings-body">
+          <div className="meeting-start-card">
+            <h2>Transcription</h2>
+            <p className="dim">
+              Which model turns a recording into text — the same picker as the chat bar's, with
+              whatever is on this machine and whatever your configured providers offer.
+            </p>
+            <AudioPicker
+              role="transcription"
+              settings={settings}
+              resident={resident}
+              onSettingsChange={onSettingsChange}
+              onOpenSettings={onOpenSettings}
+            />
+          </div>
         </div>
       ) : (
         <div className="meetings-body">

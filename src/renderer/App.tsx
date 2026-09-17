@@ -847,7 +847,13 @@ export function App() {
           */}
         {page === "tasks" ? <TasksPage onClose={toChat} /> : null}
         {page === "meetings" && settings ? (
-          <MeetingsPage settings={settings} onClose={toChat} />
+          <MeetingsPage
+            settings={settings}
+            resident={resident}
+            onSettingsChange={setSettings}
+            onOpenSettings={() => setShowSettings(true)}
+            onClose={toChat}
+          />
         ) : null}
         {page === "images" && settings ? (
           <ImagePage settings={settings} onSettingsChange={setSettings} onClose={toChat} />
