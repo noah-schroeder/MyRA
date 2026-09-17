@@ -182,7 +182,7 @@ function Review({
 
   return (
     <div className="pane">
-      <p className="pane-note">
+      <p className="pane-lead">
         What MyRA tells the model when it reviews a manuscript. Each study design has a panel of
         reviewers, and each reviewer is a separate request: the base instructions below are sent
         every time, that reviewer's own brief is added to them, and anything you type into the
@@ -197,7 +197,7 @@ function Review({
           onChange={(e) => void patch({ reviewPrompt: e.target.value })}
         />
       </label>
-      <p className="pane-note">
+      <p className="hint note">
         MyRA has not searched for anything at this point, so any reference the model produces
         here would be invented. The default text says so; if you rewrite it, keep that.
       </p>
@@ -222,7 +222,7 @@ function Review({
         .filter((t) => t.id === open)
         .map((t) => (
           <Fragment key={t.id}>
-            <p className="pane-note">
+            <p className="hint">
               {t.label} manuscripts are sent to these {t.reviewers.length} reviewers, each as a
               separate request carrying the whole manuscript.
             </p>
@@ -486,13 +486,13 @@ function Folders({
         />
       </label>
 
-      <label className="checkbox">
+      <label className="check">
         <input
           type="checkbox"
           checked={settings.deleteRawAudioAfterTranscription}
           onChange={(e) => void patch({ deleteRawAudioAfterTranscription: e.target.checked })}
         />
-        Delete the recording once a transcript exists
+        <span>Delete the recording once a transcript exists</span>
       </label>
     </div>
   );
@@ -891,7 +891,7 @@ function Audio({
           onChange={(combo) => void patch({ hotkeys: { ...settings.hotkeys, dictation: combo } })}
         />
 
-        <label className="checkbox">
+        <label className="check">
           <input
             type="radio"
             name="dictation-hotkey-mode"
@@ -899,9 +899,9 @@ function Audio({
             disabled={!settings.hotkeys.dictation}
             onChange={() => void patch({ hotkeys: { ...settings.hotkeys, dictationMode: "toggle" } })}
           />
-          Toggle — press once to start recording, again to stop.
+          <span>Toggle — press once to start recording, again to stop.</span>
         </label>
-        <label className="checkbox">
+        <label className="check">
           <input
             type="radio"
             name="dictation-hotkey-mode"
@@ -909,8 +909,10 @@ function Audio({
             disabled={!settings.hotkeys.dictation}
             onChange={() => void patch({ hotkeys: { ...settings.hotkeys, dictationMode: "hold" } })}
           />
-          Hold to talk — records while you hold the keys. Releasing them, or clicking away from
-          MyRA, stops the recording and sends it to be transcribed.
+          <span>
+            Hold to talk — records while you hold the keys. Releasing them, or clicking away from
+            MyRA, stops the recording and sends it to be transcribed.
+          </span>
         </label>
 
         <HotkeyField
@@ -921,13 +923,13 @@ function Audio({
         />
       </fieldset>
 
-      <label className="checkbox">
+      <label className="check">
         <input
           type="checkbox"
           checked={settings.meetingCaptureSystemAudio}
           onChange={(e) => void patch({ meetingCaptureSystemAudio: e.target.checked })}
         />
-        Also record the system's output during meetings
+        <span>Also record the system's output during meetings</span>
       </label>
       <p className="hint">
         This is what separates the speakers. A microphone alone records the person wearing the
@@ -1087,7 +1089,7 @@ function Persona({
         />
       </label>
 
-      <p className="pane-note">
+      <p className="hint note">
         This replaces the description of who MyRA is, and nothing else. MyRA&rsquo;s own rules
         follow it and cannot be edited from here: how to hold a tool, that a citation marker may
         only ever be one a tool actually returned, and that text inside untrusted-content markers
@@ -1128,7 +1130,7 @@ function Persona({
           ))}
         </ul>
       ) : (
-        <p className="pane-note">
+        <p className="hint">
           None yet. The cog beside a model in the model menu gives that one its own.
         </p>
       )}
@@ -1152,7 +1154,7 @@ function Permissions({
       </p>
 
       {MODES.map((m) => (
-        <label key={m.value} className="checkbox">
+        <label key={m.value} className="check">
           <input
             type="radio"
             name="permission-mode"
