@@ -3411,6 +3411,18 @@ p.warning { margin: 0; font-size: 12.5px; }
 .meet-filed { font-size: 12px; }
 .meet-filed code { font-family: var(--mono); font-size: 11.5px; }
 
+.meet-action-items { display: flex; flex-direction: column; gap: 6px; }
+.meet-action-items h4 { margin: 0; font-size: 12.5px; }
+.meet-action-items > p { margin: 0; font-size: 12px; }
+.meet-action-items ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.action-item {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 8px; border-radius: var(--radius-sm); background: var(--bg-inset);
+}
+.action-item .check { flex: none; font-size: 12.5px; padding: 0; white-space: nowrap; }
+.action-title { font-size: 13px; flex: 1 1 auto; min-width: 120px; }
+.action-meta { font-size: 11.5px; white-space: nowrap; }
+
 .meet-prompt { display: flex; flex-direction: column; gap: 8px; }
 .meet-prompt p { margin: 0; font-size: 12.5px; line-height: 1.55; }
 .meet-prompt textarea {
@@ -5927,3 +5939,145 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
 .mopt-slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
 .mopt-slider-row input[type="range"]:disabled { opacity: 0.4; }
 .mopt-slider-value { font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/*
+ * The tasks page.
+ *
+ * Fills the conversation area the way .runs does, for the same reason: a
+ * checklist somebody keeps open all day is a page, not a dialog to dismiss.
+ * No settings bar, no model picker -- nothing here touches a model.
+ */
+.tasks-page {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 22px 26px 32px;
+  overflow-y: auto;
+  max-width: 62ch;
+}
+.tasks-page-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.tasks-page-header h2 { margin: 0; font-size: 16px; font-weight: 620; }
+
+.tasks-add { display: flex; gap: 8px; }
+.tasks-add input[type="text"] {
+  flex: 1; min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-float); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.tasks-add input[type="text"]:focus-visible,
+.tasks-add input[type="date"]:focus-visible { outline: 2px solid var(--accent-glow); outline-offset: -1px; }
+.tasks-add input[type="date"] {
+  padding: 7px 8px;
+  background: var(--bg-float); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.tasks-show-done {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-dim);
+}
+.tasks-show-done input[type="checkbox"] { accent-color: var(--accent); }
+
+.tasks-empty { margin: 8px 0; font-size: 13px; color: var(--text-dim); }
+
+.tasks-page-wide { max-width: 92ch; }
+
+.tasks-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.tasks-calendar { display: flex; flex-direction: column; gap: 10px; }
+.cal-head { display: flex; align-items: center; gap: 10px; }
+.cal-head button {
+  font: inherit; font-size: 13px;
+  padding: 3px 9px; border-radius: var(--radius-sm);
+  background: var(--bg-float); color: var(--text); border: 1px solid var(--border);
+  cursor: pointer;
+}
+.cal-head button:hover { border-color: var(--border-hover); }
+.cal-head button.linkish { margin-left: auto; background: none; border: none; color: var(--accent-soft); }
+.cal-month-label { font-size: 14px; font-weight: 600; min-width: 14ch; }
+
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cal-weekday {
+  background: var(--bg-inset); color: var(--text-faint);
+  font-size: 11px; text-align: center; padding: 4px 0;
+}
+.cal-cell {
+  background: var(--bg-float); min-height: 82px;
+  padding: 4px 5px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.cal-cell:hover { background: var(--accent-wash); }
+.cal-cell.other-month { background: var(--bg-inset); }
+.cal-cell.other-month .cal-day-num { color: var(--text-faint); }
+.cal-cell.today .cal-day-num {
+  color: var(--on-accent); background: var(--accent);
+  border-radius: 999px; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cal-day-num { font-size: 11.5px; color: var(--text-dim); }
+
+.cal-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.cal-task {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; border-radius: 4px;
+  background: var(--accent-wash); padding: 1px 4px;
+}
+.cal-task.done .cal-task-title { color: var(--text-faint); text-decoration: line-through; }
+.cal-task input[type="checkbox"] { accent-color: var(--accent); width: 11px; height: 11px; flex: none; }
+.cal-task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-task-delete {
+  flex: none; width: 14px; height: 14px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text-faint); cursor: pointer; padding: 0;
+}
+.cal-task-delete:hover { color: var(--red); }
+
+.cal-undated-hint { margin: 0; font-size: 12px; }
+
+.tasks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.task-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.task-row.done .task-title { color: var(--text-faint); text-decoration: line-through; }
+
+.task-check {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+}
+.task-check input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+.task-title {
+  flex: 1; min-width: 0;
+  font-size: 13.5px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.task-due {
+  flex: none;
+  font-size: 11.5px; color: var(--accent-soft);
+  background: var(--accent-wash);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+}
+
+.task-delete {
+  flex: none;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--text-faint); font-size: 16px; line-height: 1;
+  cursor: pointer;
+}
+.task-delete:hover { color: var(--text); background: var(--bg-float); }

@@ -15,6 +15,7 @@
 
 import { readsDocuments, readsLibrary, searches, type ResearchMode } from "../research/ladder.ts";
 import { spokenGuidance } from "./spokenPrompt.ts";
+import { todayLine } from "./datePrompt.ts";
 
 /**
  * Who MyRA is, before anybody changes it.
@@ -88,6 +89,11 @@ export function systemPrompt(opts: {
   mode: ResearchMode;
   /** Whether the answer will be spoken rather than read. */
   spoken?: boolean | undefined;
+  /** Injectable so this stays a pure function of its inputs and a test does
+   *  not depend on the day it happens to run. Main passes nothing, so every
+   *  turn gets the real clock -- which is also what makes a conversation left
+   *  open across midnight correct on the next message. */
+  now?: Date | undefined;
 }): string {
   const mode = opts.mode;
   const tools = readsDocuments(mode) ? ["", ...TOOL_DISCIPLINE] : [];
@@ -142,6 +148,12 @@ export function systemPrompt(opts: {
   const spoken = spokenGuidance(opts.spoken ?? false);
   return [
     ...(opts.persona?.trim() || DEFAULT_PERSONA).split("\n"),
+    /* Immediately after the persona and before anything conditional: it is a
+       fact rather than a rule, and "who you are, and what day it is" is the
+       order a person would say it in. Not beside the spoken block at the end
+       -- that block is last because it changes what a good ANSWER is, and
+       this only ever supplies a number. */
+    "", ...todayLine(opts.now),
     ...tools, "", ...SYSTEM_PROMPT,
     ...(closing.length ? ["", ...closing] : []),
     ...(spoken.length ? ["", ...spoken] : []),

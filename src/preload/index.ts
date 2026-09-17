@@ -151,6 +151,19 @@ const api = {
      section now -- the page reflects the file rather than owning it. */
   onPaperChanged: (cb: (paper: unknown) => void) => on("myra:paper-changed", cb),
 
+  /* ---- tasks ----
+   * MyRA's own list. Never the calendar, and never any other program's task
+   * list -- see core/agent/tools/tasks.ts's header for why that is what lets
+   * these stay a plain `write` instead of the floor-classed system_of_record. */
+  taskList: () => ipcRenderer.invoke("myra:task-list"),
+  taskCreate: (task: { title: string; due?: string; notes?: string; remindAt?: string }) =>
+    ipcRenderer.invoke("myra:task-create", task),
+  taskComplete: (id: string) => ipcRenderer.invoke("myra:task-complete", id),
+  taskReopen: (id: string) => ipcRenderer.invoke("myra:task-reopen", id),
+  taskDelete: (id: string) => ipcRenderer.invoke("myra:task-delete", id),
+  /** Pushed whenever the list changes, from either the page or the agent. */
+  onTasks: (cb: (tasks: unknown) => void) => on("myra:tasks", cb),
+
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
     ipcRenderer.invoke("myra:provider-models", opts),
   providerReasoning: (opts: { baseUrl: string; id?: string; model: string; apiKey?: string }) =>
@@ -194,6 +207,12 @@ const api = {
     ipcRenderer.invoke("myra:meeting-instructions", dir, text),
   meetingRead: (dir: string, which: "notes" | "transcript") =>
     ipcRenderer.invoke("myra:meeting-read", dir, which),
+  /* The note's action items, and turning one into a MyRA task -- see
+     core/agent/tools/tasks.ts's header for why that list stays a plain
+     `write` and never touches a real calendar or task manager. */
+  meetingActions: (dir: string) => ipcRenderer.invoke("myra:meeting-actions", dir),
+  meetingActionToTask: (dir: string, index: number) =>
+    ipcRenderer.invoke("myra:meeting-action-to-task", dir, index),
   meetingReveal: (path: string) => ipcRenderer.invoke("myra:meeting-reveal", path),
   meetingDelete: (dir: string) => ipcRenderer.invoke("myra:meeting-delete", dir),
 

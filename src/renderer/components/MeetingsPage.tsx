@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  MeetingState, MeetingSummary, Settings, WhisperSnapshot,
+  ActionRecord, MeetingState, MeetingSummary, Settings, WhisperSnapshot,
 } from "../types.ts";
 import { MeetingCapture, CaptureError } from "../capture.ts";
 import { parseModelRef } from "../../core/providers.ts";
@@ -395,6 +395,8 @@ function MeetingRow({
 }) {
   const [view, setView] = useState<"notes" | "transcript" | "prompt">("notes");
   const [text, setText] = useState<string | undefined>();
+  const [actions, setActions] = useState<ActionRecord[] | undefined>();
+  const [converting, setConverting] = useState<Set<number>>(new Set());
   const [prompt, setPrompt] = useState(meeting.state.instructions ?? "");
   const [saved, setSaved] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -404,6 +406,30 @@ function MeetingRow({
     setText(undefined);
     void window.myra.meetingRead(meeting.dir, view).then(setText);
   }, [expanded, view, meeting.dir, meeting.transcribed, meeting.noted]);
+
+  useEffect(() => {
+    if (!expanded || view !== "notes") return;
+    setActions(undefined);
+    void window.myra.meetingActions(meeting.dir).then((r) => setActions(r.ok ? (r.actions ?? []) : []));
+  }, [expanded, view, meeting.dir, meeting.noted]);
+
+  const createTaskFrom = async (index: number): Promise<void> => {
+    // Belt-and-braces with the main-process lock in meeting-action-to-task:
+    // this stops a second click during the round trip from ever reaching it,
+    // so the ordinary double-click never surfaces as a rejected request.
+    if (converting.has(index)) return;
+    setConverting((prev) => new Set(prev).add(index));
+    try {
+      const r = await window.myra.meetingActionToTask(meeting.dir, index);
+      if (r.ok && r.actions) setActions(r.actions);
+    } finally {
+      setConverting((prev) => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      });
+    }
+  };
 
   const act = async (fn: () => Promise<{ ok: boolean; error?: string }>): Promise<void> => {
     await fn();
@@ -573,6 +599,36 @@ function MeetingRow({
               <Markdown text={withoutFrontMatter(text)} sources={new Map()} />
             </div>
           )}
+
+          {view === "notes" && actions && actions.length > 0 ? (
+            <div className="meet-action-items">
+              <h4>Action items</h4>
+              <p className="dim">
+                Tick the ones that are yours to add them to your MyRA task list. Nothing
+                else is changed, and nothing is sent anywhere else.
+              </p>
+              <ul>
+                {actions.map((item, i) => (
+                  <li key={i} className="action-item">
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(item.taskId)}
+                        disabled={Boolean(item.taskId) || converting.has(i)}
+                        onChange={() => void createTaskFrom(i)}
+                      />
+                      <span>{item.taskId ? "Added to tasks" : "Create task"}</span>
+                    </label>
+                    <span className="action-title">{item.title}</span>
+                    <span className="dim action-meta">
+                      {item.owner ?? "Unassigned"}
+                      {item.due ? ` · due ${item.due}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {view === "notes" && meeting.state.filedNotePath ? (
             <p className="dim meet-filed">

@@ -16,8 +16,13 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
  * - `write`            writes confined to the agent's own sandbox
  * - `dangerous`        destructive shell, or any write escaping the sandbox
  * - `catastrophic`     unrecoverable (rm -rf /, mkfs on a real device, fork bomb)
- * - `system_of_record` mutates the user's real data: tasks, calendar, contacts,
+ * - `system_of_record` mutates the user's real data: the calendar, contacts and
+ *                      task list kept in the user's OWN applications, and the
  *                      clipboard. Lives on the host, outside the sandbox.
+ *                      NOT MyRA's own task list, which is a flat directory of
+ *                      JSON files in MyRA's own folder, read by no other
+ *                      program -- see the header of agent/tools/tasks.ts,
+ *                      which argues the `write` classification in full.
  */
 export const RISK_CLASSES = ["safe", "write", "dangerous", "catastrophic", "system_of_record"] as const;
 export type RiskClass = (typeof RISK_CLASSES)[number];

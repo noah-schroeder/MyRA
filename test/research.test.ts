@@ -445,9 +445,10 @@ async function registryFor(cfg: Record<string, unknown>) {
   const { RESEARCH_TOOL_DEFS } = await import("../src/core/agent/tools/research.ts");
   const { DOCUMENT_TOOL_DEFS } = await import("../src/core/agent/tools/documents.ts");
   const { LIBRARY_TOOL_DEFS } = await import("../src/core/agent/tools/library.ts");
+  const { TASK_TOOL_DEFS } = await import("../src/core/agent/tools/tasks.ts");
   process.env["MYRA_RESEARCH_CONFIG"] = configFile(cfg);
   const registry = new ToolRegistry();
-  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS]) {
+  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS, ...TASK_TOOL_DEFS]) {
     registry.register(def);
   }
   return registry;
@@ -456,6 +457,9 @@ async function registryFor(cfg: Record<string, unknown>) {
 const NETWORK_TOOLS = ["web_search", "academic_research", "deep_research", "fetch_page"];
 const DOCUMENT_TOOLS = ["write_document", "read_document", "convert_document"];
 const LIBRARY_TOOLS = ["search_library"];
+/* Gated with `actsLocally`, the same rank as the document tools -- a task
+   list is local and jailed, which is exactly what that rung already means. */
+const TASK_TOOLS = ["create_task", "list_tasks", "complete_task"];
 
 test("off leaves the model with no tool of any kind", async () => {
   const registry = await registryFor({ v: 2, mode: "off", category: "science" });
@@ -467,17 +471,20 @@ test("off leaves the model with no tool of any kind", async () => {
   assert.deepEqual(registry.activeNames(), [], "off must send an empty schema");
   assert.deepEqual(registry.schemas(), []);
 
-  for (const t of [...NETWORK_TOOLS, ...DOCUMENT_TOOLS, ...LIBRARY_TOOLS]) {
+  for (const t of [...NETWORK_TOOLS, ...DOCUMENT_TOOLS, ...LIBRARY_TOOLS, ...TASK_TOOLS]) {
     await assert.rejects(() => registry.dispatch(t, {}), /not enabled/, `${t} must be refused at off`);
   }
   restoreResearchConfig();
 });
 
-test("the document rung gets the documents and nothing that reaches the network", async () => {
+test("the document rung gets the documents, the task list, and nothing that reaches the network", async () => {
   const registry = await registryFor({ v: 2, mode: "assistant", category: "science" });
   const active = registry.activeNames();
 
   for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} should be active`);
+  // The task tools join the documents at this rung -- both are local and
+  // jailed, and neither reaches the network.
+  for (const t of TASK_TOOLS) assert.ok(active.includes(t), `${t} should be active`);
   /* Not the library. It was reachable here once, with nothing on screen saying
      so -- which a user cannot tell apart from the feature not existing. It has
      its own rung now, and a rung is a control. */
@@ -498,6 +505,7 @@ test("the library rung searches Zotero and still cannot reach the web", async ()
 
   assert.ok(active.includes("search_library"), "the rung exists to enable this");
   for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} must survive: rungs are supersets`);
+  for (const t of TASK_TOOLS) assert.ok(active.includes(t), `${t} must survive: rungs are supersets`);
   for (const t of NETWORK_TOOLS) {
     /* The point of placing the library BELOW "web": Zotero answers on loopback,
        so this rung searches without anything leaving the machine. A rung that
@@ -528,10 +536,11 @@ test("the library is offered where it is a sensible question, and nowhere else",
   restoreResearchConfig();
 });
 
-test("searching keeps the document tools, because they are unrelated to it", async () => {
+test("searching keeps the document and task tools, because they are unrelated to it", async () => {
   const registry = await registryFor({ v: 2, mode: "web", category: "science" });
   const active = registry.activeNames();
   for (const t of DOCUMENT_TOOLS) assert.ok(active.includes(t), `${t} must survive a searching mode`);
+  for (const t of TASK_TOOLS) assert.ok(active.includes(t), `${t} must survive a searching mode`);
   assert.ok(active.includes("web_search") && active.includes("fetch_page"));
   restoreResearchConfig();
 });

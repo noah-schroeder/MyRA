@@ -37,6 +37,17 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4 6h16M4 12h16M4 18h10" />
     </>
   ),
+  /* A checkbox with a tick, plus two plain lines: reads as "a list of things
+     to do" at 16px, and is not confused with `runs` above it -- that one has
+     no checkmark and three full-width lines rather than two short ones. */
+  tasks: (
+    <>
+      <path d="M4 5.5h5v5h-5z" />
+      <path d="m4.8 8 1.2 1.2 2-2.4" />
+      <path d="M11.5 6.5h8M4 15.5h5v5h-5z" />
+      <path d="M11.5 17.5h8" />
+    </>
+  ),
   /* A framed picture with a horizon in it. Reads as "a picture" at 16px
      without borrowing the camera shape, which would say "take a photo"
      rather than "make one". */

@@ -75,7 +75,7 @@ export function researchConfigPath(): string {
  */
 export type { ResearchMode } from "./ladder.ts";
 export {
-  RESEARCH_MODES, reaches, exactly, searches, readsLibrary, readsDocuments,
+  RESEARCH_MODES, reaches, exactly, searches, readsLibrary, readsDocuments, actsLocally,
 } from "./ladder.ts";
 import {
   RESEARCH_MODES, exactly, searches, readsLibrary, readsDocuments, type ResearchMode,

@@ -27,6 +27,7 @@ import {
   DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
 } from "../core/agent/tools/documents.ts";
 import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
+import { setTaskHost, TASK_TOOL_DEFS } from "../core/agent/tools/tasks.ts";
 import {
   libraryCollections, librarySearch, libraryRoute, libraryStatus,
 } from "./runtime/zoteroLibrary.ts";
@@ -83,6 +84,8 @@ import { installAudioIpc, resolveAudio } from "./audio.ts";
 import { installImageIpc } from "./images.ts";
 import { installPaperIpc } from "./papers.ts";
 import { installReviewIpc } from "./review.ts";
+import { installTaskIpc, taskHost } from "./tasks.ts";
+import { startReminders } from "./reminders.ts";
 import { createJobs } from "./work.ts";
 import { factsFor, setIgnoreSuggested, suggestedFor } from "./runtime/modelFacts.ts";
 import { defaultStores, installProjectIpc } from "./projects.ts";
@@ -1835,7 +1838,7 @@ async function main(): Promise<void> {
 
   await tightenExistingContent();
 
-  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS]) {
+  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS, ...TASK_TOOL_DEFS]) {
     registry.register(def);
   }
 
@@ -1846,6 +1849,11 @@ async function main(): Promise<void> {
     collections: () => libraryCollections(),
     route: () => libraryRoute(),
   });
+
+  /* A flat directory of JSON in MyRA's own folder -- see tools/tasks.ts's
+     header for why that makes the write tools `write` rather than
+     `system_of_record`. */
+  setTaskHost(taskHost({ config, send }));
 
   setResearchHost({
     fallbackModel: config.current.llm.model ?? "",
@@ -2249,6 +2257,14 @@ async function main(): Promise<void> {
     config, vault, runtime, send,
     onCreated: (ref) => void fileInActiveProject(config, "image", ref),
   });
+  /* Not `fileInActiveProject`: a task is deliberately not a project member
+     (see core/tasks/task.ts's header) -- main/tasks.ts files new tasks under
+     the active project itself, on the same field every other kind reads. */
+  installTaskIpc({ config, send });
+  /* The fallback reminder heartbeat. Started here rather than lazily on first
+     use, so a task with a reminder set before the app was last closed is not
+     missed on the very session that would have caught it. */
+  startReminders();
   /* The same resolver chat and meetings take, so the paper drafter always
      writes with whatever the model bar names and configures nothing of its
      own. */

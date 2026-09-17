@@ -39,6 +39,7 @@ import { ImagePage } from "./components/ImagePage.tsx";
 import { PaperDrafter } from "./components/PaperDrafter.tsx";
 import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
+import { TasksPage } from "./components/TasksPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import { downscaleImage } from "./downscale.ts";
@@ -48,7 +49,8 @@ import type {
 } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "review" | "projects" | "api";
+type Page =
+  | "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "review" | "projects" | "api" | "tasks";
 
 /** Where each kind of work lives. One table, so a seventh kind is one line. */
 const PAGE_FOR: Record<MemberKind, Page> = {
@@ -574,6 +576,16 @@ export function App() {
 
         <nav className="rail-nav" aria-label="Sections">
           <RailButton icon="new" label="New conversation" onClick={() => void newSession()} />
+          {/* Above Meetings, as the lightest-weight of the "things you keep"
+              pages: most tasks are meant to be made by asking MyRA rather than
+              by opening this page at all, so it earns a prominent spot rather
+              than a buried one. */}
+          <RailButton
+            icon="tasks"
+            label="Tasks"
+            active={page === "tasks"}
+            onClick={() => setPage((p) => (p === "tasks" ? "chat" : "tasks"))}
+          />
           {/* A page, not a panel over the conversation. A meeting has a past --
               the recordings, transcripts and notes of every one you have held --
               and a strip above the thread could only ever show the one you were
@@ -833,6 +845,7 @@ export function App() {
           * interruption to be dismissed, over a thread you could not consult
           * while reading it.
           */}
+        {page === "tasks" ? <TasksPage onClose={toChat} /> : null}
         {page === "meetings" && settings ? (
           <MeetingsPage settings={settings} onClose={toChat} />
         ) : null}

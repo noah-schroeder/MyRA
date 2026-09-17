@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  filingRoot, listMeetings, readState, writeState, writeTranscript, NOTES_MD,
+  filingRoot, listMeetings, readActions, readState, writeActions, writeState, writeTranscript,
+  ACTIONS_FILE, NOTES_MD, type ActionRecord,
 } from "../src/core/meetings/store.ts";
 
 async function root(): Promise<string> {
@@ -134,4 +135,47 @@ test("with no vault, a meeting is filed in its own folder", () => {
 
 test("with a vault, it is filed in the vault's subfolder", () => {
   assert.equal(filingRoot("/home/me/vault", "Meetings", "/tmp/x"), join("/home/me/vault", "Meetings"));
+});
+
+function action(overrides: Partial<ActionRecord> = {}): ActionRecord {
+  return {
+    project: "", type: "action", title: "Send the deck", owner: null, due: null,
+    quote: "I'll send the deck", certain: true, at: "00:01:02", sourcing: "verbatim",
+    ...overrides,
+  };
+}
+
+test("a meeting with no actions.json has no action items, not an error", async () => {
+  assert.deepEqual(await readActions(join(tmpdir(), "myra-does-not-exist")), []);
+});
+
+test("action items round-trip through disk, including which became tasks", async () => {
+  const dir = await root();
+  const meeting = join(dir, "a");
+  try {
+    await record(meeting, "Standup", "2026-08-26T09:00:00Z");
+    const items = [
+      action({ title: "Send the deck", owner: "Sarah" }),
+      action({ title: "Review the draft", taskId: "20260826-090000-review-the-draft-ab12" }),
+    ];
+    await writeActions(meeting, items);
+    assert.deepEqual(await readActions(meeting), items);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a truncated actions.json reads as no action items rather than crashing the meeting list", async () => {
+  const dir = await root();
+  const meeting = join(dir, "a");
+  try {
+    await record(meeting, "Standup", "2026-08-26T09:00:00Z");
+    await writeFile(join(meeting, ACTIONS_FILE), "{ not json");
+    assert.deepEqual(await readActions(meeting), []);
+    // The rest of the meeting is still readable -- a bad actions.json must not
+    // take the whole row down with it.
+    assert.equal((await listMeetings(dir))[0]?.title, "Standup");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
