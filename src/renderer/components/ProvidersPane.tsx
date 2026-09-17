@@ -300,7 +300,7 @@ function ProviderCard({
           />
           Enabled
         </label>
-        <button type="button" className="btn-sm danger" onClick={onRemove}>
+        <button type="button" className="btn btn-sm danger" onClick={onRemove}>
           Remove
         </button>
       </div>
@@ -384,7 +384,7 @@ function ProviderCard({
       {hasKey ? (
         <button
           type="button"
-          className="btn-sm"
+          className="btn btn-sm"
           onClick={() =>
             void window.myra.setProviderKey(provider.id, "").then(() => setKeyNote("Key removed."))
           }
@@ -394,12 +394,12 @@ function ProviderCard({
       ) : null}
 
       <div className="provider-actions">
-        <button type="button" className="btn-sm" disabled={busy || !baseUrl.trim()} onClick={fetchModels}>
+        <button type="button" className="btn btn-sm" disabled={busy || !baseUrl.trim()} onClick={fetchModels}>
           {busy ? "Asking…" : "Fetch models"}
         </button>
         <button
           type="button"
-          className="btn-sm"
+          className="btn btn-sm"
           disabled={checking || !baseUrl.trim() || models.length === 0}
           title="Send one short question and report whether this endpoint returns the model's reasoning"
           onClick={checkReasoning}
@@ -500,7 +500,7 @@ function ModelChooser({
       <div className="models-bulk">
         <button
           type="button"
-          className="btn-sm"
+          className="btn btn-sm"
           disabled={allShownChosen || shown.length === 0}
           onClick={() => onSet([...new Set([...chosen, ...shown])])}
         >
@@ -508,7 +508,7 @@ function ModelChooser({
         </button>
         <button
           type="button"
-          className="btn-sm"
+          className="btn btn-sm"
           disabled={!shown.some((name) => picked.has(name))}
           onClick={() => onSet(chosen.filter((name) => !shown.includes(name)))}
         >

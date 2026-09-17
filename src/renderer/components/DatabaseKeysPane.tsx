@@ -116,7 +116,7 @@ function DatabaseKeyCard({
       {hasKey ? (
         <button
           type="button"
-          className="btn-sm"
+          className="btn btn-sm"
           onClick={() => void window.myra.setSecret(secret, "").then(() => setNote("Key removed."))}
         >
           Remove the stored key

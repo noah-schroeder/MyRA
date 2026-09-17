@@ -340,7 +340,7 @@ function CollectionPicker({
     return (
       <div className="collection-ask unreachable">
         <span>{state.error}</span>
-        <button type="button" className="btn-sm" onClick={load}>Try again</button>
+        <button type="button" className="btn btn-sm" onClick={load}>Try again</button>
       </div>
     );
   }

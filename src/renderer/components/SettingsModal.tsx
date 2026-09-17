@@ -1153,7 +1153,7 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
       <p className="pane-lead">
         A short walkthrough of where things live, shown once after setup.
       </p>
-      <button type="button" className="btn-sm" onClick={onReplayTutorial}>
+      <button type="button" className="btn btn-sm" onClick={onReplayTutorial}>
         Show the tutorial again
       </button>
 
@@ -1253,7 +1253,7 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
                   for anyone who skipped it, or whose first attempt failed. */}
               <button
                 type="button"
-                className="btn-sm"
+                className="btn btn-sm"
                 disabled={installing}
                 onClick={() => {
                   setInstalling(true);
