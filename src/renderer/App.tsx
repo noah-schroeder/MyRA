@@ -33,6 +33,7 @@ import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
 import { useSpeech } from "./useSpeech.ts";
 import { useHandsFree } from "./useHandsFree.ts";
+import { useHotkeys } from "./useHotkeys.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
 import { ImagePage } from "./components/ImagePage.tsx";
 import { PaperDrafter } from "./components/PaperDrafter.tsx";
@@ -283,6 +284,53 @@ export function App() {
     speech,
     ...(settings?.dictationSource ? { micDeviceId: settings.dictationSource } : {}),
   });
+
+  /*
+   * Shared by the s2s button and its hotkey, so the two are provably the same
+   * action rather than two copies that can drift apart. The voice-model guard
+   * moved here unchanged; the second guard is new -- entering hands-free while
+   * a manual dictation is recording would hand the loop a microphone another
+   * recorder already holds, the same hazard `disabled={handsFree}` on the
+   * dictate button guards in the other direction.
+   */
+  const toggleHandsFree = useCallback(() => {
+    if (!settings?.audio.voiceModel) {
+      setSettingsTab(undefined);
+      setShowSettings(true);
+      return;
+    }
+    if (!handsFree && dictation.state.phase !== "idle") return;
+    void window.myra.updateSettings({ audio: { ...settings.audio, speechToSpeech: !handsFree } }).then(setSettings);
+  }, [settings, handsFree, dictation.state.phase]);
+
+  const toggleDictation = useCallback(() => {
+    if (dictation.state.phase === "recording") {
+      void dictation.stop();
+      return;
+    }
+    if (!handsFree && dictation.state.phase === "idle") void dictation.start();
+  }, [dictation, handsFree]);
+
+  const startDictation = useCallback(() => {
+    if (!handsFree && dictation.state.phase === "idle") void dictation.start();
+  }, [dictation, handsFree]);
+
+  const stopDictation = useCallback(() => {
+    if (dictation.state.phase === "recording") void dictation.stop();
+  }, [dictation]);
+
+  useHotkeys(
+    [
+      {
+        combo: settings?.hotkeys.dictation ?? "",
+        ...(settings?.hotkeys.dictationMode === "hold"
+          ? { hold: true, onPress: startDictation, onRelease: stopDictation }
+          : { onPress: toggleDictation }),
+      },
+      { combo: settings?.hotkeys.handsFree ?? "", onPress: toggleHandsFree },
+    ],
+    !showSettings && !prompt && settings?.setupCompleted === true,
+  );
 
   /*
    * Smooth for a message arriving in the conversation on screen; instant for
@@ -1085,19 +1133,7 @@ export function App() {
                       : "Talk to MyRA: it listens, answers aloud, and listens again. Answers are kept short, because they are spoken."
                     : "Choose a voice first — opens Settings → Audio"
                 }
-                onClick={() => {
-                  /* No voice model means this cannot work, and a toggle that
-                     silently does nothing is worse than one that takes you to
-                     the thing that is missing. */
-                  if (!settings?.audio.voiceModel) {
-                    setSettingsTab(undefined);
-                    setShowSettings(true);
-                    return;
-                  }
-                  void window.myra
-                    .updateSettings({ audio: { ...settings.audio, speechToSpeech: !handsFree } })
-                    .then(setSettings);
-                }}
+                onClick={toggleHandsFree}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1145,9 +1181,7 @@ export function App() {
                    starts and stops it; a second control doing the same thing
                    would leave a recording nothing is waiting on. */
                 disabled={handsFree}
-                onClick={() =>
-                  void (dictation.state.phase === "recording" ? dictation.stop() : dictation.start())
-                }
+                onClick={toggleDictation}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -1215,6 +1249,8 @@ export function App() {
 
       <DictationHud
         state={dictation.state}
+        {...(settings?.hotkeys.dictation ? { hotkey: settings.hotkeys.dictation } : {})}
+        hold={settings?.hotkeys.dictationMode === "hold"}
         onStop={() => void dictation.stop()}
         onCancel={() => void dictation.cancel()}
       />

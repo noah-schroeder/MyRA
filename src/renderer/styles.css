@@ -873,9 +873,19 @@ kbd {
    not intend, so this is deliberately conspicuous and fixed above everything. */
 /* In the composer's flow rather than floating over it: a fixed offset overlaps
    the research controls, and overlaps them differently once the textarea grows. */
+/*
+ * Fixed, like .dl-toast -- not flow-positioned. DictationHud has no column of
+ * its own in the .app grid, so with no position rule it fell into the grid's
+ * next implicit cell: the 248px sidebar column, which is narrower than a
+ * meter, a clock and a Stop button asking for their own line ever fit in
+ * without wrapping mid-word. Shrink-to-fit (no explicit width) sizes it to
+ * its content instead.
+ */
 .hud {
+  position: fixed; left: 18px; bottom: 18px; z-index: 60;
+  max-width: calc(100vw - 36px);
   display: flex; align-items: center; gap: 10px;
-  margin-bottom: 9px; padding: 8px 12px;
+  padding: 8px 12px;
   background: var(--bg-float);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -3997,6 +4007,11 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 /* Tabs whose content is a grid rather than a form; see RuntimePane. */
 .pane-wide { max-width: none; }
+
+/* Settings → Audio's "record a shortcut" control. */
+.hotkey-row { display: flex; align-items: center; gap: 8px; }
+.hotkey-value { font-family: var(--mono); min-width: 11ch; text-align: center; }
+.hotkey-value.capturing { border-color: var(--accent); color: var(--accent-soft); }
 
 /* ==========================================================================
    API page

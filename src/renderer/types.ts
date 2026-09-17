@@ -1,6 +1,7 @@
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
 import type { Provider } from "../core/providers.ts";
 import type { ModelPrice } from "../core/pricing.ts";
+import type { HotkeySettings } from "../core/hotkeys.ts";
 import type { ApiState } from "../main/api/manager.ts";
 
 /* Re-exported so the renderer imports it from one place, the way every
@@ -198,7 +199,7 @@ export interface Settings {
   workspaceRoot: string;
   vaultRoot: string;
   vaultWriteSubdir: string;
-  dictationHotkey: string;
+  hotkeys: HotkeySettings;
   dictationSource: string;
   dictationLanguage: string;
   deleteRawAudioAfterTranscription: boolean;
@@ -241,6 +242,7 @@ export interface Settings {
  */
 export type { Provider, ProviderKind } from "../core/providers.ts";
 export type { ModelPrice } from "../core/pricing.ts";
+export type { HotkeySettings } from "../core/hotkeys.ts";
 
 export interface SessionSummary {
   id: string;

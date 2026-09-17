@@ -26,6 +26,22 @@ answers out loud, and listens again until you switch it off. Talking over
 an answer interrupts it. Leave the voice model unset and MyRA stays silent —
 speech-to-speech mode just isn't available until you pick one.
 
+## Keyboard shortcuts
+
+Both the microphone and the speech-to-speech button can be given a shortcut
+in **Settings → Audio**: click the shortcut field, then press the keys you
+want. Dictation offers a choice of two behaviours — **Toggle** starts and
+stops recording on the same key press, and **Hold to talk** records only
+while the keys are held down, stopping the moment you release them (or click
+away from MyRA). Speech-to-speech is a toggle only: it starts an ongoing
+listen-answer-listen loop rather than a single recording, so there's nothing
+for a hold to bound.
+
+Neither shortcut is set by default, and neither works outside the MyRA
+window. Electron has no reliable way to register a key combination with the
+desktop on Linux, so rather than a shortcut that works on some desktops and
+silently does nothing on others, these only ever fire while MyRA has focus.
+
 ## What leaves this machine
 
 Speech is the same local/hosted choice made twice, once per model. A

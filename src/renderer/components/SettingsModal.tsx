@@ -7,6 +7,7 @@ import { RuntimePane } from "./RuntimePane.tsx";
 import { ProvidersPane } from "./ProvidersPane.tsx";
 import { DatabaseKeysPane } from "./DatabaseKeysPane.tsx";
 import { EndpointField } from "./EndpointField.tsx";
+import { HotkeyField } from "./HotkeyField.tsx";
 import { voicesFor } from "../../core/audio/voices.ts";
 import { engineStates, runnable, type Runnable } from "../../core/runtime/runnable.ts";
 import { modelIdOf } from "../../core/audio/models.ts";
@@ -875,6 +876,50 @@ function Audio({
           ))}
         </select>
       </label>
+
+      <fieldset className="endpoint">
+        <legend>Keyboard shortcuts</legend>
+        <p className="hint">
+          These work while the MyRA window is focused. A shortcut that fires from anywhere else
+          has to be registered with the desktop, and that is not something MyRA can do reliably
+          on Linux — so it does not pretend to.
+        </p>
+
+        <HotkeyField
+          label="Dictate"
+          value={settings.hotkeys.dictation}
+          onChange={(combo) => void patch({ hotkeys: { ...settings.hotkeys, dictation: combo } })}
+        />
+
+        <label className="checkbox">
+          <input
+            type="radio"
+            name="dictation-hotkey-mode"
+            checked={settings.hotkeys.dictationMode === "toggle"}
+            disabled={!settings.hotkeys.dictation}
+            onChange={() => void patch({ hotkeys: { ...settings.hotkeys, dictationMode: "toggle" } })}
+          />
+          Toggle — press once to start recording, again to stop.
+        </label>
+        <label className="checkbox">
+          <input
+            type="radio"
+            name="dictation-hotkey-mode"
+            checked={settings.hotkeys.dictationMode === "hold"}
+            disabled={!settings.hotkeys.dictation}
+            onChange={() => void patch({ hotkeys: { ...settings.hotkeys, dictationMode: "hold" } })}
+          />
+          Hold to talk — records while you hold the keys. Releasing them, or clicking away from
+          MyRA, stops the recording and sends it to be transcribed.
+        </label>
+
+        <HotkeyField
+          label="Speech-to-speech"
+          value={settings.hotkeys.handsFree}
+          hint="A toggle: it starts the listening loop and stops it. There is no hold option -- speech-to-speech is a mode that keeps going, not a single recording. Needs a voice model above."
+          onChange={(combo) => void patch({ hotkeys: { ...settings.hotkeys, handsFree: combo } })}
+        />
+      </fieldset>
 
       <label className="checkbox">
         <input
