@@ -77,7 +77,8 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     host: "api.github.com",
-    when: "MyRA sets up its local runtime or document tools, or you press Check for engine updates",
+    when: "MyRA sets up its local runtime or document tools, or you press Check for engine updates " +
+      "or Check for updates in Settings → About",
     sends: "Nothing but the request",
   },
   {

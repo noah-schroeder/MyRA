@@ -168,6 +168,9 @@ const api = {
   installPandoc: () => ipcRenderer.invoke("myra:install-pandoc"),
   onSetupProgress: (cb: (p: unknown) => void) => on("myra:setup-progress", cb),
   privacy: () => ipcRenderer.invoke("myra:privacy"),
+  appVersion: () => ipcRenderer.invoke("myra:app-version"),
+  /* Leaves the machine, and only when the button in Settings → About is pressed. */
+  checkUpdate: () => ipcRenderer.invoke("myra:check-update"),
 
   /* ---- meetings ----
    * Capture happens in the renderer, because device access is a Web API. The

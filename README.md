@@ -195,6 +195,10 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   whisper.cpp and the rest have been released, and only when you press the
   button in Settings → Runtime. MyRA never checks on its own, and installing
   one is a separate press.
+- **Checking for app updates** asks GitHub for MyRA's own latest release, and
+  only when you press the button in Settings → About. Nothing is sent but the
+  request, and nothing is installed automatically — the reply just names the
+  version, if a newer one exists.
 - Everything else — files, transcripts, meeting audio, conversation history —
   never crosses the network at all.
 

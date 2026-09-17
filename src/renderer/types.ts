@@ -38,6 +38,8 @@ import type { UpdateCheck as EngineUpdateCheck } from "../main/runtime/engineUpd
 export type { EngineUpdateCheck };
 export type { PendingUpdate } from "../main/runtime/engineUpdates.ts";
 export type { EngineUpdate } from "../core/runtime/engineReleases.ts";
+export type { UpdateCheckResult } from "../main/appUpdate.ts";
+import type { UpdateCheckResult } from "../main/appUpdate.ts";
 /**
  * What the renderer renders.
  *
@@ -593,6 +595,9 @@ export interface MyRAApi {
   installPandoc(): Promise<{ ok: boolean; error?: string; path?: string; version?: string }>;
   onSetupProgress(cb: (p: DownloadProgress | undefined) => void): () => void;
   privacy(): Promise<PrivacyReport>;
+  appVersion(): Promise<string>;
+  /** Asks GitHub what has been released. Called from the button and nowhere else. */
+  checkUpdate(): Promise<UpdateCheckResult>;
 
   meetingState(): Promise<MeetingState>;
   meetingStart(title: string, tracks: { id: string; label: string; source?: string }[]): Promise<string>;

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import type {
-  AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, VaultStatus,
+  AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, UpdateCheckResult, VaultStatus,
 } from "../types.ts";
 import { enumerate } from "../capture.ts";
 import { RuntimePane } from "./RuntimePane.tsx";
@@ -1183,14 +1183,60 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | undefined>();
   const [privacy, setPrivacy] = useState<PrivacyReport | undefined>();
+  const [version, setVersion] = useState<string | undefined>();
+  const [checking, setChecking] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | undefined>();
 
   useEffect(() => {
     void window.myra.engines().then(setEngines);
     void window.myra.privacy().then(setPrivacy);
+    void window.myra.appVersion().then(setVersion);
   }, []);
 
   return (
     <div className="pane">
+      <h3>MyRA</h3>
+      <p className="pane-lead">
+        {version ? `Version ${version}.` : "Checking version…"} MyRA has no auto-updater — this
+        only asks GitHub when you press the button below.
+      </p>
+      <button
+        type="button"
+        className="btn btn-sm"
+        disabled={checking}
+        onClick={() => {
+          setChecking(true);
+          setUpdateCheck(undefined);
+          void window.myra.checkUpdate().then((r) => {
+            setChecking(false);
+            setUpdateCheck(r);
+          });
+        }}
+      >
+        {checking ? "Asking GitHub…" : "Check for updates"}
+      </button>
+      {updateCheck ? (
+        updateCheck.ok ? (
+          updateCheck.newer ? (
+            <p className="warning">
+              {updateCheck.latest} is out; you have {updateCheck.current}.
+              {updateCheck.url ? (
+                <>
+                  {" "}
+                  <button type="button" onClick={() => void window.myra.openExternal(updateCheck.url!)}>
+                    See what changed
+                  </button>
+                </>
+              ) : null}
+            </p>
+          ) : (
+            <p className="ok-line">You have the newest release, {updateCheck.current}.</p>
+          )
+        ) : (
+          <p className="hint">Could not reach GitHub: {updateCheck.error}</p>
+        )
+      ) : null}
+
       <h3>The tour</h3>
       {/* The way back for anyone who skipped it the first time, or wants
           another look -- the same reasoning as the pandoc button below,

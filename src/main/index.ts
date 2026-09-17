@@ -1448,6 +1448,22 @@ function installIpc(): void {
     }
   });
 
+  /** The version bundled at build time, for the rail and the About tab. */
+  ipcMain.handle("myra:app-version", () => app.getVersion());
+
+  /**
+   * Ask GitHub whether a newer MyRA release exists.
+   *
+   * Its own channel, not folded into `myra:app-version`, for the same reason
+   * `myra:engine-updates-check` is separate from `myra:engine-versions`: this
+   * one leaves the machine and that one does not. Nothing calls it except the
+   * button in Settings → About.
+   */
+  ipcMain.handle("myra:check-update", async () => {
+    const { checkForUpdate } = await import("./appUpdate.ts");
+    return checkForUpdate(app.getVersion());
+  });
+
   /*
    * What Settings shows under "what leaves this machine".
    *

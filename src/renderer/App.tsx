@@ -77,6 +77,7 @@ export function App() {
    * was a "Back to chat" button on the far side of the screen.
    */
   const [page, setPage] = useState<Page>("chat");
+  const [appVersion, setAppVersion] = useState<string | undefined>();
   /* The documents this conversation has written. Session-scoped on purpose:
      these are what MyRA made while you watched, not a file browser. */
   const documents = useDocuments();
@@ -171,6 +172,10 @@ export function App() {
   useEffect(() => {
     void window.myra.workState().then(setJob);
     return window.myra.onWork(setJob);
+  }, []);
+
+  useEffect(() => {
+    void window.myra.appVersion().then(setAppVersion);
   }, []);
 
   useEffect(() => window.myra.onPrompt(setPrompt), []);
@@ -564,7 +569,7 @@ export function App() {
         <div className="rail-brand">
           <span className="rail-mark" aria-hidden="true" />
           MyRA
-          <span className="pill">beta</span>
+          <span className="pill">{appVersion ? `beta ${appVersion}` : "beta"}</span>
         </div>
 
         <nav className="rail-nav" aria-label="Sections">
