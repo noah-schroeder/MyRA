@@ -195,7 +195,7 @@ export function ImagePicker({
         />
       ) : null}
 
-      {external ? (
+      {externalChoice ? (
         <span className="modelbar-external" role="note">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
