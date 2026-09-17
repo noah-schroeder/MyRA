@@ -16,8 +16,13 @@ import { runnable, type Runnable } from "../../core/runtime/runnable.ts";
  * controls rather than one control with a role switch, and merging them would
  * have been the more expensive mistake.
  *
- * The sections are ordered as a recommendation: loaded, downloaded, available,
- * then whatever leaves the machine.
+ * Tabbed the same way the chat bar's own picker is -- one pane per place a
+ * model can come from -- rather than one long scroll with a heading per
+ * provider. Stacked, a provider whose ticked models did not look like the job
+ * in hand read as though this menu only ever offered what was already on the
+ * machine: its models were real but sat behind a "show all" click three
+ * screens down, easy to never notice. A tab is a place in its own right, so
+ * opening it is not optional the way scrolling further is.
  */
 
 export function gb(bytes: number): string {
@@ -64,6 +69,17 @@ export function ModelMenu({
      next may be a single Whisper. Kept in state so the list does not collapse
      under someone the moment the options refresh. */
   const [showAll, setShowAll] = useState<Set<string>>(new Set());
+  /*
+   * Which tab is showing: "local", or a provider's label.
+   *
+   * Undefined until clicked, and resolved against `chosen` on every render
+   * rather than set by an effect: the options for this menu arrive after it
+   * opens (a fetch keyed on `open` in the caller), so a component that only
+   * mounts once that fetch resolves would render its first frame, still
+   * empty, before an effect ever ran. Reading it live means the tab a model
+   * actually came from is right immediately, with nothing to race.
+   */
+  const [pane, setPane] = useState<string | undefined>(undefined);
 
   const locals = options.filter((o) => o.where === "local");
   const downloaded = locals.filter((o) => o.downloaded);
@@ -133,52 +149,101 @@ export function ModelMenu({
     );
   };
 
+  /* Default to the tab the chosen model actually came from -- the same rule
+     the chat bar's own picker follows, so reopening this menu after picking a
+     hosted model lands on that provider's tab rather than always "Local". */
+  const chosenOption = options.find((o) => o.ref === chosen);
+  const home = chosenOption?.where === "provider" ? chosenOption.providerLabel ?? "Provider" : "local";
+  const active = pane !== undefined && (pane === "local" || byProvider.has(pane)) ? pane : home;
+
   return (
     <div className="modelmenu" role="menu">
-      {downloaded.length ? (
+      {options.length === 0 ? (
+        <p className="modelmenu-empty">{error ?? emptyText}</p>
+      ) : (
         <>
-          <p className="modelmenu-head">On this machine</p>
-          <ul className="modelmenu-list">{downloaded.map(row)}</ul>
-        </>
-      ) : null}
-
-      {available.length ? (
-        <>
-          <p className="modelmenu-head">
-            {downloaded.length ? "Available to download" : "Download one to get started"}
-          </p>
-          <ul className="modelmenu-list">{available.map(row)}</ul>
-        </>
-      ) : null}
-
-      {[...byProvider].map(([provider, group]) => (
-        <div key={provider}>
-          <p className="modelmenu-head">{provider}</p>
-          {[...group.fits, ...group.rest].some((m) => m.external) ? (
-            <p className="modelmenu-warn" role="note">
-              {externalWarning}
-            </p>
+          {/* Only when there is a second place to look, same as the chat bar:
+              with no providers set up, tabs would be a control with one
+              option. */}
+          {byProvider.size ? (
+            <div className="modelmenu-tabs" role="tablist" aria-label="Where models come from">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={active === "local"}
+                className={active === "local" ? "modelmenu-tab on" : "modelmenu-tab"}
+                onClick={() => setPane("local")}
+              >
+                Local
+              </button>
+              {[...byProvider.keys()].map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="tab"
+                  aria-selected={active === label}
+                  className={active === label ? "modelmenu-tab on" : "modelmenu-tab"}
+                  onClick={() => setPane(label)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           ) : null}
-          <ul className="modelmenu-list">
-            {group.fits.map(row)}
-            {showAll.has(provider) ? group.rest.map(row) : null}
-          </ul>
-          {group.rest.length && !showAll.has(provider) ? (
-            <button
-              type="button"
-              className="modelmenu-more"
-              onClick={() => setShowAll((seen) => new Set(seen).add(provider))}
-            >
-              {group.fits.length
-                ? `Show ${group.rest.length} more from this provider`
-                : `Nothing here looks right for this — show all ${group.rest.length}`}
-            </button>
-          ) : null}
-        </div>
-      ))}
 
-      {options.length === 0 ? <p className="modelmenu-empty">{error ?? emptyText}</p> : null}
-      {error && options.length ? <p className="modelmenu-empty">{error}</p> : null}
+          {active === "local" ? (
+            <>
+              {downloaded.length ? (
+                <>
+                  <p className="modelmenu-head">On this machine</p>
+                  <ul className="modelmenu-list">{downloaded.map(row)}</ul>
+                </>
+              ) : null}
+
+              {available.length ? (
+                <>
+                  <p className="modelmenu-head">
+                    {downloaded.length ? "Available to download" : "Download one to get started"}
+                  </p>
+                  <ul className="modelmenu-list">{available.map(row)}</ul>
+                </>
+              ) : null}
+
+              {locals.length === 0 ? <p className="modelmenu-empty">{emptyText}</p> : null}
+            </>
+          ) : (
+            (() => {
+              const group = byProvider.get(active)!;
+              return (
+                <>
+                  {[...group.fits, ...group.rest].some((m) => m.external) ? (
+                    <p className="modelmenu-warn" role="note">
+                      {externalWarning}
+                    </p>
+                  ) : null}
+                  <ul className="modelmenu-list">
+                    {group.fits.map(row)}
+                    {showAll.has(active) ? group.rest.map(row) : null}
+                  </ul>
+                  {group.rest.length && !showAll.has(active) ? (
+                    <button
+                      type="button"
+                      className="modelmenu-more"
+                      onClick={() => setShowAll((seen) => new Set(seen).add(active))}
+                    >
+                      {group.fits.length
+                        ? `Show ${group.rest.length} more from this provider`
+                        : `Nothing here looks right for this — show all ${group.rest.length}`}
+                    </button>
+                  ) : null}
+                </>
+              );
+            })()
+          )}
+
+          {error ? <p className="modelmenu-empty">{error}</p> : null}
+        </>
+      )}
 
       <div className="modelmenu-foot">{footer}</div>
     </div>

@@ -1,6 +1,7 @@
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
 import type { Provider } from "../core/providers.ts";
 import type { ModelPrice } from "../core/pricing.ts";
+import type { HotkeySettings } from "../core/hotkeys.ts";
 import type { ApiState } from "../main/api/manager.ts";
 
 /* Re-exported so the renderer imports it from one place, the way every
@@ -18,6 +19,8 @@ import type { BrowseSort, HfModel, RepoDetail } from "../core/runtime/hfBrowse.t
 import type { PreparedCard } from "../core/runtime/modelCard.ts";
 import type { Owner } from "../core/runtime/modelOwner.ts";
 import type { Paper, PaperKind, PaperSummary } from "../core/papers/paper.ts";
+import type { Task, TaskSummary } from "../core/tasks/task.ts";
+export type { Task, TaskSummary } from "../core/tasks/task.ts";
 import type { Member, MemberKind, Project, ProjectSummary } from "../core/projects/project.ts";
 export type { Member, MemberKind, Project, ProjectSummary } from "../core/projects/project.ts";
 import type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
@@ -37,6 +40,8 @@ import type { UpdateCheck as EngineUpdateCheck } from "../main/runtime/engineUpd
 export type { EngineUpdateCheck };
 export type { PendingUpdate } from "../main/runtime/engineUpdates.ts";
 export type { EngineUpdate } from "../core/runtime/engineReleases.ts";
+export type { UpdateCheckResult } from "../main/appUpdate.ts";
+import type { UpdateCheckResult } from "../main/appUpdate.ts";
 /**
  * What the renderer renders.
  *
@@ -198,7 +203,7 @@ export interface Settings {
   workspaceRoot: string;
   vaultRoot: string;
   vaultWriteSubdir: string;
-  dictationHotkey: string;
+  hotkeys: HotkeySettings;
   dictationSource: string;
   dictationLanguage: string;
   deleteRawAudioAfterTranscription: boolean;
@@ -241,6 +246,7 @@ export interface Settings {
  */
 export type { Provider, ProviderKind } from "../core/providers.ts";
 export type { ModelPrice } from "../core/pricing.ts";
+export type { HotkeySettings } from "../core/hotkeys.ts";
 
 export interface SessionSummary {
   id: string;
@@ -353,6 +359,27 @@ export interface MeetingSummary {
   state: MeetingArtifacts;
 }
 
+/**
+ * One of a meeting's extracted action items, mirroring
+ * core/meetings/store.ts's `ActionRecord` -- redefined here rather than
+ * imported, the same reason `MeetingSummary` above is: that module touches
+ * node:fs.
+ */
+export interface ActionRecord {
+  type: "decision" | "action" | "update" | "question" | "risk";
+  title: string;
+  owner: string | null;
+  due: string | null;
+  quote: string;
+  certain: boolean;
+  at: string | null;
+  sourcing: "verbatim" | "reworded" | "unverified";
+  sourceText?: string;
+  speaker?: string;
+  /** Set once this item has become a task -- the id of that task. */
+  taskId?: string;
+}
+
 /** One Whisper model MyRA offers to download. */
 export interface WhisperModel {
   file: string;
@@ -396,6 +423,9 @@ export interface AgentEvent {
   result?: string;
   /** For "stats": how fast the reply that just finished was. One per model call. */
   stats?: MessageStats;
+  /** The conversation this event belongs to, so a renderer looking at a
+   *  different one can tell it is not for them. */
+  sessionId?: string;
 }
 
 /**
@@ -491,6 +521,11 @@ export interface MyRAApi {
   newSession(): Promise<string>;
   listSessions(): Promise<SessionSummary[]>;
   openSession(id: string): Promise<unknown[]>;
+  renameSession(id: string, title: string): Promise<{ ok: boolean; error?: string }>;
+  /** The conversation still generating right now, if any, and everything it
+   *  has said so far -- so opening it mid-turn can resume instead of showing
+   *  a conversation that looks stalled. */
+  liveTurn(): Promise<{ sessionId: string; events: AgentEvent[] } | undefined>;
   deleteSession(id: string): Promise<void>;
   deleteAllSessions(): Promise<void>;
 
@@ -583,6 +618,9 @@ export interface MyRAApi {
   installPandoc(): Promise<{ ok: boolean; error?: string; path?: string; version?: string }>;
   onSetupProgress(cb: (p: DownloadProgress | undefined) => void): () => void;
   privacy(): Promise<PrivacyReport>;
+  appVersion(): Promise<string>;
+  /** Asks GitHub what has been released. Called from the button and nowhere else. */
+  checkUpdate(): Promise<UpdateCheckResult>;
 
   meetingState(): Promise<MeetingState>;
   meetingStart(title: string, tracks: { id: string; label: string; source?: string }[]): Promise<string>;
@@ -599,6 +637,11 @@ export interface MyRAApi {
   meetingCancel(): Promise<{ ok: boolean }>;
   meetingInstructions(dir: string, text: string): Promise<{ ok: boolean }>;
   meetingRead(dir: string, which: "notes" | "transcript"): Promise<string | undefined>;
+  meetingActions(dir: string): Promise<{ ok: boolean; error?: string; actions?: ActionRecord[] }>;
+  meetingActionToTask(
+    dir: string,
+    index: number,
+  ): Promise<{ ok: boolean; error?: string; taskId?: string; actions?: ActionRecord[] }>;
   meetingReveal(path: string): Promise<{ ok: boolean }>;
   meetingDelete(dir: string): Promise<{ ok: boolean; error?: string }>;
   reportDevices(devices: AudioSource[]): Promise<void>;
@@ -896,6 +939,19 @@ export interface MyRAApi {
   onRuntime(cb: (state: RuntimeState) => void): () => void;
   onRuntimeDownload(cb: (p: DownloadProgress | undefined) => void): () => void;
 
+  /* ---- tasks ----
+   * MyRA's own list, ticked off here and nowhere else. See
+   * core/agent/tools/tasks.ts's header for why writing to it is a plain
+   * `write` rather than the floor-classed system_of_record. */
+  taskList(): Promise<{ ok: boolean; tasks: TaskSummary[] }>;
+  taskCreate(
+    task: { title: string; due?: string; notes?: string; remindAt?: string },
+  ): Promise<{ ok: boolean; error?: string; task?: Task; tasks?: TaskSummary[] }>;
+  taskComplete(id: string): Promise<{ ok: boolean; error?: string; task?: Task; tasks?: TaskSummary[] }>;
+  taskReopen(id: string): Promise<{ ok: boolean; error?: string; task?: Task; tasks?: TaskSummary[] }>;
+  taskDelete(id: string): Promise<{ ok: boolean; tasks?: TaskSummary[] }>;
+  /** Pushed whenever the list changes, from either the page or the agent. */
+  onTasks(cb: (tasks: TaskSummary[]) => void): () => void;
 }
 
 declare global {

@@ -21,6 +21,9 @@ export interface AgentEventPayload {
   tool?: string;
   params?: Record<string, unknown>;
   result?: string;
+  /** The conversation this event belongs to, so a renderer looking at a
+   *  different one can tell it is not for them. */
+  sessionId?: string;
 }
 
 /** Subscribe to a main→renderer channel, returning an unsubscribe. */
@@ -43,6 +46,10 @@ const api = {
   newSession: () => ipcRenderer.invoke("myra:new-session"),
   listSessions: () => ipcRenderer.invoke("myra:list-sessions"),
   openSession: (id: string) => ipcRenderer.invoke("myra:open-session", id),
+  renameSession: (id: string, title: string) => ipcRenderer.invoke("myra:rename-session", id, title),
+  /** Whatever conversation is still generating right now, and every event it
+   *  has emitted so far -- so reopening it mid-turn can catch up. */
+  liveTurn: () => ipcRenderer.invoke("myra:live-turn"),
   deleteSession: (id: string) => ipcRenderer.invoke("myra:delete-session", id),
   deleteAllSessions: () => ipcRenderer.invoke("myra:delete-all-sessions"),
 
@@ -144,6 +151,19 @@ const api = {
      section now -- the page reflects the file rather than owning it. */
   onPaperChanged: (cb: (paper: unknown) => void) => on("myra:paper-changed", cb),
 
+  /* ---- tasks ----
+   * MyRA's own list. Never the calendar, and never any other program's task
+   * list -- see core/agent/tools/tasks.ts's header for why that is what lets
+   * these stay a plain `write` instead of the floor-classed system_of_record. */
+  taskList: () => ipcRenderer.invoke("myra:task-list"),
+  taskCreate: (task: { title: string; due?: string; notes?: string; remindAt?: string }) =>
+    ipcRenderer.invoke("myra:task-create", task),
+  taskComplete: (id: string) => ipcRenderer.invoke("myra:task-complete", id),
+  taskReopen: (id: string) => ipcRenderer.invoke("myra:task-reopen", id),
+  taskDelete: (id: string) => ipcRenderer.invoke("myra:task-delete", id),
+  /** Pushed whenever the list changes, from either the page or the agent. */
+  onTasks: (cb: (tasks: unknown) => void) => on("myra:tasks", cb),
+
   providerModels: (opts: { baseUrl: string; id?: string; apiKey?: string }) =>
     ipcRenderer.invoke("myra:provider-models", opts),
   providerReasoning: (opts: { baseUrl: string; id?: string; model: string; apiKey?: string }) =>
@@ -161,6 +181,9 @@ const api = {
   installPandoc: () => ipcRenderer.invoke("myra:install-pandoc"),
   onSetupProgress: (cb: (p: unknown) => void) => on("myra:setup-progress", cb),
   privacy: () => ipcRenderer.invoke("myra:privacy"),
+  appVersion: () => ipcRenderer.invoke("myra:app-version"),
+  /* Leaves the machine, and only when the button in Settings → About is pressed. */
+  checkUpdate: () => ipcRenderer.invoke("myra:check-update"),
 
   /* ---- meetings ----
    * Capture happens in the renderer, because device access is a Web API. The
@@ -184,6 +207,12 @@ const api = {
     ipcRenderer.invoke("myra:meeting-instructions", dir, text),
   meetingRead: (dir: string, which: "notes" | "transcript") =>
     ipcRenderer.invoke("myra:meeting-read", dir, which),
+  /* The note's action items, and turning one into a MyRA task -- see
+     core/agent/tools/tasks.ts's header for why that list stays a plain
+     `write` and never touches a real calendar or task manager. */
+  meetingActions: (dir: string) => ipcRenderer.invoke("myra:meeting-actions", dir),
+  meetingActionToTask: (dir: string, index: number) =>
+    ipcRenderer.invoke("myra:meeting-action-to-task", dir, index),
   meetingReveal: (path: string) => ipcRenderer.invoke("myra:meeting-reveal", path),
   meetingDelete: (dir: string) => ipcRenderer.invoke("myra:meeting-delete", dir),
 

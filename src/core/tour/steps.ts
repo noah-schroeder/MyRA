@@ -49,7 +49,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "voice",
     title: "Talk instead of typing",
-    body: "Click the microphone to dictate into the box. The wave beside it is speech-to-speech — MyRA listens, answers out loud, and keeps listening until you switch it off.",
+    body: "Click the microphone to dictate into the box. The wave beside it is speech-to-speech — MyRA listens, answers out loud, and keeps listening until you switch it off. Both can be given a keyboard shortcut in Settings → Audio.",
     anchor: "composer-dictate",
     page: "chat",
   },

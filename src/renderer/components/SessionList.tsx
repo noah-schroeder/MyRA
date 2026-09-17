@@ -69,6 +69,11 @@ export function SessionList({
      project from where you were looking at it. */
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [filing, setFiling] = useState<string | undefined>();
+  /* The chat being renamed, right-clicked from this same list -- a
+     conversation is titled from the first thing you said in it, and that is
+     often not what you want to find it under later. */
+  const [renaming, setRenaming] = useState<string | undefined>();
+  const [renameValue, setRenameValue] = useState("");
 
   const load = useCallback((): void => {
     void window.myra.recent().then((r) => setRows(r.items ?? []));
@@ -103,6 +108,17 @@ export function SessionList({
     else if (row.kind === "run") await window.myra.researchDelete(row.ref);
     load();
     onChanged?.();
+  };
+
+  const rename = async (row: Row, title: string): Promise<void> => {
+    setRenaming(undefined);
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === row.title) return;
+    const result = await window.myra.renameSession(row.ref, trimmed);
+    if (result.ok) {
+      load();
+      onChanged?.();
+    }
   };
 
   const file = async (row: Row, projectId: string): Promise<void> => {
@@ -155,18 +171,40 @@ export function SessionList({
                    long project list does not push the history around. */
                 style={{ position: "relative" }}
               >
-                <button
-                  type="button"
-                  className="session-open"
-                  onClick={() => onOpen(row.kind, row.ref)}
-                >
-                  <span className="session-title">{row.title}</span>
-                  <span className="session-meta">
-                    {TAGS[row.kind] ? <span className="session-kind">{TAGS[row.kind]}</span> : null}
-                    {when(row.at)}
-                    {row.note ? ` · ${row.note}` : ""}
-                  </span>
-                </button>
+                {renaming === `${row.kind} ${row.ref}` ? (
+                  <input
+                    autoFocus
+                    className="session-rename"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => void rename(row, renameValue)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      else if (e.key === "Escape") setRenaming(undefined);
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="session-open"
+                    onClick={() => onOpen(row.kind, row.ref)}
+                    onContextMenu={(e) => {
+                      // Only a conversation's own title is rewritten by hand;
+                      // a paper, review or run is titled by its own page.
+                      if (row.kind !== "chat") return;
+                      e.preventDefault();
+                      setRenameValue(row.title);
+                      setRenaming(`${row.kind} ${row.ref}`);
+                    }}
+                  >
+                    <span className="session-title">{row.title}</span>
+                    <span className="session-meta">
+                      {TAGS[row.kind] ? <span className="session-kind">{TAGS[row.kind]}</span> : null}
+                      {when(row.at)}
+                      {row.note ? ` · ${row.note}` : ""}
+                    </span>
+                  </button>
+                )}
                 {/* Siblings of the open button, not children of it: a button
                     inside a button is invalid, and filing something must not
                     also open it. The star in the model menu is laid out the

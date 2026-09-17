@@ -15,6 +15,7 @@ import { effectiveKind, parseProviders, type Provider } from "./providers.ts";
 import { parseSampling, type Sampling } from "./llm/sampling.ts";
 import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES, type StudyType } from "./review/prompt.ts";
 import { DEFAULT_PERSONA } from "./agent/systemPrompt.ts";
+import { DEFAULT_HOTKEYS, parseHotkeys, type HotkeySettings } from "./hotkeys.ts";
 
 /** Model -> the persona it answers as. Blank entries are not entries. */
 function parsePromptsByModel(raw: unknown): Record<string, string> {
@@ -200,7 +201,9 @@ export interface Settings {
   /** On the host: the Obsidian vault, and the subtree the agent may write to. */
   vaultRoot: string;
   vaultWriteSubdir: string;
-  dictationHotkey: string;
+  /** Dictation and speech-to-speech shortcuts. Renderer-side, focused-window
+   *  only -- see src/core/hotkeys.ts for why. */
+  hotkeys: HotkeySettings;
   /** PipeWire node id or name to record from. Empty means the system default. */
   dictationSource: string;
   /** ISO-639-1 hint for the transcriber. Empty lets it detect the language. */
@@ -435,7 +438,7 @@ export const DEFAULT_SETTINGS: Settings = {
   workspaceRoot: join(homedir(), "Documents", "myra"),
   vaultRoot: "",
   vaultWriteSubdir: "MyRA",
-  dictationHotkey: "<Super>d",
+  hotkeys: { ...DEFAULT_HOTKEYS },
   dictationSource: "",
   dictationLanguage: "",
   deleteRawAudioAfterTranscription: false,
@@ -517,7 +520,12 @@ export class ConfigStore {
        * on each one. Caught by the test that asserts the migration's own effect
        * is what stops it repeating.
        */
-      const { transcription: _migrated, ...stored } = parsed;
+      /* `dictationHotkey` held a GNOME `gsettings` string from the abandoned
+         v1 approach (see src/core/hotkeys.ts); it is dropped rather than
+         converted, since a GNOME keybinding is not a combo this build can
+         honour, and left in place it would round-trip forever the same way
+         `transcription` did before this destructure existed. */
+      const { transcription: _migrated, dictationHotkey: _v1Hotkey, ...stored } = parsed;
       this.#settings = {
         ...DEFAULT_SETTINGS,
         ...stored,
@@ -527,6 +535,7 @@ export class ConfigStore {
            reference read straight out of it would be sent to an endpoint. */
         audio: parseAudio(parsed.audio),
         image: parseImage(parsed.image),
+        hotkeys: parseHotkeys(parsed.hotkeys),
         /* Read from the key the old build wrote. `transcription` is not part of
            Settings any more, so this is the only thing that still knows the
            name -- which is exactly what a migration source should be. */
@@ -565,6 +574,9 @@ export class ConfigStore {
       /* Merged too, so the image bar can change the model without sending the
          size back with it. */
       ...(patch.image ? { image: parseImage({ ...this.#settings.image, ...patch.image }) } : {}),
+      /* Merged, so the Settings pane can change dictationMode without
+         resending both combos. */
+      ...(patch.hotkeys ? { hotkeys: parseHotkeys({ ...this.#settings.hotkeys, ...patch.hotkeys }) } : {}),
       /* `undefined` is a value here, not an omission: clearing this is how the
          migration records that it is done, and a spread that skipped it would
          run the migration again on every launch. */

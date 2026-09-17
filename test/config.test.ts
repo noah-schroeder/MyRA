@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
@@ -156,5 +156,41 @@ test("reviews have a root of their own, beside papers", async () => {
   await withSettings({}, async (store) => {
     assert.ok(store.current.reviewsRoot.endsWith("reviews"));
     assert.notEqual(store.current.reviewsRoot, store.current.papersRoot);
+  });
+});
+
+test("the v1 GNOME dictation keybinding is dropped, not carried forward", async () => {
+  await withSettings({ dictationHotkey: "<Super>d" }, async (store) => {
+    assert.deepEqual(store.current.hotkeys, DEFAULT_SETTINGS.hotkeys);
+
+    // The migration's own effect is what stops it running twice: the next
+    // save must not write the old key back out.
+    await store.update({});
+    const written = JSON.parse(await readFile(SETTINGS, "utf8")) as Record<string, unknown>;
+    assert.ok(!("dictationHotkey" in written));
+  });
+});
+
+test("a stored hotkeys block is rebuilt field by field", async () => {
+  await withSettings({ hotkeys: { dictation: "ctrl+shift+d", dictationMode: "wobble", handsFree: "<Super>d" } }, async (store) => {
+    assert.equal(store.current.hotkeys.dictation, "Ctrl+Shift+D");
+    // An unrecognised mode falls back to the default rather than the file's word.
+    assert.equal(store.current.hotkeys.dictationMode, "toggle");
+    // Not one of ours -- same as any stored value that isn't a combo.
+    assert.equal(store.current.hotkeys.handsFree, "");
+  });
+});
+
+test("clearing a hotkey's combo does not lose the mode beside it", async () => {
+  await withSettings({}, async (store) => {
+    // Callers always spread the current block, the way the Audio pane does
+    // for `audio` -- a patch names the field it changes, not a partial one.
+    await store.update({ hotkeys: { ...store.current.hotkeys, dictation: "Ctrl+Shift+D", dictationMode: "hold" } });
+    assert.equal(store.current.hotkeys.dictation, "Ctrl+Shift+D");
+    assert.equal(store.current.hotkeys.dictationMode, "hold");
+
+    await store.update({ hotkeys: { ...store.current.hotkeys, dictation: "" } });
+    assert.equal(store.current.hotkeys.dictation, "");
+    assert.equal(store.current.hotkeys.dictationMode, "hold");
   });
 });

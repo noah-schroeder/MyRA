@@ -18,15 +18,18 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { ipcMain, shell } from "electron";
 
 import type { ConfigStore, EndpointSettings } from "../core/config.ts";
-import { MeetingRecorder, type MeetingRecord, type TrackSpec } from "../core/meetings/meeting.ts";
+import { localDay, MeetingRecorder, type MeetingRecord, type TrackSpec } from "../core/meetings/meeting.ts";
 import {
   noteMeeting, renderTranscript, transcribeMeeting, type RunProgress,
 } from "../core/meetings/meetingRun.ts";
 import {
-  deleteMeeting, filingRoot, listMeetings, readRecord, readState, readTranscript,
-  writeState, writeTranscript, NOTES_MD, TRANSCRIPT_MD,
+  deleteMeeting, filingRoot, listMeetings, readActions, readRecord, readState, readTranscript,
+  writeActions, writeState, writeTranscript, NOTES_MD, TRANSCRIPT_MD, type ActionRecord,
 } from "../core/meetings/store.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
+import { newTask } from "../core/tasks/task.ts";
+import { localZone, normaliseDay } from "../core/time.ts";
+import { createAndSave } from "./tasks.ts";
 
 export interface MeetingDeps {
   config: ConfigStore;
@@ -109,6 +112,12 @@ export function installMeetingIpc(deps: MeetingDeps): void {
   let recorder: MeetingRecorder | undefined;
   let state: MeetingState = { phase: "idle" };
   let running: AbortController | undefined;
+  /* Guards myra:meeting-action-to-task against two calls for the same item
+     racing: both would otherwise read actions.json before either had written
+     a taskId back, both would create a task, and the loser's write would
+     silently drop its own taskId from the file -- a real task with nothing
+     in actions.json pointing at it. */
+  const converting = new Set<string>();
 
   const publish = (next: Partial<MeetingState>): void => {
     state = { ...state, ...next };
@@ -275,6 +284,14 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       // Only when it was filed somewhere else: writing it twice into the same
       // directory is how the duplicate above happened.
       if (vault) await saver(dir)(NOTES_MD, result.notes.markdown);
+      // Into the meeting's own folder unconditionally -- unlike notes.md this
+      // never had a vault-filing question, since it is MyRA's own bookkeeping
+      // rather than a document to export. Regenerated with every note run, so
+      // a re-run's action list replaces the last one rather than appending to
+      // it -- a task already created from a prior run stays on the task list,
+      // but its checkbox here resets, since the old taskId no longer points
+      // at anything in the new extraction.
+      await writeActions(dir, result.actions);
       await writeState(dir, {
         notedAt: new Date().toISOString(),
         notesModel: label,
@@ -404,6 +421,62 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       return await readFile(join(meetingDir(dir), name), "utf8");
     } catch {
       return undefined;
+    }
+  });
+
+  ipcMain.handle("myra:meeting-actions", async (_e, dir: string) => {
+    try {
+      return { ok: true, actions: await readActions(meetingDir(dir)) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  /**
+   * One action item, filed onto the task list.
+   *
+   * `index` rather than a stable per-item id: the array is only ever replaced
+   * whole, by a note re-run, so a position in it is exactly as stable as the
+   * extraction that produced it and needs nothing more durable.
+   */
+  ipcMain.handle("myra:meeting-action-to-task", async (_e, dir: string, index: unknown) => {
+    let meeting: string;
+    try {
+      meeting = meetingDir(dir);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    const i = Number(index);
+    const key = `${meeting}::${i}`;
+    if (converting.has(key)) {
+      return { ok: false, error: "already creating a task from that item." };
+    }
+    converting.add(key);
+    try {
+      const actions = await readActions(meeting);
+      const item: ActionRecord | undefined = Number.isInteger(i) ? actions[i] : undefined;
+      if (!item) return { ok: false, error: "that action item could not be found." };
+      if (item.taskId) return { ok: false, error: "that item is already on the task list." };
+
+      const record = await readRecord(meeting);
+      const now = new Date();
+      const due = item.due ? normaliseDay(item.due, now, localZone()) : undefined;
+      const task = newTask({
+        title: item.title,
+        // A back-reference in the one free-text field a task already has,
+        // rather than a new field on Task itself -- see the plan's note on why
+        // `project` (a different, project-index concept) is left alone.
+        notes: record ? `From meeting: ${record.title || "Untitled meeting"} (${localDay(record.startedAt)})` : "",
+        ...(due ? { due } : {}),
+        now,
+      });
+      const stored = await createAndSave({ config, send }, task);
+
+      actions[i] = { ...item, taskId: stored.id };
+      await writeActions(meeting, actions);
+      return { ok: true, taskId: stored.id, actions };
+    } finally {
+      converting.delete(key);
     }
   });
 

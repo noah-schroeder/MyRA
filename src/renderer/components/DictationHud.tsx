@@ -1,5 +1,5 @@
 import type { DictationState } from "../types.ts";
-import { prettyBinding } from "./binding.ts";
+import { prettyCombo } from "../../core/hotkeys.ts";
 import { litSegments, SEGMENTS, segmentClass } from "./meterBars.ts";
 
 /**
@@ -33,7 +33,8 @@ function Meter({ level, clipping }: { level: number; clipping?: boolean }) {
  * Recording with no visible sign of it is the failure that matters here: a
  * hotkey that latched without the user noticing means a live microphone they
  * did not intend. So this is deliberately conspicuous — fixed, high contrast,
- * and it names the key that stops it.
+ * and it names the key that stops it -- once one is configured in Settings
+ * → Audio; nothing is shown otherwise, since there is nothing to press.
  *
  * The meter answers the second question, which the timer cannot: a clock counts
  * up just as happily when the microphone is muted, and without a level the
@@ -42,11 +43,14 @@ function Meter({ level, clipping }: { level: number; clipping?: boolean }) {
 export function DictationHud({
   state,
   hotkey,
+  hold,
   onStop,
   onCancel,
 }: {
   state: DictationState;
   hotkey?: string;
+  /** Whether `hotkey` is held-to-talk rather than a start/stop toggle. */
+  hold?: boolean;
   onStop: () => void;
   onCancel: () => void;
 }) {
@@ -85,7 +89,7 @@ export function DictationHud({
       ) : null}
       <span className="hud-actions">
         <button className="btn btn-sm" onClick={onStop}>
-          Stop{hotkey ? ` · ${prettyBinding(hotkey)}` : ""}
+          {hotkey ? (hold ? `Release ${prettyCombo(hotkey)}` : `Stop · ${prettyCombo(hotkey)}`) : "Stop"}
         </button>
         <button className="btn btn-ghost btn-sm" onClick={onCancel}>
           Discard

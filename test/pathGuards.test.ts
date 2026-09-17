@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 
 import { repoId } from "../src/core/runtime/hf.ts";
 import { assertRunId } from "../src/core/research/run.ts";
+import { assertTaskId } from "../src/core/tasks/task.ts";
 
 describe("repoId", () => {
   it("accepts the shape HuggingFace actually uses", () => {
@@ -41,6 +42,21 @@ describe("assertRunId", () => {
   it("refuses a separator or a climb", () => {
     for (const bad of ["..", ".", "../secrets", "a/b", "", "a\0b"]) {
       assert.throws(() => assertRunId(bad), /no research run named/, `accepted ${bad}`);
+    }
+  });
+});
+
+describe("assertTaskId", () => {
+  it("accepts an id the app generates", () => {
+    assert.equal(
+      assertTaskId("20260915-140530-review-frank-s-paper-ab12"),
+      "20260915-140530-review-frank-s-paper-ab12",
+    );
+  });
+
+  it("refuses a separator or a climb", () => {
+    for (const bad of ["..", ".", "../secrets", "a/b", "", "a\0b"]) {
+      assert.throws(() => assertTaskId(bad), /no task named/, `accepted ${bad}`);
     }
   });
 });

@@ -33,11 +33,13 @@ import { enumerate } from "./capture.ts";
 import { useDictation } from "./useDictation.ts";
 import { useSpeech } from "./useSpeech.ts";
 import { useHandsFree } from "./useHandsFree.ts";
+import { useHotkeys } from "./useHotkeys.ts";
 import { DictationHud } from "./components/DictationHud.tsx";
 import { ImagePage } from "./components/ImagePage.tsx";
 import { PaperDrafter } from "./components/PaperDrafter.tsx";
 import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
+import { TasksPage } from "./components/TasksPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import { downscaleImage } from "./downscale.ts";
@@ -47,7 +49,8 @@ import type {
 } from "./types.ts";
 
 /** Runs and Models are places you go; the conversation is where you come back to. */
-type Page = "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "review" | "projects" | "api";
+type Page =
+  | "chat" | "runs" | "models" | "meetings" | "images" | "papers" | "review" | "projects" | "api" | "tasks";
 
 /** Where each kind of work lives. One table, so a seventh kind is one line. */
 const PAGE_FOR: Record<MemberKind, Page> = {
@@ -60,7 +63,7 @@ const PAGE_FOR: Record<MemberKind, Page> = {
 };
 
 export function App() {
-  const { items, busy, usage, error, sources, send, abort, reset, dismissError } = useAgent();
+  const { items, busy, usage, error, sources, send, abort, reset, resume, dismissError } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   /* Which tab Settings opens on, when something sent you there for a reason. */
@@ -76,6 +79,7 @@ export function App() {
    * was a "Back to chat" button on the far side of the screen.
    */
   const [page, setPage] = useState<Page>("chat");
+  const [appVersion, setAppVersion] = useState<string | undefined>();
   /* The documents this conversation has written. Session-scoped on purpose:
      these are what MyRA made while you watched, not a file browser. */
   const documents = useDocuments();
@@ -170,6 +174,10 @@ export function App() {
   useEffect(() => {
     void window.myra.workState().then(setJob);
     return window.myra.onWork(setJob);
+  }, []);
+
+  useEffect(() => {
+    void window.myra.appVersion().then(setAppVersion);
   }, []);
 
   useEffect(() => window.myra.onPrompt(setPrompt), []);
@@ -283,6 +291,53 @@ export function App() {
     speech,
     ...(settings?.dictationSource ? { micDeviceId: settings.dictationSource } : {}),
   });
+
+  /*
+   * Shared by the s2s button and its hotkey, so the two are provably the same
+   * action rather than two copies that can drift apart. The voice-model guard
+   * moved here unchanged; the second guard is new -- entering hands-free while
+   * a manual dictation is recording would hand the loop a microphone another
+   * recorder already holds, the same hazard `disabled={handsFree}` on the
+   * dictate button guards in the other direction.
+   */
+  const toggleHandsFree = useCallback(() => {
+    if (!settings?.audio.voiceModel) {
+      setSettingsTab(undefined);
+      setShowSettings(true);
+      return;
+    }
+    if (!handsFree && dictation.state.phase !== "idle") return;
+    void window.myra.updateSettings({ audio: { ...settings.audio, speechToSpeech: !handsFree } }).then(setSettings);
+  }, [settings, handsFree, dictation.state.phase]);
+
+  const toggleDictation = useCallback(() => {
+    if (dictation.state.phase === "recording") {
+      void dictation.stop();
+      return;
+    }
+    if (!handsFree && dictation.state.phase === "idle") void dictation.start();
+  }, [dictation, handsFree]);
+
+  const startDictation = useCallback(() => {
+    if (!handsFree && dictation.state.phase === "idle") void dictation.start();
+  }, [dictation, handsFree]);
+
+  const stopDictation = useCallback(() => {
+    if (dictation.state.phase === "recording") void dictation.stop();
+  }, [dictation]);
+
+  useHotkeys(
+    [
+      {
+        combo: settings?.hotkeys.dictation ?? "",
+        ...(settings?.hotkeys.dictationMode === "hold"
+          ? { hold: true, onPress: startDictation, onRelease: stopDictation }
+          : { onPress: toggleDictation }),
+      },
+      { combo: settings?.hotkeys.handsFree ?? "", onPress: toggleHandsFree },
+    ],
+    !showSettings && !prompt && settings?.setupCompleted === true,
+  );
 
   /*
    * Smooth for a message arriving in the conversation on screen; instant for
@@ -402,15 +457,22 @@ export function App() {
     // arrived as a separate message, and recovering the sources so the [n]
     // markers in the restored prose still resolve.
     const { items: restored, sources: restoredSources } = restoreThread(messages);
-    reset(restored, restoredSources);
+    reset(restored, restoredSources, id);
+    /* This conversation's own turn may still be running -- switched away from
+       and back to mid-reply, say. `reset` above showed only what was on disk
+       when the turn started; this catches the view up on everything it has
+       said since, the same way a tab that never left would have seen it. */
+    const live = await window.myra.liveTurn();
+    if (live && live.sessionId === id) resume(id, live.events);
     /* The panel showed what THIS conversation wrote. Carrying it into another
        one would attribute a document to a thread that never produced it. */
     documents.reset();
   };
 
   const newSession = async (): Promise<void> => {
-    setSessionId(await window.myra.newSession());
-    reset();
+    const id = await window.myra.newSession();
+    setSessionId(id);
+    reset([], undefined, id);
     documents.reset();
     clearPendingAttachments();
     startFresh();
@@ -509,11 +571,21 @@ export function App() {
         <div className="rail-brand">
           <span className="rail-mark" aria-hidden="true" />
           MyRA
-          <span className="pill">beta</span>
+          <span className="pill">{appVersion ? `beta ${appVersion}` : "beta"}</span>
         </div>
 
         <nav className="rail-nav" aria-label="Sections">
           <RailButton icon="new" label="New conversation" onClick={() => void newSession()} />
+          {/* Above Meetings, as the lightest-weight of the "things you keep"
+              pages: most tasks are meant to be made by asking MyRA rather than
+              by opening this page at all, so it earns a prominent spot rather
+              than a buried one. */}
+          <RailButton
+            icon="tasks"
+            label="Tasks"
+            active={page === "tasks"}
+            onClick={() => setPage((p) => (p === "tasks" ? "chat" : "tasks"))}
+          />
           {/* A page, not a panel over the conversation. A meeting has a past --
               the recordings, transcripts and notes of every one you have held --
               and a strip above the thread could only ever show the one you were
@@ -773,8 +845,15 @@ export function App() {
           * interruption to be dismissed, over a thread you could not consult
           * while reading it.
           */}
+        {page === "tasks" ? <TasksPage onClose={toChat} /> : null}
         {page === "meetings" && settings ? (
-          <MeetingsPage settings={settings} onClose={toChat} />
+          <MeetingsPage
+            settings={settings}
+            resident={resident}
+            onSettingsChange={setSettings}
+            onOpenSettings={() => setShowSettings(true)}
+            onClose={toChat}
+          />
         ) : null}
         {page === "images" && settings ? (
           <ImagePage settings={settings} onSettingsChange={setSettings} onClose={toChat} />
@@ -1015,30 +1094,69 @@ export function App() {
               </div>
             ) : null}
             {!lookup && attachError ? <p className="composer-attach-error">{attachError}</p> : null}
-            <textarea
-              className="input"
-              placeholder={
-                lookup
-                  ? "Search the literature — no model in the loop"
-                  : "Ask a question, or describe what you need — or drop in an image or a paper"
-              }
-              value={typed}
-              rows={1}
-              onChange={(e) => setTyped(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
+            <div className="composer-input-row">
+              {/*
+                * Left of the text, not in the toolbar underneath it.
+                *
+                * Attaching a file is something you reach for before or while
+                * typing the question it belongs to, not after — the common
+                * shape for a chat composer puts it beside the cursor rather
+                * than in a row of controls that answer a different kind of
+                * question (research depth, dictation, send).
+                */}
+              {lookup ? null : (
+                <>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    hidden
+                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt"
+                    onChange={(e) => {
+                      for (const file of e.target.files ?? []) void attachFile(file);
+                      // Reset, so choosing the same file twice fires a change event twice.
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="mic"
+                    aria-label="Attach an image or a document"
+                    title="Attach an image or a document"
+                    data-tour="composer-attach"
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                </>
+              )}
+              <textarea
+                className="input"
+                placeholder={
+                  lookup
+                    ? "Search the literature — no model in the loop"
+                    : "Ask a question, or describe what you need — or drop in an image or a paper"
                 }
-              }}
-              onPaste={(e) => {
-                if (lookup) return;
-                for (const item of e.clipboardData.items) {
-                  const file = item.kind === "file" ? item.getAsFile() : null;
-                  if (file) void attachFile(file);
-                }
-              }}
-            />
+                value={typed}
+                rows={1}
+                onChange={(e) => setTyped(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                onPaste={(e) => {
+                  if (lookup) return;
+                  for (const item of e.clipboardData.items) {
+                    const file = item.kind === "file" ? item.getAsFile() : null;
+                    if (file) void attachFile(file);
+                  }
+                }}
+              />
+            </div>
 
             <div className="composer-tools">
               <ResearchBar
@@ -1078,19 +1196,7 @@ export function App() {
                       : "Talk to MyRA: it listens, answers aloud, and listens again. Answers are kept short, because they are spoken."
                     : "Choose a voice first — opens Settings → Audio"
                 }
-                onClick={() => {
-                  /* No voice model means this cannot work, and a toggle that
-                     silently does nothing is worse than one that takes you to
-                     the thing that is missing. */
-                  if (!settings?.audio.voiceModel) {
-                    setSettingsTab(undefined);
-                    setShowSettings(true);
-                    return;
-                  }
-                  void window.myra
-                    .updateSettings({ audio: { ...settings.audio, speechToSpeech: !handsFree } })
-                    .then(setSettings);
-                }}
+                onClick={toggleHandsFree}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1099,34 +1205,6 @@ export function App() {
                 </svg>
               </button>
 
-              {lookup ? null : (
-                <>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    hidden
-                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt"
-                    onChange={(e) => {
-                      for (const file of e.target.files ?? []) void attachFile(file);
-                      // Reset, so choosing the same file twice fires a change event twice.
-                      e.target.value = "";
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="mic"
-                    aria-label="Attach an image or a document"
-                    title="Attach an image or a document"
-                    data-tour="composer-attach"
-                    onClick={() => fileInput.current?.click()}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
-                  </button>
-                </>
-              )}
               <button
                 type="button"
                 className={dictation.state.phase === "recording" ? "mic active" : "mic"}
@@ -1138,9 +1216,7 @@ export function App() {
                    starts and stops it; a second control doing the same thing
                    would leave a recording nothing is waiting on. */
                 disabled={handsFree}
-                onClick={() =>
-                  void (dictation.state.phase === "recording" ? dictation.stop() : dictation.start())
-                }
+                onClick={toggleDictation}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -1208,6 +1284,8 @@ export function App() {
 
       <DictationHud
         state={dictation.state}
+        {...(settings?.hotkeys.dictation ? { hotkey: settings.hotkeys.dictation } : {})}
+        hold={settings?.hotkeys.dictationMode === "hold"}
         onStop={() => void dictation.stop()}
         onCancel={() => void dictation.cancel()}
       />

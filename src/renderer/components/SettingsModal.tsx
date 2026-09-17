@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useState } from "react";
 import type {
-  AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, VaultStatus,
+  AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, UpdateCheckResult, VaultStatus,
 } from "../types.ts";
 import { enumerate } from "../capture.ts";
 import { RuntimePane } from "./RuntimePane.tsx";
 import { ProvidersPane } from "./ProvidersPane.tsx";
 import { DatabaseKeysPane } from "./DatabaseKeysPane.tsx";
 import { EndpointField } from "./EndpointField.tsx";
+import { HotkeyField } from "./HotkeyField.tsx";
 import { voicesFor } from "../../core/audio/voices.ts";
 import { engineStates, runnable, type Runnable } from "../../core/runtime/runnable.ts";
 import { modelIdOf } from "../../core/audio/models.ts";
@@ -181,7 +182,7 @@ function Review({
 
   return (
     <div className="pane">
-      <p className="pane-note">
+      <p className="pane-lead">
         What MyRA tells the model when it reviews a manuscript. Each study design has a panel of
         reviewers, and each reviewer is a separate request: the base instructions below are sent
         every time, that reviewer's own brief is added to them, and anything you type into the
@@ -196,7 +197,7 @@ function Review({
           onChange={(e) => void patch({ reviewPrompt: e.target.value })}
         />
       </label>
-      <p className="pane-note">
+      <p className="hint note">
         MyRA has not searched for anything at this point, so any reference the model produces
         here would be invented. The default text says so; if you rewrite it, keep that.
       </p>
@@ -221,7 +222,7 @@ function Review({
         .filter((t) => t.id === open)
         .map((t) => (
           <Fragment key={t.id}>
-            <p className="pane-note">
+            <p className="hint">
               {t.label} manuscripts are sent to these {t.reviewers.length} reviewers, each as a
               separate request carrying the whole manuscript.
             </p>
@@ -485,13 +486,13 @@ function Folders({
         />
       </label>
 
-      <label className="checkbox">
+      <label className="check">
         <input
           type="checkbox"
           checked={settings.deleteRawAudioAfterTranscription}
           onChange={(e) => void patch({ deleteRawAudioAfterTranscription: e.target.checked })}
         />
-        Delete the recording once a transcript exists
+        <span>Delete the recording once a transcript exists</span>
       </label>
     </div>
   );
@@ -876,13 +877,59 @@ function Audio({
         </select>
       </label>
 
-      <label className="checkbox">
+      <fieldset className="endpoint">
+        <legend>Keyboard shortcuts</legend>
+        <p className="hint">
+          These work while the MyRA window is focused. A shortcut that fires from anywhere else
+          has to be registered with the desktop, and that is not something MyRA can do reliably
+          on Linux — so it does not pretend to.
+        </p>
+
+        <HotkeyField
+          label="Dictate"
+          value={settings.hotkeys.dictation}
+          onChange={(combo) => void patch({ hotkeys: { ...settings.hotkeys, dictation: combo } })}
+        />
+
+        <label className="check">
+          <input
+            type="radio"
+            name="dictation-hotkey-mode"
+            checked={settings.hotkeys.dictationMode === "toggle"}
+            disabled={!settings.hotkeys.dictation}
+            onChange={() => void patch({ hotkeys: { ...settings.hotkeys, dictationMode: "toggle" } })}
+          />
+          <span>Toggle — press once to start recording, again to stop.</span>
+        </label>
+        <label className="check">
+          <input
+            type="radio"
+            name="dictation-hotkey-mode"
+            checked={settings.hotkeys.dictationMode === "hold"}
+            disabled={!settings.hotkeys.dictation}
+            onChange={() => void patch({ hotkeys: { ...settings.hotkeys, dictationMode: "hold" } })}
+          />
+          <span>
+            Hold to talk — records while you hold the keys. Releasing them, or clicking away from
+            MyRA, stops the recording and sends it to be transcribed.
+          </span>
+        </label>
+
+        <HotkeyField
+          label="Speech-to-speech"
+          value={settings.hotkeys.handsFree}
+          hint="A toggle: it starts the listening loop and stops it. There is no hold option -- speech-to-speech is a mode that keeps going, not a single recording. Needs a voice model above."
+          onChange={(combo) => void patch({ hotkeys: { ...settings.hotkeys, handsFree: combo } })}
+        />
+      </fieldset>
+
+      <label className="check">
         <input
           type="checkbox"
           checked={settings.meetingCaptureSystemAudio}
           onChange={(e) => void patch({ meetingCaptureSystemAudio: e.target.checked })}
         />
-        Also record the system's output during meetings
+        <span>Also record the system's output during meetings</span>
       </label>
       <p className="hint">
         This is what separates the speakers. A microphone alone records the person wearing the
@@ -1042,7 +1089,7 @@ function Persona({
         />
       </label>
 
-      <p className="pane-note">
+      <p className="hint note">
         This replaces the description of who MyRA is, and nothing else. MyRA&rsquo;s own rules
         follow it and cannot be edited from here: how to hold a tool, that a citation marker may
         only ever be one a tool actually returned, and that text inside untrusted-content markers
@@ -1083,7 +1130,7 @@ function Persona({
           ))}
         </ul>
       ) : (
-        <p className="pane-note">
+        <p className="hint">
           None yet. The cog beside a model in the model menu gives that one its own.
         </p>
       )}
@@ -1107,7 +1154,7 @@ function Permissions({
       </p>
 
       {MODES.map((m) => (
-        <label key={m.value} className="checkbox">
+        <label key={m.value} className="check">
           <input
             type="radio"
             name="permission-mode"
@@ -1138,14 +1185,60 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | undefined>();
   const [privacy, setPrivacy] = useState<PrivacyReport | undefined>();
+  const [version, setVersion] = useState<string | undefined>();
+  const [checking, setChecking] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | undefined>();
 
   useEffect(() => {
     void window.myra.engines().then(setEngines);
     void window.myra.privacy().then(setPrivacy);
+    void window.myra.appVersion().then(setVersion);
   }, []);
 
   return (
     <div className="pane">
+      <h3>MyRA</h3>
+      <p className="pane-lead">
+        {version ? `Version ${version}.` : "Checking version…"} MyRA has no auto-updater — this
+        only asks GitHub when you press the button below.
+      </p>
+      <button
+        type="button"
+        className="btn btn-sm"
+        disabled={checking}
+        onClick={() => {
+          setChecking(true);
+          setUpdateCheck(undefined);
+          void window.myra.checkUpdate().then((r) => {
+            setChecking(false);
+            setUpdateCheck(r);
+          });
+        }}
+      >
+        {checking ? "Asking GitHub…" : "Check for updates"}
+      </button>
+      {updateCheck ? (
+        updateCheck.ok ? (
+          updateCheck.newer ? (
+            <p className="warning">
+              {updateCheck.latest} is out; you have {updateCheck.current}.
+              {updateCheck.url ? (
+                <>
+                  {" "}
+                  <button type="button" onClick={() => void window.myra.openExternal(updateCheck.url!)}>
+                    See what changed
+                  </button>
+                </>
+              ) : null}
+            </p>
+          ) : (
+            <p className="ok-line">You have the newest release, {updateCheck.current}.</p>
+          )
+        ) : (
+          <p className="hint">Could not reach GitHub: {updateCheck.error}</p>
+        )
+      ) : null}
+
       <h3>The tour</h3>
       {/* The way back for anyone who skipped it the first time, or wants
           another look -- the same reasoning as the pandoc button below,
@@ -1153,7 +1246,7 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
       <p className="pane-lead">
         A short walkthrough of where things live, shown once after setup.
       </p>
-      <button type="button" className="btn-sm" onClick={onReplayTutorial}>
+      <button type="button" className="btn btn-sm" onClick={onReplayTutorial}>
         Show the tutorial again
       </button>
 
@@ -1253,7 +1346,7 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
                   for anyone who skipped it, or whose first attempt failed. */}
               <button
                 type="button"
-                className="btn-sm"
+                className="btn btn-sm"
                 disabled={installing}
                 onClick={() => {
                   setInstalling(true);

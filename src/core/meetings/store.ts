@@ -16,6 +16,9 @@
  *   transcript.json   timed lines, so notes can be redone without re-transcribing
  *   transcript.md     the readable transcript
  *   notes.md          the note
+ *   actions.json      the note's action items, so a checked "create task" box
+ *                      survives a restart instead of offering to create the
+ *                      same task twice
  *
  * Reading a directory tells you exactly which of the three buttons to offer,
  * which is the whole point: transcription is expensive and note-taking is
@@ -26,6 +29,7 @@
 import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MeetingRecord } from "./meeting.ts";
+import type { VerifiedItem } from "./notes.ts";
 import type { Line } from "./transcript.ts";
 import { OWNER_ONLY_FILE } from "../paths.ts";
 
@@ -34,6 +38,14 @@ export const STATE_FILE = "myra.json";
 export const TRANSCRIPT_FILE = "transcript.json";
 export const TRANSCRIPT_MD = "transcript.md";
 export const NOTES_MD = "notes.md";
+export const ACTIONS_FILE = "actions.json";
+
+/** An action item as notes.ts extracted and verified it, plus whether it has
+ *  already become a MyRA task. `taskId` is the done-marker: once set, the
+ *  page must not offer to create it again. */
+export interface ActionRecord extends VerifiedItem {
+  taskId?: string | undefined;
+}
 
 /* Optionals written `?: T | undefined` throughout: clearing a field by assigning
    undefined -- "this no longer failed" -- is otherwise a type error under
@@ -118,6 +130,21 @@ export async function readNotes(dir: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** `[]` for a meeting with no action items, one noted before this file
+ *  existed, or a record that fails to parse -- the same forgiving read every
+ *  other artifact here gets, since a truncated actions.json is a reason to
+ *  show no action panel, not a reason to hide the whole meeting. */
+export async function readActions(dir: string): Promise<ActionRecord[]> {
+  return (await readJson<ActionRecord[]>(join(dir, ACTIONS_FILE))) ?? [];
+}
+
+export async function writeActions(dir: string, items: ActionRecord[]): Promise<void> {
+  await writeFile(join(dir, ACTIONS_FILE), JSON.stringify(items, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: OWNER_ONLY_FILE,
+  });
 }
 
 async function bytesIn(dir: string): Promise<{ bytes: number; wavs: number }> {

@@ -107,3 +107,23 @@ export function readsDocuments(mode: ResearchMode): boolean {
   return reaches(mode, "assistant");
 }
 
+/**
+ * Whether the model may do anything at all on this machine that is not
+ * typing -- read the task list, add to it, tick something off.
+ *
+ * Not a new rung, and not a reuse of `readsDocuments` under a borrowed name.
+ * The bottom rung's promise is about the WHOLE schema, not about research:
+ * the system prompt says "You have no tools at all in this conversation" at
+ * "off", and a test asserts the schema is literally empty there. A task tool
+ * that ignored the ladder would make both of those false -- and the second
+ * failure this prevents is the documented one: a small model greeted with
+ * "hi" that has something it is able to call, calls it.
+ *
+ * "assistant" is described as local, jailed and networkless, which is
+ * exactly what a task list is. So tasks join the documents there rather than
+ * being given a control of their own that nobody would find.
+ */
+export function actsLocally(mode: ResearchMode): boolean {
+  return reaches(mode, "assistant");
+}
+
