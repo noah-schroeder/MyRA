@@ -5,6 +5,10 @@ configure it to use — a hosted model provider, a research API, Hugging Face.
 See the README's "What leaves this machine" for exactly what it sends and
 when.
 
+For what contains the agent — what it can reach, what it cannot, and what
+MyRA does not defend against — see
+[docs/threat-model.md](docs/threat-model.md).
+
 ## Reporting a vulnerability
 
 Please use GitHub's private vulnerability reporting rather than a public

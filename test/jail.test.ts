@@ -16,11 +16,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readdir, rm, symlink, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveInJail } from "../src/core/agent/tools/documents.ts";
 import { pandocArgs } from "../src/core/documents/formats.ts";
+import { writeText } from "../src/core/documents/office.ts";
 
 async function withJail<T>(body: (jail: string, outside: string) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), "myra-jail-"));
@@ -59,7 +60,7 @@ test("the six escape vectors are all refused", async () => {
     }
 
     // A NUL truncates the path in any C API it reaches.
-    await assert.rejects(() => resolveInJail(jail, "notes.md\0.png"), /not a name/);
+    await assert.rejects(() => resolveInJail(jail, "notes.md\0.png"), /cannot be a filename/);
   });
 });
 
@@ -163,4 +164,62 @@ test("a filename that looks like a flag stays a filename", () => {
   });
   assert.equal(args.at(-1), "--lua-filter=evil.lua");
   assert.equal(args.filter((a) => a === "--lua-filter=evil.lua").length, 1);
+});
+
+/**
+ * The gap between resolving a path and using it.
+ *
+ * `resolveInJail` returns a string, and for a document that does not exist yet
+ * -- the ordinary write_document case -- the final component was checked
+ * against a filesystem that did not yet contain it. Anything that could plant
+ * a symlink there in the meantime had the write follow it out of the jail.
+ *
+ * Simulated here by doing exactly that between the two calls, which is the
+ * only way to test a race deterministically.
+ */
+test("a symlink planted after resolution does not redirect the write", async () => {
+  await withJail(async (jail, outside) => {
+    const target = join(outside, "planted.md");
+    await writeFile(target, "ORIGINAL");
+
+    // Resolved while the name is free, which is what the jail sees.
+    const abs = await resolveInJail(jail, "notes.md");
+    assert.equal(abs, join(jail, "notes.md"));
+
+    // ...and now the attacker wins the race.
+    await symlink(target, abs);
+
+    await writeText(abs, "WRITTEN BY THE AGENT");
+
+    assert.equal(await readFile(target, "utf8"), "ORIGINAL", "the file outside was not touched");
+    const inside = await readFile(join(jail, "notes.md"), "utf8");
+    assert.equal(inside, "WRITTEN BY THE AGENT", "the link was replaced by a real file");
+    assert.equal((await lstat(join(jail, "notes.md"))).isSymbolicLink(), false);
+  });
+});
+
+test("the ordinary write is unchanged, and leaves nothing behind", async () => {
+  await withJail(async (jail) => {
+    const abs = await resolveInJail(jail, "drafts/memo.md");
+    assert.equal(await writeText(abs, "first"), 5);
+    assert.equal(await writeText(abs, "second, longer"), 14, "overwriting is still overwriting");
+    assert.equal(await readFile(abs, "utf8"), "second, longer");
+
+    const listing = await readdir(join(jail, "drafts"));
+    assert.deepEqual(listing, ["memo.md"], `a temporary was left behind: ${listing.join(", ")}`);
+  });
+});
+
+test("a write that fails leaves no half-written temporary", async () => {
+  await withJail(async (jail) => {
+    // A directory standing where the file should go: rename cannot replace it.
+    await mkdir(join(jail, "occupied.md"));
+    const abs = await resolveInJail(jail, "occupied.md");
+    await assert.rejects(() => writeText(abs, "anything"));
+    assert.deepEqual(
+      (await readdir(jail)).filter((n) => n.includes(".part")),
+      [],
+      "a failed write must not leave a .part file for a listing to show",
+    );
+  });
 });

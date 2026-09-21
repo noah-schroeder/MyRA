@@ -27,7 +27,48 @@ import {
 import { makePrivateDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
 import type { EnginePins } from "../../core/runtime/enginePins.ts";
 import { applyEnginePins } from "./engineVersions.ts";
+import { forgetDaemon, readStartTicks, rememberDaemon } from "./daemons.ts";
 import { launchSpec } from "./loader.ts";
+import { scrubbedEnv } from "../../core/childEnv.ts";
+
+/**
+ * Signal a daemon and everything it started.
+ *
+ * `lemond` is a supervisor; the processes holding models in VRAM are its
+ * children. Signalling its pid alone left every one of them behind -- the whole
+ * of the leak this file was fixed for -- so the signal goes to the process
+ * group `start()` puts the daemon at the head of.
+ *
+ * The single-pid fallback is for one case only: `process.kill(-pid)` throws
+ * ESRCH when no such group exists any more, which means the daemon has already
+ * exited. `child.kill` is then a no-op too, and that is the right outcome. It
+ * is not a path for a daemon that was never detached -- every daemon this
+ * build starts leads its own group, and one left over from an older build is
+ * not this object's `#child` at all; `sweepStrays` is what reclaims those, and
+ * it decides group-versus-pid by reading the real group from /proc rather than
+ * assuming one.
+ */
+function signalTree(child: ChildProcess, sig: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (process.platform === "win32") {
+    if (pid) spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  if (pid !== undefined) {
+    try {
+      process.kill(-pid, sig);
+      return;
+    } catch {
+      /* The group is gone, so the daemon is too. Fall through to the pid, which
+         will say the same thing and cost nothing. */
+    }
+  }
+  try {
+    child.kill(sig);
+  } catch {
+    /* Already gone, which is the outcome this wanted. */
+  }
+}
 
 /** An unused port, obtained by letting the OS pick one and handing it back. */
 async function freePort(): Promise<number> {
@@ -75,6 +116,17 @@ export interface LemonadeStartOptions {
    * takes effect. See engineVersions.ts.
    */
   enginePins?: EnginePins;
+  /**
+   * A Hugging Face access token for THIS daemon's own pulls, when the caller
+   * has decided this start should carry one.
+   *
+   * `scrubbedEnv` no longer forwards an ambient `HF_TOKEN` -- MyRA's downloads
+   * are anonymous by default -- so a gated repository needs this explicitly,
+   * and lemond only ever reads it at its own spawn: there is no per-request
+   * header a download it starts itself takes instead. `manager.ts` decides
+   * when a start should carry one; this is only the delivery.
+   */
+  hfToken?: string;
 }
 
 const LOG_LINES = 400;
@@ -165,8 +217,22 @@ export class LemonadeServer {
 
     const child = spawn(launch.command, launch.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      // Not detached: this process must remain our child so that closing the
-      // app can find and kill it.
+      /*
+       * Detached, so the daemon leads a process group of its own.
+       *
+       * That group is the only handle MyRA has on the engines: `llama-server`,
+       * `whisper-server`, `koko` and `sd-cpp` are children `lemond` spawns
+       * itself, on their own ports, and they are what actually holds the model
+       * in VRAM. Signalling `lemond` alone left every one of them behind,
+       * reparented to init, still holding the card -- measured on a Pop!_OS
+       * 22.04 workstation where chat got slower all day and only a reboot gave
+       * the memory back.
+       *
+       * It is still this process's child: `detached` changes the group, not the
+       * parentage, and the handle still reports its own exit. Never `unref`ed,
+       * which is what would actually let it outlive us unwatched.
+       */
+      ...(process.platform === "win32" ? {} : { detached: true }),
       windowsHide: true,
       cwd: dirname(opts.binary),
       /*
@@ -174,7 +240,19 @@ export class LemonadeServer {
        * did with llama-server: a process's command line is world-readable on
        * Linux via /proc/<pid>/cmdline, while /proc/<pid>/environ is owner-only.
        */
-      env: { ...process.env, ...launch.env, LEMONADE_API_KEY: this.#apiKey },
+      /* The daemon downloads models, so it keeps the proxy variables too.
+         Its own key is passed here rather than on the command line, and
+         goes on top of the scrub because it is deliberate. Same for the HF
+         token: MyRA's downloads are anonymous unless `opts.hfToken` says
+         otherwise, so this is never an ambient variable passed through --
+         it is only ever the one the user pasted into Settings, handed down
+         because this particular start is meant to carry it. Both names,
+         because different tools in this space read one or the other. */
+      env: scrubbedEnv(process.env, "engine", {
+        ...launch.env,
+        LEMONADE_API_KEY: this.#apiKey,
+        ...(opts.hfToken ? { HF_TOKEN: opts.hfToken, HUGGING_FACE_HUB_TOKEN: opts.hfToken } : {}),
+      }),
     });
     this.#child = child;
     this.#set({ pid: child.pid ?? undefined });
@@ -191,6 +269,7 @@ export class LemonadeServer {
 
     child.on("exit", (code, signal) => {
       this.#child = undefined;
+      if (child.pid !== undefined) void forgetDaemon(child.pid);
       if (this.#stopping) {
         this.#set({ state: "stopped", pid: undefined });
         return;
@@ -209,6 +288,33 @@ export class LemonadeServer {
         error: `Lemonade stopped (${why}). The log below is what it said.`,
       });
     });
+
+    /*
+     * Write it down before waiting for it to answer, and after the listeners.
+     *
+     * Before the wait, because a daemon that hangs during startup is exactly
+     * the one that gets abandoned -- the user gives up, closes the window, and
+     * it is still there holding whatever it had loaded. Recorded here it can be
+     * found again on the next launch; recorded after `#waitForReady` it could
+     * not be.
+     *
+     * After the listeners above, because this awaits twice and `exit` is
+     * dropped when nothing is listening for it: a daemon that dies immediately,
+     * which is what a missing library looks like, would otherwise report
+     * nothing and leave the start to time out instead of failing with its own
+     * reason.
+     */
+    if (child.pid !== undefined) {
+      const pid = child.pid;
+      const ticks = await readStartTicks(pid);
+      await rememberDaemon({
+        pid,
+        port,
+        binary: opts.binary,
+        ...(ticks !== undefined ? { startTicks: ticks } : {}),
+        startedAt: Date.now(),
+      });
+    }
 
     await this.#waitForReady(port);
     return this.#status;
@@ -361,10 +467,15 @@ export class LemonadeServer {
   /**
    * Stop, and mean it.
    *
-   * `taskkill /T` on Windows because a terminated parent does not take its
-   * children with it there -- and lemond has children of its own, since the
-   * backends it manages are separate processes. SIGTERM then SIGKILL elsewhere,
-   * with a grace period so a loaded model is released cleanly.
+   * A terminated parent does not take its children with it on any platform we
+   * ship to, and `lemond` has children that matter: the engines holding models
+   * in VRAM are separate processes it spawned. So the signal goes to the whole
+   * process group -- `taskkill /T` on Windows, `kill(-pid)` elsewhere, which is
+   * what `detached` in `start()` exists to make possible.
+   *
+   * SIGTERM then SIGKILL, with a grace period so a loaded model is released
+   * cleanly. Three seconds rather than five, so this always finishes inside the
+   * quit timeout in `main/index.ts` and the clean path is the one that runs.
    */
   async stop(): Promise<void> {
     const child = this.#child;
@@ -375,17 +486,13 @@ export class LemonadeServer {
     }
     this.#stopping = true;
 
-    if (process.platform === "win32" && child.pid) {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    } else {
-      child.kill("SIGTERM");
-    }
+    signalTree(child, "SIGTERM");
 
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
-        if (this.#child && process.platform !== "win32") child.kill("SIGKILL");
+        if (this.#child && process.platform !== "win32") signalTree(child, "SIGKILL");
         resolve();
-      }, 5_000);
+      }, 3_000);
       child.once("exit", () => {
         clearTimeout(timer);
         resolve();
@@ -396,15 +503,24 @@ export class LemonadeServer {
     this.#set({ state: "stopped", pid: undefined, baseUrl: undefined, adminUrl: undefined });
   }
 
-  /** Synchronous best effort, for `before-quit` where nothing can be awaited. */
+  /**
+   * Synchronous best effort, for the paths that genuinely cannot await.
+   *
+   * This used to send a bare SIGKILL to lemond's pid, and that was the bug. A
+   * SIGKILL cannot be caught, so the daemon never got to shut down the engines
+   * it had spawned: `llama-server` and the rest were reparented to init still
+   * holding the card, every open-and-close of the app stranded another set, and
+   * the machine did not get its VRAM back until it was rebooted.
+   *
+   * So it asks instead of insisting, and asks the whole group. It cannot wait
+   * for the answer -- that is what `stop()` is for, and `before-quit` now calls
+   * that first -- but a signal the daemon is able to act on is the one thing
+   * SIGKILL made impossible.
+   */
   killNow(): void {
     const child = this.#child;
     if (!child || child.exitCode !== null) return;
     this.#stopping = true;
-    if (process.platform === "win32" && child.pid) {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    } else {
-      child.kill("SIGKILL");
-    }
+    signalTree(child, "SIGTERM");
   }
 }

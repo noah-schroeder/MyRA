@@ -1,5 +1,5 @@
 /**
- * The first-run tour: thirteen stops, fixed in advance.
+ * The first-run tour: eighteen stops, fixed in advance.
  *
  * Its own module, with no imports, for the same reason databases.ts is: it has
  * to be readable from the renderer with nothing dragged in behind it, and it
@@ -29,7 +29,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "welcome",
     title: "Welcome to MyRA",
-    body: "A short tour of where things live — about a minute, thirteen stops. Leave whenever you like; nothing here is required.",
+    body: "A short tour of where things live — a couple of minutes, eighteen stops, six of them on the one control that decides what MyRA may do on its own. Leave whenever you like; nothing here is required.",
     page: "chat",
   },
   {
@@ -53,10 +53,56 @@ export const TOUR_STEPS: readonly TourStep[] = [
     anchor: "composer-dictate",
     page: "chat",
   },
+  /*
+   * Six stops on one control, rather than one stop about all of it.
+   *
+   * It was a single step -- "two rings, one boundary" -- which is the right
+   * sentence about the boundary and says nothing about the six buttons either
+   * side of it. People were reading the rings as a difficulty setting, Deep
+   * as "Quick but better", and never finding Zotero or Look up at all. The
+   * control is the one place a person decides what MyRA may do without being
+   * asked, so it is the one place worth spending steps on; every step below
+   * spotlights the same bar and walks up it a rung at a time.
+   */
   {
-    id: "research",
-    title: "How far MyRA may reach",
-    body: "Two rings, one boundary. The left ring never leaves this machine; the right one searches the actual literature and cites what it used. Pick per question — nothing here is a permanent setting.",
+    id: "mode-off",
+    title: "Off: nothing but the model",
+    body: "The bar under the box is one control for how far MyRA may reach, and it has a line through the middle. On Off the model has no tools at all — it cannot search, open a link or touch a file, and answers only from what it already knows.",
+    anchor: "composer-research",
+    page: "chat",
+  },
+  {
+    id: "mode-assistant",
+    title: "Assistant: your files and your tasks",
+    body: "The model can read and write documents in the folder you chose, and keep your task list — add something, see what's open, tick one off. Nothing leaves this machine.",
+    anchor: "composer-research",
+    page: "chat",
+  },
+  {
+    id: "mode-zotero",
+    title: "Zotero: the papers you already have",
+    body: "Everything Assistant does, plus a search of your own Zotero library — the papers you collected and the metadata you corrected. Zotero answers on this machine, so this rung still sends nothing anywhere.",
+    anchor: "composer-research",
+    page: "chat",
+  },
+  {
+    id: "mode-quick",
+    title: "Quick: search the literature",
+    body: "The first rung past the line, so this one does reach out. MyRA searches the databases named beside it — OpenAlex and arXiv, plus PubMed and CORE once you add a free key for each — and cites what it used, in seconds, in the conversation.",
+    anchor: "composer-research",
+    page: "chat",
+  },
+  {
+    id: "mode-deep",
+    title: "Deep: a report you can audit",
+    body: "Not Quick with more searches — a slower, different job that plans, screens, reads, verifies and writes up. It asks you to scope the question and approve the plan up front, then runs for minutes on its own, and every stage keeps its working.",
+    anchor: "composer-research",
+    page: "chat",
+  },
+  {
+    id: "mode-lookup",
+    title: "Look up: skip the model entirely",
+    body: "Search those same databases yourself, with nothing generating an answer in between. It isn't a setting you leave on — stepping away from it puts you back on whichever rung you were using.",
     anchor: "composer-research",
     page: "chat",
   },

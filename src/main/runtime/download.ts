@@ -22,6 +22,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
 import { makePrivateDir } from "../../core/paths.ts";
+import { scrubbedEnv } from "../../core/childEnv.ts";
 
 export class DownloadError extends Error {
   override readonly name = "DownloadError";
@@ -140,14 +141,31 @@ export async function hashFile(path: string): Promise<string> {
  * bsdtar on macOS, and bsdtar in Windows 10 1803 and later -- which also reads
  * zip archives, so one code path covers every platform.
  *
- * The archive's checksum is verified before this is called, which is the real
- * protection: an attacker who could rewrite the bytes could otherwise plant a
- * path-traversal entry, and no extractor flag would save us.
+ * The archive's checksum is verified before this is called, and that is the
+ * real protection against a planted path-traversal entry: every caller now
+ * passes a sha256, because an archive nobody checked becomes a binary MyRA
+ * runs as the user.
+ *
+ * `--no-same-owner --no-same-permissions` on top, which checksums do not
+ * cover. Traversal is already handled by both tars: without `-P` they strip a
+ * leading `/` and refuse a `..` member. What they do by DEFAULT and should
+ * not here is restore the modes recorded in the archive -- so a legitimately
+ * signed upstream tarball carrying a setuid bit, or 0777 on a directory,
+ * would undo the 0700 `makePrivateDir` just created. cruntime.ts already
+ * passes `--no-same-owner` for its own extraction; this makes the two agree.
  */
+/** The argv, separately, so a test can pin it the way pandocArgs is pinned. */
+export function tarArgs(archive: string, destDir: string): string[] {
+  return ["-xf", archive, "-C", destDir, "--no-same-owner", "--no-same-permissions"];
+}
+
 export async function extractArchive(archive: string, destDir: string): Promise<void> {
   await makePrivateDir(destDir);
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("tar", ["-xf", archive, "-C", destDir], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn("tar", tarArgs(archive, destDir), {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: scrubbedEnv(process.env),
+    });
     let stderr = "";
     child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));
     child.on("error", (err) => reject(new DownloadError(`could not run tar: ${err.message}`)));

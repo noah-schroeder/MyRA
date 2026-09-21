@@ -12,6 +12,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
+import { tarArgs } from "../src/main/runtime/download.ts";
+
 import {
   activeCount, bytesLabel, etaLabel, fraction, newDownload, observe, pollForModel, rate, statusLine,
 } from "../src/core/downloads/download.ts";
@@ -371,5 +373,27 @@ describe("waiting for the daemon's index to catch up", () => {
     assert.equal(found, undefined);
     // One fewer wait than attempts: no point sleeping after the last look.
     assert.deepEqual(sleeps, [1000, 2000]);
+  });
+});
+
+describe("unpacking an archive MyRA downloaded", () => {
+  /**
+   * Traversal is already handled by both tars: without `-P` they strip a
+   * leading `/` and refuse a `..` member. What is pinned here is the part
+   * they do NOT do by default -- restoring the ownership and modes recorded
+   * in the archive, which would undo the 0700 makePrivateDir just created.
+   */
+  it("never restores the archive's own ownership or permissions", () => {
+    const args = tarArgs("/tmp/x/a.tar.gz", "/tmp/x/out");
+    assert.ok(args.includes("--no-same-owner"), "a tarball must not choose the owner");
+    assert.ok(args.includes("--no-same-permissions"), "nor a setuid bit, nor 0777");
+  });
+
+  it("never disables tar's own traversal handling", () => {
+    const args = tarArgs("/tmp/x/a.tar.gz", "/tmp/x/out");
+    // -P is what turns OFF stripping a leading slash and refusing `..`.
+    assert.ok(!args.includes("-P"), "-P would re-enable absolute and climbing members");
+    assert.ok(!args.includes("--absolute-names"));
+    assert.equal(args[args.indexOf("-C") + 1], "/tmp/x/out", "extraction is always into a named directory");
   });
 });

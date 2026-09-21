@@ -53,6 +53,11 @@ it already:
 MyRA also reads models you've already downloaded with LM Studio or Ollama —
 nothing is copied or re-downloaded.
 
+Downloads are anonymous by default. Some publishers gate a repository behind
+an accepted licence; for one of those, paste a Hugging Face access token into
+**Settings → Runtime** — MyRA restarts the model server once to carry it, only
+for that download, unless you choose to send it with every download instead.
+
 ### Sizing a model to your hardware
 
 Loading a model with no guidance defaults to a 4,096-token context window,

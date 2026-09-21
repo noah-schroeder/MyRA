@@ -29,7 +29,14 @@ const dir = mkdtempSync(join(tmpdir(), "myra-test-"));
  * researchRoot() defaults to ~/Documents/myra/research -- so a test run could
  * both read the developer's settings and write run directories into their
  * documents folder.
+ *
+ * MYRA_WORKSPACE for the same reason, one folder up: workspaceRoot() falls
+ * back to ~/Documents/myra, so anything reaching writeText -- the document
+ * tools, the paper exporter, a draft -- wrote a real file into the
+ * developer's own documents folder. Observed while testing the jail: a smoke
+ * check meant for a temporary directory left a file in ~/Documents/myra.
  */
 process.env["MYRA_CONFIG_DIR"] = dir;
 process.env["MYRA_RESEARCH_CONFIG"] = join(dir, "research.json");
 process.env["MYRA_RESEARCH_ROOT"] = join(dir, "research");
+process.env["MYRA_WORKSPACE"] = join(dir, "workspace");

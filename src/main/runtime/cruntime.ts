@@ -39,6 +39,7 @@ import {
 } from "../../core/runtime/oci.ts";
 import { DownloadError, downloadFile, type Progress } from "./download.ts";
 import { launchSpec } from "./loader.ts";
+import { scrubbedEnv } from "../../core/childEnv.ts";
 
 export interface CRuntimeOptions {
   signal?: AbortSignal;
@@ -59,7 +60,10 @@ export async function probe(binary: string, args = ["--version"]): Promise<strin
     const child = spawn(launch.command, launch.args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, ...launch.env },
+      /* The engine set, because a working Vulkan or ROCm stack can
+         depend on any of it, and a model that stops using the card is a
+         worse bug than an inherited variable. launch.env still wins. */
+      env: scrubbedEnv(process.env, "engine", launch.env),
     });
     let out = "";
     const take = (b: Buffer): void => { out += b.toString(); };
@@ -85,7 +89,7 @@ async function extractMatching(archive: string, into: string, patterns: string[]
       "tar",
       ["-xzf", archive, "-C", into, "--wildcards", "--no-anchored",
        "--transform", "s|.*/||", "--no-same-owner", ...patterns],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      { stdio: ["ignore", "ignore", "pipe"], env: scrubbedEnv(process.env) },
     );
     let stderr = "";
     child.stderr?.on("data", (b: Buffer) => (stderr += b.toString()));

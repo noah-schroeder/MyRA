@@ -205,3 +205,42 @@ describe("a wrap interrupted halfway", () => {
     assert.equal(await isWrapped(dir), true);
   });
 });
+
+describe("the shim is the only shell text MyRA writes", () => {
+  const spec = { arch: "x64", hostDirs: ["/usr/lib/x86_64-linux-gnu"] };
+
+  it("refuses an engine name that would end the quoted argument", () => {
+    /* `name` is a filename read out of Lemonade's engine cache, and
+       `couldBeEngine` only excludes .so files and already-wrapped binaries --
+       so a name is whatever is on disk. Spliced into `"$d/<name>.myra-real"`,
+       a quote closes the string and the rest is a command, in a 0755 script
+       that runs every time the engine starts. */
+    for (const bad of ['x"; id > /tmp/p; "', "x`id`", "x$(id)", "a\nb", "x'y", "back\\slash"]) {
+      assert.throws(
+        () => shimScript(bad, spec),
+        /refusing to wrap an engine named/,
+        `${JSON.stringify(bad)} was accepted as an engine name`,
+      );
+    }
+  });
+
+  it("drops a host directory it cannot quote rather than failing the engine", () => {
+    /* hostDirs are raw lines from /etc/ld.so.conf. A malformed one on
+       somebody's machine must not stop their models loading: the bundle and
+       the engine's own directory come first and are the ones that matter. */
+    const script = shimScript("llama-server", {
+      arch: "x64",
+      hostDirs: ['/opt/"; rm -rf ~; "', "/usr/lib/x86_64-linux-gnu", "/opt/$ORIGIN/lib"],
+    });
+    assert.ok(!script.includes("rm -rf"), "the injection never reached the script");
+    assert.ok(script.includes("/usr/lib/x86_64-linux-gnu"), "the good directory survived");
+    assert.ok(script.includes('"$d/llama-server.myra-real"'), "and the engine still starts");
+  });
+
+  it("still produces exactly one exec line for an ordinary engine", () => {
+    const script = shimScript("whisper-server", spec);
+    const execs = script.split("\n").filter((l) => l.startsWith("exec "));
+    assert.equal(execs.length, 1);
+    assert.ok(isShimScript(script));
+  });
+});

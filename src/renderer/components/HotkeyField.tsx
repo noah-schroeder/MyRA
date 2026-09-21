@@ -78,8 +78,11 @@ export function HotkeyField({
         >
           {capturing ? "Press the keys…" : value ? prettyCombo(value) : "Not set"}
         </button>
+        {/* Beside the chord button and matching it, rather than underlined text
+            next to a control: they are the two things you can do to a shortcut,
+            and only one of them looked like a control. */}
         {value && !capturing ? (
-          <button type="button" className="link" onClick={() => onChange("")}>
+          <button type="button" className="btn btn-sm" onClick={() => onChange("")}>
             Clear
           </button>
         ) : null}

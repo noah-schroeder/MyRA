@@ -23,6 +23,7 @@ named.
 | Semantic Scholar | — | asked only whether a found paper has an open-access PDF |
 | Page reading | — | the page sees a request from this machine |
 | Model search / download | — | only on Search, opening a result, or Download; typing sends nothing |
+| Hugging Face token | not sent with an ordinary download | sent only for a gated repository, unless you chose "Always send my token" |
 | Engine update checks | — | only when you press the button in Settings → Runtime |
 | Files, transcripts, meeting audio, history | always | never |
 
@@ -61,6 +62,13 @@ named.
   the model's authors published. Same host as the download itself, only
   when you download, and nothing is sent but the repository name. Loading a
   model afterwards asks nothing: what was learned is kept on this machine.
+- **A Hugging Face access token**, when you add one in **Settings → Runtime**,
+  is never sent with an ordinary download — MyRA's downloads stay anonymous by
+  default. It is sent only for a repository the registry itself reports as
+  gated, and only to Hugging Face, to fetch exactly that repository — unless
+  you choose "Always send my token", which sends it with every download. A
+  token you paste is encrypted into this machine's own keyring, the same as
+  every other API key.
 - **Checking for engine updates** asks GitHub which builds of llama.cpp,
   whisper.cpp and the rest have been released, and only when you press the
   button in **Settings → Runtime**. MyRA never checks on its own, and

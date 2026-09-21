@@ -131,6 +131,23 @@ export function assertProjectId(id: string): string {
   return id;
 }
 
+/**
+ * The shape every member reference shares, whichever store owns it.
+ *
+ * Not a sixth opinion: this is the INTERSECTION of the guards that already
+ * exist -- assertRunId, assertPaperId, assertReviewId, assertImageId and the
+ * regex in sessions.ts all spell it exactly this way. Stated once here so a
+ * record arriving from disk can be held to it without reaching a store, which
+ * `parseProject` cannot do: it takes an id and nothing else.
+ *
+ * A ref reaches `join()` in main/projects.ts, and for a meeting it reaches
+ * `rm -rf`, because a meeting is addressed by its DIRECTORY NAME rather than
+ * by an id. `../../../..` was accepted here.
+ */
+export function isMemberRef(ref: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(ref) && ref !== "." && ref !== "..";
+}
+
 export function newProject(opts: { name: string; id?: string; now?: Date }): Project {
   const now = opts.now ?? new Date();
   const name = opts.name.trim() || "Untitled project";
@@ -229,6 +246,49 @@ export function pruneMembers(project: Project, alive: (member: Member) => boolea
   return kept.length === project.members.length ? project : { ...project, members: kept };
 }
 
+/**
+ * The rows the rail shows: one project's work, or the work that is in none.
+ *
+ * The two groups are disjoint and there is no view showing both, which is what
+ * makes "Delete all conversations" a broom for loose work rather than a button
+ * that empties a project it never named.
+ *
+ * The other half of that is the one people actually notice: with no project
+ * named, this is everything that is in no project -- so a conversation started
+ * while no project is open is in this list, which is the ordinary way to use
+ * the app and must never depend on projects existing at all.
+ */
+export function railRows<T extends { project: string }>(
+  rows: readonly T[],
+  projectId?: string,
+): T[] {
+  return rows.filter((row) => (projectId ? row.project === projectId : !row.project));
+}
+
+/**
+ * The newest `limit` rows of each project, and of the loose ones.
+ *
+ * The rail shows one of those groups at a time -- either the work that is in no
+ * project, or one project's own -- never the two together, so a limit counted
+ * across the whole list is a limit on the wrong thing: fifty items filed into
+ * projects would empty a list that was never going to show them anyway.
+ *
+ * Takes the rows in the order they are wanted in and keeps it, so "newest" is
+ * whatever the caller already sorted by.
+ */
+export function perProjectLimit<T extends { project: string }>(
+  rows: readonly T[],
+  limit: number,
+): T[] {
+  const taken = new Map<string, number>();
+  return rows.filter((row) => {
+    const n = taken.get(row.project) ?? 0;
+    if (n >= limit) return false;
+    taken.set(row.project, n + 1);
+    return true;
+  });
+}
+
 /** How many of each kind, for a dialog that has to say what it is about to do. */
 export function countsOf(members: readonly Member[]): Record<MemberKind, number> {
   const counts = { chat: 0, meeting: 0, run: 0, paper: 0, review: 0, image: 0 };
@@ -274,6 +334,11 @@ export function parseProject(raw: unknown, id: string): Project | undefined {
     const ref = m["ref"];
     if (typeof ref !== "string" || !ref) continue;
     if (!MEMBER_KINDS.includes(kind as MemberKind)) continue;
+    /* Dropped rather than repaired, the same way an unknown kind is. A record
+       on disk is an input: this file is written by MyRA, but it sits in a
+       directory the user and any sync client can reach, and the ref is about
+       to be joined onto a root. */
+    if (!isMemberRef(ref)) continue;
     /* Deduplicated on the way in. A record written by a build with a bug in it
        is not a reason to count the same meeting twice in the delete dialog. */
     const key = `${String(kind)} ${ref}`;

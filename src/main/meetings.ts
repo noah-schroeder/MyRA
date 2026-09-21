@@ -30,6 +30,7 @@ import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import { newTask } from "../core/tasks/task.ts";
 import { localZone, normaliseDay } from "../core/time.ts";
 import { createAndSave } from "./tasks.ts";
+import { revealInside } from "./reveal.ts";
 
 export interface MeetingDeps {
   config: ConfigStore;
@@ -486,16 +487,15 @@ export function installMeetingIpc(deps: MeetingDeps): void {
      * vault, because that is where notes are filed when a vault is configured.
      * Anywhere else is not something this button can have produced.
      */
-    const target = resolve(String(path ?? ""));
-    const roots = [config.current.meetingsRoot, config.current.vaultRoot]
-      .filter((r) => r.trim())
-      .map((r) => resolve(r));
-    if (!roots.some((root) => target === root || target.startsWith(root + sep))) {
-      return { ok: false, error: "that is not a meeting file." };
-    }
+    const verdict = revealInside(
+      path,
+      [config.current.meetingsRoot, config.current.vaultRoot],
+      "a meeting file",
+    );
+    if (!verdict.ok) return verdict;
     // Show it in the file manager rather than opening it: the user may want the
     // folder, and a .md opened in whatever claims the extension is rarely it.
-    shell.showItemInFolder(target);
+    shell.showItemInFolder(verdict.target);
     return { ok: true };
   });
 

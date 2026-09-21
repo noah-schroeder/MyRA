@@ -25,6 +25,7 @@ feature, or keep reading for the pitch and the technical detail.
 ## Contents
 
 - [What it does](#what-it-does)
+- [What the model can do](#what-the-model-can-do)
 - [Quick start](#quick-start)
 - [Installing it](#installing-it)
 - [Running it from source](#running-it-from-source)
@@ -72,6 +73,95 @@ PDF, jailed to a folder you choose.
 **Images.** Makes figures and illustrations from a description, with the model
 chosen the same way the speech ones are, and files each into a folder you own
 beside a note of what it was asked for.
+
+## What the model can do
+
+Everything the model can do is one list of twelve tools, and **the mode bar
+under the message box decides which of them it is even shown**. That bar is a
+ladder — each rung is the one below plus something more — with a line drawn
+through the middle where MyRA stops being able to reach off this machine.
+
+| Mode | What it adds | Nothing leaves? |
+| --- | --- | --- |
+| **Off** | nothing at all — the tool list sent to the model is empty | ✅ |
+| **Assistant** | your documents folder, and your MyRA task list | ✅ |
+| **Zotero** | a search of your own Zotero library | ✅ |
+| **Quick** | searching the literature, and opening what it finds | ❌ |
+| **Deep** | the full research pipeline instead of a single lookup | ❌ |
+| **Look up** | you search the databases yourself, with no model in the loop | ❌ |
+
+**Off really is off.** It does not mean "prefer not to" — the tool array in the
+request is empty, so there is nothing for the model to call. This matters on
+small local models, which will use a tool simply because one is there.
+
+**Look up is not a mode.** It is a button on the same bar that sends what you
+type to the databases directly rather than to a model. Stepping away from it
+puts you back on whichever rung you were on.
+
+### The twelve tools
+
+**Documents** — from **Assistant** up. All four are confined to the documents
+folder you chose in Settings; every path is resolved with `realpath` on every
+call, so a symlink pointing out of that folder is refused.
+
+| Tool | What it does |
+| --- | --- |
+| `read_document` | Reads a PDF, Word, OpenDocument, HTML or Markdown file as text. Cannot open a URL. |
+| `write_document` | Writes a document, converting to your chosen format on the way out. |
+| `convert_document` | Converts a file already in the folder, always to a new file beside it — never over the original. |
+| `draft_document` | For something with sections: proposes an outline for you to approve and edit, then writes each section separately and saves as it goes. |
+
+**Tasks** — from **Assistant** up. MyRA's own task list, a directory of JSON
+files it owns. It is not your calendar and not any other program, and nothing
+written here appears anywhere else.
+
+| Tool | What it does |
+| --- | --- |
+| `create_task` | Adds one task, with an optional due day and a local reminder. |
+| `list_tasks` | Lists what is open, done, or both. |
+| `complete_task` | Ticks one off — undoable from the Tasks page. |
+
+**Library** — at **Zotero**, and again during a **Deep** run.
+
+| Tool | What it does |
+| --- | --- |
+| `search_library` | Searches the papers you have already collected: titles, abstracts, tags, notes and the indexed text of attached PDFs. Runs entirely on this machine — Zotero answers on loopback — and respects the collection you scoped it to. |
+
+Deliberately **not** offered at Quick. "What does the literature say" and "what
+is in my library" are two different questions, and answering both at once made
+one feature out of two.
+
+**The literature** — the rungs past the line.
+
+| Tool | Where | What it does |
+| --- | --- | --- |
+| `web_search` | Quick only | Searches the databases you ticked — OpenAlex and arXiv, plus PubMed and CORE once you add a free key for each — and returns ranked results with snippets. |
+| `fetch_page` | Quick and Deep | The **only** tool that can open a URL. Returns the page or PDF as text, wrapped as untrusted data: MyRA reads and cites it, and never follows instructions inside it. |
+| `academic_research` | Deep only | The eleven-stage pipeline over the scholarly literature — scope, plan, discover, screen, snowball, retrieve, extract, synthesize, verify, review, revise — ending in a cited report you can audit stage by stage. Takes minutes. |
+| `deep_research` | Deep only | The same pipeline over general web sources. **Not available in this build**: it needs a general-web search backend, and none ships — see [What leaves this machine](#what-leaves-this-machine). |
+
+`web_search` is *withdrawn* at Deep rather than kept alongside the pipeline, so
+that asking for a report cannot be quietly answered with a single lookup. And
+the two research tools run **once per turn**: a model left free to call one
+again after reading its own report did exactly that, three times on one
+question, re-asking every scoping question each time.
+
+### What is not on the list
+
+There is no `bash`, no shell, and no general file access, so "run a command" is
+not a sentence this protocol can express. The list above is the complete set —
+see [registry.ts](src/core/agent/registry.ts), and
+[Architecture](#architecture) below for the two rules that hold it up.
+
+Every tool declares a **risk class**, and **Settings → Permissions** decides
+what that costs you: *Ask every time* confirms every call, searches included;
+*Guarded*, the default, is silent for reads and for writes that stay inside
+your documents folder; *Never ask* prompts for nothing it is allowed not to.
+Nothing MyRA currently ships is classified above "a write inside its own
+folder", so in the default mode no prompt ever fires — the jail is what is
+actually containing the agent, not the prompts. That is the honest version of
+the claim, and it is why the jail is the thing with six escape vectors
+written against it in the test suite.
 
 ## Quick start
 
@@ -191,6 +281,13 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   published. Same host as the download itself, only when you download, and
   nothing is sent but the repository name. Loading a model afterwards asks
   nothing: what was learned is kept on this machine.
+- **A Hugging Face access token**, when you add one in Settings → Runtime, is
+  never sent with an ordinary download — MyRA's downloads stay anonymous by
+  default. It is sent only for a repository the registry itself reports as
+  gated, and only to Hugging Face, to fetch exactly that repository — unless
+  you choose "Always send my token", which sends it with every download. A
+  token you paste is encrypted into this machine's own keyring, the same as
+  every other API key.
 - **Checking for engine updates** asks GitHub which builds of llama.cpp,
   whisper.cpp and the rest have been released, and only when you press the
   button in Settings → Runtime. MyRA never checks on its own, and installing
@@ -213,7 +310,7 @@ One process tree, no daemon, no container, no VM.
 ```
 Electron main                       Renderer (sandboxed)
 ├─ agent loop  ── the only LLM caller ├─ chat · tool cards · citations
-│   └─ tool registry ~8 tools         ├─ meeting capture (getUserMedia)
+│   └─ tool registry · 12 tools       ├─ meeting capture (getUserMedia)
 ├─ core/       pure TS, no electron   └─ settings
 │   ├─ audio      speech · voices · what is worth reading aloud
 │   ├─ images     prompts · sizes · where a picture is filed

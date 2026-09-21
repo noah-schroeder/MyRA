@@ -1,9 +1,16 @@
 /**
- * The permission model, shared by the enforcement point (the pi extension in
- * the VM, and the host broker) and by the UI that displays it.
+ * The permission model, shared by the enforcement point and by the UI that
+ * displays it.
  *
  * Keeping the matrix here rather than duplicating it means the badge the user
  * sees and the decision actually taken can never drift apart.
+ *
+ * What enforces it is `approve` in main/index.ts, which looks the tool up in
+ * the registry, asks `decide`, and puts the question to the window. There is
+ * no VM and no broker -- see docs/threat-model.md for what the boundary
+ * actually is. Note what this means in practice for the tool set MyRA ships:
+ * nothing is classified above `write`, so in the default mode no prompt ever
+ * fires, and the jail is what is actually containing the agent.
  */
 
 export const PERMISSION_MODES = ["manual", "guarded", "yolo"] as const;
@@ -53,13 +60,13 @@ const MATRIX: Record<RiskClass, Record<PermissionMode, Decision>> = {
 };
 
 export function decide(mode: PermissionMode, risk: RiskClass): Decision {
+  /* Asked here rather than left to the matrix happening to agree with it.
+     "No mode lowers the floor" was true only because two rows above are all
+     "ask" -- so an editor tuning the yolo column would have made the claim
+     false while the test asserting it went on passing, for a reason that had
+     nothing to do with the claim. */
+  if (isFloorClass(risk)) return "ask";
   return MATRIX[risk][mode];
-}
-
-
-/** True when the user must type to confirm rather than just click. */
-export function requiresTypedConfirm(risk: RiskClass): boolean {
-  return risk === "catastrophic";
 }
 
 export interface PolicyVerdict {

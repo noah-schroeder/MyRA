@@ -10,8 +10,11 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { loadSession, saveSession, type Session } from "../src/core/sessions.ts";
+import { deleteAllSessions, loadSession, saveSession, type Session } from "../src/core/sessions.ts";
 import type { ChatMessage } from "../src/core/llm/chat.ts";
 
 function session(id: string, messages_: ChatMessage[]): Session {
@@ -57,4 +60,34 @@ test("a plain message with neither carries neither back", async () => {
   const loaded = await loadSession("test-plain-roundtrip");
   assert.equal(loaded?.messages_[0]?.meta, undefined);
   assert.equal(loaded?.messages_[0]?.attachments, undefined);
+});
+
+/**
+ * The rail's broom, and the one thing it must not sweep.
+ *
+ * Filing a conversation into a project is how somebody says they are keeping
+ * it, and the list that button sits under does not show filed work at all --
+ * so a button that emptied projects would be destroying work it never named.
+ */
+test("deleting every conversation spares the ones a project holds", async () => {
+  /* MYRA_SESSIONS_DIR is read on every call rather than bound at import, so
+     this cannot reach the sessions the tests above wrote. */
+  const dir = await mkdtemp(join(tmpdir(), "myra-sessions-"));
+  const was = process.env["MYRA_SESSIONS_DIR"];
+  process.env["MYRA_SESSIONS_DIR"] = dir;
+  try {
+    for (const id of ["loose-one", "loose-two", "filed-one"]) {
+      await saveSession(session(id, [{ role: "user", content: "Hi" }]));
+    }
+
+    await deleteAllSessions(new Set(["filed-one"]));
+    assert.deepEqual((await readdir(dir)).sort(), ["filed-one.json"]);
+
+    // Nothing filed: the whole directory goes, .partial files and all.
+    await deleteAllSessions();
+    assert.deepEqual(await readdir(dir).then((n) => n, () => []), []);
+  } finally {
+    if (was === undefined) delete process.env["MYRA_SESSIONS_DIR"];
+    else process.env["MYRA_SESSIONS_DIR"] = was;
+  }
 });

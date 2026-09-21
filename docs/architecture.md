@@ -42,6 +42,10 @@ Two rules hold that boundary up, and neither may be relaxed:
 2. **Every path is resolved and jailed on every call**, with `realpath`,
    after normalisation — so a symlink pointing out of the jail is caught.
 
+The [threat model](threat-model.html) sets out what that boundary does and
+does not cover, including the parts MyRA does not defend against — there is no
+OS-level sandbox around the main process, and the page says why.
+
 ## The local model runtime
 
 MyRA runs local models through a bundled runtime called **Lemonade**,

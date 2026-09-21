@@ -201,6 +201,34 @@ export function isOverridden(options: ModelOptions, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(options.saved, key);
 }
 
+/** The value the daemon has saved for a key, or `undefined` if it is not overridden. */
+export function savedValue(options: ModelOptions, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(options.saved, key) ? options.saved[key] : undefined;
+}
+
+/**
+ * Whether a saved `ctx_size` is one MyRA itself wrote.
+ *
+ * MyRA's own auto-tune patch goes through the exact same
+ * `POST /models/{id}/options` a user's own edit in the tuning panel does, so
+ * `options.saved` cannot tell the two apart -- and a bare `isOverridden` check
+ * cannot either, which is the reason a model handed 8192 once, back when MyRA
+ * had no shape for it, was never resized again even after a real shape became
+ * available: the first write made it look exactly like something the user had
+ * typed on purpose.
+ *
+ * `recorded` is `ModelFacts.autoCtxSize`, MyRA's own side record of the number
+ * it last wrote. Undefined `saved` means nothing is overridden, so there is
+ * nothing to claim or disclaim. Undefined `recorded` with a defined `saved`
+ * means something is overridden and MyRA never recorded writing it -- a value
+ * from before this existed, or one the user typed -- and that is always
+ * treated as theirs, never recomputed automatically.
+ */
+export function ctxIsOurs(saved: unknown, recorded: number | undefined): boolean {
+  if (saved === undefined) return true;
+  return recorded !== undefined && saved === recorded;
+}
+
 /** The value in force for a key: the override if there is one, else the default. */
 export function effectiveValue(options: ModelOptions, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(options.effective, key)

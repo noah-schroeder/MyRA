@@ -30,8 +30,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Machine } from "../../core/runtime/fit.ts";
+import {
+  CONTEXT_LADDER, knownMachine, memoryBudget, type AutoContext, type Machine, type ModelShape,
+} from "../../core/runtime/fit.ts";
 import { SamplingEditor } from "./SamplingEditor.tsx";
+import { MemoryBar } from "./MemoryBar.tsx";
 import { displayModelName } from "../../core/runtime/foreign.ts";
 import {
   effectiveValue,
@@ -251,6 +254,7 @@ export function ModelOptionsEditor({
                 value={draft[field.key] ?? ""}
                 machine={machine}
                 onChange={(v) => setDraft((d) => ({ ...d, [field.key]: v }))}
+                onOptionsChanged={load}
               />
             ))}
           </div>
@@ -356,6 +360,7 @@ function Field({
   value,
   machine,
   onChange,
+  onOptionsChanged,
 }: {
   model: string;
   field: OptionField;
@@ -363,6 +368,8 @@ function Field({
   value: string;
   machine: Machine;
   onChange: (v: string) => void;
+  /** Re-read this model's options -- what "Recompute" needs after it writes. */
+  onOptionsChanged: () => void;
 }) {
   const overridden = isOverridden(options, field.key);
   const fallback = options.defaults[field.key];
@@ -411,7 +418,16 @@ function Field({
 
       {/* What "auto" actually means on this machine, and what the number costs.
           Auto-tune resolving a 128k model down to 4k is invisible otherwise. */}
-      {field.kind === "context" ? <ContextHint options={options} value={value} machine={machine} /> : null}
+      {field.kind === "context" ? (
+        <ContextHint
+          model={model}
+          options={options}
+          value={value}
+          machine={machine}
+          onChange={onChange}
+          onOptionsChanged={onOptionsChanged}
+        />
+      ) : null}
       {/* A bare "300" in a box labelled "Unload after idle" is a number with
           no unit, and the two plausible readings -- five minutes or five
           hours -- are an hour apart. */}
@@ -651,49 +667,275 @@ function Seconds({ value }: { value: string }) {
 
 const round = (n: number): string => (Math.round(n * 10) / 10).toString();
 
+/**
+ * What a context size costs, and a way to pick one that stays on the card.
+ *
+ * The refusal to invent a number used to be unconditional: the daemon does
+ * not report a model's layer and KV-head counts, so a figure here would not
+ * move with the setting it is describing, and a cost estimate that does not
+ * move is worse than none. That premise died the day MyRA started reading a
+ * model's own GGUF header (`core/runtime/gguf.ts`) -- once a real shape is on
+ * hand, `memoryBudget` computes an exact figure for whatever is in the box,
+ * and it is the same arithmetic a load is sized by. The refusal survives for
+ * exactly the case it was written for: no shape yet, where the only cache
+ * figure available is a flat fraction of the file size and would print the
+ * same number at 4k and at 128k.
+ */
 function ContextHint({
+  model,
   options,
   value,
   machine,
+  onChange,
+  onOptionsChanged,
 }: {
+  model: string;
   options: ModelOptions;
   value: string;
   machine: Machine;
+  onChange: (v: string) => void;
+  onOptionsChanged: () => void;
 }) {
+  const [facts, setFacts] = useState<{
+    shape?: ModelShape;
+    sizeBytes?: number;
+    autoCtxSize?: number;
+    allowOffload?: boolean;
+  }>({});
+  const [proposal, setProposal] = useState<AutoContext | undefined>();
+  const [applying, setApplying] = useState(false);
+  /* `facts` starts `{}` on every model change, which reads exactly like "no
+     autoCtxSize on record" until the fetch below actually answers -- the
+     recompute effect needs to tell those two apart, or it probes a model MyRA
+     sized itself the instant it is opened. */
+  const [factsLoaded, setFactsLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setFactsLoaded(false);
+    void window.myra.modelFacts(model).then((r) => {
+      if (!alive) return;
+      setFacts({
+        ...(r.shape ? { shape: r.shape } : {}),
+        ...(r.sizeBytes ? { sizeBytes: r.sizeBytes } : {}),
+        ...(r.autoCtxSize !== undefined ? { autoCtxSize: r.autoCtxSize } : {}),
+        ...(r.allowOffload ? { allowOffload: true } : {}),
+      });
+      setFactsLoaded(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [model]);
+
+  /* The "Recompute" offer, checked once per model: a saved value that is
+     overridden but that MyRA never recorded writing is the state a model is
+     left in forever once a shape arrives after the fact -- `#autoTuneLoad`
+     will never touch it on its own, by design (`ctxIsOurs`). Only worth
+     asking the daemon about in that exact case, not on every render. */
+  const savedCtx = options.saved["ctx_size"];
+  const savedIsRealNumber = typeof savedCtx === "number" && savedCtx > 0;
+  useEffect(() => {
+    let alive = true;
+    /* Gated on the fetch above having actually answered, not merely on
+       `facts.autoCtxSize` being undefined -- `facts` resets to `{}` on every
+       model change, which is indistinguishable from "MyRA measured this and
+       recorded nothing" until the real answer arrives. Without this gate, a
+       model MyRA sized itself got probed the moment its panel opened: the
+       probe writes `modelFacts.json` (see `recomputeContext`'s own doc
+       comment), and the "MyRA now measures this model" line briefly appeared
+       and then vanished again the instant the real facts landed and this
+       effect re-ran with the true `autoCtxSize` in hand.
+
+       Deliberately NOT keyed on the whole `facts` object: `toggleAllowOffload`
+       replaces it wholesale on every flip of the offload checkbox, which would
+       re-fire this probe for a reason that has nothing to do with it. */
+    if (factsLoaded && savedIsRealNumber && facts.autoCtxSize === undefined) {
+      /* Only for a saved, positive number -- a saved "auto" (-1) is a
+         deliberate choice to hand this back to the daemon, not the
+         stuck-at-the-floor case this offer exists for, and there is no sane
+         way to print "-1 tokens". */
+      void window.myra.modelContextPreview(model).then((r) => {
+        if (alive && r.ok) setProposal(r.auto);
+      });
+    } else {
+      setProposal(undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [model, factsLoaded, savedIsRealNumber, savedCtx, facts.autoCtxSize]);
+
+  const applyRecompute = async (): Promise<void> => {
+    setApplying(true);
+    const res = await window.myra.modelContextApply(model);
+    setApplying(false);
+    if (res.ok) {
+      setProposal(undefined);
+      onOptionsChanged();
+    }
+  };
+
+  const toggleAllowOffload = async (allow: boolean): Promise<void> => {
+    setFacts((f) => ({ ...f, allowOffload: allow }));
+    await window.myra.setAllowOffload(model, allow);
+    onOptionsChanged();
+  };
+
   const read = readContextSize(value);
+  const recompute =
+    proposal?.tokens && savedIsRealNumber && proposal.tokens !== savedCtx ? (
+      <p className="mopt-hint">
+        MyRA now measures this model: {formatTokens(Number(savedCtx))} {"→"} <strong>{formatTokens(proposal.tokens)}</strong>.{" "}
+        <button type="button" className="cfg-reveal" disabled={applying} onClick={() => void applyRecompute()}>
+          {applying ? "Recomputing…" : "Recompute"}
+        </button>
+      </p>
+    ) : null;
+
   if ("error" in read) return <p className="mopt-hint bad">{read.error}</p>;
+
+  // In "Auto" the box has no number of its own -- the bar is drawn against
+  // what the daemon last resolved it to, so it still means something on
+  // screen rather than sitting blank until the next load.
+  const context = read.value === -1 ? options.resolvedCtxSize : read.value;
+  /* Also gated on the machine actually being known: without it, every rung
+     button below renders disabled -- "does not fit" -- against a budget of
+     zero, for a machine `lemonadeInfo()` simply has not answered about yet. */
+  const bar =
+    facts.shape && facts.sizeBytes && context && knownMachine(machine) ? (
+      <ContextBudget
+        sizeBytes={facts.sizeBytes}
+        shape={facts.shape}
+        machine={machine}
+        context={context}
+        allowOffload={facts.allowOffload ?? false}
+        ceiling={facts.shape.contextLength}
+        onPick={onChange}
+        onAllowOffloadChange={(v) => void toggleAllowOffload(v)}
+      />
+    ) : null;
 
   if (read.value === -1) {
     return (
+      <>
+        <p className="mopt-hint">
+          Auto — Lemonade works out a size when the model loads
+          {options.resolvedCtxSize ? (
+            <>
+              , currently <strong>{formatTokens(options.resolvedCtxSize)}</strong> (
+              {options.resolvedCtxSize.toLocaleString("en-GB")} tokens)
+            </>
+          ) : null}
+          .
+        </p>
+        {bar}
+        {recompute}
+      </>
+    );
+  }
+
+  if (!facts.shape || !facts.sizeBytes) {
+    /* No measurement yet, not "never possible" -- a model MyRA has not shaped
+       (an import, or one still being downloaded) genuinely has no honest
+       figure to show. Memory reserved at load time still grows roughly in
+       proportion to this, in whichever pool ends up holding it. */
+    const ceiling = machine.vramBytes ? "graphics memory" : "system memory";
+    return (
       <p className="mopt-hint">
-        Auto — Lemonade works out a size when the model loads
-        {options.resolvedCtxSize ? (
-          <>
-            , currently <strong>{formatTokens(options.resolvedCtxSize)}</strong> (
-            {options.resolvedCtxSize.toLocaleString("en-GB")} tokens)
-          </>
-        ) : null}
-        .
+        <strong>{formatTokens(read.value)}</strong> ({read.value.toLocaleString("en-GB")} tokens).
+        MyRA has not measured this model yet, so memory reserved at load time can only be said to
+        grow roughly in proportion to this, in {ceiling}. If a size is too large the model fails to
+        load and Lemonade says so — nothing is damaged by trying.
       </p>
     );
   }
 
-  /*
-   * No invented number here.
-   *
-   * The KV cache is what a bigger window costs, and its size needs the model's
-   * layer and KV-head counts -- which the daemon does not report, so
-   * `fit.ts` would fall back to a rule of thumb that ignores context entirely
-   * and produce the same figure for 4k and 128k. A cost estimate that does not
-   * move with the setting it is describing is worse than none, so this states
-   * the relationship and leaves the number to the load, where it is real.
-   */
-  const ceiling = machine.vramBytes ? "graphics memory" : "system memory";
   return (
-    <p className="mopt-hint">
-      <strong>{formatTokens(read.value)}</strong> ({read.value.toLocaleString("en-GB")} tokens).
-      Memory reserved at load time grows roughly in proportion to this, in {ceiling}. If a size is
-      too large the model fails to load and Lemonade says so — nothing is damaged by trying.
-    </p>
+    <>
+      <p className="mopt-hint">
+        <strong>{formatTokens(read.value)}</strong> ({read.value.toLocaleString("en-GB")} tokens).
+      </p>
+      {bar}
+      {recompute}
+    </>
+  );
+}
+
+/**
+ * The bar, the rungs, and the one control that changes what the bar is drawn
+ * against: whether this model is allowed to spill off the card for a longer
+ * window. Split out of `ContextHint` because it needs its own memo over the
+ * budget arithmetic, and `ContextHint` already has enough state of its own.
+ */
+function ContextBudget({
+  sizeBytes,
+  shape,
+  machine,
+  context,
+  allowOffload,
+  ceiling,
+  onPick,
+  onAllowOffloadChange,
+}: {
+  sizeBytes: number;
+  shape: ModelShape;
+  machine: Machine;
+  context: number;
+  allowOffload: boolean;
+  /** The model's own trained length, when this is a typed value rather than Auto. */
+  ceiling: number | undefined;
+  onPick: (value: string) => void;
+  onAllowOffloadChange: (v: boolean) => void;
+}) {
+  const budget = useMemo(
+    () => memoryBudget(sizeBytes, machine, { shape, context, allowOffload }),
+    [sizeBytes, machine, shape, context, allowOffload],
+  );
+
+  const rungs = useMemo(
+    () => CONTEXT_LADDER.filter((c) => (ceiling ? c <= ceiling : true)),
+    [ceiling],
+  );
+
+  /* Not "your graphics card" while offload is allowed: `memoryBudget` widens
+     `budgetBytes` to VRAM+RAM the moment `allowOffload` is set, so the figure
+     the bar is drawn against is no longer the card alone, and saying so would
+     name the wrong ceiling. */
+  const against = machine.vramBytes && !allowOffload ? "your graphics card" : "this machine";
+
+  return (
+    <div className="cfg-context">
+      <MemoryBar budget={budget} against={against} />
+      {rungs.length ? (
+        <div className="seg" role="group" aria-label="Context size">
+          {rungs.map((c) => {
+            const fits = memoryBudget(sizeBytes, machine, { shape, context: c, allowOffload }).headroomBytes >= 0;
+            return (
+              <button
+                key={c}
+                type="button"
+                className={c === context ? "active" : ""}
+                disabled={!fits}
+                title={fits ? `${formatTokens(c)} tokens` : `${formatTokens(c)} tokens — does not fit`}
+                onClick={() => onPick(String(c))}
+              >
+                {formatTokens(c)}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {machine.vramBytes ? (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={allowOffload}
+            onChange={(e) => onAllowOffloadChange(e.target.checked)}
+          />
+          <span>Allow this model to spill off the graphics card for a longer window</span>
+        </label>
+      ) : null}
+    </div>
   );
 }

@@ -179,13 +179,28 @@ lists the six kinds of thing MyRA makes — `chat | meeting | run | paper | revi
 (`MemberKind`/`MEMBER_KINDS`/`KIND_WORDS`/`countsOf`, render.ts's `FOLDERS`/`HEADINGS`/
 `ORDER`, `defaultStores`, and the two renderer tables); `asMembers` validates against
 `MEMBER_KINDS` rather than a chain of literals, because that chain was the one place a new
-kind could be added everywhere else and still be dropped silently. A real directory per project was costed and rejected, and will be
+kind could be added everywhere else and still be dropped silently. A member's `ref`
+is validated by the store that owns it, through `assertRef` on `KindStore` — on the
+interface for the reason risk class is on the `ToolDef`: widening `MemberKind` makes
+`ProjectStores` demand a seventh store, which does not compile without one. Meetings
+are why it is there, being the only kind addressed by directory name rather than by
+an id, and `stores.meeting.remove` is `rm -rf`. A real directory per project was costed and rejected, and will be
 proposed again: as soon as items live in different directories every "open this by id"
 call has to first discover *which* directory holds it, so that design needs this index
 anyway — and on top of it the research root would have to be threaded through the
 pipeline and its resume logic, the meetings jail widened past `meetingsRoot`, and
 conversations moved out of `~/.config` into a directory a file manager and any cloud sync
 can read.
+
+**Filing something into a project takes it out of the rail's Recent list.** The list shows one
+group at a time — the project you are in, or the work that is in no project — and never both,
+which is what makes "Delete all conversations" beside it a broom for loose work rather than a
+button that empties a project it never named. Main enforces the same rule rather than trusting
+the window's filter: `deleteAllSessions` takes the set `filedRefs("chat")` returns and spares
+it, attachments included. `myra:recent` returns both groups, each row carrying its project, and
+its limit is counted **per project** (`perProjectLimit`) — a limit across the whole list would
+let a morning's filing push every loose conversation out of a list that was never going to show
+those rows.
 
 "All of it together on disk" is a real want, and it is answered by **exporting** a folder
 rather than by living in one. [render.ts](src/core/projects/render.ts) decides what goes

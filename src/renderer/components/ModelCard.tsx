@@ -26,7 +26,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fitModel, quantRank, type Machine } from "../../core/runtime/fit.ts";
+import { fitModel, knownMachine, memoryBudget, quantRank, type Machine } from "../../core/runtime/fit.ts";
 import type { RepoDetail } from "../../core/runtime/hfBrowse.ts";
 import { age, loadableFiles, pullCheckpoint, pullName, pulledId } from "../../core/runtime/hfBrowse.ts";
 import type { PreparedCard } from "../../core/runtime/modelCard.ts";
@@ -45,6 +45,7 @@ import {
 } from "../../core/runtime/registry.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import { Markdown } from "./Markdown.tsx";
+import { MemoryBar } from "./MemoryBar.tsx";
 import { CapabilityIcons, compactNumber, DownloadProgress, FIT_CHIP, gb } from "./modelBits.tsx";
 
 /** What the page needs to know to open, gathered by whoever opened it. */
@@ -110,7 +111,7 @@ export function ModelCard({
   /** The name of the download in flight, if it is one of these. */
   pulling: string | undefined;
   job: PullProgress | undefined;
-  onDownload: (choice: { name: string; checkpoint: string; recipe: string }) => void;
+  onDownload: (choice: { name: string; checkpoint: string; recipe: string; gated: boolean }) => void;
   onBack: () => void;
 }) {
   const { repo, recipe, source, labels } = target;
@@ -121,6 +122,10 @@ export function ModelCard({
   const [error, setError] = useState<string | undefined>();
   /** Said separately: a repository can have files and no card, and vice versa. */
   const [cardError, setCardError] = useState<string | undefined>();
+  /* Only for the gated callout's own wording below -- fetched once rather than
+     threaded down from three different pages that all reach this component. */
+  const [hfTokenUse, setHfTokenUse] = useState<"gated" | "always">("gated");
+  useEffect(() => void window.myra.getSettings().then((s) => setHfTokenUse(s.hfTokenUse)), []);
 
   /*
    * Everything the page needs, asked for at once.
@@ -179,7 +184,7 @@ export function ModelCard({
    */
   const tier = useCallback(
     (bytes: number): number => {
-      if (!machine.ramBytes) return 1;
+      if (!knownMachine(machine)) return 1;
       const { verdict } = fitModel(bytes, machine);
       return verdict === "gpu" ? 0 : verdict === "too-large" ? Infinity : 1;
     },
@@ -247,7 +252,7 @@ export function ModelCard({
     ?? choices[0];
   const pickedInstalled = picked !== undefined && have.has(picked.installedAs);
   const pickedFit =
-    picked?.sizeBytes && machine.ramBytes ? fitModel(picked.sizeBytes, machine) : undefined;
+    picked?.sizeBytes && knownMachine(machine) ? fitModel(picked.sizeBytes, machine) : undefined;
 
   const [owner, name] = splitRepo(repo);
   const updated = age(detail?.lastModified);
@@ -327,9 +332,18 @@ export function ModelCard({
         <div className="lem-callout">
           <p className="lem-callout-title">This model’s licence has to be accepted first.</p>
           <p className="lem-callout-body">
-            The publisher gates downloads behind an agreement on their own site. MyRA holds no
-            account with the registry, so a download from here will be refused until you have
-            accepted it there{detail.licenseLink ? " — the terms are linked below" : ""}.
+            The publisher gates downloads behind an agreement on their own site — go there and
+            accept it{detail.licenseLink ? " (the terms are linked below)" : ""} before pressing
+            Download{detail.licenseLink ? "" : " here"}.{" "}
+            {hfTokenUse === "always" ? (
+              "MyRA sends your Hugging Face token with every download, so once you have accepted, this one will go through."
+            ) : (
+              <>
+                MyRA downloads anonymously by default, so this one also needs a Hugging Face
+                token — add one in Settings → Runtime and MyRA will use it for this download
+                only.
+              </>
+            )}
           </p>
         </div>
       ) : null}
@@ -419,6 +433,8 @@ export function ModelCard({
                   name: picked.pullAs,
                   checkpoint: picked.checkpoint,
                   recipe,
+                  // Already known from the registry -- see the callout above.
+                  gated: detail?.gated ?? false,
                 })
               }
             >
@@ -462,6 +478,15 @@ export function ModelCard({
                   <span className="lem-chip dim">{picked.files} files</span>
                 ) : null}
               </div>
+              {picked.sizeBytes && knownMachine(machine) ? (
+                /* No GGUF header to read before a download exists -- the
+                   segments below are the same rule-of-thumb cache `pickedFit`
+                   is already badged from, just drawn rather than summarised
+                   into one word. Marked "(estimated)" for the same reason
+                   ContextHint withholds a real figure until MyRA has actually
+                   measured this model. */
+                <MemoryBar budget={memoryBudget(picked.sizeBytes, machine)} />
+              ) : null}
               {quantOf(picked.label)?.note ? (
                 <p className="card-picked-note">{quantOf(picked.label)?.note}</p>
               ) : null}

@@ -10,7 +10,8 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  apiBase, embeddableAsset, embeddableUrl, LEMONADE_VERSION, lemondArgs, lemondName,
+  apiBase, EMBEDDABLE_SHA256, embeddableAsset, embeddableSha256, embeddableUrl, LEMONADE_VERSION,
+  lemondArgs, lemondName,
   chatModelOf, chatModelToReload, mergeConfig, openAiBase, parseHealth, pinnedConfig,
 } from "../src/core/runtime/lemonade.ts";
 import { executableName } from "../src/main/runtime/download.ts";
@@ -286,5 +287,42 @@ describe("executableName", () => {
     // pandoc is found this way: `pandoc-3.10.2/pandoc.exe` in the archive.
     assert.equal(executableName("pandoc", "win32"), "pandoc.exe");
     assert.equal(executableName("pandoc", "linux"), "pandoc");
+  });
+});
+
+/**
+ * A version bump without its hashes must fail here, not at install time.
+ *
+ * `installLemonade` refuses an asset it has no pinned sha256 for, which is the
+ * right behaviour at runtime and a terrible way to find out. This is the
+ * mechanism that actually keeps the table current: change LEMONADE_VERSION and
+ * this test names the four assets that now need entries.
+ */
+describe("the daemon archive is pinned", () => {
+  it("has a checksum for every build MyRA can ask for", () => {
+    const wanted: string[] = [];
+    for (const platform of ["linux", "darwin", "win32"]) {
+      for (const arch of ["x64", "arm64"]) {
+        const asset = embeddableAsset(platform, arch);
+        if (asset) wanted.push(asset);
+      }
+    }
+    assert.ok(wanted.length >= 4, "the platform matrix should still produce assets");
+    for (const asset of wanted) {
+      const sha = embeddableSha256(asset);
+      assert.ok(sha, `no sha256 pinned for ${asset} -- add it when bumping LEMONADE_VERSION`);
+      assert.match(sha, /^[0-9a-f]{64}$/, `${asset} has a malformed sha256`);
+    }
+  });
+
+  it("carries no rows left over from an older version", () => {
+    // A stale row is a hash for an archive nothing will ever ask for, which
+    // reads as coverage and is not.
+    for (const asset of Object.keys(EMBEDDABLE_SHA256)) {
+      assert.ok(
+        asset.includes(LEMONADE_VERSION),
+        `${asset} is left over from an older version of the pin`,
+      );
+    }
   });
 });

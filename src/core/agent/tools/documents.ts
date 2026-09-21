@@ -12,7 +12,8 @@
 import { readlink, realpath } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
-  FORMAT_NAMES, isReadable, resolveFormat, safeRelativePath, slugName, withExtension,
+  FORMAT_NAMES, isReadable, looksAbsolute, looksLikeEscape, resolveFormat, safeRelativePath, slugName,
+  withExtension,
 } from "../../documents/formats.ts";
 import {
   DocsError, convert, documentsDir, exists, readAsText, writeText,
@@ -83,11 +84,26 @@ export async function resolveInJail(root: string, name: string): Promise<string>
   // phantom etc/ directory appearing in someone's documents folder is nobody's
   // intent. At the tool boundary a confused path should be an error the model
   // can see, not a silent relocation.
-  if (name.trim().startsWith("/")) {
+  if (looksAbsolute(name)) {
     throw new DocsError(`${JSON.stringify(name)} is an absolute path; give a name inside the documents folder`);
   }
   const rel = safeRelativePath(name);
-  if (!rel) throw new DocsError(`${JSON.stringify(name)} is not a name inside the documents folder`);
+  if (!rel) {
+    /* Say which of the two it is, because the model can act on one of them.
+       A climb is a refusal and nothing more to discuss; an awkward character
+       is a name it can simply write differently, and "not a name inside the
+       documents folder" gave it nothing to go on. The rules are the union of
+       three platforms' -- see safeRelativePath -- because this folder is one
+       people sync. */
+    if (looksLikeEscape(name)) {
+      throw new DocsError(`${JSON.stringify(name)} is not a name inside the documents folder`);
+    }
+    throw new DocsError(
+      `${JSON.stringify(name)} cannot be a filename on every system this folder may be ` +
+        `synced to. Avoid \\ : NUL and a trailing dot or space, and the reserved names ` +
+        `CON, PRN, AUX, NUL, COM1-9 and LPT1-9.`,
+    );
+  }
 
   const jail = await realpath(root).catch(() => resolve(root));
   let target = resolve(jail, rel);

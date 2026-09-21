@@ -6,7 +6,6 @@ import {
   FLOOR_CLASSES,
   decide,
   isFloorClass,
-  requiresTypedConfirm,
 } from "../src/core/policy.ts";
 
 test("guarded auto-approves safe and sandbox writes, but not dangerous", () => {
@@ -47,9 +46,21 @@ test("floor classes are exactly catastrophic and system_of_record", () => {
   assert.deepEqual([...floors].sort(), ["catastrophic", "system_of_record"]);
 });
 
-test("only catastrophic demands a typed confirmation", () => {
-  const typed = RISK_CLASSES.filter(requiresTypedConfirm);
-  assert.deepEqual(typed, ["catastrophic"]);
+test("the floor is enforced by decide, not by the matrix agreeing with it", () => {
+  /* `requiresTypedConfirm` used to be asserted here. It was exported, tested,
+     unreachable -- nothing is classified `catastrophic` -- and NOT
+     implemented: UiDialog is a plain two-button confirm. A guard that is
+     promised and not enforced is the failure mode that made risk.ts look
+     maintained for a year, so it is gone and the property it gestured at is
+     asserted where something can act on it (test/approval.test.ts).
+
+     What is pinned here instead: decide() itself refuses, so the floor
+     survives someone editing a column of MATRIX. */
+  for (const risk of FLOOR_CLASSES) {
+    for (const mode of PERMISSION_MODES) {
+      assert.equal(decide(mode, risk), "ask");
+    }
+  }
 });
 
 /*

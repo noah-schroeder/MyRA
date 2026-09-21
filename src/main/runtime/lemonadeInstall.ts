@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 
 import { makePrivateDir } from "../../core/paths.ts";
 import {
-  embeddableAsset, embeddableUrl, LEMONADE_VERSION, lemondName,
+  embeddableAsset, embeddableSha256, embeddableUrl, LEMONADE_VERSION, lemondName,
 } from "../../core/runtime/lemonade.ts";
 import { ensureCRuntime, type CRuntimeOptions } from "./cruntime.ts";
 import { DownloadError, downloadFile, extractArchive, findExecutable, type Progress } from "./download.ts";
@@ -63,8 +63,21 @@ export async function installLemonade(opts: LemonadeInstallOptions): Promise<Lem
   await makePrivateDir(opts.staging);
   const archive = join(opts.staging, asset);
 
+  /* Refused rather than installed unverified. This archive becomes a daemon
+     MyRA spawns for the life of the app, so "we could not check it" is not a
+     reason to run it -- and an unpinned asset means the version was bumped
+     without its hashes, which is a mistake in this repo rather than anything
+     about the user's machine. */
+  const sha = embeddableSha256(asset);
+  if (!sha) {
+    throw new DownloadError(
+      `This build of MyRA has no checksum recorded for ${asset}, so it will not install it.`,
+    );
+  }
+
   opts.onPhase?.("downloading Lemonade");
   await downloadFile(embeddableUrl(asset, version), archive, {
+    sha256: sha,
     ...(opts.signal ? { signal: opts.signal } : {}),
     ...(opts.onProgress ? { onProgress: (p) => opts.onProgress!({ ...p, what: "Lemonade" }) } : {}),
   });

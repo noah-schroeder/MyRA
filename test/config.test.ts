@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 import {
   ConfigStore, DEFAULT_SETTINGS, LEGACY_REASONING, type Settings,
@@ -192,5 +193,118 @@ test("clearing a hotkey's combo does not lose the mode beside it", async () => {
     await store.update({ hotkeys: { ...store.current.hotkeys, dictation: "" } });
     assert.equal(store.current.hotkeys.dictation, "");
     assert.equal(store.current.hotkeys.dictationMode, "hold");
+  });
+});
+
+/**
+ * Every configurable folder is a jail root, so a stored value is an input.
+ *
+ * `meetingDir` and `resolveInJail` are both correct jails that resolve against
+ * one of these. Handed "/", a correct jail contains the whole filesystem --
+ * and `meeting-delete` walks it with `rm -rf`. The picker cannot produce these
+ * values; a hand-edited settings.json and any build that ever wrote the field
+ * can.
+ */
+test("a folder that cannot be a jail root falls back to the default", async () => {
+  const stored = {
+    meetingsRoot: "/",
+    workspaceRoot: 42,
+    imagesRoot: "relative/not/absolute",
+    papersRoot: join(CONFIG_DIR, "papers"),
+    reviewsRoot: homedir(),
+    meetingReportDir: "../../",
+    vaultWriteSubdir: "..\\..\\escape",
+  };
+  await withSettings(stored, async (store) => {
+    assert.equal(store.current.meetingsRoot, DEFAULT_SETTINGS.meetingsRoot, "a filesystem root");
+    assert.equal(store.current.workspaceRoot, DEFAULT_SETTINGS.workspaceRoot, "not even a string");
+    assert.equal(store.current.imagesRoot, DEFAULT_SETTINGS.imagesRoot, "not absolute");
+    assert.equal(store.current.papersRoot, DEFAULT_SETTINGS.papersRoot, "inside CONFIG_DIR");
+    assert.equal(store.current.reviewsRoot, DEFAULT_SETTINGS.reviewsRoot, "the home directory itself");
+    assert.equal(store.current.meetingReportDir, DEFAULT_SETTINGS.meetingReportDir, "a climb");
+    assert.equal(store.current.vaultWriteSubdir, DEFAULT_SETTINGS.vaultWriteSubdir, "a win32 climb");
+  });
+});
+
+test("a folder the user actually chose is left exactly as it is", async () => {
+  const mine = join(homedir(), "Work", "myra-elsewhere");
+  await withSettings({ workspaceRoot: mine, meetingsRoot: mine, vaultRoot: "", zoteroDataDir: "" }, async (store) => {
+    assert.equal(store.current.workspaceRoot, mine);
+    assert.equal(store.current.meetingsRoot, mine);
+    /* Empty is a real answer for these two -- "no vault", "look in the usual
+       places" -- and must not be replaced by a default that points somewhere. */
+    assert.equal(store.current.vaultRoot, "");
+    assert.equal(store.current.zoteroDataDir, "");
+  });
+});
+
+test("a root the window sends is checked the same as one on disk", async () => {
+  await withSettings({}, async (store) => {
+    const before = store.current.meetingsRoot;
+    await store.update({ meetingsRoot: "/" });
+    assert.equal(store.current.meetingsRoot, before, "an unusable root keeps the one that worked");
+    /* Kept, not reset to the packaged default: the value being replaced is
+       the user's own working folder, and losing it is its own bug. */
+    const mine = join(homedir(), "Work", "somewhere");
+    await store.update({ meetingsRoot: mine });
+    assert.equal(store.current.meetingsRoot, mine);
+    await store.update({ persona: "unrelated" });
+    assert.equal(store.current.meetingsRoot, mine, "a patch that names no root leaves it alone");
+  });
+});
+
+/**
+ * The `update()` path for the two settings a Settings box calls a jail root
+ * "does not apply to" -- `meetingReportDir` is joined onto one rather than
+ * being one, and `zoteroDataDir` accepts empty on purpose -- had only the
+ * load path (`a folder that cannot be a jail root falls back to the
+ * default`, above) pinned. A rejection that only happens on `update()` is
+ * exactly what a typed keystroke exercises, which is what the Zotero and
+ * Report-subfolder boxes send.
+ */
+test("a patch that cannot be a subdirectory keeps the one already stored", async () => {
+  await withSettings({ meetingReportDir: "Meetings" }, async (store) => {
+    // A trailing dot: what `safeRelativePath` refuses on Win32's own strip-on-open rule.
+    await store.update({ meetingReportDir: "Notes." });
+    assert.equal(store.current.meetingReportDir, "Meetings", "a rejected value is not written");
+    await store.update({ meetingReportDir: "Weekly Notes" });
+    assert.equal(store.current.meetingReportDir, "Weekly Notes", "an ordinary one still is");
+  });
+});
+
+test("a patch that cannot be a root keeps the zotero folder already stored", async () => {
+  const mine = join(homedir(), "Zotero");
+  await withSettings({ zoteroDataDir: mine }, async (store) => {
+    await store.update({ zoteroDataDir: "/" });
+    assert.equal(store.current.zoteroDataDir, mine, "a filesystem root is refused");
+    // Empty is a real answer for this one -- "look in the usual places" -- not a refusal.
+    await store.update({ zoteroDataDir: "" });
+    assert.equal(store.current.zoteroDataDir, "");
+  });
+});
+
+test("hfTokenUse round-trips, and an unrecognised value is anonymous by default", async () => {
+  // "gated" is the safer default -- anonymous unless a repository actually
+  // needs the token -- so anything that is not literally "always" falls back
+  // to it, the same ternary shape hotkeys.ts already uses for dictationMode.
+  await withSettings({ hfTokenUse: "nonsense" }, async (store) => {
+    assert.equal(store.current.hfTokenUse, "gated", "a value from neither state is anonymous, not a crash");
+  });
+  await withSettings({}, async (store) => {
+    assert.equal(store.current.hfTokenUse, "gated", "the packaged default is anonymous");
+    await store.update({ hfTokenUse: "always" });
+    assert.equal(store.current.hfTokenUse, "always");
+    await store.update({ persona: "unrelated" });
+    assert.equal(store.current.hfTokenUse, "always", "a patch naming no token setting leaves it alone");
+    await store.update({ hfTokenUse: "gated" });
+    assert.equal(store.current.hfTokenUse, "gated");
+  });
+});
+
+test("the corrected value is what gets written back", async () => {
+  await withSettings({ meetingsRoot: "/" }, async (store) => {
+    await store.update({ persona: "anything, to force a save" });
+    const onDisk = JSON.parse(await readFile(SETTINGS, "utf8"));
+    assert.equal(onDisk.meetingsRoot, DEFAULT_SETTINGS.meetingsRoot);
   });
 });

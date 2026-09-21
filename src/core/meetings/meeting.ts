@@ -48,6 +48,41 @@ export interface MeetingRecord {
 }
 
 /**
+ * A track id, refused if it could be anything but a name.
+ *
+ * Thrown as a MeetingError so it joins the "every track starts or none does"
+ * unwind below: a meeting that refuses at track two must not leave track one
+ * recording into a directory nothing will finish.
+ */
+export function assertTrackId(id: string, label?: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(id) || id === "." || id === "..") {
+    throw new MeetingError(
+      `${label ?? "a track"} has an id that cannot be a filename: ${JSON.stringify(id)}`,
+    );
+  }
+  return id;
+}
+
+/**
+ * A meeting reference, refused if it is anything but one.
+ *
+ * A meeting is the one thing MyRA makes that is addressed by its DIRECTORY
+ * NAME rather than by an id -- `meetingId()` below produces the name, and
+ * everything else joins it onto `meetingsRoot()`. The five other kinds got an
+ * `assert*Id` for exactly this reason and this one did not, so a project
+ * member naming `../../../..` reached `rm -rf` through `stores.meeting.remove`.
+ *
+ * The same shape `assertRunId` and the rest use, because what it has to
+ * survive is the same: a join onto a root, then a recursive delete.
+ */
+export function assertMeetingRef(ref: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(ref) || ref === "." || ref === "..") {
+    throw new Error(`no meeting named ${JSON.stringify(ref)}`);
+  }
+  return ref;
+}
+
+/**
  * A filesystem-safe, sortable meeting id: 2026-08-21T14-05-33.
  *
  * Local time, not UTC. A meeting at six in the evening is filed under the day
@@ -217,6 +252,14 @@ export class MeetingRecorder {
 
     const seen = new Set<string>();
     for (const track of tracks) {
+      /* Here rather than in a second place, because this loop is already the
+         one that validates track ids. The id becomes a FILENAME --
+         capture.ts opens `<dir>/<id>.wav` with "w", which creates or
+         truncates -- and nothing upstream looked at it: `unknownSources`
+         below inspects `spec.source` and never `spec.id`, so a crafted id
+         was an arbitrary truncate followed by attacker-chosen bytes over
+         `myra:meeting-audio`. */
+      assertTrackId(track.id, track.label);
       if (seen.has(track.id)) throw new MeetingError(`duplicate track id: ${track.id}`);
       seen.add(track.id);
     }

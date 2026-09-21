@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ItemRow, MemberKind, ProjectSummary } from "../types.ts";
+import { railRows } from "../../core/projects/project.ts";
 import { RailSection, useRailSection } from "./RailSection.tsx";
 
 /**
@@ -44,10 +45,11 @@ export function SessionList({
    * Show only this project's work, under its name.
    *
    * The payoff of having projects at all: while you are working in one, the
-   * history beside you is that project's history. It is a filter and never a
-   * hiding place -- "Everything" is always one click away, and the heading names
-   * what is being filtered so the missing rows are explained rather than merely
-   * absent.
+   * history beside you is that project's history. The heading names what is
+   * being filtered, so the missing rows are explained rather than merely
+   * absent, and the button below steps out to the work that is in no project.
+   *
+   * There is no view here that shows both at once, deliberately: see `shown`.
    */
   filter?: { name: string; id: string } | undefined;
   /**
@@ -141,8 +143,19 @@ export function SessionList({
   };
 
   const filtering = Boolean(filter) && !all;
-  const shown = filtering ? rows.filter((r) => r.project === filter!.id) : rows;
-  const chats = rows.filter((r) => r.kind === "chat").length;
+  /*
+   * Filing something into a project takes it out of this list.
+   *
+   * Not merely a filter any more: the two groups are shown one at a time and
+   * nothing here shows them together. That is what makes "Delete all
+   * conversations" below a broom for loose work instead of a button that
+   * reaches into a project and empties it -- which is how somebody loses the
+   * three conversations behind a grant application, from a button that never
+   * named their project. A project's contents are on its own page.
+   */
+  const loose = railRows(rows);
+  const shown = filtering ? railRows(rows, filter!.id) : loose;
+  const chats = loose.filter((r) => r.kind === "chat").length;
 
   return (
     /* Folded, the list must stop claiming the space it is no longer using --
@@ -259,19 +272,30 @@ export function SessionList({
             ))}
             {shown.length === 0 ? (
               <li className="session-empty">
-                {filtering ? "Nothing in this project yet." : "Nothing saved yet."}
+                {filtering
+                  ? "Nothing in this project yet."
+                  : rows.length
+                    /* Not "nothing saved yet", which would be a lie about a
+                       disk holding forty conversations. */
+                    ? "Everything you have is filed into a project."
+                    : "Nothing saved yet."}
               </li>
             ) : null}
           </ul>
 
+          {/* Named for what it actually shows. "Everything" was true when this
+              list carried filed work too, and is now the one thing the other
+              side of this button is not. */}
           {filter ? (
             <button type="button" className="session-scope" onClick={() => setAll((v) => !v)}>
-              {all ? `Only ${filter.name}` : "Everything →"}
+              {all ? `Only ${filter.name}` : "Not in a project →"}
             </button>
           ) : null}
 
           {/* Conversations only, and it says so. Three kinds of work behind one
-              blunt button is how somebody loses a review they meant to keep. */}
+              blunt button is how somebody loses a review they meant to keep --
+              and the count is of the loose ones, which is exactly what the
+              list above is showing and exactly what main will delete. */}
           {chats > 0 && !filtering ? (
             confirming ? (
               <div className="session-confirm">

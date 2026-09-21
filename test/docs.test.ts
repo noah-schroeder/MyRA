@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { dirname, posix, win32 } from "node:path";
+import { tmpdir } from "node:os";
 import {
-  extensionOf, FORMATS, isReadable, outputName, pandocArgs, resolveFormat, safeRelativePath, slugName,
-  withExtension,
+  baseName, extensionOf, FORMATS, isReadable, looksAbsolute, looksLikeEscape, outputName, pandocArgs,
+  resolveFormat,
+  safeRelativePath, slugName, withExtension,
 } from "../src/core/documents/formats.ts";
 
 test("formats are named the several ways a model will name them", () => {
@@ -54,17 +57,102 @@ test("conversions never run in place", () => {
   assert.equal(args[args.length - 1], "/w/report.docx", "the source is the last argument");
 });
 
-test("a path that leaves the documents folder is refused", () => {
-  assert.equal(safeRelativePath("memo.docx"), "memo.docx");
-  assert.equal(safeRelativePath("drafts/memo.docx"), "drafts/memo.docx");
+/**
+ * Names that must never survive, on any platform MyRA ships to.
+ *
+ * Kept as one array because the composition test below re-uses it: a row added
+ * here is automatically checked against both path implementations.
+ */
+const ATTACKS: [string, string][] = [
+  ["posix traversal", "../../.ssh/id_rsa"],
+  ["traversal hidden by normalisation", "drafts/../../out.docx"],
+  ["climb that returns inside", "drafts/../memo.docx"],
+  ["empty", ""],
+  ["whitespace", "   "],
+  ["NUL", "a\0b"],
+  ["win32 traversal", "..\\..\\outside\\secret.md"],
+  ["win32 traversal, mixed separators", "drafts/..\\..\\outside\\secret.md"],
+  ["backslash anywhere", "a\\b.md"],
+  ["drive letter", "C:/Windows/System32/x.md"],
+  ["drive-relative", "C:x.md"],
+  ["UNC share", "\\\\server\\share\\x.md"],
+  ["extended-length prefix", "\\\\?\\C:\\x.md"],
+  ["NTFS alternate data stream", "notes.md:payload"],
+  ["trailing space after a climb", ".. "],
+  ["trailing dot", "notes.md."],
+  ["trailing space on a directory segment", "drafts /notes.md"],
+  ["trailing dot on a directory segment", "drafts./notes.md"],
+  ["reserved device", "NUL"],
+  ["reserved device with an extension", "con.txt"],
+  ["reserved device, lowercased", "lpt1.md"],
+  ["reserved device in a subdirectory", "drafts/aux.docx"],
+];
+
+const LEGITIMATE = ["memo.docx", "drafts/memo.docx", "a/b/c/deep.md", "Résumé 2026.odt", "notes.v2.md"];
+
+test("a path that leaves the documents folder is refused, on every platform we ship to", () => {
+  for (const name of LEGITIMATE) {
+    assert.equal(safeRelativePath(name), name, `${name} is an ordinary name`);
+  }
   assert.equal(safeRelativePath("/etc/passwd"), "etc/passwd", "a leading slash is stripped, not honoured");
-  assert.equal(safeRelativePath("../../.ssh/id_rsa"), undefined);
-  assert.equal(safeRelativePath("drafts/../../out.docx"), undefined);
-  // Even when the climb would come back inside: nobody types that on purpose.
-  assert.equal(safeRelativePath("drafts/../memo.docx"), undefined);
-  assert.equal(safeRelativePath(""), undefined);
-  assert.equal(safeRelativePath("   "), undefined);
-  assert.equal(safeRelativePath("a\0b"), undefined);
+  assert.equal(safeRelativePath("./memo.docx"), "memo.docx");
+  /* Trailing whitespace on the NAME is trimmed, as it always has been -- the
+     result is an ordinary name inside the jail. What must not be trimmed away
+     is whitespace on an inner segment, where win32 stripping it at open time
+     turns `drafts ` into a different directory; that is an ATTACKS row. */
+  assert.equal(safeRelativePath("notes.md "), "notes.md");
+
+  for (const [label, name] of ATTACKS) {
+    assert.equal(safeRelativePath(name), undefined, `${label}: ${JSON.stringify(name)} was accepted`);
+  }
+});
+
+test("an absolute path is absolute in all three spellings", () => {
+  for (const name of ["/etc/passwd", "\\windows", "\\\\server\\share", "\\\\?\\C:\\x", "C:\\x", "c:/x"]) {
+    assert.ok(looksAbsolute(name), `${JSON.stringify(name)} should read as absolute`);
+  }
+  for (const name of ["memo.docx", "drafts/memo.docx", "..", "a:b/c".slice(2)]) {
+    assert.ok(!looksAbsolute(name), `${JSON.stringify(name)} should read as relative`);
+  }
+});
+
+/**
+ * The property, checked against the real win32 implementation.
+ *
+ * This is how a Windows jail is tested on a Linux CI: `path.win32` is always
+ * available, so the actual Windows resolution algorithm runs here. Do NOT
+ * mock `process.platform` -- that tests a guess about what win32 does, which
+ * is exactly the mistake that let `..\..\x` through in the first place.
+ *
+ * What it cannot cover is realpath and symlinks, which are filesystem
+ * behaviour and untestable cross-platform. That is the argument for pushing
+ * every rule decidable by string down into safeRelativePath, where it is
+ * checkable everywhere, and leaving resolveInJail only the part that must ask
+ * the disk.
+ */
+test("whatever safeRelativePath accepts stays inside the jail under both path implementations", () => {
+  for (const [, name] of [...ATTACKS.map((a) => a), ...LEGITIMATE.map((n) => ["ok", n] as [string, string])]) {
+    const rel = safeRelativePath(name);
+    if (rel === undefined) continue;
+    assert.ok(
+      win32.resolve("C:\\jail", rel).startsWith("C:\\jail\\"),
+      `${JSON.stringify(name)} -> ${JSON.stringify(rel)} escapes under win32`,
+    );
+    assert.ok(
+      posix.resolve("/jail", rel).startsWith("/jail/"),
+      `${JSON.stringify(name)} -> ${JSON.stringify(rel)} escapes under posix`,
+    );
+  }
+});
+
+test("the last component of a path the OS produced, on either platform", () => {
+  assert.equal(baseName("/a/b/c.md"), "c.md");
+  assert.equal(baseName("C:\\a\\b\\c.md"), "c.md");
+  assert.equal(baseName("c.md"), "c.md");
+  // A conversion names its own output; getting this wrong on Windows meant
+  // outputName treated the whole path as the stem.
+  assert.equal(outputName("C:\\jail\\report.docx", FORMATS["md"]!), "report.md");
+  assert.equal(extensionOf("C:\\a\\b.TXT"), "txt");
 });
 
 test("a title becomes a filename that will not surprise anyone", () => {
@@ -94,18 +182,15 @@ test("scratch space is inside the workspace, never /tmp", async () => {
   // so the workspace stays the scratch root.
   const { scratchRoot, workspaceRoot, documentsDir } = await import("../src/core/documents/office.ts");
   assert.ok(scratchRoot().startsWith(workspaceRoot() + "/"), `scratch was ${scratchRoot()}`);
-  assert.ok(!scratchRoot().startsWith("/tmp"));
+  /* Against tmpdir() rather than the literal "/tmp": the suite now points
+     MYRA_WORKSPACE at a temporary directory of its own, so a check for the
+     string would fail on a correct answer. What matters is that scratch is
+     derived from the workspace and is not the OS temp directory itself. */
+  assert.notEqual(scratchRoot(), tmpdir());
+  assert.notEqual(dirname(scratchRoot()), tmpdir(), "scratch must hang off the workspace");
   // And no hidden directories: snap confinement refuses those under $HOME too.
   assert.ok(!scratchRoot().split("/").some((seg: string) => seg.startsWith(".")), scratchRoot());
   assert.ok(!documentsDir().split("/").some((seg: string) => seg.startsWith(".")), documentsDir());
-});
-
-test("the documents folder is the only place these tools reach", async () => {
-  const { inWorkspace, documentsDir, DocsError } = await import("../src/core/documents/office.ts");
-  assert.equal(inWorkspace("memo.docx"), documentsDir() + "/memo.docx");
-  // safeRelativePath refuses these first; inWorkspace is the second lock.
-  assert.throws(() => inWorkspace("../../.ssh/id_rsa"), DocsError);
-  assert.throws(() => inWorkspace("/etc/passwd"), DocsError);
 });
 
 test("a supplied name still gets the extension its format needs", () => {
@@ -124,4 +209,21 @@ test("a supplied name still gets the extension its format needs", () => {
   assert.equal(withExtension("minutes.2026-01-05", "docx"), "minutes.2026-01-05.docx");
   // A different real extension is kept too: nothing in the name is destroyed.
   assert.equal(withExtension("report.txt", "md"), "report.txt.md");
+});
+
+/**
+ * Awkward and escaping are different problems with different answers.
+ *
+ * `safeRelativePath` refuses both, which is right for a tool call. The draft
+ * flow needs the distinction: it has a title to fall back on and a run worth
+ * minutes to lose, so a colon in a model-written heading should become a slug
+ * while a climb stays an error rather than a silent relocation.
+ */
+test("a climb is an escape; an awkward character is not", () => {
+  for (const escaping of ["../x", "a/../../b", "..\\..\\x", "/etc/passwd", "C:\\x", "..", "a/.. /b"]) {
+    assert.ok(looksLikeEscape(escaping), `${JSON.stringify(escaping)} should read as an escape`);
+  }
+  for (const awkward of ["Study: A Review", "notes.md ", "NUL", "a\\b.md", "ordinary.md"]) {
+    assert.ok(!looksLikeEscape(awkward), `${JSON.stringify(awkward)} is awkward, not an escape`);
+  }
 });

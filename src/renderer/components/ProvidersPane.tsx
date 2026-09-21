@@ -126,9 +126,12 @@ export function ProvidersPane({
           <strong>An older single endpoint is still set:</strong> {settings.llm.baseUrl}. It is
           used only when no model is chosen anywhere else. Add it above as a provider, then clear
           it here.{" "}
+          {/* Out of the sentence and onto its own line as a button. This is the
+              action the note exists to offer, and as underlined words at the end
+              of a paragraph it read as part of the explanation. */}
           <button
             type="button"
-            className="link"
+            className="btn btn-sm"
             onClick={() => void patch({ llm: { ...settings.llm, baseUrl: "", model: "" } })}
           >
             Clear it

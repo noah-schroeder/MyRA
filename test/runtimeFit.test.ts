@@ -11,7 +11,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  autoContext, CONTEXT_LADDER, fitModel, kvCacheBytes, largestContext, quantRank,
+  autoContext, CONTEXT_LADDER, fitModel, knownMachine, kvCacheBytes, largestContext, memoryBudget,
+  quantRank,
 } from "../src/core/runtime/fit.ts";
 import type { ModelShape } from "../src/core/runtime/fit.ts";
 
@@ -135,6 +136,120 @@ test("leaves the last of the machine alone, not just the last of the card", () =
   const combined = (SMALL_CARD.vramBytes + SMALL_CARD.ramBytes) * 0.85;
   assert.ok(needed <= combined, `${needed} exceeds the safe share of ${combined}`);
   assert.equal(auto.tokens, 65536);
+});
+
+test("stays on the card wherever that is possible at all", () => {
+  /* The exact shape of the bug this fixed. Fixing shapes without also fixing
+     this would have handed a small model on a big card an enormous window:
+     LFM2.5-2.6B on a 32 GB card, with no VRAM-first budget, picks 128k+ tokens
+     of cache that needs far more than the card holds and spills most of the
+     model itself off it. */
+  const HYBRID: ModelShape = {
+    architecture: "lfm2",
+    layers: 30,
+    embeddingLength: 2048,
+    headCount: 32,
+    headCountKvPerLayer: [0, 0, 8, 0, 0, 8, 0, 0, 0, 8, 0, 0, 8, 0, 0, 8, 0, 0, 8, 0, 0, 8, 0, 0, 8, 0, 0, 0, 0, 0],
+    headCountKv: 8,
+    keyLength: 64,
+    valueLength: 64,
+    contextLength: 131072,
+    hasChatTemplate: true,
+  };
+  const bigCard = { vramBytes: 32 * GIB, ramBytes: 32 * GIB };
+  const auto = autoContext({ fileBytes: 1.6 * GIB, machine: bigCard, shape: HYBRID });
+  const needed = fitModel(1.6 * GIB, bigCard, { shape: HYBRID, context: auto.tokens! }).requiredBytes;
+  assert.ok(
+    needed <= bigCard.vramBytes * 0.85,
+    `${needed} spills past the card's own budget of ${bigCard.vramBytes * 0.85}`,
+  );
+  assert.ok(auto.why.includes("graphics card") || auto.why.includes("trained for"), auto.why);
+});
+
+test("a large model on a large card still fits within the card's own budget, not just the machine's", () => {
+  /* The measured case from the report this exists to fix: Qwen3.8-27B on a
+     32 GB card. Without the VRAM-first stage this picks 131072 or 262144,
+     which needs 48-80 GB and is guaranteed to spill; with it the answer stays
+     inside what the card alone can hold. */
+  const bigCard = { vramBytes: 32 * GIB, ramBytes: 32 * GIB };
+  const auto = autoContext({ fileBytes: 15.2 * GIB, machine: bigCard, shape: QWEN });
+  const needed = fitModel(15.2 * GIB, bigCard, { shape: QWEN, context: auto.tokens! }).requiredBytes;
+  assert.ok(needed <= bigCard.vramBytes * 0.85, `${needed} exceeds the card's own budget`);
+  // 131072 needs 28.6 GiB, over the card's 27.2 GiB budget -- so it must have
+  // stopped short of it, the way the old vram+ram budget never would have.
+  assert.ok(auto.tokens! < 131072, `expected a window short of what would spill, got ${auto.tokens}`);
+});
+
+test("allowOffload opts back into the old vram+ram budget, deliberately", () => {
+  /* A wide, low-GQA shape so the KV cache grows fast enough with context to
+     show the effect clearly: room for 16k on the card alone, room for 131k
+     once the processor's memory is allowed to help hold it. */
+  const wide: ModelShape = {
+    architecture: "test", layers: 48, headCount: 32, headCountKv: 16,
+    keyLength: 128, valueLength: 128, contextLength: 2_000_000, hasChatTemplate: true,
+  };
+  const card = { vramBytes: 16 * GIB, ramBytes: 64 * GIB };
+  const restrained = autoContext({ fileBytes: 4 * GIB, machine: card, shape: wide });
+  const spilling = autoContext({ fileBytes: 4 * GIB, machine: card, shape: wide, allowOffload: true });
+
+  assert.equal(restrained.tokens, 16384);
+  assert.match(restrained.why, /graphics card/);
+  const restrainedNeeds = fitModel(4 * GIB, card, { shape: wide, context: restrained.tokens! }).requiredBytes;
+  assert.ok(restrainedNeeds <= card.vramBytes * 0.85, "restrained must not spill off the card");
+
+  assert.equal(spilling.tokens, 131072);
+  assert.match(spilling.why, /spilling off the graphics card/);
+  const spillingNeeds = fitModel(4 * GIB, card, { shape: wide, context: spilling.tokens! }).requiredBytes;
+  assert.ok(spillingNeeds > card.vramBytes * 0.85, "this is meant to demonstrate an actual spill");
+  assert.ok(spillingNeeds <= (card.vramBytes + card.ramBytes) * 0.85);
+
+  assert.ok(spilling.tokens! > restrained.tokens!, "allowOffload should be able to pick a longer window");
+});
+
+test("memoryBudget sums to exactly what it reports as the total", () => {
+  const card = { vramBytes: 16 * GIB, ramBytes: 64 * GIB };
+  const budget = memoryBudget(FILE, card, { shape: QWEN, context: 32768 });
+  assert.equal(budget.weightsBytes + budget.cacheBytes + budget.overheadBytes, budget.totalBytes);
+  assert.equal(budget.budgetBytes - budget.totalBytes, budget.headroomBytes);
+});
+
+test("memoryBudget's headroom goes negative rather than the segments rescaling", () => {
+  // Deliberately more than the card can hold, so the bar this feeds has to
+  // run past its own end -- the rule the CSS this draws with is built on.
+  const tinyCard = { vramBytes: 2 * GIB, ramBytes: 64 * GIB };
+  const budget = memoryBudget(FILE, tinyCard, { shape: QWEN, context: 32768 });
+  assert.ok(budget.headroomBytes < 0, "an 11 GB file on a 2 GB card must not fit");
+  assert.equal(budget.budgetBytes, tinyCard.vramBytes, "drawn against VRAM alone by default");
+});
+
+test("memoryBudget agrees with fitModel's own breakdown, by construction", () => {
+  // The whole point of building it as a projection: a bar and a load must
+  // never be able to disagree about what a configuration costs.
+  const card = { vramBytes: 16 * GIB, ramBytes: 64 * GIB };
+  const fit = fitModel(FILE, card, { shape: QWEN, context: 65536 });
+  const budget = memoryBudget(FILE, card, { shape: QWEN, context: 65536 });
+  assert.equal(budget.cacheBytes, fit.cacheBytes);
+  assert.equal(budget.overheadBytes, fit.overheadBytes);
+  assert.equal(budget.totalBytes, fit.requiredBytes);
+  assert.equal(budget.verdict, fit.verdict);
+});
+
+test("memoryBudget draws against VRAM alone unless allowOffload is set", () => {
+  const card = { vramBytes: 16 * GIB, ramBytes: 64 * GIB };
+  const restrained = memoryBudget(FILE, card, { shape: QWEN, context: 32768 });
+  const spilling = memoryBudget(FILE, card, { shape: QWEN, context: 32768, allowOffload: true });
+  assert.equal(restrained.budgetBytes, 16 * GIB);
+  assert.equal(spilling.budgetBytes, 16 * GIB + 64 * GIB);
+});
+
+test("knownMachine tells a probe that has not answered from a real machine with none", () => {
+  // The renderer's `useState<Machine>({ ramBytes: 0 })` initialiser, standing
+  // in for `lemonadeInfo()` before it resolves -- and forever, if it fails.
+  assert.equal(knownMachine({ ramBytes: 0 }), false);
+  assert.equal(knownMachine({ ramBytes: 32 * GIB }), true);
+  // VRAM alone counts too: a machine could in principle report a card with no
+  // RAM figure attached, and that is still a real answer, not an unanswered one.
+  assert.equal(knownMachine({ ramBytes: 0, vramBytes: 16 * GIB }), true);
 });
 
 test("never goes above what the model was trained for", () => {

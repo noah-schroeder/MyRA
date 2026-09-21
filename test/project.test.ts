@@ -15,7 +15,8 @@ import { describe, it } from "node:test";
 
 import {
   addMembers, assertProjectId, byNewest, countsOf, hasMember, kindLabel, newProject, ownerOf,
-  parseProject, projectId, pruneMembers, removeMembers, sameMember, summaryOf,
+  parseProject, perProjectLimit, projectId, pruneMembers, railRows, removeMembers, sameMember,
+  summaryOf,
   type Member, type Project,
 } from "../src/core/projects/project.ts";
 
@@ -161,6 +162,52 @@ describe("the rail's order", () => {
 
   it("counts what is in each", () => {
     assert.equal(summaryOf(project("a", [chat("c"), paper("p")])).items, 2);
+  });
+});
+
+describe("what the rail shows", () => {
+  const row = (project: string, ref: string) => ({ project, ref });
+
+  it("shows a conversation that is in no project, which is most of them", () => {
+    /* The ordinary way to use the app: no project open, just chatting. That
+       conversation is in this list whether or not a project exists at all. */
+    const rows = [row("", "just-chatting"), row("p1", "filed")];
+    assert.deepEqual(railRows(rows).map((r) => r.ref), ["just-chatting"]);
+    assert.deepEqual(railRows([row("", "a"), row("", "b")]).map((r) => r.ref), ["a", "b"]);
+  });
+
+  it("shows one project's work when a project is named, and only that one's", () => {
+    const rows = [row("", "loose"), row("p1", "mine"), row("p2", "theirs")];
+    assert.deepEqual(railRows(rows, "p1").map((r) => r.ref), ["mine"]);
+  });
+
+  it("puts every row in exactly one of the two groups", () => {
+    /* The property the delete button rests on: nothing is in both, so the
+       broom under the loose list cannot reach filed work. */
+    const rows = [row("", "loose"), row("p1", "filed")];
+    for (const r of rows) {
+      const inLoose = railRows(rows).includes(r);
+      const inProject = r.project ? railRows(rows, r.project).includes(r) : false;
+      assert.equal(inLoose !== inProject, true, `${r.ref} is in both groups or neither`);
+    }
+  });
+});
+
+describe("the rail's limit", () => {
+  const row = (project: string, ref: string) => ({ project, ref });
+
+  it("is counted per project, so filed work cannot crowd out loose work", () => {
+    /* The rail draws one group at a time -- what is in no project, or one
+       project's own. A limit across the whole list would let three items
+       filed this morning push out every loose conversation in a list that was
+       never going to show them. */
+    const rows = [row("p1", "a"), row("p1", "b"), row("p1", "c"), row("", "loose")];
+    assert.deepEqual(perProjectLimit(rows, 2).map((r) => r.ref), ["a", "b", "loose"]);
+  });
+
+  it("keeps the order it was given, which is the order it was sorted in", () => {
+    const rows = [row("", "newest"), row("p1", "filed"), row("", "older")];
+    assert.deepEqual(perProjectLimit(rows, 5).map((r) => r.ref), ["newest", "filed", "older"]);
   });
 });
 

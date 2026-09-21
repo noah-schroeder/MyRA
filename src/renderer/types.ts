@@ -12,6 +12,7 @@ import type { ForeignModel } from "../core/runtime/foreign.ts";
 import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
 import type { LoadedModel } from "../core/runtime/lemonade.ts";
 import type { ModelOptions } from "../core/runtime/modelOptions.ts";
+import type { AutoContext, ModelShape } from "../core/runtime/fit.ts";
 export type { RunFootprint } from "../core/research/run.ts";
 import type { RunFootprint } from "../core/research/run.ts";
 import type { RegistrySource, RepoVariants } from "../core/runtime/registry.ts";
@@ -200,6 +201,8 @@ export interface Settings {
   embeddings: EndpointSettings;
   /** Where Zotero's library is, when MyRA cannot work it out. Empty = find it. */
   zoteroDataDir: string;
+  /** When the stored Hugging Face token is actually sent to the model server. */
+  hfTokenUse: "gated" | "always";
   workspaceRoot: string;
   vaultRoot: string;
   vaultWriteSubdir: string;
@@ -729,8 +732,21 @@ export interface MyRAApi {
     /** How many experts a MoE model routes between, when known. Informative:
      *  it decides whether the MoE-CPU slider is offered, not what it goes to. */
     experts?: number;
+    /** The full shape, when known, for the memory bar to size a context against. */
+    shape?: ModelShape;
+    /** The weights on disk, in bytes -- the other half the bar needs. */
+    sizeBytes?: number;
+    /** The `ctx_size` MyRA itself last wrote, if it did. See `ctxIsOurs`. */
+    autoCtxSize?: number;
+    /** Whether this model is allowed to spill off the card for a longer window. */
+    allowOffload?: boolean;
   }>;
   setIgnoreSuggested(model: string | undefined, ignore: boolean): Promise<{ ok: boolean }>;
+  setAllowOffload(model: string | undefined, allow: boolean): Promise<{ ok: boolean }>;
+  /** What MyRA would size this model's context to, without writing it. */
+  modelContextPreview(model?: string): Promise<{ ok: boolean; error?: string; auto?: AutoContext }>;
+  /** Writes exactly what the preview above showed. */
+  modelContextApply(model?: string): Promise<{ ok: boolean; error?: string; auto?: AutoContext }>;
   /** The build each backend is on, and the one Lemonade shipped with. */
   engineVersions(): Promise<{
     ok: boolean;
@@ -763,12 +779,6 @@ export interface MyRAApi {
   }>;
   lemonadeLoad(name: string): Promise<{ ok: boolean; error?: string; loaded?: string }>;
   lemonadeUnload(): Promise<{ ok: boolean; error?: string }>;
-  lemonadePull(
-    name: string,
-    checkpoint?: string,
-  ): Promise<{ ok: boolean; error?: string; models?: InstalledModel[] }>;
-  /** Live progress for the download in flight; returns an unsubscribe. */
-  onPullProgress(fn: (p: PullProgress & { name: string }) => void): () => void;
   reviewExtract(
     name: string,
     bytes: ArrayBuffer,
@@ -853,9 +863,14 @@ export interface MyRAApi {
   ): Promise<{ ok: boolean; error?: string; variants?: RepoVariants }>;
   registryPull(
     name: string,
+    /** Empty for a model the daemon already has in its own catalogue. */
     checkpoint: string,
     source: RegistrySource,
     recipe?: string,
+    /** Whether the registry itself reports this repository as gated -- false
+        when that is simply not known, such as a catalogue entry with no
+        resolvable repository, never guessed from anything else. */
+    gated?: boolean,
     /* Resolves once the transfer has STARTED, carrying its id. It used to
        resolve when the bytes finished arriving, which is why a download could
        not outlive the component awaiting it. */
@@ -1141,40 +1156,15 @@ export interface RuntimeState {
   };
 }
 
-export type CacheType = "f16" | "q8_0" | "q4_0";
-
-export interface LaunchSettings {
-  /** `?: T | undefined`, not `?: T`: undefined is the value that means "auto",
-   *  and a patch has to be able to send it. */
-  context?: number | undefined;
-  slots: number;
-  cacheType: CacheType;
-  gpuLayers?: number | undefined;
-  extraArgs?: string | undefined;
-}
-
-export interface LaunchBudget {
-  /** True when the context was left for llama.cpp's --fit to size. */
-  autofit: boolean;
-  weightsBytes: number;
-  cacheBytes: number;
-  estimated: boolean;
-  overheadBytes: number;
-  totalBytes: number;
-  budgetBytes: number;
-  headroomBytes: number;
-  verdict: ModelFit["verdict"];
-  context: number;
-}
-
-export interface LaunchPlan {
-  settings: LaunchSettings;
-  budget: LaunchBudget;
-  /** The tuning half of the command line, shown verbatim. */
-  args: string[];
-  /** Set when an extra argument was rejected; the budget is still valid. */
-  error?: string;
-}
+/*
+ * `LaunchSettings` / `LaunchBudget` / `LaunchPlan` / `CacheType` used to live
+ * here, describing a launch command MyRA built itself. Deleted along with
+ * their producer, `core/runtime/launch.ts`, in "Hand the whole inference
+ * stack to Lemonade" -- the daemon builds the launch command now. Their
+ * replacement is `MemoryBudget` in `core/runtime/fit.ts`, which draws the
+ * same kind of bar against a model's real GGUF shape rather than a plan MyRA
+ * no longer makes.
+ */
 
 export interface LocalModel {
   path: string;

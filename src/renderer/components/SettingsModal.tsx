@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type {
   AudioOption, AudioRole, AudioSource, PrivacyReport, Settings, UpdateCheckResult, VaultStatus,
 } from "../types.ts";
@@ -255,6 +255,56 @@ function Review({
   );
 }
 
+/**
+ * Local state for a folder or subdirectory box bound to a setting whose
+ * sanitiser can refuse what was typed -- committed on blur and on unmount,
+ * never on every keystroke, and resynced from the stored value after EVERY
+ * completed commit, not merely one that changed it.
+ *
+ * The Zotero data folder was the first box rewritten for this and its own
+ * comment records the underlying reason: a setting validated on the way in
+ * (`core/roots.ts`, `sanitiseSubdir`'s `safeRelativePath`) replaces an
+ * unusable value with whatever was already stored, so a box bound straight to
+ * the setting is rejected and echoed back on every keystroke and cannot be
+ * typed into at all.
+ *
+ * That first rewrite still keyed its resync effect on the stored value
+ * itself, which is not enough: a REFUSED save leaves the stored value
+ * unchanged by definition, so the effect never re-fires and the box goes on
+ * showing the refused text for the life of the component -- exactly the
+ * failure the rewrite was for, one layer further in. A counter bumped after
+ * every commit settles, whether or not the stored value actually moved, is
+ * what makes the resync fire on a refusal too.
+ */
+function useCommittedPath(
+  value: string,
+  save: (next: string) => Promise<unknown>,
+): { dir: string; setDir: (v: string) => void; commit: (next: string) => void } {
+  const [dir, setDir] = useState(value);
+  const [saves, setSaves] = useState(0);
+  const commitRef = useRef<() => void>(() => {});
+
+  const commit = (next: string): void => {
+    setDir(next);
+    if (next === value) return;
+    void save(next).finally(() => setSaves((n) => n + 1));
+  };
+  // Reassigned every render, so the unmount effect below -- which runs once,
+  // with a closure fixed at mount -- still sees the latest `dir` through it.
+  commitRef.current = () => commit(dir);
+
+  // Closing the panel with the cursor still in the box fires no blur, and
+  // what was just typed would otherwise be thrown away.
+  useEffect(() => () => commitRef.current(), []);
+
+  // Resynced after every completed commit, including a refused one: the
+  // stored value may not have moved, but the box still has to give up
+  // whatever was typed and show what is actually on record.
+  useEffect(() => setDir(value), [value, saves]);
+
+  return { dir, setDir, commit };
+}
+
 /* ----------------------------------------------------------------- library */
 
 /**
@@ -295,14 +345,17 @@ function Library({
   // is should not open saying nothing and wait to be asked.
   useEffect(() => void check(), []);
 
+  const { dir, setDir, commit } = useCommittedPath(
+    settings.zoteroDataDir,
+    (next) => patch({ zoteroDataDir: next }).then(check),
+  );
+
   const choose = async (): Promise<void> => {
     const picked = await window.myra.chooseDirectory({
       title: "The folder holding zotero.sqlite",
       current: settings.zoteroDataDir,
     });
-    if (!picked) return;
-    await patch({ zoteroDataDir: picked });
-    await check();
+    if (picked) commit(picked);
   };
 
   const api = status?.api;
@@ -344,9 +397,10 @@ function Library({
         </span>
         <div className="folder-row">
           <input
-            value={settings.zoteroDataDir}
+            value={dir}
             placeholder="Found automatically"
-            onChange={(e) => void patch({ zoteroDataDir: e.target.value })}
+            onChange={(e) => setDir(e.target.value)}
+            onBlur={() => commit(dir)}
           />
           <button type="button" onClick={() => void choose()}>
             Choose…
@@ -359,10 +413,7 @@ function Library({
           {busy ? "Checking…" : "Check again"}
         </button>
         {settings.zoteroDataDir ? (
-          <button
-            type="button"
-            onClick={() => void patch({ zoteroDataDir: "" }).then(check)}
-          >
+          <button type="button" onClick={() => commit("")}>
             Clear, and find it automatically
           </button>
         ) : null}
@@ -410,9 +461,19 @@ const SOURCE_WORDS: Record<string, string> = {
 /* ----------------------------------------------------------------- folders */
 
 const FOLDERS = [
-  { key: "vaultRoot", label: "Vault", hint: "Where reports and notes are filed. Your Obsidian vault, if you have one." },
-  { key: "workspaceRoot", label: "Documents", hint: "Where drafts and conversions are written." },
-  { key: "meetingsRoot", label: "Recordings", hint: "Where meeting audio is kept until it is transcribed." },
+  /* Meeting notes and nothing else, because that is all `filingRoot` joins
+     onto it -- papers, reviews, images and research runs each have their own
+     folder, and a hint reading "reports and notes" sent people looking in here
+     for a research report that was never written to it. */
+  { key: "vaultRoot", label: "Vault", hint: "Where meeting notes are filed. Your Obsidian vault, if you have one. Leave it empty and a meeting's notes stay in the meeting's own folder." },
+  /* Named as the parent it is. `documentsDir()` is `<this>/documents`, so
+     somebody who picks ~/Papers finds their drafts in ~/Papers/documents and
+     has no way to tell from here that they should have looked there. */
+  { key: "workspaceRoot", label: "Documents", hint: "Holds the documents folder MyRA writes drafts and conversions into, and a scratch folder for the conversions themselves. That documents folder is the only place the document tools can read or write." },
+  /* The directory is the record -- see meetings/store.ts. Calling it the place
+     audio waits to be transcribed describes the first minute of its life and
+     none of the rest. */
+  { key: "meetingsRoot", label: "Meetings", hint: "One folder per meeting, holding the recording and the transcript and notes made from it. Nothing is moved out of it afterwards." },
   /* The images folder is settable for the same reason the other three are: the
      page invites you to open it in a file manager and keep what is in it, and a
      folder you are told to treat as yours that can only be moved by editing
@@ -434,8 +495,28 @@ function Folders({
     if (picked) await patch({ [key]: picked } as Partial<Settings>);
   };
 
+  /* `meetingReportDir` goes through `sanitiseSubdir` -> `safeRelativePath`,
+     which refuses a segment with a trailing dot or space, a colon, a
+     backslash, or a reserved Windows name -- so a box bound straight to the
+     setting reverts mid-word the moment a keystroke lands on one of those,
+     the same unusable-field failure the Zotero box above was rewritten for. */
+  const report = useCommittedPath(
+    settings.meetingReportDir,
+    (next) => patch({ meetingReportDir: next }),
+  );
+
   return (
     <div className="pane">
+      {/* Said here because the refusal is otherwise silent: an unusable choice
+          falls back to the folder that was already set (core/roots.ts), so the
+          box simply does not change and nothing says why. */}
+      <p className="pane-lead">
+        Where MyRA keeps what it makes. Each of these is a boundary as well as a location —
+        it is what the matching feature is allowed to write inside — so your home folder
+        itself, a filesystem root, and MyRA&rsquo;s own configuration folder are refused, and
+        choosing one leaves the folder unchanged.
+      </p>
+
       {FOLDERS.map((f) => (
         <label key={f.key} className="folder">
           {f.label}
@@ -456,8 +537,9 @@ function Folders({
           beside the recording.
         </span>
         <input
-          value={settings.meetingReportDir}
-          onChange={(e) => void patch({ meetingReportDir: e.target.value })}
+          value={report.dir}
+          onChange={(e) => report.setDir(e.target.value)}
+          onBlur={() => report.commit(report.dir)}
         />
       </label>
 
@@ -931,11 +1013,18 @@ function Audio({
         />
         <span>Also record the system's output during meetings</span>
       </label>
+      {/* Rewritten against what the code does. This described a screen-share
+          picker and a video track thrown away afterwards, and there is neither:
+          the renderer asks for `video: false`, and main answers the request
+          with the output sink's monitor and refuses outright any request that
+          did ask for video (setDisplayMediaRequestHandler in main/index.ts,
+          with useSystemPicker off). Nobody is ever asked to choose a window. */}
       <p className="hint">
         This is what separates the speakers. A microphone alone records the person wearing the
         headphones and nobody else, so a remote meeting transcribes to one side of the
-        conversation. You will be asked which window or screen to share; the video is discarded
-        immediately and only the audio is kept.
+        conversation. MyRA records what your speakers are playing, directly — no window or
+        screen is captured, nothing is asked of you when a meeting starts, and a request for
+        video is refused rather than answered.
       </p>
 
       <label>
@@ -1005,16 +1094,24 @@ function Appearance({
           still answering. Quit from the tray icon. Turn this off and closing the window quits
           MyRA as it used to.
         </p>
-        {/* Said plainly rather than left as a checkbox that does nothing:
-            GNOME shows no status area unless an AppIndicator extension is
-            installed, and MyRA closes normally when there is nowhere to go. */}
+        {/* Said plainly rather than left as a checkbox that does nothing, and
+            said as what was measured. `trayAvailable` is statusItemRegistered,
+            which asks the bus whether OUR icon is published -- not whether the
+            desktop could host one. The difference is the whole reason that
+            function exists: on Ubuntu GNOME with the watcher running and the
+            extension installed, Electron publishes nothing and the answer is
+            still no. Promising the apt line would fix it would be promising
+            something core/runtime/statusArea.ts records as not fixing it. */}
         {trayOk === false ? (
           <p className="hint note">
-            Your desktop is not showing tray icons, so this has no effect and closing the window
-            quits MyRA — it will not vanish into a tray that is not there. GNOME, Pop!_OS
-            included, needs an extension for this:{" "}
-            <code>sudo apt install gnome-shell-extension-appindicator</code>, then log out and
-            back in. MyRA checks again each time it starts.
+            MyRA&rsquo;s tray icon did not reach your desktop&rsquo;s status area, so this has no
+            effect and closing the window quits MyRA — it will not vanish into a tray that is not
+            there. Usually that is a desktop with no status area at all: GNOME, Pop!_OS included,
+            needs <code>sudo apt install gnome-shell-extension-appindicator</code> and a log out
+            and back in. It is worth trying, but it is not a guarantee — this has also been
+            measured with that extension installed and working, where the icon is published by
+            nothing and no setting here can change it. MyRA asks again each time it starts, and
+            whenever it cannot publish an icon, closing the window simply quits.
           </p>
         ) : null}
       </fieldset>
@@ -1051,7 +1148,10 @@ function Appearance({
 }
 
 const MODES = [
-  { value: "guarded", label: "Guarded", hint: "Reading is silent; writing a document is silent too, and every write is jailed to your documents folder. The default." },
+  /* "your documents folder" was only ever two thirds of it: the task tools
+     write too, into MyRA's own configuration folder, and a research run writes
+     its working files. Each is jailed; none of them is the documents folder. */
+  { value: "guarded", label: "Guarded", hint: "Reading is silent, and so is writing — every write is jailed to the folder that owns it. The default. A tool able to act outside those folders would prompt; none in this build can." },
   { value: "manual", label: "Ask every time", hint: "Confirm every tool call, searches included. Thorough, and noisy: a research run becomes a wall of prompts." },
   { value: "yolo", label: "Never ask", hint: "Nothing prompts. With this tool set that is the same as Guarded, and it stays honest if a riskier tool is ever added." },
 ] as const;
@@ -1168,11 +1268,53 @@ function Permissions({
         </label>
       ))}
 
+      {/*
+        * Written from the registry rather than from memory.
+        *
+        * This said "the open web, read-only" for searching, which stopped being
+        * true when SearXNG went: every provider in this build is a scholarly
+        * database and there is no general-web backend at all, so a search is
+        * one of four named APIs. It also listed two of the four things the
+        * tools touch -- the Zotero library and MyRA's own task list were
+        * missing, and the task list is the one that writes.
+        */}
       <h3>What the tools can reach</h3>
       <ul className="plain">
-        <li>Searching and reading sources: the open web, read-only.</li>
-        <li>Reading and writing documents: your documents folder only, checked on every call.</li>
-        <li>Nothing can send data anywhere. Every tool reads; none posts.</li>
+        <li>
+          Searching: OpenAlex and arXiv, plus PubMed and CORE once you have added a key for
+          them. This build has no general web-search backend, so a search is always one of
+          those four.
+        </li>
+        <li>
+          Reading a page: any http(s) address the model names, read-only — except an address
+          on this machine or your own network, which is refused before the request is made.
+        </li>
+        <li>
+          Your Zotero library: read-only, through Zotero&rsquo;s own local connection or from a
+          snapshot of the library file — never the file Zotero is using.
+        </li>
+        <li>
+          Documents: the <code>documents</code> folder inside the one set under Folders, and
+          nothing outside it. Every path is resolved and re-checked on every call.
+        </li>
+        <li>
+          MyRA&rsquo;s own task list, which is a folder of files in MyRA&rsquo;s configuration
+          folder. Not your calendar, and nothing another program keeps.
+        </li>
+        {/* Named exactly, because it is the one folder here the Folders tab
+            does not set: researchRoot() is a fixed path unless
+            MYRA_RESEARCH_ROOT overrides it, so a moved Documents folder does
+            not take research runs with it. */}
+        <li>
+          A research run&rsquo;s own folder, one per run, in{" "}
+          <code>~/Documents/myra/research</code> — its sources and working files go there and
+          nowhere else. This is the one folder the Folders tab does not move.
+        </li>
+        <li>
+          No tool sends anything. Every request one makes is a fetch: what leaves is a search
+          query, or the address of a page to read. Your documents, transcripts and conversations
+          are not something a tool can put on the network.
+        </li>
       </ul>
     </div>
   );
@@ -1225,8 +1367,15 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
               {updateCheck.url ? (
                 <>
                   {" "}
-                  <button type="button" onClick={() => void window.myra.openExternal(updateCheck.url!)}>
-                    See what changed
+                  {/* Classed, like the button that found the release. Bare, it
+                      had no rule at all and drew a default browser button --
+                      the failure the .link rule's own comment describes. */}
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void window.myra.openExternal(updateCheck.url!)}
+                  >
+                    See what changed ↗
                   </button>
                 </>
               ) : null}
@@ -1340,8 +1489,9 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
           <li>PDF text extraction: {engines.pdftotext ? "available" : "not found"}</li>
           {!engines.pandoc ? (
             <li className="warning">
-              Without pandoc, documents can only be written as Markdown. Everything else —
-              meetings, research, chat — works as normal.
+              Without pandoc, documents can only be written as Markdown — plain text, HTML, Word,
+              OpenDocument and PDF all pass through it — and a Word or OpenDocument file cannot be
+              read back either. Everything else — meetings, research, chat — works as normal.
               {/* The setup screen installs this on first run; this is the way back
                   for anyone who skipped it, or whose first attempt failed. */}
               <button
@@ -1363,10 +1513,16 @@ function About({ onReplayTutorial }: { onReplayTutorial: () => void }) {
               {installError ? <span className="hint"> {installError}</span> : null}
             </li>
           ) : null}
+          {/* Every PDF in the app goes through pdfToText, not just a research
+              run's: a manuscript dropped into peer review and a paper dropped
+              into the composer are the same call. Naming only research read as
+              "the rest still works", and the rest does not. */}
           {!engines.pdftotext ? (
             <li className="warning">
-              Without poppler, PDFs cannot be read as text. Papers found by research will still
-              be cited, but their full text will not be available.
+              Without poppler, no PDF can be read as text: papers found by research will still be
+              cited but not read, and a PDF dropped into peer review or into a chat message cannot
+              be opened at all. MyRA fetches pandoc for you during setup, but not this one, which
+              your system installs: <code>sudo apt install poppler-utils</code>.
             </li>
           ) : null}
         </ul>

@@ -100,6 +100,22 @@ export function secondsOf(dataBytes: number): number {
   return dataBytes / (RATE * CHANNELS * SAMPLE_BYTES);
 }
 
+/**
+ * The last line before a name becomes a file.
+ *
+ * `meeting.ts` already refuses a track id that is not a name, and gives the
+ * better message for it. This is here because THIS module performs the join
+ * and the open -- the same two-layer habit `meetingDir` and the note saver
+ * have in main/meetings.ts -- so a second caller arriving later cannot open a
+ * path of its own choosing with "w", which creates or truncates.
+ */
+function assertRecordingName(name: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") {
+    throw new Error(`a recording cannot be named ${JSON.stringify(name)}`);
+  }
+  return name;
+}
+
 /** One recording in flight. */
 export class Recorder {
   #handle: FileHandle | undefined;
@@ -145,7 +161,7 @@ export class Recorder {
       this.#owned = true;
     }
 
-    this.#path = join(this.#dir, `${options.name ?? "recording"}.wav`);
+    this.#path = join(this.#dir, `${assertRecordingName(options.name ?? "recording")}.wav`);
     // 0600: audio of a meeting is the most sensitive thing this app produces.
     this.#handle = await open(this.#path, "w", OWNER_ONLY_FILE);
     await this.#handle.write(wavHeader(0), 0, HEADER_BYTES, 0);

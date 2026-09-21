@@ -11,12 +11,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ctxIsOurs,
   effectiveValue,
   fieldsFor,
   isOverridden,
   parseModelOptions,
   patchFrom,
   readContextSize,
+  savedValue,
   type ModelOptions,
 } from "../src/core/runtime/modelOptions.ts";
 
@@ -65,6 +67,35 @@ test("default, saved and effective are kept apart", () => {
   assert.equal(options.resolvedCtxSize, 4096);
   assert.equal(isOverridden(options, "ctx_size"), true);
   assert.equal(isOverridden(options, "llamacpp_backend"), false);
+});
+
+test("savedValue reads only what is actually overridden", () => {
+  const options = parseModelOptions(LLAMACPP);
+  assert.equal(savedValue(options, "ctx_size"), 16384);
+  assert.equal(savedValue(options, "llamacpp_backend"), undefined);
+});
+
+test("ctxIsOurs -- the rule that lets MyRA tell its own write from the user's", () => {
+  /* Nothing overridden: there is nothing to claim or disclaim, and MyRA is
+     free to write whatever it computes. */
+  assert.equal(ctxIsOurs(undefined, undefined), true);
+  assert.equal(ctxIsOurs(undefined, 8192), true);
+
+  /* Overridden, and it is exactly the number MyRA last recorded writing:
+     ours, safe to recompute and overwrite again. */
+  assert.equal(ctxIsOurs(8192, 8192), true);
+
+  /* Overridden to a DIFFERENT number than MyRA recorded -- the user changed it
+     by hand after MyRA wrote 8192, or MyRA's record is stale. Either way this
+     is now the user's value and must never be silently replaced. */
+  assert.equal(ctxIsOurs(16384, 8192), false);
+
+  /* Overridden with no record of MyRA ever writing anything -- a value saved
+     before autoCtxSize existed, or one the user typed with nothing from MyRA
+     in between. Always treated as theirs; MyRA never infers ownership from
+     the number alone (e.g. "it's 8192, so it must be mine"). */
+  assert.equal(ctxIsOurs(8192, undefined), false);
+  assert.equal(ctxIsOurs(16384, undefined), false);
 });
 
 test("the fields offered are the ones the recipe actually has", () => {

@@ -2974,6 +2974,10 @@ p.warning { margin: 0; font-size: 12.5px; }
    is invalid, and because clicking it must not also load several gigabytes. */
 .modelmenu-row { display: flex; align-items: stretch; gap: 2px; }
 .modelmenu-row .modelmenu-item { flex: 1; min-width: 0; }
+/* A glance at the loaded model's own headroom, under its row -- a sibling
+   list item rather than a child of the row, which is a flex LINE of buttons
+   and has no room to grow a bar underneath itself. */
+.modelmenu-active-memory { padding: 0 10px 6px; }
 .modelmenu-default {
   flex: none; font: inherit; font-size: 13px; line-height: 1;
   padding: 0 8px; border: 0; border-radius: var(--radius-sm);
@@ -3073,6 +3077,10 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 
 .cfg-budget { display: flex; flex-direction: column; gap: 9px; }
+/* ContextBudget's own wrapper, around the bar MemoryBar draws -- its own rule
+   rather than nesting inside .cfg-budget, which is MemoryBar's own wrapper and
+   drew the whole legend a second time when the two were the same class. */
+.cfg-context { display: flex; flex-direction: column; gap: 9px; }
 
 /* Segments are a percentage of the machine's memory, not of the total, so a
    configuration that does not fit runs visibly past the end instead of
@@ -3088,6 +3096,9 @@ p.warning { margin: 0; font-size: 12.5px; }
 .cfg-bar.over { border-color: color-mix(in srgb, var(--red) 60%, transparent); }
 .cfg-bar.over .seg-weights { background: var(--red); }
 .cfg-bar.over .seg-cache { background: color-mix(in srgb, var(--red) 55%, transparent); }
+/* The chat bar's dropdown: a glance at whether the loaded model fits, not a
+   form to read. */
+.cfg-bar.compact { height: 6px; }
 
 .cfg-key {
   list-style: none; margin: 0; padding: 0;
@@ -3693,12 +3704,14 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .lem-update-what strong { color: var(--text); font-weight: 620; }
 .lem-update-size { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); margin-right: auto; }
+/* Now a button beside Update rather than underlined text between the versions
+   and it, so this is a modifier on .lem-install: same shape, quieter, and
+   pushed to the right so the two controls do not read as a pair of equals. */
 .lem-update-notes {
-  font-size: 11px; color: var(--text-dim);
-  text-decoration: underline; text-decoration-color: var(--border-hover);
-  text-underline-offset: 3px; white-space: nowrap;
+  margin-left: auto;
+  font-size: 11px;
+  border-color: var(--border);
 }
-.lem-update-notes:hover { color: var(--accent-soft); }
 
 .lem-update-body { display: flex; flex-direction: column; gap: 7px; }
 .lem-update-body p { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }

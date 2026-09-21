@@ -33,6 +33,9 @@ five-minute tour, the app has one built in on first launch.
   of every network request MyRA makes and when.
 - **[Architecture](architecture.html)** — for anyone reading the code or
   reviewing the security model.
+- **[Threat model: what contains the agent](threat-model.html)** — what the
+  agent can and cannot reach, stated with its limits rather than only its
+  guarantees.
 - **[Troubleshooting](troubleshooting.html)** — the setup problems people
   actually hit.
 

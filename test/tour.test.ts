@@ -65,10 +65,30 @@ test("every step's anchor exists in the renderer, and every anchor is used by a 
 });
 
 test("the tour stays inside the budget it was designed to", () => {
-  // "At most 10-15 steps, definitely less-is-more" was the brief. Both ends
-  // are worth pinning: a future edit that quietly grows this into a feature
-  // tour is exactly the failure the brief was written to prevent.
-  assert.ok(TOUR_STEPS.length >= 10 && TOUR_STEPS.length <= 15, `${TOUR_STEPS.length} steps`);
+  // "At most 10-15 steps, definitely less-is-more" was the brief, and the
+  // ceiling was raised once, deliberately: the research bar went from one
+  // step to six, one per rung, because that control is the whole of what a
+  // person is agreeing to and a single step about it was being read as a
+  // difficulty setting. That is the only reason this number has ever moved.
+  // Both ends are still worth pinning -- a future edit that quietly grows
+  // this into a feature tour is exactly the failure the brief was written to
+  // prevent -- so the new ceiling is the tour as it now stands, with no
+  // headroom to drift into.
+  assert.ok(TOUR_STEPS.length >= 10 && TOUR_STEPS.length <= 18, `${TOUR_STEPS.length} steps`);
+});
+
+test("every rung of the research ladder gets its own stop", () => {
+  // The six buttons on the bar, by the name the bar prints on each. Pinned
+  // because the failure is silent in both directions: a rung added to the
+  // ladder with no step leaves the tour describing five of six, and a step
+  // dropped in a tidy-up leaves the control half-explained with nothing
+  // failing. Look up is included though it is not a persisted mode -- it is
+  // a button on the same bar, and a person deciding what MyRA may reach
+  // does not know which of the six the config file happens to store.
+  const ids = new Set(TOUR_STEPS.map((s) => s.id));
+  for (const rung of ["off", "assistant", "zotero", "quick", "deep", "lookup"]) {
+    assert.ok(ids.has(`mode-${rung}`), `no tour step for the "${rung}" rung`);
+  }
 });
 
 test("every step reads as a sentence, for a reader who is not a developer", () => {

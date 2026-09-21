@@ -77,21 +77,34 @@ function DatabaseKeyCard({
       <div className="provider-head">
         <span className="provider-label">{label}</span>
       </div>
+      {/* What MyRA does, not what the API permits. This read "works without a
+          key at 3 requests a second", which is true of NCBI and false of this
+          app: `secret` on a DatabaseInfo means unusable until that secret is
+          set, so resolveProviders drops PubMed from the sweep and reports it as
+          skipped. Somebody reading the old line would have gone looking for
+          PubMed results that were never requested. */}
       <p className="provider-note">
         {covers}
         {secret === "ncbiKey"
-          ? " Works without a key at 3 requests a second; a free NCBI key raises that to 10 — useful on a deep run, which fires several queries in a row."
+          ? " Without a key MyRA does not search PubMed at all — it is dropped from the sweep and named as skipped. NCBI allows 3 requests a second without one and 10 with, and a deep run fires several queries in a row, so MyRA asks for a key rather than being throttled in the middle of one."
           : " CORE requires a key for every request; there is no keyless tier."}
-        {signup ? (
-          <>
-            {" "}
-            <a className="linkish" href={signup} target="_blank" rel="noreferrer">
-              Get a free key
-            </a>
-            .
-          </>
-        ) : null}
       </p>
+
+      {/* A button rather than a link inside the sentence above. Two reasons:
+          it is the one thing to do on this card before there is a key, and a
+          link is easy to read straight past; and it goes through
+          `openExternal`, which is the checked route every other outbound link
+          in the app takes, rather than an <a target="_blank"> relying on the
+          window-open handler to catch it. */}
+      {signup ? (
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => void window.myra.openExternal(signup)}
+        >
+          Get a free key ↗
+        </button>
+      ) : null}
 
       <label className="field">
         <span>API key</span>
