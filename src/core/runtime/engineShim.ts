@@ -54,6 +54,19 @@ export interface ShimSpec {
 }
 
 /**
+ * Whether a value can be interpolated into the shim without escaping it.
+ *
+ * Deliberately narrow: a double quote or a backslash ends or continues the
+ * quoted argument, `$` and a backtick substitute inside double quotes, and a
+ * newline starts a new command outright. A colon is excluded too, because
+ * `--library-path` is colon-separated and a directory containing one would
+ * silently become two.
+ */
+function shellSafe(value: string): boolean {
+  return value !== "" && !/["'`$\\\n\r:]/.test(value);
+}
+
+/**
  * The script that replaces the engine binary.
  *
  * Paths are resolved from `$0` at run time rather than baked in: an engine
@@ -62,10 +75,27 @@ export interface ShimSpec {
  * a directory that no longer exists.
  */
 export function shimScript(name: string, spec: ShimSpec): string {
+  /* Refused rather than escaped. This is the only place in MyRA that builds
+     shell TEXT, and both values interpolated into it come from outside: `name`
+     is a filename read out of Lemonade's engine cache, and `hostDirs` are raw
+     lines parsed from /etc/ld.so.conf. A name or a directory carrying a quote
+     ends the `--library-path "..."` argument and everything after it is a
+     command. Quoting it correctly is a thing this codebase declines to do
+     anywhere else -- llamaArgs.ts refuses a value with a quote in it rather
+     than escaping one -- and an engine binary is not the place to start. */
+  if (!shellSafe(name)) {
+    throw new Error(`refusing to wrap an engine named ${JSON.stringify(name)}`);
+  }
+  /* A dropped host directory is survivable, so these are filtered rather than
+     refused: the bundle and the engine's own directory come first and are the
+     ones that matter, and a malformed ld.so.conf on somebody's machine should
+     not stop their models loading. */
+  const hostDirs = spec.hostDirs.filter(shellSafe);
+
   /* The bundle first, then the engine's own directory, then the host's --
      `--library-path` REPLACES the loader's search rather than adding to it, so
      anything left out here is simply not found. */
-  const path = `$d/${LIBC_DIR}:$d:${spec.hostDirs.join(":")}`;
+  const path = `$d/${LIBC_DIR}:$d:${hostDirs.join(":")}`;
   return [
     "#!/bin/sh",
     SHIM_MARK,

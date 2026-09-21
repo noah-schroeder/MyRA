@@ -22,7 +22,8 @@ import { ipcMain, shell } from "electron";
 import type { ConfigStore } from "../core/config.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import {
-  addMembers, byNewest, countsOf, MEMBER_KINDS, newProject, ownerOf, removeMembers, summaryOf,
+  addMembers, byNewest, countsOf, MEMBER_KINDS, newProject, ownerOf, perProjectLimit,
+  removeMembers, summaryOf,
   type Member, type MemberKind, type ProjectSummary,
 } from "../core/projects/project.ts";
 import { exportPlan, fileName, renderSession, type ExportItem } from "../core/projects/render.ts";
@@ -31,14 +32,18 @@ import {
   type ItemRow, type ProjectDetail, type ProjectStores,
 } from "./projectStore.ts";
 
-import { deleteSession, listSessions, loadSession } from "../core/sessions.ts";
+import { assertSessionId, deleteSession, listSessions, loadSession } from "../core/sessions.ts";
 import { deleteMeeting, listMeetings, NOTES_MD, TRANSCRIPT_MD } from "../core/meetings/store.ts";
-import { deleteRun, listRuns } from "../core/research/run.ts";
+import { assertMeetingRef } from "../core/meetings/meeting.ts";
+import { assertRunId, deleteRun, listRuns } from "../core/research/run.ts";
 import { researchRoot } from "../core/research/config.ts";
-import { assemble } from "../core/papers/paper.ts";
+import { assemble, assertPaperId } from "../core/papers/paper.ts";
 import { deletePaper, listPapers, readPaperRecord } from "./papers.ts";
 import { deleteReview, listReviews, readReviewRecord } from "./review.ts";
+import { assertReviewId } from "../core/review/record.ts";
 import { deleteImage, listImages, recordFor } from "./images.ts";
+import { assertImageId } from "../core/images/store.ts";
+import { revealInside } from "./reveal.ts";
 
 export interface ProjectDeps {
   config: ConfigStore;
@@ -80,6 +85,7 @@ export function defaultStores(config: ConfigStore): ProjectStores {
 
   return {
     chat: {
+      assertRef: assertSessionId,
       list: async () =>
         (await listSessions()).map((s) => ({
           ref: s.id,
@@ -100,6 +106,7 @@ export function defaultStores(config: ConfigStore): ProjectStores {
     },
 
     meeting: {
+      assertRef: assertMeetingRef,
       list: async () =>
         (await listMeetings(meetingsRoot())).map((m) => ({
           ref: basename(m.dir),
@@ -125,6 +132,7 @@ export function defaultStores(config: ConfigStore): ProjectStores {
     },
 
     run: {
+      assertRef: assertRunId,
       list: async () =>
         (await listRuns()).map((r) => ({
           ref: r.id,
@@ -145,6 +153,7 @@ export function defaultStores(config: ConfigStore): ProjectStores {
     },
 
     paper: {
+      assertRef: assertPaperId,
       list: async () =>
         (await listPapers(papersRoot())).map((p) => ({
           ref: p.id,
@@ -160,6 +169,7 @@ export function defaultStores(config: ConfigStore): ProjectStores {
     },
 
     review: {
+      assertRef: assertReviewId,
       list: async () =>
         (await listReviews(reviewsRoot())).map((r) => ({
           ref: r.id,
@@ -177,6 +187,7 @@ export function defaultStores(config: ConfigStore): ProjectStores {
     },
 
     image: {
+      assertRef: assertImageId,
       list: async () =>
         (await listImages(deps)).map((i) => ({
           ref: i.id,
@@ -203,10 +214,11 @@ export function defaultStores(config: ConfigStore): ProjectStores {
 }
 
 /**
- * How many rows the rail's recent list carries.
+ * How many rows the rail's recent list carries, per project.
  *
  * Long enough that a week of work is all there, short enough that reading four
- * stores to draw a sidebar stays cheap.
+ * stores to draw a sidebar stays cheap. Per project rather than in total
+ * because the rail draws one group at a time -- see `perProjectLimit`.
  */
 const RECENT_LIMIT = 50;
 
@@ -318,6 +330,10 @@ export function installProjectIpc(deps: ProjectDeps): void {
    * Meetings and images are not in it deliberately: they have their own pages
    * with their own shapes, and this list stands where the conversation list
    * stood. What belongs in it is the work you were in the middle of.
+   *
+   * Filed and loose rows both come back, each carrying the project it is in,
+   * because the window draws one group or the other from this one answer and
+   * `project` is what tells them apart.
    */
   ipcMain.handle("myra:recent", async () => {
     const kinds: MemberKind[] = ["chat", "paper", "review", "run"];
@@ -338,11 +354,11 @@ export function installProjectIpc(deps: ProjectDeps): void {
       }
     }
     out.sort((a, b) => b.at.localeCompare(a.at));
-    return { ok: true, items: out.slice(0, RECENT_LIMIT) };
+    return { ok: true, items: perProjectLimit(out, RECENT_LIMIT) };
   });
 
   ipcMain.handle("myra:project-add", async (_e, id: unknown, members: unknown) => {
-    const wanted = asMembers(members);
+    const wanted = asMembers(members, stores);
     if (!wanted.length) return { ok: true };
     const projects = await readAll();
     const target = projects.find((p) => p.id === String(id));
@@ -360,7 +376,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
   ipcMain.handle("myra:project-remove", async (_e, id: unknown, members: unknown) => {
     const project = await readProject(String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
-    await writeProject(removeMembers(project, asMembers(members)));
+    await writeProject(removeMembers(project, asMembers(members, stores)));
     await publish();
     return { ok: true };
   });
@@ -393,7 +409,9 @@ export function installProjectIpc(deps: ProjectDeps): void {
     for (const member of project.members) {
       let payload: Partial<ExportItem> = {};
       try {
-        payload = await stores[member.kind].payload(member.ref);
+        /* Asserted before `payload`, because a payload is where a ref becomes
+           a directory that `cp -r` then copies into the user's workspace. */
+        payload = await stores[member.kind].payload(stores[member.kind].assertRef(member.ref));
       } catch {
         /* One unreadable item does not cancel the export. It is listed in the
            index with nothing written, which is the truth about it. */
@@ -421,13 +439,17 @@ export function installProjectIpc(deps: ProjectDeps): void {
   });
 
   ipcMain.handle("myra:project-reveal", async (_e, path: unknown) => {
-    shell.showItemInFolder(String(path));
+    /* An export lands at join(workspaceRoot, fileName(name)), so the workspace
+       is the only root this button can have produced a path in. */
+    const verdict = revealInside(path, [config.current.workspaceRoot], "a folder MyRA exported");
+    if (!verdict.ok) return verdict;
+    shell.showItemInFolder(verdict.target);
     return { ok: true };
   });
 }
 
 /** Members as they arrive from the window: rebuilt, never trusted. */
-function asMembers(raw: unknown): Member[] {
+function asMembers(raw: unknown, stores: ProjectStores): Member[] {
   if (!Array.isArray(raw)) return [];
   const out: Member[] = [];
   for (const entry of raw) {
@@ -440,6 +462,14 @@ function asMembers(raw: unknown): Member[] {
        already validates this way, and the chain was the one place a new kind
        could be added everywhere else and still be dropped silently here. */
     if (typeof kind !== "string" || !MEMBER_KINDS.includes(kind as MemberKind)) continue;
+    /* And the ref against the store that owns it, so a bad one never enters a
+       record at all. Dropped the same way an unknown kind is: this is the door
+       rather than the last line, and the last line is in `deleteProject`. */
+    try {
+      stores[kind as MemberKind].assertRef(ref);
+    } catch {
+      continue;
+    }
     out.push({ kind: kind as MemberKind, ref });
   }
   return out;

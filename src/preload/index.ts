@@ -256,6 +256,13 @@ const api = {
   modelFacts: (model?: string) => ipcRenderer.invoke("myra:model-facts", model ?? null),
   setIgnoreSuggested: (model: string | undefined, ignore: boolean) =>
     ipcRenderer.invoke("myra:model-facts-ignore", model ?? null, ignore),
+  setAllowOffload: (model: string | undefined, allow: boolean) =>
+    ipcRenderer.invoke("myra:model-facts-allow-offload", model ?? null, allow),
+  /* Read-only: what MyRA would size the context to, for the tuning panel's
+     "Recompute" offer, shown before anyone presses it. */
+  modelContextPreview: (model?: string) => ipcRenderer.invoke("myra:model-context-preview", model ?? null),
+  /* Writes exactly what the preview above showed. */
+  modelContextApply: (model?: string) => ipcRenderer.invoke("myra:model-context-apply", model ?? null),
   setModelPrompt: (model: string | undefined, value?: string) =>
     ipcRenderer.invoke("myra:set-model-prompt", model ?? null, value ?? null),
   setReasoning: (dialectId: string, value?: string) =>
@@ -294,8 +301,6 @@ const api = {
   },
   lemonadeLoad: (name: string) => ipcRenderer.invoke("myra:lemonade-load", name),
   lemonadeUnload: () => ipcRenderer.invoke("myra:lemonade-unload"),
-  lemonadePull: (name: string, checkpoint?: string) =>
-    ipcRenderer.invoke("myra:lemonade-pull", name, checkpoint),
   hfDetail: (repo: string) => ipcRenderer.invoke("myra:hf-detail", repo),
   hfCard: (repo: string) => ipcRenderer.invoke("myra:hf-card", repo),
   lemonadeDeleteModel: (id: string) => ipcRenderer.invoke("myra:lemonade-delete-model", id),
@@ -348,11 +353,6 @@ const api = {
     ipcRenderer.on("myra:models-changed", handler);
     return () => ipcRenderer.removeListener("myra:models-changed", handler);
   },
-  onPullProgress: (fn: (p: unknown) => void) => {
-    const handler = (_e: unknown, p: unknown): void => fn(p);
-    ipcRenderer.on("myra:pull-progress", handler);
-    return () => ipcRenderer.removeListener("myra:pull-progress", handler);
-  },
   hfBrowse: (q: {
     query?: string;
     authors?: string[];
@@ -362,8 +362,8 @@ const api = {
   }) => ipcRenderer.invoke("myra:hf-browse", q),
   registryVariants: (checkpoint: string, source: string) =>
     ipcRenderer.invoke("myra:registry-variants", checkpoint, source),
-  registryPull: (name: string, checkpoint: string, source: string, recipe?: string) =>
-    ipcRenderer.invoke("myra:registry-pull", name, checkpoint, source, recipe),
+  registryPull: (name: string, checkpoint: string, source: string, recipe?: string, gated?: boolean) =>
+    ipcRenderer.invoke("myra:registry-pull", name, checkpoint, source, recipe, gated ?? false),
   modelOptions: (name: string) => ipcRenderer.invoke("myra:model-options", name),
   modelOptionsSet: (name: string, patch: Record<string, unknown>) =>
     ipcRenderer.invoke("myra:model-options-set", name, patch),

@@ -72,7 +72,10 @@ export function RegistrySearch({
   /** The download in flight, and its figures, both owned by the pane above. */
   pulling: string | undefined;
   job: PullProgress | undefined;
-  onDownload: (source: RegistrySource, choice: { name: string; checkpoint: string; recipe: string }) => void;
+  onDownload: (
+    source: RegistrySource,
+    choice: { name: string; checkpoint: string; recipe: string; gated: boolean },
+  ) => void;
 }) {
   /*
    * The selected model lives here, not in the pane above.

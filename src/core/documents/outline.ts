@@ -16,7 +16,9 @@
  * to catch an empty section or a nonsense length before any of it is written.
  */
 
-import { FORMAT_NAMES, resolveFormat, safeRelativePath, slugName } from "./formats.ts";
+import {
+  FORMAT_NAMES, looksAbsolute, looksLikeEscape, resolveFormat, safeRelativePath, slugName,
+} from "./formats.ts";
 
 export interface DraftSection {
   heading: string;
@@ -252,12 +254,25 @@ export function normaliseName(given: string, ext: string, title: string): string
      lands inside the jail -- but it turns "/etc/passwd" into a real file at
      <jail>/etc/passwd, and a phantom etc/ directory appearing in someone's
      documents folder is nobody's intent. Two tools that jail the same folder
-     must not disagree about what an absolute path means. */
-  if (given.trim().startsWith("/")) {
+     must not disagree about what an absolute path means, which is why the test
+     is one shared function rather than a copy of `/` in each of them. */
+  if (looksAbsolute(given)) {
     throw new OutlineError(`"${given}" is an absolute path; give a name inside the documents folder`);
   }
-  const rel = safeRelativePath(given);
-  if (!rel) throw new OutlineError(`"${given}" is not a name inside the documents folder`);
+  /* A climb stays an error. Falling back to the slug below would turn an
+     attempt to leave the folder into a quiet relocation, which is the thing
+     this boundary refuses to do. */
+  if (looksLikeEscape(given)) {
+    throw new OutlineError(`"${given}" is not a name inside the documents folder`);
+  }
+  /* Slugged rather than refused, which is what the empty case below already
+     does. The name here was written by a model into an outline, and a draft
+     is minutes of work across many sections -- aborting the whole run because
+     a heading said "Study: A Review" is a worse answer than filing it as
+     `study-a-review.md`. The characters that would make this a path, rather
+     than merely an awkward filename, are gone either way: slugName reduces to
+     [a-z0-9-], and an absolute path is refused above. */
+  const rel = safeRelativePath(given) ?? slugName(title, ext);
   const base = rel.replace(/\.[A-Za-z0-9]+$/, "");
   if (!base) return slugName(title, ext);
   return `${base}.${ext}`;

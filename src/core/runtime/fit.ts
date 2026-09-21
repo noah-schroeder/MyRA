@@ -17,12 +17,17 @@
 /**
  * As much of a model's architecture as affects the KV cache.
  *
- * Read from a GGUF header when MyRA parsed those itself. Nothing supplies it
- * now that Lemonade owns the model files -- its catalogue gives a download size
- * and no architecture -- so every estimate here currently takes the rule-of-
- * thumb path and says so via `estimated`. Kept because the exact arithmetic is
- * correct and hard-won, and a shape may become available again through the
- * daemon.
+ * Two producers, in `main/runtime/`: `readShapeFromFile` in `ggufFile.ts` reads
+ * it straight off the model's own GGUF header, and `shapeFromConfig` in
+ * `modelFacts.ts` reads it from a Hugging Face `config.json` when the file is
+ * not yet on disk. The GGUF reading is preferred where both are available --
+ * see `gguf.ts`'s own header comment for why -- and `modelFacts.ts` records
+ * which one answered, so a `config.json` guess is never allowed to overwrite a
+ * measurement taken from the file that actually loads.
+ *
+ * Absent entirely means neither has run, or both came back empty -- a repo with
+ * no `base_model` and no local file yet, most often. Every estimate here then
+ * takes the rule-of-thumb path and says so via `estimated`.
  */
 export interface ModelShape {
   architecture?: string;
@@ -127,6 +132,23 @@ export interface Machine {
 }
 
 /**
+ * Whether `lemonadeInfo()` has actually answered, as opposed to a caller's
+ * `useState` initialiser still standing in for it.
+ *
+ * `{ ramBytes: 0 }` is that initialiser, and also the state a failed or
+ * pending probe leaves behind forever -- indistinguishable from a real
+ * machine with no RAM, which does not exist. `memoryBudget` against it
+ * returns `budgetBytes: 0`, and a bar drawn from that renders "does not fit"
+ * for a model that is loaded and running fine. Callers that draw a bar, or
+ * decide whether a context size fits, ask this first rather than reading
+ * `machine.ramBytes` directly -- a truthiness test on RAM alone wrongly
+ * suppresses a machine that reports VRAM only.
+ */
+export function knownMachine(m: Machine): boolean {
+  return Boolean(m.ramBytes || m.vramBytes);
+}
+
+/**
  * When the GGUF header was not read, assume a cache proportional to the
  * weights. Crude, and marked as such in the result so the UI can hedge.
  */
@@ -193,6 +215,68 @@ export function fitModel(
     ...parts,
     estimated,
     label: `Too large for this machine — needs about ${gib(required)}${estimated ? " (estimated)" : ""}, and there is ${gib(machine.ramBytes)} of memory.`,
+  };
+}
+
+/**
+ * The same breakdown `fitModel` computes, drawn against a fixed budget rather
+ * than turned into a verdict -- what a memory bar needs, since a bar cannot
+ * render "gpu" | "partial" | "cpu" | "too-large", it needs the numbers those
+ * verdicts were computed FROM.
+ *
+ * Deliberately a thin projection over `fitModel` rather than its own
+ * arithmetic: `fitModel`'s own comment already names the failure two separate
+ * calculations invites -- "the breakdown and the total have to come from the
+ * same arithmetic, or a budget bar can add up to something other than the
+ * number printed beside it" -- and this is that promise kept. Any bar drawn
+ * from `MemoryBudget` and any load sized by `fitModel`/`autoContext` are
+ * reading the same numbers by construction, not by two authors remembering to
+ * agree.
+ */
+export interface MemoryBudget {
+  weightsBytes: number;
+  cacheBytes: number;
+  overheadBytes: number;
+  /** weights + cache + overhead -- always the sum of the three above. */
+  totalBytes: number;
+  /** What the segments are drawn against: VRAM alone when there is a card. */
+  budgetBytes: number;
+  /** `budgetBytes - totalBytes`. Negative means it does not fit. */
+  headroomBytes: number;
+  /** True when the cache figure is a rule of thumb, not a measurement. */
+  estimated: boolean;
+  verdict: Verdict;
+}
+
+/**
+ * `budgetBytes` is VRAM alone when there is a card, matching `autoContext`'s
+ * own stage-one budget -- a bar drawn against VRAM+RAM would make a window
+ * that spills to the processor look exactly like one that fits the card,
+ * which is the reading that led to the report this whole file was reworked
+ * for. Pass `allowOffload` to draw the bar against the wider budget
+ * deliberately, the same flag `autoContext` takes for the same reason.
+ */
+export function memoryBudget(
+  fileBytes: number,
+  machine: Machine,
+  opts: { shape?: ModelShape; context?: number; bytesPerElement?: number; allowOffload?: boolean } = {},
+): MemoryBudget {
+  const fit = fitModel(fileBytes, machine, opts);
+  const budgetBytes =
+    !opts.allowOffload && machine.vramBytes !== undefined
+      ? machine.vramBytes
+      : machine.vramBytes !== undefined
+        ? machine.vramBytes + machine.ramBytes
+        : machine.ramBytes;
+  return {
+    weightsBytes: fileBytes,
+    cacheBytes: fit.cacheBytes,
+    overheadBytes: fit.overheadBytes,
+    totalBytes: fit.requiredBytes,
+    budgetBytes,
+    headroomBytes: budgetBytes - fit.requiredBytes,
+    estimated: fit.estimated,
+    verdict: fit.verdict,
   };
 }
 
@@ -292,18 +376,54 @@ export function autoContext(opts: {
   ceiling?: number | undefined;
   bytesPerElement?: number | undefined;
   floor?: number;
+  /**
+   * Deliberately trade GPU residency for a longer window.
+   *
+   * Off is the default, and it is the whole point of the two-stage budget
+   * below: left to plan against VRAM and system RAM together, this function
+   * happily hands a 2.6B model on a 32 GB card a 128,000-token window that
+   * needs 48 GB to hold, which `--fit` then satisfies by spilling most of the
+   * model itself to system memory -- measured at roughly a fifteenth the
+   * generation speed. That is not a smaller window costing some convenience;
+   * it is the model silently leaving the card. `allowOffload` is there for
+   * someone who wants a window that large anyway and has weighed the cost --
+   * MyRA's own auto-tune never opts into it.
+   */
+  allowOffload?: boolean;
 }): AutoContext {
   const floor = opts.floor ?? 8192;
   const { machine } = opts;
-  /* The whole machine, not the card alone. A context that spills past VRAM is
-     not the crash risk it would look like: llama-server's own `-ngl`/`--fit`
-     (default `auto`/`on`, measured against the bundled binary) is what actually
-     decides which layers sit where, and it degrades to CPU offload rather than
-     failing outright. What still has to hold regardless of which pool this
-     budget is drawn from is the safety fraction below and the hard ceiling a
-     few lines down -- those are what stopped the OOM this exists to prevent,
-     not which memory this number is counted against. */
-  const budget = Math.floor(((machine.vramBytes ?? 0) + machine.ramBytes) * SAFETY_FRACTION);
+  const machineBudget = Math.floor(((machine.vramBytes ?? 0) + machine.ramBytes) * SAFETY_FRACTION);
+  const vramBudget = machine.vramBytes ? Math.floor(machine.vramBytes * SAFETY_FRACTION) : undefined;
+  /*
+   * Two stages, and which one applies is decided once, up front, by whether
+   * even the FLOOR context leaves the whole model on the card.
+   *
+   * Stage 1, the common case: if the smallest window worth offering already
+   * fits in VRAM alone, every larger window `largestContext` might go on to
+   * pick also fits there -- a bigger context only ever costs more -- so
+   * budgeting against VRAM alone is enough, and it guarantees the model stays
+   * off the CPU. This is what makes "the largest window that stays on the
+   * card" the actual policy, rather than an accident of the floor happening
+   * to be small.
+   *
+   * Stage 2, the fallback: if even the floor would already spill, the model
+   * was always going to be partially offloaded regardless of context size --
+   * llama-server's own `-ngl`/`--fit` (default `auto`/`on`, measured against
+   * the bundled binary) decides layer placement, and it degrades to CPU
+   * offload rather than failing outright. Budgeting against VRAM alone in
+   * that case would find nothing fits and return the daemon's poor 4,096
+   * default, which is strictly worse than sizing against the whole machine as
+   * this always did before. The safety fraction and the hard ceiling below
+   * are what actually stop the OOM this always guarded against, whichever
+   * pool the budget is drawn from.
+   */
+  const floorFits = vramBudget !== undefined && fitModel(opts.fileBytes, machine, {
+    ...(opts.shape ? { shape: opts.shape } : {}),
+    context: floor,
+    ...(opts.bytesPerElement ? { bytesPerElement: opts.bytesPerElement } : {}),
+  }).requiredBytes <= vramBudget;
+  const budget = !opts.allowOffload && floorFits ? vramBudget : machineBudget;
   const ceiling = Math.min(opts.ceiling ?? Infinity, opts.shape?.contextLength ?? Infinity);
   const capped = Number.isFinite(ceiling) ? ceiling : undefined;
 
@@ -342,10 +462,15 @@ export function autoContext(opts: {
     };
   }
 
-  /* Named honestly now that the budget is graphics memory AND system memory
-     together: "fits in your graphics memory" would be a claim this number does
-     not back once part of it spilled to the processor to get there. */
-  const where = machine.vramBytes ? "this machine's memory" : "system memory";
+  /* Named honestly, according to which budget actually produced this answer --
+     "fits on your graphics card" is a claim `budget === machineBudget` does not
+     back, since part of it spilled to the processor to get there. */
+  const where =
+    budget === vramBudget
+      ? "your graphics card"
+      : machine.vramBytes
+        ? "this machine's memory, spilling off the graphics card"
+        : "system memory";
   return {
     tokens: best,
     estimated: false,

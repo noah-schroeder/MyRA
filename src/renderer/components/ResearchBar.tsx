@@ -7,9 +7,10 @@ import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
  * One control for the whole question of how far MyRA may reach.
  *
  * Five of these six choices are a ladder, each rung a superset of the one
- * below: nothing, then your files, then your own library, then the literature,
- * then the literature done properly. The sixth takes the model out of the loop
- * entirely and hands the query to OpenAlex and arXiv directly.
+ * below: nothing, then your files and your task list, then your own library,
+ * then the literature, then the literature done properly. The sixth takes the
+ * model out of the loop entirely and hands the query to OpenAlex and arXiv
+ * directly.
  *
  * "Library" sits below "Quick" rather than beside it because it reaches further
  * into THIS MACHINE rather than outward: Zotero answers on loopback with no
@@ -42,7 +43,12 @@ interface Rung { value: ResearchMode; label: string; hint: string }
 
 const LOCAL: Rung[] = [
   { value: "off", label: "Off", hint: "No tools at all. The model answers from what it knows, and cannot search, open a URL, or touch a file." },
-  { value: "assistant", label: "Documents", hint: "The model can read and write in your documents folder. It still cannot reach the network." },
+  /* "Assistant", not "Documents", since the task list joined it: the rung is
+     everything MyRA may do on this machine without being asked twice, and
+     naming it after one of the two things it covers left "make me a task for
+     Thursday" with no button a person could find. The hint still names the
+     folder, because that is the part with a jail around it. */
+  { value: "assistant", label: "Assistant", hint: "The model can read and write in your documents folder, and keep your task list — add a task, list what's open, tick one off. It still cannot reach the network." },
   { value: "library", label: "Zotero", hint: "The model can also search your own Zotero library — your collected papers, on this machine. Still no network. If Zotero is running, that reaches the indexed text of PDFs; closed, it searches titles, abstracts, authors, tags and notes instead." },
 ];
 
@@ -191,7 +197,7 @@ export function ResearchBar({
 
       {/* Shared by Quick, Deep and Look up -- all three search the literature,
           and it is one setting for what "the literature" means here, not
-          three. Not shown at Off/Documents/Library: those rungs do not
+          three. Not shown at Off/Assistant/Zotero: those rungs do not
           search databases at all. */}
       {(searches(config.mode) || lookup) && !exactly(config.mode, "library") ? (
         <DatabasePicker chosen={config.databases ?? []} onChoose={(databases) => apply({ databases })} />

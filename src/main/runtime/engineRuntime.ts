@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { LIBC_DIR, loaderName, missingVersions } from "../../core/runtime/libc.ts";
 import { couldBeEngine, isShimScript, REAL_SUFFIX, shimScript } from "../../core/runtime/engineShim.ts";
 import { bundledLoader, hostLibDirs, resolveSpec } from "./loader.ts";
+import { scrubbedEnv } from "../../core/childEnv.ts";
 
 /** One engine backend as Lemonade lays it out: `bin/<recipe>/<backend>/`. */
 export interface EngineDir {
@@ -82,7 +83,10 @@ export async function tooOldForEngine(binary: string, dir: string): Promise<stri
     const child = spawn(launch.command, launch.args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, ...launch.env },
+      /* The engine set, because a working Vulkan or ROCm stack can
+         depend on any of it, and a model that stops using the card is a
+         worse bug than an inherited variable. launch.env still wins. */
+      env: scrubbedEnv(process.env, "engine", launch.env),
     });
     let out = "";
     const take = (b: Buffer): void => { out += b.toString(); };
@@ -129,8 +133,20 @@ export async function wrapEngine(dir: string, runtimeFrom: string): Promise<stri
   const wrapped: string[] = [];
   for (const name of binaries) {
     const path = join(dir, name);
+    /* Built BEFORE the rename, because it can refuse: a name carrying a shell
+       metacharacter is not wrapped, and a refusal after the rename would
+       leave the engine renamed with no shim in front of it -- which is
+       exactly the orphan `healOrphans` exists to clean up after. Skipped
+       rather than thrown, so one odd file does not stop the other engines in
+       the directory being repaired. */
+    let script: string;
+    try {
+      script = shimScript(name, spec);
+    } catch {
+      continue;
+    }
     await rename(path, join(dir, name + REAL_SUFFIX));
-    await writeFile(path, shimScript(name, spec), { mode: 0o755 });
+    await writeFile(path, script, { mode: 0o755 });
     await chmod(path, 0o755);
     wrapped.push(name);
   }

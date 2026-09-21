@@ -65,6 +65,41 @@ export function embeddableAsset(
   return undefined;
 }
 
+/**
+ * The sha256 of every embeddable build MyRA will install, by asset name.
+ *
+ * Pinned here, in the source, rather than read from the release API at
+ * install time. The daemon is downloaded once and then spawned as a
+ * long-lived process for the life of the app, so an archive nobody checked is
+ * arbitrary code execution as the user -- and reading the expected hash from
+ * the same host that serves the bytes only detects corruption, never a
+ * substitution. A number written down when the version was chosen is checked
+ * against bytes fetched much later, which is the whole point.
+ *
+ * Taken from GitHub's own `digest` field for the v11.8.0 assets.
+ * `cruntime.ts` already pins an OCI digest this way; this is the download
+ * that did not.
+ *
+ * Bumping LEMONADE_VERSION without adding the four new hashes fails
+ * `npm test` -- see test/lemonade.test.ts, which is the only version of this
+ * rule that survives the next release.
+ */
+export const EMBEDDABLE_SHA256: Record<string, string> = {
+  "lemonade-embeddable-11.8.0-ubuntu-x64.tar.gz":
+    "3cb13e93b0496c583e4cb4dda6aef58c39fc71fbb058fb171d62ac18f4cd72fc",
+  "lemonade-embeddable-11.8.0-ubuntu-arm64.tar.gz":
+    "04f0f6b72d9e70efa250b7e91a9a29e8a77e33fc66db6ca59e29afe5eac8262c",
+  "lemonade-embeddable-11.8.0-macos-arm64.tar.gz":
+    "6cf8a519d883e2f3072a676fab69dd9be96f4d476a7ef440b3e4fb6e08ed4c36",
+  "lemonade-embeddable-11.8.0-windows-x64.zip":
+    "c0dc9087840de5c7a1e9974279ba4690cb1ec545c7e165dbf52468ed845c71c7",
+};
+
+/** The pinned hash for an asset, or nothing when this build did not pin one. */
+export function embeddableSha256(asset: string): string | undefined {
+  return EMBEDDABLE_SHA256[asset];
+}
+
 export function embeddableUrl(asset: string, version: string = LEMONADE_VERSION): string {
   return `https://github.com/${LEMONADE_REPO}/releases/download/v${version}/${asset}`;
 }

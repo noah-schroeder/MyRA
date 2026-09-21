@@ -73,12 +73,30 @@ export async function installPandoc(opts: InstallOptions = {}): Promise<InstallR
    *
    * mkdtemp makes the name unguessable and the directory 0700.
    */
+  /* Refused rather than installed unverified. Everything above about a
+     planted binary applies just as well to the archive itself: what MyRA
+     does with this file is copy a binary out of it into the tools directory
+     and execute it as the user from then on. A hosted release with no
+     published digest is a release MyRA declines to install -- and declining
+     is cheap here, because the app already degrades honestly: pandocPath()
+     falls back to whatever is on PATH, and write_document still writes
+     Markdown and says why it could not convert. */
+  const sha = digestOf(asset);
+  if (!sha) {
+    throw new DownloadError(
+      `GitHub published no checksum for this pandoc build, so MyRA will not install it. ` +
+        `Install pandoc yourself and MyRA will use the one on your PATH.`,
+    );
+  }
+
   const work = await mkdtemp(join(tmpdir(), "myra-pandoc-"));
-  const archive = join(work, asset.name);
+  /* A fixed local name, not `asset.name`: that is remote text, and this is a
+     path. `tar` sniffs the format, so the extension carries no meaning here
+     and nothing is lost by refusing to let a release payload choose it. */
+  const archive = join(work, "pandoc-download");
   try {
-    const sha = digestOf(asset);
     await downloadFile(asset.browser_download_url, archive, {
-      ...(sha ? { sha256: sha } : {}),
+      sha256: sha,
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onProgress
         ? { onProgress: (p: Progress) => opts.onProgress!({ ...p, what: `pandoc ${release.tag_name}` }) }

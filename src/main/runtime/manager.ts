@@ -29,25 +29,30 @@ import {
   chatModelOf, chatModelToReload, isChatEngine, isChatModel, LEMONADE_VERSION,
   type LoadedModel,
 } from "../../core/runtime/lemonade.ts";
+import { straysToKill } from "../../core/runtime/strays.ts";
+import { mergeRuntimeConfig } from "../../core/runtime/runtimeConfig.ts";
 import { LemonadeServer } from "./lemonade.ts";
 import { LemonadeApi } from "./lemonadeApi.ts";
 import { findLemonade, installLemonade } from "./lemonadeInstall.ts";
 import { bundledLoader } from "./loader.ts";
+import { forgetRecords, killStray, readRecords, scanProcesses } from "./daemons.ts";
 import { repairEngines } from "./engineRuntime.ts";
 import { shippedVersions } from "./engineVersions.ts";
 import { checkEngineUpdates, type UpdateCheck } from "./engineUpdates.ts";
 import { buildIndex, readIndexSources, type IndexResult } from "./foreignScan.ts";
 import { labelsWithProjector } from "../../core/runtime/foreign.ts";
 import {
-  defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir, stagingDir,
+  defaultModelsDir, lemonadeCacheDir, lemonadeConfigDir, lemonadeDir, lemonadeIndexDir,
+  ownedPrefixes, stagingDir,
 } from "./paths.ts";
 import type { Progress } from "./download.ts";
 import type { MachineInfo, PullProgress } from "../../core/runtime/systemInfo.ts";
 import type { InstalledModel } from "./lemonadeApi.ts";
 import { autoContext } from "../../core/runtime/fit.ts";
 import { kvBytesPerElement, readFlags, writeFlags } from "../../core/runtime/llamaArgs.ts";
-import { factsFor } from "./modelFacts.ts";
-import { isOverridden, type ModelOptions } from "../../core/runtime/modelOptions.ts";
+import { factsFor, learnShapeFromFile, setAutoCtxSize } from "./modelFacts.ts";
+import { ctxIsOurs, savedValue, type ModelOptions } from "../../core/runtime/modelOptions.ts";
+import { weightsFile } from "./modelFiles.ts";
 
 /**
  * Whether CUDA is what this model would actually run on.
@@ -141,6 +146,29 @@ export class RuntimeManager {
   #index: IndexResult | undefined;
   #lemonade = new LemonadeServer();
   #listeners = new Set<() => void>();
+  /** A start already under way, so twenty callers cannot spawn twenty daemons. */
+  #starting: Promise<LemonadeApi> | undefined;
+  /**
+   * The one sweep for this run, so `ensureLemonade` can wait on it rather than
+   * merely trust that nothing calls it first. `main()`'s own call order did
+   * that once, but `startOnLaunch` is a second, independent caller, and an
+   * invariant that depends on every caller getting the order right by hand is
+   * the kind that survives until someone adds a third.
+   */
+  #sweep: Promise<unknown> | undefined;
+
+  /**
+   * Where the daemon's own token comes from, without this module reaching a
+   * keyring itself -- the same reader-thunk shape `setDatabaseKeys` and
+   * `setEndpointResolver` already use. Nothing by default, so a build that
+   * never wires one simply never sends a token, the same "silently unusable,
+   * never silently wrong" default `keys.ts` documents for a database key.
+   */
+  #hfTokenReader: () => Promise<string | undefined> = () => Promise.resolve(undefined);
+  /** `Settings.hfTokenUse === "always"` -- every start carries the token, not only a gated pull's. */
+  #hfAlways = false;
+  /** Consumed by the very next start: set by a gated pull that is about to restart the daemon for it. */
+  #hfWantedOnce = false;
 
   /**
    * The client for whatever Lemonade is running, or nothing when it is not.
@@ -178,8 +206,10 @@ export class RuntimeManager {
   async load(): Promise<RuntimeConfig> {
     this.#config = { ...DEFAULTS, modelsDir: defaultModelsDir() };
     try {
-      const parsed = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as Partial<RuntimeConfig>;
-      this.#config = { ...this.#config, ...parsed };
+      const parsed: unknown = JSON.parse(await readFile(CONFIG_PATH, "utf8"));
+      /* Rebuilt, not spread. `modelsDir` is the jail root that model deletion
+         checks against, so a stored "/" made that check accept everything. */
+      this.#config = mergeRuntimeConfig(parsed, this.#config);
     } catch (err) {
       /* A missing file is the first run. A file that will not parse is a
          force-quit or a power cut caught mid-write, and it must not throw out
@@ -195,7 +225,10 @@ export class RuntimeManager {
   }
 
   async update(patch: Partial<RuntimeConfig>): Promise<RuntimeConfig> {
-    this.#config = { ...this.#config, ...patch };
+    /* Validated here rather than in the IPC handler, so a second caller
+       cannot skip it -- the same reason the roots are checked inside
+       ConfigStore rather than at each reader. */
+    this.#config = mergeRuntimeConfig({ ...this.#config, ...patch }, this.#config);
     await makeOwnDir(CONFIG_DIR);
     await writeFile(CONFIG_PATH, `${JSON.stringify(this.#config, null, 2)}\n`, {
       mode: OWNER_ONLY_FILE,
@@ -260,9 +293,90 @@ export class RuntimeManager {
    * single moment in the app's life when "the backend is ready" is true, and
    * pretending otherwise is how a race gets written.
    */
-  async ensureLemonade(opts: EnsureOptions = {}): Promise<LemonadeApi> {
-    if (this.#lemonade.status.state === "ready") return this.#api;
+  /**
+   * Reclaim model servers a previous run left behind.
+   *
+   * The failure this repairs, measured on a Pop!_OS 22.04 workstation with a
+   * 32 GB card: MyRA's quit path sent `lemond` a SIGKILL, which cannot be
+   * caught, so the daemon never shut down the engines holding models in VRAM.
+   * They were reparented to init and stayed there, every close of the window
+   * stranded another set, and chat got slower all day in fresh conversations
+   * until the machine was rebooted. `lemonade.ts` stops making new ones; this
+   * is what clears a machine that already has them, which is the only thing
+   * that helps a user before their next reboot.
+   *
+   * `ensureLemonade` awaits this run's sweep before it does anything else, so
+   * this can never see -- and can never kill -- the daemon that call is about
+   * to start. Only the records this sweep actually read are dropped
+   * afterwards, named by pid, rather than the file cleared wholesale: a
+   * wholesale clear raced the daemon `ensureLemonade` was starting while this
+   * was still killing a slow-to-die stray, and erased that daemon's own
+   * just-written record along with the ones this reclaimed.
+   *
+   * Returns how many were reclaimed, for the line the user is shown.
+   */
+  async sweepStrays(): Promise<number> {
+    const sweep = this.#doSweep();
+    this.#sweep = sweep;
+    return sweep;
+  }
 
+  async #doSweep(): Promise<number> {
+    try {
+      const records = await readRecords();
+      const strays = straysToKill(records, await scanProcesses(), {
+        pid: process.pid,
+        uid: typeof process.getuid === "function" ? process.getuid() : -1,
+        ownedPrefixes: ownedPrefixes(),
+      });
+      for (const stray of strays) await killStray(stray);
+      await forgetRecords(records.map((r) => r.pid));
+      if (strays.length) {
+        this.#lemonade.note(
+          `Reclaimed ${strays.length} model server${strays.length === 1 ? "" : "s"} left running by a previous session.`,
+        );
+      }
+      return strays.length;
+    } catch (err) {
+      /* A sweep is a repair, never a precondition for starting. A /proc that
+         cannot be read, or a signal that is refused, must not stop the app. */
+      console.error("Sweeping leftover model servers failed:", (err as Error).message);
+      return 0;
+    }
+  }
+
+  async ensureLemonade(opts: EnsureOptions = {}): Promise<LemonadeApi> {
+    /* Resolved instantly once the sweep has run, so this costs nothing after
+       startup -- but the first caller, `startOnLaunch` among them, must not
+       start a daemon the sweep has not looked at yet: a stray that outlives
+       the sweep because it started concurrently with the very thing the sweep
+       exists to protect is the bug `sweepStrays`'s own header used to merely
+       assert away. */
+    await this.#sweep;
+    if (this.#lemonade.status.state === "ready") return this.#api;
+    /*
+     * Join a start already running, rather than beginning a second one.
+     *
+     * The early-out above reads a state that stays "starting" across an install
+     * and a walk of the user's model directories, so two of the twenty call
+     * sites that reach here can both get past it -- a chat send and the Models
+     * page opening is enough. `start()` begins with `await this.stop()`, but
+     * `#child` is still undefined for the first caller at that moment, so it is
+     * a no-op; both spawn, and the second's assignment to `#child` overwrites
+     * the first's handle. That daemon is then untracked: nothing in this
+     * process can stop it, and it holds its models until the machine reboots.
+     *
+     * A joining caller's `onPhase` and `onProgress` are dropped, and its
+     * `signal` cannot cancel. Both are deliberate: the progress being reported
+     * belongs to the start that is actually happening, and aborting a shared
+     * start because one of twenty callers gave up is the worse failure.
+     */
+    if (this.#starting) return this.#starting;
+    this.#starting = this.#startLemonade(opts).finally(() => { this.#starting = undefined; });
+    return this.#starting;
+  }
+
+  async #startLemonade(opts: EnsureOptions): Promise<LemonadeApi> {
     const dir = lemonadeDir(LEMONADE_VERSION);
     let binary = await findLemonade(dir);
     if (!binary) {
@@ -302,6 +416,16 @@ export class RuntimeManager {
       this.#lemonade.note(`Could not index your model folders: ${(err as Error).message}`);
     }
 
+    /* Resolved fresh on every start, never cached on this instance: a token
+       entered in Settings has to reach the very next start, and "always"
+       being flipped off must not leave a stale one sitting in memory to be
+       sent to a daemon that starts an hour later for an unrelated reason.
+       `#hfWantedOnce` is consumed here, win or lose -- a start that fails
+       must not leave a stale request armed for whatever starts next. */
+    const wantsHfToken = this.#hfAlways || this.#hfWantedOnce;
+    this.#hfWantedOnce = false;
+    const hfToken = wantsHfToken ? await this.#hfTokenReader() : undefined;
+
     opts.onPhase?.("starting Lemonade");
     const status = await this.#lemonade.start({
       binary,
@@ -310,6 +434,7 @@ export class RuntimeManager {
       ...(this.#config.enginePins ? { enginePins: this.#config.enginePins } : {}),
       // So a library built up under the old runtime is simply there.
       modelsDir: indexDir,
+      ...(hfToken ? { hfToken } : {}),
     });
     if (status.state !== "ready") throw new Error(status.error ?? "Lemonade did not start.");
     await this.#repairEngines(dirname(binary));
@@ -512,10 +637,19 @@ export class RuntimeManager {
    * so the patch reaches the process. Both patches below go through the same
    * one call when there is anything to send, rather than two round trips.
    *
-   * Three refusals hold for context, and each is load-bearing:
+   * Four refusals hold for context, and each is load-bearing:
    *
    *   - **A value the user set is never touched.** `saved` is the daemon's own
-   *     record of what was overridden, so this asks it rather than guessing.
+   *     record of what was overridden -- but `saved` cannot say WHO overrode
+   *     it, since this method's own patch and a user's own edit in the tuning
+   *     panel go through the exact same `POST /models/{id}/options`. That
+   *     ambiguity was a real bug: a shape-less model handed the 8,192 floor
+   *     once looked permanently "overridden" and was never resized even after
+   *     a real shape became available. `ctxIsOurs`, checked against
+   *     `ModelFacts.autoCtxSize` -- MyRA's own side record of what it last
+   *     wrote -- is what tells the two apart. A saved value that is not ours
+   *     is left alone, and the record is cleared so the next load does not
+   *     go on claiming it.
    *   - **A recipe with no `ctx_size` is left alone**, which is how whispercpp
    *     stays out of this by the daemon's own field list rather than by a
    *     model-name test.
@@ -524,6 +658,13 @@ export class RuntimeManager {
    *     is a poor default, but a number that stops the model loading is worse.
    *     The daemon does not clamp -- asked for a million it tries, and the OOM
    *     killer arrives -- so the clamping is ours to do.
+   *   - **The card comes first.** `autoContext` now budgets against VRAM alone
+   *     whenever the model fits there at all, only falling back to VRAM+RAM
+   *     when it does not -- see `fit.ts`. Handing a shape-less model 8,192 was
+   *     an accident that happened to protect the machine: once shapes are
+   *     read from the file itself (below), the old VRAM+RAM budget would
+   *     confidently pick a window that spills most of the model to system
+   *     memory, which measures at roughly a fifteenth the speed.
    *
    * Flash attention gets one refusal of its own, and it is finer-grained than
    * "has `llamacpp_args` been overridden": that string holds many flags, and a
@@ -544,32 +685,22 @@ export class RuntimeManager {
 
       const info = await this.#api.systemInfo().catch(() => undefined);
       const patch: { ctx_size?: number; llamacpp_args?: string } = {};
+      let autoWrote: number | undefined;
 
-      if (info && !isOverridden(options, "ctx_size")) {
-        const model = (await this.#api.listModels().catch(() => [])).find((m) => m.id === name);
-        if (model?.sizeBytes) {
-          /* Read, never fetched: the shape was learned when the model was
-             downloaded. Absent means the sizer falls back to the floor and
-             says so, which is the honest answer for a model imported from
-             elsewhere or downloaded before this existed. */
-          const facts = await factsFor(name);
-          const args = options.effective["llamacpp_args"];
-          const bpe = typeof args === "string" ? kvBytesPerElement(args) : undefined;
+      const saved = savedValue(options, "ctx_size");
+      const facts = await factsFor(name);
 
-          const auto = autoContext({
-            fileBytes: model.sizeBytes,
-            machine: {
-              ...(info.devices[0]?.totalBytes ? { vramBytes: info.devices[0].totalBytes } : {}),
-              ramBytes: info.ramBytes ?? 0,
-            },
-            ...(facts?.shape ? { shape: facts.shape } : {}),
-            ...(model.maxContextTokens ? { ceiling: model.maxContextTokens } : {}),
-            /* A quantised KV cache is the one flag that changes how long a
-               window fits, so somebody who set it gets sized against what
-               they set. */
-            ...(bpe ? { bytesPerElement: bpe } : {}),
-          });
-          if (auto.tokens && auto.tokens !== options.resolvedCtxSize) patch.ctx_size = auto.tokens;
+      if (saved !== undefined && !ctxIsOurs(saved, facts?.autoCtxSize)) {
+        /* Somebody else's value -- the user's own edit, or one saved before
+           MyRA recorded its own writes at all. Left exactly as it is, and the
+           stale claim (if any) is cleared so the NEXT load already sees
+           nothing recorded rather than going on believing it wrote this. */
+        if (facts?.autoCtxSize !== undefined) await setAutoCtxSize(name, undefined);
+      } else if (info) {
+        const auto = await this.#computeAutoContext(name, options, info);
+        if (auto?.tokens && auto.tokens !== options.resolvedCtxSize) {
+          patch.ctx_size = auto.tokens;
+          autoWrote = auto.tokens;
         }
       }
 
@@ -582,12 +713,152 @@ export class RuntimeManager {
       }
 
       if (Object.keys(patch).length) await this.#api.setModelOptions(name, patch);
+      /* Recorded only after the daemon actually accepted the patch: a record
+         of a write that never landed is worse than no record at all. */
+      if (autoWrote !== undefined) await setAutoCtxSize(name, autoWrote);
     } catch {
       /* Tuning is an improvement on the default, not a precondition for
          loading one. A daemon that refuses the patch, a model list that
          fails, a probe that reports no devices -- all of them mean "load it
          as it was". */
     }
+  }
+
+  /**
+   * Work out what MyRA would size this model's context to, right now.
+   *
+   * Pulled out of `#autoTuneLoad` so a caller can ask the SAME question
+   * without loading anything: `recomputeContext` below shows this number to
+   * the tuning panel's "Recompute" offer before anyone presses it, and writes
+   * exactly what was shown when they do. Two independent computations of this
+   * is how a panel ends up promising one figure and writing another.
+   */
+  async #computeAutoContext(
+    name: string,
+    options: ModelOptions,
+    info: MachineInfo,
+  ): Promise<ReturnType<typeof autoContext> | undefined> {
+    const facts = await factsFor(name);
+    const model = (await this.#api.listModels().catch(() => [])).find((m) => m.id === name);
+
+    /* Try the model's own GGUF header before trusting a shape that only ever
+       came from a config.json guess, or none at all. Lazy, here, because this
+       is the one place every model eventually passes through -- a
+       download-time fetch never reaches an LM Studio or Ollama import or
+       anything installed before shapes existed. A
+       read that finds nothing changes nothing: no network, no state, just
+       the rule-of-thumb path below as before. */
+    const needsFiles = !model?.sizeBytes || !facts?.shape || facts.shapeFrom === "config";
+    const files = needsFiles
+      ? await weightsFile(name, this.#modelFilesDeps()).catch(() => undefined)
+      : undefined;
+
+    let shaped = facts;
+    if (files && (!facts?.shape || facts.shapeFrom === "config")) {
+      shaped = (await learnShapeFromFile(name, files.path).catch(() => undefined)) ?? facts;
+    }
+
+    /* The daemon reports size 0 for most `extra_models_dir` entries -- every
+       LM Studio or Ollama import -- which silently skipped sizing altogether
+       before `files` gave this a second way to learn it. */
+    const sizeBytes = model?.sizeBytes || files?.bytes;
+    if (!sizeBytes) return undefined;
+
+    const args = options.effective["llamacpp_args"];
+    const bpe = typeof args === "string" ? kvBytesPerElement(args) : undefined;
+
+    return autoContext({
+      fileBytes: sizeBytes,
+      machine: {
+        ...(info.devices[0]?.totalBytes ? { vramBytes: info.devices[0].totalBytes } : {}),
+        ramBytes: info.ramBytes ?? 0,
+      },
+      ...(shaped?.shape ? { shape: shaped.shape } : {}),
+      ...(model?.maxContextTokens ? { ceiling: model.maxContextTokens } : {}),
+      /* A quantised KV cache is the one flag that changes how long a window
+         fits, so somebody who set it gets sized against what they set. */
+      ...(bpe ? { bytesPerElement: bpe } : {}),
+      ...(shaped?.allowOffload ? { allowOffload: true } : {}),
+    });
+  }
+
+  /**
+   * What MyRA would size this model's context to, without writing a `ctx_size`
+   * -- or, with `apply`, actually write it.
+   *
+   * "Without touching anything" is not quite true even when `apply` is false:
+   * `#computeAutoContext` can still call `learnShapeFromFile`, which records
+   * this model's own measured shape in `modelFacts.json`. That is a cache of a
+   * fact about a file on disk, not a change to anything the user set, and it
+   * is never skipped just because the answer will only be shown rather than
+   * applied -- a preview that leaves the shape unmeasured would recompute it
+   * again, from scratch, the moment "Recompute" is actually pressed.
+   *
+   * `ctx_size` itself is the one thing this never writes unset: `apply` is
+   * the one path allowed to write a `ctx_size` MyRA does not already own --
+   * the tuning panel's "Recompute" offer, shown next to a value that is saved
+   * but is not MyRA's -- the state a model is left in forever once
+   * `#autoTuneLoad`'s own `ctxIsOurs` check finds a value it does not
+   * recognise, even after a real shape becomes available for it. Requires a
+   * live daemon and a `ctx_size`-capable recipe, the same guards
+   * `#autoTuneLoad` itself applies, because a whispercpp model has no such
+   * setting to recompute.
+   */
+  async recomputeContext(name: string, apply = false): Promise<ReturnType<typeof autoContext> | undefined> {
+    const options = await this.#api.modelOptions(name).catch(() => undefined);
+    if (!options || !("ctx_size" in options.defaults)) return undefined;
+    const info = await this.#api.systemInfo().catch(() => undefined);
+    if (!info) return undefined;
+    const auto = await this.#computeAutoContext(name, options, info);
+    if (apply && auto?.tokens) {
+      await this.#api.setModelOptions(name, { ctx_size: auto.tokens });
+      await setAutoCtxSize(name, auto.tokens);
+    }
+    return auto;
+  }
+
+  /** The three directories `weightsFile` needs, read off this manager's own state. */
+  #modelFilesDeps(): { foreign: IndexResult["foreign"]; modelsDir: string; indexDir: string } {
+    return { foreign: this.foreignModels, modelsDir: this.modelsDir, indexDir: this.indexDir };
+  }
+
+  /**
+   * A model's weights, in bytes, however MyRA has to find that out.
+   *
+   * The daemon's own `/models` figure first -- it is free, already fetched for
+   * most callers -- and `weightsFile`'s own disk read as the fallback, for
+   * exactly the models that report a bare 0: every `extra_models_dir` entry,
+   * which is every LM Studio and Ollama import. Exposed publicly because the
+   * `myra:model-facts` IPC handler needs the same number the auto-tuner does,
+   * for the tuning panel's own memory bar to draw against.
+   */
+  async modelFileBytes(id: string): Promise<number | undefined> {
+    const model = (await this.#api.listModels().catch(() => [])).find((m) => m.id === id);
+    if (model?.sizeBytes) return model.sizeBytes;
+    const files = await weightsFile(id, this.#modelFilesDeps()).catch(() => undefined);
+    return files?.bytes;
+  }
+
+  /**
+   * Record a model's shape from the GGUF header on disk, the moment there is
+   * one to read.
+   *
+   * `modelFacts.ts`'s own doc comment on `learnShapeFromFile` names this as
+   * one of its two callers -- `ipc.ts`'s download-finished handler, right
+   * before `learnFacts` -- but nothing actually called it from there; only
+   * `#autoTuneLoad`'s lazy read at first load did. A model whose repository
+   * has a `config.json` therefore got `shapeFrom: "config"` at download time
+   * and paid an 8 MiB GGUF read on its first load -- when the file was
+   * already on disk and the user was already waiting for it to load, not
+   * waiting for it to download. Exposed so `ipc.ts` can call it without
+   * reaching into `#modelFilesDeps` itself, which is private for the reason
+   * every other `#`-prefixed member here is: the three directories it needs
+   * are read off this manager's own state, not passed in by a caller that
+   * would have to keep them in sync by hand.
+   */
+  async learnShape(id: string): Promise<void> {
+    const files = await weightsFile(id, this.#modelFilesDeps()).catch(() => undefined);
+    if (files) await learnShapeFromFile(id, files.path).catch(() => undefined);
   }
 
   async loadModel(name: string): Promise<void> {
@@ -855,5 +1126,43 @@ export class RuntimeManager {
 
   killNow(): void {
     this.#lemonade.killNow();
+  }
+
+  /** Install the reader that gets this daemon's Hugging Face token, when one is stored. */
+  setHfToken(read: () => Promise<string | undefined>): void {
+    this.#hfTokenReader = read;
+  }
+
+  /** Whether every start, not only a gated pull's, should carry the token. */
+  setHfTokenAlways(always: boolean): void {
+    this.#hfAlways = always;
+  }
+
+  /** Whether every start already carries the token -- a gated pull needs no restart of its own. */
+  get hfTokenAlways(): boolean {
+    return this.#hfAlways;
+  }
+
+  /**
+   * Restart the daemon so the very next pull can carry the user's token.
+   *
+   * There is no per-request header a download lemond starts itself would
+   * take instead: a token reaches it only through its own environment, read
+   * once at spawn -- so a gated repository the user is about to fetch needs
+   * a fresh start, not a header on this call. Only reached for a gated
+   * repository in "only for models that need it" mode; "always send my
+   * token" never needs this, because every start already carries one.
+   *
+   * A model already loaded is not reloaded afterwards -- that cost is real,
+   * but it is paid once per gated download, not per token use, and a
+   * multi-gigabyte transfer is about to dwarf it either way.
+   */
+  async restartForHfToken(): Promise<void> {
+    this.#hfWantedOnce = true;
+    this.#lemonade.note(
+      "This repository is gated. Restarting the model server so your Hugging Face token can be used.",
+    );
+    await this.stop();
+    await this.ensureLemonade();
   }
 }

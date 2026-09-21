@@ -12,9 +12,12 @@ message box:
 
 ![The message bar in Deep research mode, with database chips](assets/screenshots/research-deep-mode.png)
 
-- **Off** — no search, just the model.
-- **Documents** — search what's in the current project.
-- **Zotero** — search your Zotero library (see below).
+- **Off** — no tools at all, just the model. Not "prefers not to search":
+  the tool list sent to the model is empty, so there is nothing to call.
+- **Assistant** — read and write in your documents folder, and keep your
+  MyRA task list. Still no network.
+- **Zotero** — everything Assistant does, plus a search of your Zotero
+  library (see below). Zotero answers on this machine, so still no network.
 - **Quick** — a handful of searches against the databases you've enabled,
   read and answered directly in the conversation.
 - **Deep** — the full pipeline: scope, plan, discover, screen, snowball,

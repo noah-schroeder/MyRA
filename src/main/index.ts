@@ -59,6 +59,7 @@ import { estimateTokens } from "../core/agent/compact.ts";
 import { REPLY_TOKENS } from "../core/review/manuscript.ts";
 import { sniffImage } from "../core/images/generate.ts";
 import { extractDocument } from "./extract.ts";
+import { PendingPrompts } from "../core/agent/pending.ts";
 import {
   deleteAllAttachments, deleteAttachment, deleteSessionAttachments, readImageDataUri, saveImageAttachment,
 } from "./attachments.ts";
@@ -87,9 +88,9 @@ import { installReviewIpc } from "./review.ts";
 import { installTaskIpc, taskHost } from "./tasks.ts";
 import { startReminders } from "./reminders.ts";
 import { createJobs } from "./work.ts";
-import { factsFor, setIgnoreSuggested, suggestedFor } from "./runtime/modelFacts.ts";
+import { factsFor, setAllowOffload, setIgnoreSuggested, suggestedFor } from "./runtime/modelFacts.ts";
 import { defaultStores, installProjectIpc } from "./projects.ts";
-import { fileInActiveProject } from "./projectStore.ts";
+import { fileInActiveProject, filedRefs } from "./projectStore.ts";
 import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -402,6 +403,23 @@ function createWindow(): void {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
 
+  /*
+   * Whoever was going to answer is gone.
+   *
+   * A question outstanding when the window reloads -- the dev server's own
+   * reload, or a crashed renderer coming back -- left `approve()` awaiting a
+   * promise nothing would ever resolve, and the turn hung with no way out but
+   * restarting the app. `undefined` denies, which is the right answer for a
+   * permission prompt nobody is looking at.
+   */
+  contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (!isMainFrame || isInPlace) return;
+    const dropped = pending.cancelAll();
+    if (dropped > 0) {
+      console.warn(`the window navigated with ${dropped} question(s) outstanding; they were declined.`);
+    }
+  });
+
   if (process.env["ELECTRON_RENDERER_URL"]) {
     void window_.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
@@ -678,8 +696,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
  * produces a confident report on the wrong question, which is worse than no
  * report because it looks like work.
  */
-const pending = new Map<string, (answer: string | undefined) => void>();
-let promptSeq = 0;
+const pending = new PendingPrompts();
 
 function ask(
   method: "input" | "editor" | "confirm",
@@ -699,11 +716,9 @@ function ask(
  * this only owns the id and the promise.
  */
 function prompt(request: Record<string, unknown>): Promise<string | undefined> {
-  const id = `p${++promptSeq}`;
-  return new Promise((resolve) => {
-    pending.set(id, resolve);
-    send("myra:prompt", { id, ...request });
-  });
+  const { id, answer } = pending.open();
+  send("myra:prompt", { id, ...request });
+  return answer;
 }
 
 /* ------------------------------------------------------------------ ipc --- */
@@ -891,8 +906,13 @@ function installIpc(): void {
     if (session_?.id === id) session_ = undefined;
   });
   ipcMain.handle("myra:delete-all-sessions", async () => {
-    await deleteAllSessions();
-    await deleteAllAttachments().catch(() => {});
+    /* Every conversation the rail's list actually shows, which is every one
+       NOT filed into a project -- see `deleteAllSessions`. Asked here rather
+       than passed in from the window: what survives a delete must not depend
+       on a list the window drew some time ago. */
+    const filed = await filedRefs("chat");
+    await deleteAllSessions(filed);
+    await deleteAllAttachments(filed).catch(() => {});
     session_ = undefined;
   });
 
@@ -908,6 +928,13 @@ function installIpc(): void {
   /* The documents folder, handed to the module that jails against it, on the
      same terms and for the same reason. */
   setWorkspaceRoot(config.current.workspaceRoot);
+
+  /* Same shape again: whether "always send my token" is on decides what the
+     NEXT daemon start carries, so the runtime has to know it before settings
+     have necessarily finished loading, and again the moment the switch is
+     flipped -- not at the next restart, which for a daemon nobody restarts on
+     purpose could be days away. */
+  runtime.setHfTokenAlways(config.current.hfTokenUse === "always");
 
   /* Whether this desktop actually shows a tray icon, which decides whether
      "keep running when closed" can do anything at all. Linux answers this
@@ -931,6 +958,7 @@ function installIpc(): void {
     }
     setZoteroDataDir(next.zoteroDataDir);
     setWorkspaceRoot(next.workspaceRoot);
+    runtime.setHfTokenAlways(next.hfTokenUse === "always");
     /* A different folder is a different library, so the snapshot taken from
        the old one must not answer the next search. */
     if (next.zoteroDataDir !== beforeDir) forgetZoteroSnapshot();
@@ -1176,6 +1204,12 @@ function installIpc(): void {
   ipcMain.handle("myra:model-facts", async (_e, ref?: unknown) => {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
     const facts = await factsFor(key);
+    /* The renderer already imports fit.ts to draw a fit chip on the models
+       list, so this hands it the shape and the file size rather than a
+       precomputed budget -- one round trip lets the tuning panel's memory bar
+       recompute live as someone edits the context box, instead of an IPC call
+       per keystroke. */
+    const sizeBytes = await runtime.modelFileBytes(key).catch(() => undefined);
     return {
       ok: true,
       key,
@@ -1192,6 +1226,10 @@ function installIpc(): void {
          every other integer flag already does without a measured model. */
       ...(facts?.shape?.layers ? { layers: facts.shape.layers } : {}),
       ...(facts?.shape?.experts ? { experts: facts.shape.experts } : {}),
+      ...(facts?.shape ? { shape: facts.shape } : {}),
+      ...(sizeBytes ? { sizeBytes } : {}),
+      ...(facts?.autoCtxSize !== undefined ? { autoCtxSize: facts.autoCtxSize } : {}),
+      ...(facts?.allowOffload ? { allowOffload: true } : {}),
     };
   });
 
@@ -1199,6 +1237,52 @@ function installIpc(): void {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
     await setIgnoreSuggested(key, Boolean(ignore));
     return { ok: true };
+  });
+
+  /**
+   * Deliberately trade GPU residency for a longer context window, or stop.
+   *
+   * A separate handler rather than folded into `myra:model-options-set`: this
+   * is not a daemon field at all, it is MyRA's own record of a choice that
+   * changes how MyRA's own auto-tuner sizes the NEXT load -- it takes effect
+   * on reload, the same as every other field in this panel.
+   */
+  ipcMain.handle("myra:model-facts-allow-offload", async (_e, ref: unknown, allow: unknown) => {
+    const key = modelKey(typeof ref === "string" ? ref : undefined);
+    await setAllowOffload(key, Boolean(allow));
+    return { ok: true };
+  });
+
+  /**
+   * What MyRA would size this model's context to right now, without writing
+   * it -- the number the tuning panel's "Recompute" offer shows before anyone
+   * presses it.
+   */
+  ipcMain.handle("myra:model-context-preview", async (_e, ref?: unknown) => {
+    const key = modelKey(typeof ref === "string" ? ref : undefined);
+    if (!key) return { ok: false, error: "No model is chosen." };
+    try {
+      const auto = await runtime.recomputeContext(key, false);
+      return { ok: true, auto };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  /**
+   * Write what the preview above showed. See `RuntimeManager.recomputeContext`
+   * for why this is the one path allowed to overwrite a `ctx_size` MyRA does
+   * not already own.
+   */
+  ipcMain.handle("myra:model-context-apply", async (_e, ref?: unknown) => {
+    const key = modelKey(typeof ref === "string" ? ref : undefined);
+    if (!key) return { ok: false, error: "No model is chosen." };
+    try {
+      const auto = await runtime.recomputeContext(key, true);
+      return { ok: true, auto };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   });
 
   ipcMain.handle("myra:set-model-prompt", async (_e, ref: unknown, value?: string | null) => {
@@ -1485,11 +1569,7 @@ function installIpc(): void {
   });
 
   ipcMain.handle("myra:answer-prompt", (_e, id: string, answer: string | undefined) => {
-    const resolve = pending.get(String(id));
-    if (resolve) {
-      pending.delete(String(id));
-      resolve(answer === undefined ? undefined : String(answer));
-    }
+    pending.answer(String(id), answer === undefined ? undefined : String(answer));
   });
 
   /* The run directory is the audit trail, and until now it was reachable from
@@ -1947,6 +2027,32 @@ async function main(): Promise<void> {
   setDocumentWatcher((doc) => send("myra:document", doc));
 
   await runtime.load();
+
+  /*
+   * Reclaim model servers a previous run left holding the graphics card.
+   *
+   * Before anything can call `ensureLemonade`, so it never sees the daemon this
+   * run is about to start. Not behind a prompt, and that is deliberate: the
+   * identity check in core/runtime/strays.ts requires a process running as this
+   * user, out of MyRA's own data directory, matching a pid and kernel start
+   * time MyRA wrote down itself -- a false positive is very nearly ruled out,
+   * a modal before the window exists is the worst possible moment to ask, and
+   * "is pid 4242 yours?" is not a question anybody can answer. What the user
+   * needs is to find out afterwards, which is what this line and the note in
+   * the runtime log are for.
+   */
+  void runtime.sweepStrays().then((count) => {
+    if (!count) return;
+    try {
+      new Notification({
+        title: "MyRA",
+        body: `Freed memory from ${count} model server${count === 1 ? "" : "s"} left running by a previous session.`,
+      }).show();
+    } catch {
+      /* A desktop without notifications is not a reason to fail a startup. */
+    }
+  });
+
   /*
    * Loading a local model is a decision about where the conversation goes.
    *
@@ -2479,31 +2585,97 @@ app.on("window-all-closed", () => {
 });
 
 /*
- * Take the model server with us.
+ * Take the model server with us, and wait long enough for it to go.
  *
- * `before-quit` cannot await, so this is the synchronous best effort; on
- * Windows it is a taskkill /T because a terminated parent does not take its
- * children with it there. Leaving an 8 GB process behind after the window
- * closes is the single most annoying failure a local-model app can have.
+ * This used to be a synchronous SIGKILL to lemond's pid, and that was the bug
+ * behind the report that started this: a SIGKILL cannot be caught, so the
+ * daemon never shut down the engines it had spawned -- `llama-server` and the
+ * rest were reparented to init still holding the graphics card, every close of
+ * the window stranded another set, and the machine did not get its memory back
+ * until it was rebooted.
+ *
+ * Quitting therefore waits now. `before-quit` cannot await on its own, so this
+ * is the standard dance: preventDefault, do the real teardown, then quit again
+ * for real. The timeout is what stops a wedged daemon holding the app open
+ * forever, and it sits OUTSIDE the three-second grace inside `stop()`, so the
+ * clean path always finishes first and this only fires when something is
+ * genuinely stuck. The cost is that quitting is no longer instant -- paid after
+ * the window has already gone, which is the right place to pay it.
  */
-app.on("before-quit", () => {
+const QUIT_TIMEOUT_MS = 5_000;
+let teardown: Promise<void> | undefined;
+/* Set only inside the teardown's own `app.quit()` below -- the one pass this
+   handler is allowed to let through. Without it, a second Cmd-Q (or an
+   impatient Ctrl-C, or a re-sent SIGTERM) arriving while `teardown` is already
+   running hit the early `if (teardown) return` with no `preventDefault`, so
+   Electron quit immediately: `runtime.stop()` never reached its SIGKILL
+   escalation, and lemond was abandoned mid-SIGTERM -- the exact leak this
+   whole rewrite exists to close, caused by the rewrite's own second path out. */
+let quitConfirmed = false;
+
+app.on("before-quit", (event) => {
   /* Set here as well as in the tray's Quit, so a shutdown that starts anywhere
      else -- the desktop's session end, Cmd-Q, a signal -- also lets the window
      close rather than being blocked by the hide-on-close handler. */
   quitting = true;
+  // The pass the teardown's own app.quit() causes. Every other pass is held.
+  if (quitConfirmed) return;
+  event.preventDefault();
+  // A pass that arrived while the first is still tearing down: already held.
+  if (teardown) return;
   tray?.destroy();
   /* The Zotero snapshot is a copy of the user's library. It is theirs, it is
      under their own config directory, and it still has no business outliving
      the app that made it. */
   forgetZoteroSnapshot();
-  runtime.killNow();
-  /* The listening socket must not outlive the window either -- and the key
-     usage counters are only flushed on stop. */
-  void api.stop();
+  /* Held so it can be cleared, rather than `unref`ed. An unref'd timer does not
+     keep the process alive, which is the difference between a grace period and
+     the appearance of one -- the same mistake, made in daemons.ts first, let a
+     sweep exit before it had finished reclaiming anything. */
+  let ceiling: NodeJS.Timeout | undefined;
+  teardown = Promise.race([
+    (async () => {
+      await runtime.stop();
+      /* The listening socket must not outlive the window either -- and the key
+         usage counters are only flushed on stop. */
+      await api.stop();
+    })(),
+    new Promise<void>((resolve) => { ceiling = setTimeout(resolve, QUIT_TIMEOUT_MS); }),
+  ])
+    .catch(() => undefined)
+    .finally(() => {
+      if (ceiling) clearTimeout(ceiling);
+      // A no-op after a clean stop, and the whole point after a timeout.
+      runtime.killNow();
+      quitConfirmed = true;
+      app.quit();
+    });
 });
 process.on("exit", () => {
   runtime.killNow();
 });
+
+/*
+ * The ways out that never reached `before-quit` at all.
+ *
+ * A desktop session ending, a `kill <pid>`, or Ctrl-C in `npm run dev` delivers
+ * a signal that Node acts on by terminating immediately -- so neither
+ * `before-quit` nor the `exit` handler above ever ran, and lemond and every
+ * engine it had spawned survived completely intact with nothing left in the
+ * world able to find them. There was no handler for any of these.
+ *
+ * It is not optional alongside detaching the daemon: a terminal's Ctrl-C goes
+ * to the foreground process group, which the daemon is deliberately no longer
+ * in, so without this, detaching would have created a leak for developers in
+ * the act of fixing one for users. `app.quit()` is idempotent and routes
+ * through the teardown above.
+ */
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+  process.on(sig, () => {
+    quitting = true;
+    app.quit();
+  });
+}
 
 /*
  * A stray rejection must not take lemond down with it.
@@ -2516,10 +2688,13 @@ process.on("exit", () => {
  * sees MyRA vanish and their RAM stay spent, which is the exact failure the
  * shutdown path above exists to prevent.
  *
- * So both handlers do the same two things: say what happened somewhere a
- * person can find it, and take the daemon down first. Neither swallows the
- * fault silently, and `uncaughtException` still exits -- carrying on after one
- * means running with state that has already been left half-written.
+ * The two are handled differently, and the asymmetry is deliberate. An uncaught
+ * exception really does end the process, so it takes the daemon down first --
+ * carrying on after one means running with state that has already been left
+ * half-written. An unhandled rejection is logged and nothing else: killing the
+ * runtime on one would mean a rejected fetch inside a research stage costing
+ * somebody the model they had loaded, which is a worse outcome than the leak.
+ * Neither swallows the fault silently.
  */
 process.on("unhandledRejection", (reason) => {
   console.error("[myra] unhandled rejection:", reason);

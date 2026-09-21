@@ -128,7 +128,25 @@ export async function deleteSessionAttachments(sessionId: string): Promise<void>
  * list: a session with an attachment but no message was never saved (see
  * main/index.ts's `myra:new-session`), so it has no session file to list
  * but still has bytes on disk worth clearing.
+ *
+ * `keep` is the conversations a project holds, which `deleteAllSessions` spares
+ * for the same reason -- an image dropped into a filed conversation has to
+ * outlive the broom as surely as the message referring to it does, or that
+ * message degrades to plain text the next time it is sent.
  */
-export async function deleteAllAttachments(): Promise<void> {
-  await rm(attachmentsRoot(), { recursive: true, force: true });
+export async function deleteAllAttachments(keep: ReadonlySet<string> = new Set()): Promise<void> {
+  if (!keep.size) {
+    await rm(attachmentsRoot(), { recursive: true, force: true });
+    return;
+  }
+  let names: string[];
+  try {
+    names = await readdir(attachmentsRoot());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (keep.has(name)) continue;
+    await rm(join(attachmentsRoot(), name), { recursive: true, force: true });
+  }
 }

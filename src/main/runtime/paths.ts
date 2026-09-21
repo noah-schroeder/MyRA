@@ -12,7 +12,7 @@
  */
 
 import { app } from "electron";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 export function runtimesDir(): string {
   return join(app.getPath("userData"), "runtimes");
@@ -68,4 +68,23 @@ export function lemonadeIndexDir(): string {
 /** Default cache location, used until the models directory setting is wired in. */
 export function lemonadeCacheDir(): string {
   return join(app.getPath("userData"), "lemonade", "cache");
+}
+
+/**
+ * The directories MyRA starts executables out of.
+ *
+ * Used by the stray sweep as the test for "is this process ours": `lemond`
+ * lives under `runtimes/`, and the engines Lemonade downloads and spawns for
+ * itself live under `lemonade/`. A Lemonade the user installed for themselves
+ * -- from a package, a pipx venv, a Flatpak -- is under neither, and so can
+ * never be mistaken for one of ours and killed.
+ *
+ * Returned with a trailing separator, because these are matched as prefixes and
+ * `…/lemonade` without one would also match a sibling called `lemonade-backup`.
+ */
+export function ownedPrefixes(): string[] {
+  return [
+    join(app.getPath("userData"), "runtimes") + sep,
+    join(app.getPath("userData"), "lemonade") + sep,
+  ];
 }

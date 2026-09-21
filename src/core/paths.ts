@@ -9,7 +9,7 @@
 
 import { chmod, lstat, mkdir, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 export const CONFIG_DIR =
   process.env["MYRA_CONFIG_DIR"] ?? join(homedir(), ".config", "myra");
@@ -67,6 +67,27 @@ export async function makeOwnDir(path: string): Promise<void> {
     /* Racing with another process, or a filesystem with no modes at all
        (a FAT-formatted external disk). Neither is worth failing a write over. */
   }
+}
+
+/**
+ * Whether one path is contained by another.
+ *
+ * `relative()` rather than `startsWith(root + sep)`, and that is the whole
+ * point of having one of these: the prefix form answers true for
+ * `/home/u/Documentsevil` against `/home/u/Documents` unless the separator is
+ * appended by hand, and it is wrong on Windows in the other direction, where
+ * `C:\Jail` and `c:\jail` are the same directory spelled two ways. `relative`
+ * asks the platform's own path implementation both questions at once.
+ *
+ * `allowRoot` is off by default because the caller that most needs this is
+ * deletion. A request naming the meetings folder itself would otherwise have
+ * taken every meeting in it -- see meetingDir in main/meetings.ts, which wants
+ * the strict answer, against the note saver beside it, which wants the other.
+ */
+export function insideRoot(root: string, target: string, opts?: { allowRoot?: boolean }): boolean {
+  const rel = relative(resolve(root), resolve(target));
+  if (rel === "") return opts?.allowRoot === true;
+  return !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /**

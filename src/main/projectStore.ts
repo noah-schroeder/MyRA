@@ -32,6 +32,22 @@ export interface ItemRow {
 
 /** What a project needs from a store, and the only thing it may assume. */
 export interface KindStore {
+  /**
+   * Refuse a ref this store does not address. Throws; returns it otherwise.
+   *
+   * On the interface rather than in a table beside it, for the reason a risk
+   * class lives on the ToolDef: `ProjectStores` is a Record over MemberKind,
+   * so widening that union makes `defaultStores` fail to compile until a
+   * seventh store exists -- and that store fails until it answers this. The
+   * check cannot be forgotten for a new kind, which a checklist could not
+   * promise.
+   *
+   * Meetings are why it is here. Five kinds are addressed by an id that
+   * `assert*Id` already guards; a meeting is addressed by its DIRECTORY NAME,
+   * so `stores.meeting.remove` was `rm -rf` over join(meetingsRoot(), ref)
+   * with ref straight off the wire.
+   */
+  assertRef: (ref: string) => string;
   list: () => Promise<ItemRow[]>;
   remove: (ref: string) => Promise<void>;
   /** What the export should contain for this one. */
@@ -149,6 +165,22 @@ export async function readAllPruned(stores: ProjectStores): Promise<Project[]> {
 }
 
 /**
+ * Every ref of one kind that some project holds.
+ *
+ * What "delete all conversations" must not touch. Read unpruned on purpose:
+ * pruning needs the stores and writes as it goes, and the only cost of a stale
+ * member here is sparing a file that is already gone -- which costs nothing,
+ * where the other direction costs the work.
+ */
+export async function filedRefs(kind: MemberKind): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (const project of await readAll()) {
+    for (const member of project.members) if (member.kind === kind) out.add(member.ref);
+  }
+  return out;
+}
+
+/**
  * Delete a project, and optionally everything in it.
  *
  * One member refusing does not abandon the rest. `deleteRun` declines to remove
@@ -169,7 +201,13 @@ export async function deleteProject(
   if (opts.contents) {
     for (const member of project.members) {
       try {
-        await stores[member.kind].remove(member.ref);
+        /* Before `remove`, not at the door alone. A record on disk reaches
+           here through `readProject`, which -- unlike `readAllPruned` -- does
+           no pruning, so this is the last thing standing between a member's
+           ref and `rm -rf`. A refusal joins the same `failed` list a live
+           research run uses, so it is reported rather than swallowed and the
+           other members are still removed. */
+        await stores[member.kind].remove(stores[member.kind].assertRef(member.ref));
         removed.set(member.kind, (removed.get(member.kind) ?? 0) + 1);
       } catch (err) {
         failed.push({ kind: member.kind, ref: member.ref, error: (err as Error).message });

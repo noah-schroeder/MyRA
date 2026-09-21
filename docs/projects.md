@@ -27,6 +27,17 @@ Nothing about a project changes where files sit on disk beyond normal
 filing — MyRA doesn't move things around behind your back. Use
 **+ Add existing…** to bring in work you did before the project existed.
 
+## Where filed work shows up
+
+Once something is in a project, it leaves the **Recent** list in the rail and
+appears on the project's own page instead. The rail shows one group at a time:
+the project you are in, or — through the button under the list — the work that
+is in no project at all.
+
+That is also what makes **Delete all conversations** safe to press. It clears
+the loose conversations the list is showing and never reaches into a project,
+so filing something is a way of keeping it.
+
 ## Exporting
 
 **Export** writes the whole project out as one real folder — conversations

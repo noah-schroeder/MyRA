@@ -219,3 +219,45 @@ test("the recordings folder follows the setting, not the value at startup", asyn
     await rm(second, { recursive: true, force: true });
   }
 });
+
+/**
+ * A track id becomes a filename, so it is a name or it is nothing.
+ *
+ * capture.ts opens `<dir>/<id>.wav` with "w" -- create or truncate -- and the
+ * only checks before it were duplicate detection and `unknownSources`, which
+ * inspects `spec.source` and never `spec.id`. A crafted id was therefore an
+ * arbitrary truncate, followed by attacker-chosen bytes over
+ * `myra:meeting-audio`, 44 bytes after a RIFF header.
+ */
+test("a track id that could be a path is refused before anything opens", async () => {
+  const root = scratch();
+  const outside = join(root, "..", "myra-track-id-sentinel");
+  try {
+    const meeting = new MeetingRecorder({ root, listSources: async () => [] });
+    for (const bad of ["../../../../tmp/evil", "a/b", "..", ".", "with space", "back\\slash"]) {
+      await assert.rejects(
+        () => meeting.start("Standup", [{ id: bad, label: "Microphone" }]),
+        MeetingError,
+        `${JSON.stringify(bad)} was accepted as a track id`,
+      );
+    }
+    // Neither the meeting directory nor anything above it was created.
+    assert.deepEqual(readdirSync(root), []);
+    assert.throws(() => readFileSync(`${outside}.wav`), /ENOENT/);
+
+    // And the check is not vacuous: an ordinary two-track meeting still starts.
+    const id = await meeting.start("Standup", [
+      { id: "me", label: "Microphone" },
+      { id: "them", label: "Everyone else" },
+    ]);
+    assert.ok(id, "an ordinary two-track meeting still starts");
+    const record = await meeting.stop();
+    assert.deepEqual(
+      record.tracks.map((t) => t.id).sort(),
+      ["me", "them"],
+      "and both tracks wrote where they were meant to",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

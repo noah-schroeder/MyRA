@@ -21,6 +21,14 @@ export interface Download {
   name: string;
   /** What a person calls it. */
   label: string;
+  /**
+   * The repository and file to fetch, or empty.
+   *
+   * Empty is the catalogue case: a name the daemon already holds an entry
+   * for, which it resolves to an address itself. It is not a missing value --
+   * it is the difference between "fetch this exact file from this exact
+   * repository" and "fetch the thing you already call this".
+   */
   checkpoint: string;
   source: string;
   recipe: string;

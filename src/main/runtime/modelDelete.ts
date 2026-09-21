@@ -32,12 +32,14 @@
  * model's own library rather than to MyRA's directories alone.
  */
 
-import { lstat, readdir, readlink, realpath, rm, rmdir, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { realpath, rm, rmdir } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 import type { ForeignModel } from "../../core/runtime/foreign.ts";
 import { ownerOf, type Owner } from "../../core/runtime/modelOwner.ts";
 import { EXTRA_MODEL_REFUSAL, LemonadeApiError } from "./lemonadeApi.ts";
+import { assertModelId } from "../../core/runtime/runtimeConfig.ts";
+import { inside, resolveTargets } from "./modelFiles.ts";
 
 export interface DeleteResult {
   owner: Owner;
@@ -57,12 +59,6 @@ export interface DeleteDeps {
   indexDir: string;
   /** Rebuild the index and restart the daemon so the row goes away. */
   rescan: () => Promise<unknown>;
-}
-
-/** `rel === ""` counts: a target that IS the root is inside it. */
-function inside(parent: string, child: string): boolean {
-  const rel = relative(resolve(parent), resolve(child));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 /**
@@ -97,7 +93,12 @@ export async function deleteModel(id: string, deps: DeleteDeps): Promise<DeleteR
      that is the library the index recorded; for anything else, MyRA's own
      folder. Nothing widens this set at runtime. */
   const roots = foreign ? [dirname(await realpath(foreign.path))] : [deps.modelsDir];
-  const targets = await resolveTargets(join(deps.indexDir, id), roots);
+  /* Asserted, like every other id that lands in a path. This one was the
+     exception: `id` came off IPC and was joined onto the index directory with
+     no guard, so the only thing standing between it and an arbitrary unlink
+     was `roots` -- and `roots` is `deps.modelsDir`, which the window could
+     set. Both halves needed fixing; either alone left the primitive. */
+  const targets = await resolveTargets(join(deps.indexDir, assertModelId(id)), roots, "deleted");
   if (!targets.length) {
     throw new Error(
       `MyRA could not find the files for ${id}. Nothing has been deleted.`,
@@ -120,41 +121,4 @@ export async function deleteModel(id: string, deps: DeleteDeps): Promise<DeleteR
      the model it can no longer open is still on the list. */
   await deps.rescan();
   return { owner, removed, restarted: true };
-}
-
-/**
- * The real files behind one entry in the index.
- *
- * An entry is a directory of symlinks (or, for a loose file, a link itself).
- * Every link is resolved and checked against the permitted roots before it
- * joins the list, and one bad link fails the whole delete rather than being
- * skipped: a half-deleted model is worse than an undeleted one, and a link
- * pointing outside its library is a fact somebody should hear about.
- */
-async function resolveTargets(entry: string, roots: string[]): Promise<string[]> {
-  const info = await lstat(entry).catch(() => undefined);
-  if (!info) return [];
-
-  const links: string[] = [];
-  if (info.isDirectory()) {
-    for (const name of await readdir(entry)) links.push(join(entry, name));
-  } else {
-    links.push(entry);
-  }
-
-  const out: string[] = [];
-  for (const link of links) {
-    const target = await realpath(
-      (await lstat(link)).isSymbolicLink() ? await readlink(link).then((t) => resolve(dirname(link), t)) : link,
-    ).catch(() => undefined);
-    if (!target) continue;
-    if (!(await stat(target).catch(() => undefined))?.isFile()) continue;
-    if (!roots.some((root) => inside(root, target))) {
-      throw new Error(
-        `${target} is not inside a folder MyRA manages, so it has not been deleted.`,
-      );
-    }
-    out.push(target);
-  }
-  return out;
 }

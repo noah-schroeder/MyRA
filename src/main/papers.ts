@@ -41,6 +41,7 @@ import { buildSystem, buildUser, type DraftRequest } from "../core/papers/prompt
 import { byNewest, idOfFile, paperFileName, parseRecord, summaryOf } from "../core/papers/store.ts";
 import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import type { Jobs } from "./work.ts";
+import { revealInside } from "./reveal.ts";
 
 export interface PaperDeps {
   config: ConfigStore;
@@ -286,7 +287,11 @@ export function installPaperIpc(deps: PaperDeps): void {
   });
 
   ipcMain.handle("myra:paper-reveal", async (_e, path: unknown) => {
-    shell.showItemInFolder(String(path));
+    /* A paper is exported into the documents folder (see paper-export above),
+       so that is the only root this button can have produced a path in. */
+    const verdict = revealInside(path, [documentsDir()], "a paper MyRA exported");
+    if (!verdict.ok) return verdict;
+    shell.showItemInFolder(verdict.target);
     return { ok: true };
   });
 }

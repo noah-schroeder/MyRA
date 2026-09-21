@@ -77,11 +77,23 @@ export function titleFrom(messages: ChatMessage[]): string {
   return line.length > 60 ? `${line.slice(0, 57)}…` : line;
 }
 
+/**
+ * A session id, refused if it is anything but one.
+ *
+ * The id is generated here and never comes from a user, but it lands in a
+ * path, so it is still checked rather than trusted. Exported because a project
+ * addresses a conversation by this id too, and a sixth copy of the regex is a
+ * sixth thing that can drift.
+ */
+export function assertSessionId(id: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(id) || id === "." || id === "..") {
+    throw new Error(`invalid session id ${JSON.stringify(id)}`);
+  }
+  return id;
+}
+
 function pathFor(id: string): string {
-  // The id is generated here and never comes from a user, but it lands in a
-  // path, so it is still checked rather than trusted.
-  if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error(`invalid session id ${JSON.stringify(id)}`);
-  return join(sessionsDir(), `${id}.json`);
+  return join(sessionsDir(), `${assertSessionId(id)}.json`);
 }
 
 export async function saveSession(session: Session): Promise<void> {
@@ -144,6 +156,33 @@ export async function deleteSession(id: string): Promise<void> {
   await rm(pathFor(id), { force: true });
 }
 
-export async function deleteAllSessions(): Promise<void> {
-  await rm(sessionsDir(), { recursive: true, force: true });
+/**
+ * Every conversation, except the ones some project holds.
+ *
+ * "Delete all conversations" in the rail is a broom for the loose work the list
+ * beside it actually shows, and a conversation filed into a project is not in
+ * that list -- filing it is how you said you were keeping it. Emptying a
+ * project from a button that never named it is how somebody loses the three
+ * chats behind a grant application.
+ *
+ * The whole directory still goes when nothing is filed, which is the ordinary
+ * case: a `.partial` left by a killed write has no session file to be listed
+ * under, so file-by-file would leave it behind.
+ */
+export async function deleteAllSessions(keep: ReadonlySet<string> = new Set()): Promise<void> {
+  if (!keep.size) {
+    await rm(sessionsDir(), { recursive: true, force: true });
+    return;
+  }
+  let names: string[];
+  try {
+    names = (await readdir(sessionsDir())).filter((n) => n.endsWith(".json"));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const id = name.slice(0, -5);
+    if (keep.has(id)) continue;
+    await rm(join(sessionsDir(), name), { force: true });
+  }
 }

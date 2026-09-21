@@ -13,7 +13,11 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { runTurn } from "../src/core/agent/loop.ts";
 import { ToolRegistry, type ToolDef } from "../src/core/agent/registry.ts";
-import { decide, PERMISSION_MODES, FLOOR_CLASSES } from "../src/core/policy.ts";
+import { decide, PERMISSION_MODES, FLOOR_CLASSES, RISK_CLASSES } from "../src/core/policy.ts";
+import { DOCUMENT_TOOL_DEFS } from "../src/core/agent/tools/documents.ts";
+import { RESEARCH_TOOL_DEFS } from "../src/core/agent/tools/research.ts";
+import { LIBRARY_TOOL_DEFS } from "../src/core/agent/tools/library.ts";
+import { TASK_TOOL_DEFS } from "../src/core/agent/tools/tasks.ts";
 
 async function withServer<T>(
   replies: unknown[],
@@ -131,5 +135,47 @@ test("the modes differ where it matters, and agree where it does not", () => {
   // And the floor holds regardless of mode, including "never ask".
   for (const risk of FLOOR_CLASSES) {
     for (const mode of PERMISSION_MODES) assert.equal(decide(mode, risk), "ask", `${risk} in ${mode}`);
+  }
+});
+
+/**
+ * A live guard where `requiresTypedConfirm` was a dead promise.
+ *
+ * That function claimed a catastrophic tool would demand a typed confirmation.
+ * It was exported, it was tested, and it was never implemented: UiDialog.tsx
+ * is two buttons. Nothing was classified `catastrophic`, so the gap never
+ * showed. Deleting it and asserting the precondition instead means the day
+ * somebody adds such a tool, the build tells them what is missing rather than
+ * shipping it behind an ordinary confirm.
+ */
+test("no tool declares a floor class, because the UI has no typed confirm", () => {
+  const all = [
+    ...RESEARCH_TOOL_DEFS,
+    ...DOCUMENT_TOOL_DEFS,
+    ...LIBRARY_TOOL_DEFS,
+    ...TASK_TOOL_DEFS,
+  ];
+  assert.ok(all.length >= 12, "the registry should still have its tools");
+  const floors = all.filter((t) => FLOOR_CLASSES.includes(t.risk)).map((t) => t.name);
+  assert.deepEqual(
+    floors,
+    [],
+    "A catastrophic or system_of_record tool needs a confirmation stronger than " +
+      "UiDialog's two buttons. Implement it with the tool that needs it.",
+  );
+});
+
+test("every tool declares a risk class the policy knows about", () => {
+  const all = [
+    ...RESEARCH_TOOL_DEFS,
+    ...DOCUMENT_TOOL_DEFS,
+    ...LIBRARY_TOOL_DEFS,
+    ...TASK_TOOL_DEFS,
+  ];
+  for (const tool of all) {
+    assert.ok(
+      RISK_CLASSES.includes(tool.risk),
+      `${tool.name} declares ${tool.risk}, which decide() cannot answer for`,
+    );
   }
 });

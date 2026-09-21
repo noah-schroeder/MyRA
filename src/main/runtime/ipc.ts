@@ -46,7 +46,7 @@ function reasonFrom(err: unknown): string {
 export function installRuntimeIpc(
   runtime: RuntimeManager,
   send: (channel: string, payload?: unknown) => void,
-  _hfToken: () => Promise<string | undefined>,
+  hfToken: () => Promise<string | undefined>,
   _window: () => BrowserWindow | undefined,
   /**
    * Called when a local model has been loaded on purpose.
@@ -57,6 +57,11 @@ export function installRuntimeIpc(
    */
   onModelLoaded: () => Promise<void> = async () => {},
 ): void {
+  /* The reader the daemon's own start resolves for a gated pull, or for
+     every start once "always send my token" is on -- see `setHfToken`'s own
+     comment for why this is a thunk rather than the secret itself. */
+  runtime.setHfToken(hfToken);
+
   /*
    * The download registry, owned here because this is where the daemon is.
    *
@@ -65,12 +70,20 @@ export function installRuntimeIpc(
    * immediately; the record lives here and is pushed to whatever is on screen.
    */
   const downloads = new Downloads({
+    /* An empty checkpoint means "the name is one the daemon already has in
+       its own catalogue", which is how the Recommended tab's rows arrive
+       here. The recipe and the source go with the checkpoint and not
+       without it: Lemonade resolves a registered name from its own entry,
+       and a request that named a source alongside it would be asking the
+       daemon to reconcile two answers to the same question. So a catalogue
+       pull sends exactly `{model_name}`, byte for byte what the awaited
+       handler this replaced sent. */
     pull: ({ name, checkpoint, source, recipe, signal, onProgress }) =>
       runtime.api.pullModel(
         name,
-        checkpoint,
+        checkpoint || undefined,
         recipe,
-        source as RegistrySource,
+        checkpoint ? (source as RegistrySource) : undefined,
         onProgress,
         signal,
       ),
@@ -96,8 +109,21 @@ export function installRuntimeIpc(
       const id = listedId(name);
       void pollForModel(id, () => runtime.api.listModels())
         .catch(() => undefined)
-        .then((model) => {
+        .then(async (model) => {
           send("myra:models-changed");
+          /*
+           * The file MyRA just finished downloading, read before it is asked
+           * about over the network -- `learnShapeFromFile` never overwrites a
+           * shape this same read already recorded, and `learnFacts` below
+           * never destroys one with no repository to check against (see
+           * modelFacts.test.ts), so the order here is the safe one: the read
+           * that needs no network first, then the one that does. Without
+           * this, a model whose repository has a `config.json` never has its
+           * GGUF header read at all until `#autoTuneLoad` does it lazily, on
+           * the user's first load -- while the file was already on disk and
+           * the user was already waiting to download it, not to load it.
+           */
+          await runtime.learnShape(id);
           /*
            * The one moment MyRA asks Hugging Face what this model is.
            *
@@ -305,16 +331,6 @@ export function installRuntimeIpc(
     }
   });
 
-  ipcMain.handle("myra:lemonade-pull", async (_e, name: string, checkpoint?: string) => {
-    try {
-      await runtime.ensureLemonade();
-      await runtime.api.pullModel(String(name), checkpoint ? String(checkpoint) : undefined);
-      return { ok: true, models: await runtime.api.listModels() };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
-  });
-
   /**
    * Search one registry.
    *
@@ -425,17 +441,51 @@ export function installRuntimeIpc(
   );
 
   /**
-   * Download a specific quantisation from a specific registry.
+   * Fetch a model, and hand back a handle to the transfer rather than the file.
    *
-   * Separate from `lemonade-pull`, which pulls a catalogue entry by name. This
-   * one carries a checkpoint and a source chosen in the search UI, and both
-   * have to survive the trip: the source decides which country the bytes come
-   * from.
+   * The only way a download starts. There used to be a second one --
+   * `myra:lemonade-pull`, which awaited the whole transfer and so existed
+   * only for as long as the page that called it -- and the Recommended tab
+   * was still on it, so a catalogue model downloaded from there had no
+   * progress bar off that page, no pause and no cancel, while a searched one
+   * had all three. Two paths to the same daemon endpoint differing only in
+   * which of them a user happened to press is not a distinction worth
+   * keeping, so there is one.
+   *
+   * A checkpoint may be empty, and that is what says which kind of pull this
+   * is: given one, it names a specific quantisation in a specific repository
+   * and the `source` decides which country the bytes come from; empty, the
+   * name is one the daemon already knows from its own bundled catalogue and
+   * it resolves the address itself.
+   *
+   * `gated` is the caller's own answer, already known from the registry --
+   * see `ModelCard`'s own `detail.gated` -- never re-asked here. In "only for
+   * models that need it" mode a gated repository needs the daemon restarted
+   * to carry the token first, which `ensureLemonade` below cannot do on its
+   * own: it is a no-op once the daemon is already running. "Always send my
+   * token" needs none of this, because every start already carries one.
    */
   ipcMain.handle(
     "myra:registry-pull",
-    async (_e, name: string, checkpoint: string, source: RegistrySource, recipe?: string) => {
+    async (
+      _e, name: string, checkpoint: string, source: RegistrySource, recipe?: string, gated?: boolean,
+    ) => {
       if (!isEnabled(readSource(source))) return refuse(readSource(source));
+      if (gated && !runtime.hfTokenAlways) {
+        if (!(await hfToken())) {
+          return {
+            ok: false,
+            error:
+              "This repository is gated and needs a Hugging Face access token. " +
+              "Add one in Settings → Runtime, under “Hugging Face token”.",
+          };
+        }
+        try {
+          await runtime.restartForHfToken();
+        } catch (err) {
+          return { ok: false, error: (err as Error).message };
+        }
+      }
       try {
         await runtime.ensureLemonade();
         /* Returns as soon as the transfer is registered, not when it finishes.
@@ -445,7 +495,10 @@ export function installRuntimeIpc(
         const installed = await runtime.api.listModels().catch(() => []);
         const record = downloads.start({
           name: String(name),
-          checkpoint: String(checkpoint),
+          /* Never `String(undefined)`: an absent checkpoint is the catalogue
+             case, and the literal "undefined" would be sent to the daemon as
+             a repository address. */
+          checkpoint: checkpoint ? String(checkpoint) : "",
           source: readSource(source),
           recipe: recipe ? String(recipe) : "llamacpp",
           /* So cancelling can tell "throw away what I just fetched" from

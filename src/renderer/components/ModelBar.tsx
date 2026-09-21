@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { LocalModel, Provider, RuntimeState, Settings } from "../types.ts";
 import {
   displayModelName, filterModels, shortModelName as shorten, SOURCE_LABELS, sourceOfModel,
@@ -11,7 +11,8 @@ import {
 import { priceLabel, priceTitle } from "../../core/pricing.ts";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 import { CapabilityIcons } from "./modelBits.tsx";
-import type { Machine } from "../../core/runtime/fit.ts";
+import { knownMachine, memoryBudget, type Machine, type ModelShape } from "../../core/runtime/fit.ts";
+import { MemoryBar } from "./MemoryBar.tsx";
 
 /**
  * Which model is answering — and, now, which one answers next.
@@ -563,54 +564,67 @@ export function ModelBar({
                 const isActive = m.path === activePath;
                 const isDefault = m.path === defaultModel;
                 return (
-                  <li key={m.path} className="modelmenu-row">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={isActive ? "modelmenu-item active" : "modelmenu-item"}
-                      onClick={() => void load(m.path)}
-                      /* A model whose header says it will not fit is still
-                         offered: the fit is an estimate of speed, not a lock,
-                         and refusing to try is not ours to decide. */
-                      title={m.fit?.label}
-                    >
-                      <span className="modelmenu-name">{shorten(m.name)}</span>
-                      <span className="modelmenu-meta">
-                        <CapabilityIcons labels={m.labels} />
-                        {m.size ? gb(m.size) : null}
-                        {isActive && local ? <span className="pill on">loaded</span> : null}
-                        {isActive && loading ? <span className="pill warn">loading</span> : null}
-                      </span>
-                    </button>
-                    {/* A sibling, not a child: a button inside a button is
-                        invalid, and clicking "make this the default" must not
-                        also load several gigabytes. */}
-                    <button
-                      type="button"
-                      className={isDefault ? "modelmenu-default on" : "modelmenu-default"}
-                      aria-pressed={isDefault}
-                      title={
-                        isDefault
-                          ? "Loads when MyRA starts. Click to stop."
-                          : "Load this one when MyRA starts"
-                      }
-                      onClick={() => void makeDefault(m.path)}
-                    >
-                      {isDefault ? "★" : "☆"}
-                    </button>
-                    <button
-                      type="button"
-                      className="modelmenu-cog"
-                      title={`Settings for ${m.name}`}
-                      aria-label={`Settings for ${m.name}`}
-                      onClick={() => {
-                        setOpen(false);
-                        setTuning({ model: m.path, local: true });
-                      }}
-                    >
-                      ⚙
-                    </button>
-                  </li>
+                    <Fragment key={m.path}>
+                    <li className="modelmenu-row">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={isActive ? "modelmenu-item active" : "modelmenu-item"}
+                        onClick={() => void load(m.path)}
+                        /* A model whose header says it will not fit is still
+                           offered: the fit is an estimate of speed, not a lock,
+                           and refusing to try is not ours to decide. */
+                        title={m.fit?.label}
+                      >
+                        <span className="modelmenu-name">{shorten(m.name)}</span>
+                        <span className="modelmenu-meta">
+                          <CapabilityIcons labels={m.labels} />
+                          {m.size ? gb(m.size) : null}
+                          {isActive && local ? <span className="pill on">loaded</span> : null}
+                          {isActive && loading ? <span className="pill warn">loading</span> : null}
+                        </span>
+                      </button>
+                      {/* A sibling, not a child: a button inside a button is
+                          invalid, and clicking "make this the default" must not
+                          also load several gigabytes. */}
+                      <button
+                        type="button"
+                        className={isDefault ? "modelmenu-default on" : "modelmenu-default"}
+                        aria-pressed={isDefault}
+                        title={
+                          isDefault
+                            ? "Loads when MyRA starts. Click to stop."
+                            : "Load this one when MyRA starts"
+                        }
+                        onClick={() => void makeDefault(m.path)}
+                      >
+                        {isDefault ? "★" : "☆"}
+                      </button>
+                      <button
+                        type="button"
+                        className="modelmenu-cog"
+                        title={`Settings for ${m.name}`}
+                        aria-label={`Settings for ${m.name}`}
+                        onClick={() => {
+                          setOpen(false);
+                          setTuning({ model: m.path, local: true });
+                        }}
+                      >
+                        ⚙
+                      </button>
+                    </li>
+                    {/* Only the model actually holding the card right now -- one
+                        that has never loaded has nothing measured to draw, and a
+                        bar per row in a list of sixty models is sixty fetches
+                        nobody asked for. A sibling <li>, not a child of the row
+                        above: that row is a flex line of buttons, and a full-width
+                        bar belongs on its own line under it, not squeezed into it. */}
+                    {isActive && local && active?.contextTokens && knownMachine(machine) ? (
+                      <li className="modelmenu-active-memory" aria-hidden="true">
+                        <ActiveModelMemory model={m.path} machine={machine} context={active.contextTokens} />
+                      </li>
+                    ) : null}
+                    </Fragment>
                 );
               })}
             </ul>
@@ -755,5 +769,48 @@ export function ModelBar({
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The compact bar under the one row actively holding the card, in the
+ * dropdown's model list.
+ *
+ * Fetches its own facts, the same independent-fetch pattern
+ * `ModelOptionsEditor`'s `FlagsField` and `PersonaField` already use --
+ * lifting this into `ModelBar`'s own state would mean re-fetching it on every
+ * open regardless of whether this row is even visible, for a value that is
+ * only ever interesting on the one row that is loaded. No shape yet, or no
+ * size, means no bar: a cache figure that does not move with `context` is
+ * worse than none, the same refusal `ContextHint` makes.
+ */
+function ActiveModelMemory({
+  model,
+  machine,
+  context,
+}: {
+  model: string;
+  machine: Machine;
+  context: number;
+}) {
+  const [facts, setFacts] = useState<{ shape?: ModelShape; sizeBytes?: number }>({});
+
+  useEffect(() => {
+    let alive = true;
+    void window.myra.modelFacts(model).then((r) => {
+      if (!alive) return;
+      setFacts({ ...(r.shape ? { shape: r.shape } : {}), ...(r.sizeBytes ? { sizeBytes: r.sizeBytes } : {}) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [model]);
+
+  if (!facts.shape || !facts.sizeBytes) return null;
+  return (
+    <MemoryBar
+      compact
+      budget={memoryBudget(facts.sizeBytes, machine, { shape: facts.shape, context })}
+    />
   );
 }

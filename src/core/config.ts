@@ -16,6 +16,7 @@ import { parseSampling, type Sampling } from "./llm/sampling.ts";
 import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES, type StudyType } from "./review/prompt.ts";
 import { DEFAULT_PERSONA } from "./agent/systemPrompt.ts";
 import { DEFAULT_HOTKEYS, parseHotkeys, type HotkeySettings } from "./hotkeys.ts";
+import { sanitiseRoot, sanitiseSubdir } from "./roots.ts";
 
 /** Model -> the persona it answers as. Blank entries are not entries. */
 function parsePromptsByModel(raw: unknown): Record<string, string> {
@@ -196,6 +197,18 @@ export interface Settings {
    * A path, not a file: the folder holding zotero.sqlite.
    */
   zoteroDataDir: string;
+  /**
+   * When the Hugging Face token in the keyring is actually sent to lemond.
+   *
+   * `"gated"` -- the default -- means MyRA's downloads stay anonymous and the
+   * token is used only for a repository the registry itself reports as
+   * gated, which restarts the daemon once to carry it. `"always"` sends it on
+   * every daemon start, for someone who would rather not be asked again. The
+   * token is never forwarded from the shell's own `HF_TOKEN` either way --
+   * see `core/childEnv.ts`'s header for why an ambient secret is not handed
+   * to a child process MyRA did not ask to have one.
+   */
+  hfTokenUse: "gated" | "always";
   /** Inside the VM: where the agent may write freely. */
   workspaceRoot: string;
   /** On the host: the Obsidian vault, and the subtree the agent may write to. */
@@ -435,6 +448,7 @@ export const DEFAULT_SETTINGS: Settings = {
   image: { ...DEFAULT_IMAGE },
   embeddings: { baseUrl: "", envVar: "MYRA_EMBED_KEY", model: "", timeoutMs: 120_000 },
   zoteroDataDir: "",
+  hfTokenUse: "gated",
   workspaceRoot: join(homedir(), "Documents", "myra"),
   vaultRoot: "",
   vaultWriteSubdir: "MyRA",
@@ -552,6 +566,26 @@ export class ConfigStore {
            prompt is built by calling `.trim()` on this, so a number here is not
            a wrong persona -- it is a TypeError on the next message. */
         persona: typeof parsed.persona === "string" ? parsed.persona : DEFAULT_SETTINGS.persona,
+        /* Rebuilt, never spread, because each of these is a jail ROOT --
+           `meetingDir` and `resolveInJail` resolve against them and refuse
+           anything outside. A correct jail handed "/" contains the whole
+           filesystem, and the next delete that walks a root acts on it. See
+           core/roots.ts for what "usable" means and what it deliberately does
+           not check. */
+        workspaceRoot: sanitiseRoot(parsed.workspaceRoot, DEFAULT_SETTINGS.workspaceRoot),
+        meetingsRoot: sanitiseRoot(parsed.meetingsRoot, DEFAULT_SETTINGS.meetingsRoot),
+        imagesRoot: sanitiseRoot(parsed.imagesRoot, DEFAULT_SETTINGS.imagesRoot),
+        papersRoot: sanitiseRoot(parsed.papersRoot, DEFAULT_SETTINGS.papersRoot),
+        reviewsRoot: sanitiseRoot(parsed.reviewsRoot, DEFAULT_SETTINGS.reviewsRoot),
+        /* Empty is a real answer for these two: no vault configured, and
+           "look in the usual places" for Zotero. */
+        vaultRoot: sanitiseRoot(parsed.vaultRoot, DEFAULT_SETTINGS.vaultRoot, { emptyMeans: "none" }),
+        zoteroDataDir: sanitiseRoot(parsed.zoteroDataDir, DEFAULT_SETTINGS.zoteroDataDir, { emptyMeans: "none" }),
+        hfTokenUse: parsed.hfTokenUse === "always" ? "always" : "gated",
+        /* Joined onto a root rather than being one: `filingRoot` does
+           join(vaultRoot, subdir), so "../../" filed notes above the vault. */
+        vaultWriteSubdir: sanitiseSubdir(parsed.vaultWriteSubdir, DEFAULT_SETTINGS.vaultWriteSubdir),
+        meetingReportDir: sanitiseSubdir(parsed.meetingReportDir, DEFAULT_SETTINGS.meetingReportDir),
         systemPrompts: parsePromptsByModel(parsed.systemPrompts),
         sampling: parseSamplingByModel(parsed.sampling),
         reasoning: parseReasoningByModel(parsed.reasoning),
@@ -595,6 +629,46 @@ export class ConfigStore {
       /* Replaced, not merged: un-choosing a level has to be expressible, and
          a merge cannot say "this model no longer has one". */
       ...(patch.reasoning ? { reasoning: parseReasoningByModel(patch.reasoning) } : {}),
+      /* Each guarded by `in`, so a patch that does not mention a root leaves
+         it alone -- the same shape `legacyTranscription` above needs, and the
+         reason the chat bar can change a model without resending folders.
+         Validated HERE rather than at each reader, so `config.current.<root>`
+         is safe by construction: setWorkspaceRoot, meetingDir, the project
+         export root and images all read it and none of them can forget. */
+      ...("workspaceRoot" in patch
+        ? { workspaceRoot: sanitiseRoot(patch.workspaceRoot, this.#settings.workspaceRoot) }
+        : {}),
+      ...("meetingsRoot" in patch
+        ? { meetingsRoot: sanitiseRoot(patch.meetingsRoot, this.#settings.meetingsRoot) }
+        : {}),
+      ...("imagesRoot" in patch
+        ? { imagesRoot: sanitiseRoot(patch.imagesRoot, this.#settings.imagesRoot) }
+        : {}),
+      ...("papersRoot" in patch
+        ? { papersRoot: sanitiseRoot(patch.papersRoot, this.#settings.papersRoot) }
+        : {}),
+      ...("reviewsRoot" in patch
+        ? { reviewsRoot: sanitiseRoot(patch.reviewsRoot, this.#settings.reviewsRoot) }
+        : {}),
+      ...("vaultRoot" in patch
+        ? { vaultRoot: sanitiseRoot(patch.vaultRoot, this.#settings.vaultRoot, { emptyMeans: "none" }) }
+        : {}),
+      ...("zoteroDataDir" in patch
+        ? {
+            zoteroDataDir: sanitiseRoot(patch.zoteroDataDir, this.#settings.zoteroDataDir, {
+              emptyMeans: "none",
+            }),
+          }
+        : {}),
+      ...("hfTokenUse" in patch
+        ? { hfTokenUse: patch.hfTokenUse === "always" ? "always" : "gated" }
+        : {}),
+      ...("vaultWriteSubdir" in patch
+        ? { vaultWriteSubdir: sanitiseSubdir(patch.vaultWriteSubdir, this.#settings.vaultWriteSubdir) }
+        : {}),
+      ...("meetingReportDir" in patch
+        ? { meetingReportDir: sanitiseSubdir(patch.meetingReportDir, this.#settings.meetingReportDir) }
+        : {}),
     };
     await this.save();
     this.#emit();

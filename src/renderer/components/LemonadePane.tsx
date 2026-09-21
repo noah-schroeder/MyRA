@@ -33,7 +33,7 @@ import { RegistrySearch } from "./RegistrySearch.tsx";
 import { ModelCard, type CardTarget } from "./ModelCard.tsx";
 import { CapabilityIcons, DownloadProgress, gb } from "./modelBits.tsx";
 import { useDownloads } from "./Downloads.tsx";
-import { fraction } from "../../core/downloads/download.ts";
+import { displayName, fraction } from "../../core/downloads/download.ts";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
 
 import { groupCatalog, repoOf, type CatalogEntry } from "../../core/runtime/catalog.ts";
@@ -236,10 +236,17 @@ function EngineUpdateRow({
             250px wide and "Processor b10375 → b10793 · 16 MB" does not fit on
             one, so the size wrapped alone onto a third line. */}
         {size ? <span className="lem-update-size">{size}</span> : null}
+        {/* A button beside Update rather than a link between the version and
+            it, and it opens through `openExternal` like every other outbound
+            link in the app instead of leaning on the window-open handler. */}
         {row.releaseUrl ? (
-          <a className="lem-update-notes" href={row.releaseUrl} target="_blank" rel="noreferrer">
+          <button
+            type="button"
+            className="lem-install lem-update-notes"
+            onClick={() => void window.myra.openExternal(row.releaseUrl!)}
+          >
             What changed ↗
-          </a>
+          </button>
         ) : null}
         <button type="button" className="lem-install" disabled={busy} onClick={onAsk}>
           {row.waiting ? "Install now" : "Update"}
@@ -627,7 +634,7 @@ export function LemonadePane({
   const download = useCallback(
     async (
       source: RegistrySource,
-      choice: { name: string; checkpoint: string; recipe: string },
+      choice: { name: string; checkpoint: string; recipe: string; gated?: boolean },
     ): Promise<void> => {
       setPullError(undefined);
       /* Resolves once the transfer has started, not when it has finished.
@@ -635,7 +642,7 @@ export function LemonadePane({
          noticing it arrived -- belongs to the registry in main, which is what
          lets it outlive this page. */
       const res = await window.myra.registryPull(
-        choice.name, choice.checkpoint, source, choice.recipe,
+        choice.name, choice.checkpoint, source, choice.recipe, choice.gated ?? false,
       );
       if (!res.ok) setPullError(explainRegistryError(res.error ?? "", source));
     },
@@ -1290,6 +1297,24 @@ export function LemonadePane({
                     const fit = m.sizeBytes && machine.ramBytes ? fitModel(m.sizeBytes, machine) : undefined;
                     const chip = fit ? FIT_CHIP[fit.verdict] : undefined;
                     const here = have.has(m.id);
+                    /* `displayName`, not a bare comparison: a pull that
+                       carries its own checkpoint is registered under a
+                       `user.` prefix the daemon strips again when it lists
+                       the model, so the id in this row and the name of the
+                       transfer fetching it differ by exactly that. */
+                    const downloading = pulling !== undefined && displayName(pulling) === m.id;
+                    /* Resolved before the action, not inside it: a catalogue
+                       checkpoint that is not an `org/repo` address -- not
+                       every row on the Chat tab has one -- used to fall
+                       through `action === "view"`'s own `if (repo)` check
+                       straight into a download, from a button that still read
+                       "View" and was never disabled by one. */
+                    const repo = here ? undefined : repoOf(m.checkpoint);
+                    /* What this row's one button does, decided once rather
+                       than re-derived by the label, the disabled test and the
+                       click handler separately -- which is how "View" ended up
+                       disabled by a download it only wanted to look at. */
+                    const action = here ? "load" : active?.id === "chat" && repo ? "view" : "download";
                     /* Two different verdicts, and the engine one wins. A model
                        that fits comfortably in memory and has no engine to run
                        it is not "Fits on GPU"; showing that was the bug. */
@@ -1434,10 +1459,14 @@ export function LemonadePane({
                                cheaply -- it is somebody's bandwidth, possibly
                                metered. The tooltip says why rather than
                                leaving a dead button. */
-                            disabled={busy || (!here && verdict.state === "unsupported")}
+                            disabled={
+                              busy ||
+                              (action === "download" && downloading) ||
+                              (!here && verdict.state === "unsupported")
+                            }
                             title={verdict.state === "unsupported" ? verdict.reason : undefined}
                             onClick={() => {
-                              if (here) {
+                              if (action === "load") {
                                 loadOrUnload(m.id);
                                 return;
                               }
@@ -1446,15 +1475,34 @@ export function LemonadePane({
                                  group's rows name a checkpoint Lemonade already knows about
                                  the way `RegistrySearch`'s own results do: through the card,
                                  which is what already resolves a repository to a download. */
-                              const repo = active?.id === "chat" ? repoOf(m.checkpoint) : undefined;
-                              if (repo) {
+                              if (action === "view" && repo) {
                                 setViewing({ repo, recipe: m.recipe, source: m.source, labels: m.labels });
                                 return;
                               }
-                              void run(`Downloading ${m.id}`, () => window.myra.lemonadePull(m.id));
+                              /* The same registry every other download on this page
+                                 goes through, with an empty checkpoint because the
+                                 daemon already has an entry under this name. This row
+                                 used to await the whole transfer over an IPC reply of
+                                 its own, which meant the progress, the name and the
+                                 only handle on it were thrown away by changing page --
+                                 while the bytes carried on arriving. See
+                                 `myra:registry-pull`. */
+                              /* No `gated` here: a catalogue entry with no
+                                 resolvable repository (`repo` above is
+                                 undefined) has nothing MyRA could have asked
+                                 the registry about in the first place. */
+                              void download(m.source, {
+                                name: m.id,
+                                checkpoint: "",
+                                recipe: m.recipe,
+                              });
                             }}
                           >
-                            {here ? (m.id === loaded ? "Unload" : "Load") : active?.id === "chat" ? "View" : "Download"}
+                            {action === "load"
+                              ? m.id === loaded ? "Unload" : "Load"
+                              : action === "view"
+                                ? "View"
+                                : downloading ? "Downloading" : "Download"}
                           </button>
                         </div>
                       </li>

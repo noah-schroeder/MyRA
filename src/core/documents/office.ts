@@ -8,11 +8,13 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { makePrivateDir, OWNER_ONLY_FILE, toolsDir } from "../paths.ts";
 import { FORMATS, extensionOf, outputName, pandocArgs, pandocReader, type Format } from "./formats.ts";
+import { scrubbedEnv } from "../childEnv.ts";
 
 export class DocsError extends Error {
   override readonly name = "DocsError";
@@ -121,15 +123,6 @@ async function scratchDir(prefix: string): Promise<string> {
   return await mkdtemp(join(scratchRoot(), prefix));
 }
 
-/** Absolute path for a workspace-relative one, refusing anything outside. */
-export function inWorkspace(rel: string): string {
-  const root = resolve(documentsDir());
-  const abs = resolve(root, rel);
-  if (abs !== root && !abs.startsWith(root + "/")) {
-    throw new DocsError(`${rel} is outside the documents folder`);
-  }
-  return abs;
-}
 
 async function run(
   command: string,
@@ -137,7 +130,12 @@ async function run(
   timeoutMs: number,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((done, fail) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      /* pandoc and pdftotext need to be found, to run in a locale and
+         to write a temporary file. Nothing else here is theirs. */
+      env: scrubbedEnv(process.env),
+    });
     let stdout = "";
     let stderr = "";
     let timer: NodeJS.Timeout | undefined;
@@ -312,10 +310,56 @@ async function verify(produced: string, format: Format, stderr: string): Promise
   }
 }
 
-/** Write text to a file, creating the directory it lives in. */
+/**
+ * Write text to a file, creating the directory it lives in.
+ *
+ * Written under an unguessable name and renamed into place, which is the rule
+ * this codebase already states twice -- images write a sidecar last and a
+ * research stage writes `<name>.partial` and finalises it -- and which this,
+ * the one write reached by a model-supplied name, skipped.
+ *
+ * Here the reason is the gap between resolving a path and using it.
+ * `resolveInJail` returns a STRING, and for a document that does not exist yet
+ * -- the ordinary write_document case -- the final component was checked
+ * against a filesystem that did not contain it. Anything able to plant a
+ * symlink at that path in the meantime had the write follow it out of the
+ * jail. Two properties close it, and neither needs a platform-specific flag:
+ *
+ *   - `"wx"` is O_CREAT|O_EXCL, which refuses to follow a symlink at the final
+ *     component on every POSIX platform -- it fails EEXIST even for a dangling
+ *     one -- and is CREATE_NEW on Windows. A random suffix means the name
+ *     cannot have been created in advance, the same argument `mkdtemp` already
+ *     carries in capture.ts and tools/pandoc.ts.
+ *   - `rename` REPLACES a symlink standing at the destination rather than
+ *     writing through it. So the dangerous operation is removed rather than
+ *     guarded.
+ *
+ * What remains, stated rather than waved at: `rename` resolves the PARENT
+ * directory fresh, so swapping an intermediate directory for a symlink inside
+ * the same window still lands the file elsewhere -- as does `makePrivateDir`
+ * below, which is `mkdir -p` and will happily create real directories through
+ * one. Closing that needs openat/O_DIRECTORY walking, which Node does not
+ * expose and which is not worth a native dependency. The precondition for
+ * either is write access inside a directory created 0700, which means a
+ * process already running as this user, or a workspace the user deliberately
+ * pointed at a shared or synced folder. See docs/threat-model.md.
+ */
 export async function writeText(abs: string, content: string): Promise<number> {
   await makePrivateDir(dirname(abs));
-  await writeFile(abs, content, { encoding: "utf8", mode: OWNER_ONLY_FILE });
+  const temporary = `${abs}.${randomUUID().slice(0, 8)}.part`;
+  try {
+    const handle = await open(temporary, "wx", OWNER_ONLY_FILE);
+    try {
+      await handle.writeFile(content, { encoding: "utf8" });
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, abs);
+  } catch (err) {
+    // Never leave a half-written .part behind for a listing to show.
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw err;
+  }
   return Buffer.byteLength(content, "utf8");
 }
 
