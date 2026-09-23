@@ -1,13 +1,18 @@
 /**
  * A file dropped into the chat: the id shape, and what it costs to send.
  *
- * Two kinds, two very different fates. A document's text is extracted once and
- * inlined into the message as ordinary words -- see main/index.ts, which
- * wraps it in the same UNTRUSTED CONTENT markers `read_document` uses. An
- * image cannot be inlined as text, so the message keeps only this small
- * reference and the bytes live on disk; `expandImages` below is where a
- * reference turns back into something a vision model can read, and it does so
- * only at the last possible moment, inside `buildRequest`.
+ * Three kinds, three fates. A document's text is extracted once and inlined
+ * into the message as ordinary words -- see main/index.ts, which wraps it in
+ * the same UNTRUSTED CONTENT markers `read_document` uses. An image cannot be
+ * inlined as text, so the message keeps only this small reference and the
+ * bytes live on disk; `expandImages` below is where a reference turns back
+ * into something a vision model can read, and it does so only at the last
+ * possible moment, inside `buildRequest`. A `data` attachment -- a pasted or
+ * dropped table -- is kept exactly like an image: bytes on disk, a reference
+ * in the message. It is never expanded into the wire request at all, which is
+ * the point (see tools/table.ts's header): the model reaches the numbers only
+ * by calling a tool with the attachment's id, never by having them typed into
+ * its own context, which is the one route a transcription error could travel.
  *
  * `ChatMessage.content` is never an array. Widening it would have meant
  * teaching every reader of a stored conversation -- the title, the export
@@ -18,7 +23,9 @@
  * bug unrepresentable rather than merely avoided.
  */
 
-export type AttachmentKind = "image" | "document";
+import { asUntrusted } from "../research/html.ts";
+
+export type AttachmentKind = "image" | "document" | "data";
 
 /** What a message carries, as a reference -- never the bytes and never the text. */
 export interface Attachment {
@@ -28,6 +35,10 @@ export interface Attachment {
   mime?: string;
   /** Documents only, for the chip. */
   words?: number;
+  /** Data attachments only, for the chip and for the shape line the model
+   *  reads instead of the numbers themselves. */
+  rows?: number;
+  columns?: string[];
 }
 
 function randomId(): string {
@@ -109,3 +120,33 @@ export function expandImages(
  * early rather than a lot late.
  */
 export const IMAGE_TOKEN_ESTIMATE = 1200;
+
+/**
+ * A user message's own text, with a dropped document's extracted content and
+ * a pasted table's shape line folded in ahead of it as ordinary words.
+ *
+ * Both are wrapped as untrusted, and for the same reason: a colleague's
+ * export or a downloaded dataset is somebody else's writing, exactly as a
+ * dropped document is, and its column headers are exactly the kind of place
+ * a pasted prompt-injection payload would sit -- there is nothing about
+ * arriving as a table's header row rather than a paragraph that makes it
+ * safer to read as an instruction. The shape line names columns and a row
+ * count only, never a value; the numbers themselves reach a tool exclusively
+ * through the attachment's id (see tools/table.ts's header).
+ */
+export function composeMessageContent(
+  text: string,
+  documents: readonly { name: string; text: string }[],
+  data: readonly { id: string; name: string; rows: number; columns: readonly string[] }[],
+): string {
+  const documentText = documents.map((d) => asUntrusted(d.name, d.text)).join("\n\n");
+  const dataText = data
+    .map((d) =>
+      asUntrusted(
+        d.name,
+        `[data ${d.id}: "${d.name}" -- ${d.columns.length} columns (${d.columns.join(", ")}), ${d.rows} rows]`,
+      ),
+    )
+    .join("\n\n");
+  return [documentText, dataText, text].filter((s) => s).join("\n\n").trim();
+}

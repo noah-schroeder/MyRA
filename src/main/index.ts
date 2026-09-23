@@ -68,8 +68,7 @@ import {
 import { setPdfRenderer, engines, documentsDir, setWorkspaceRoot } from "../core/documents/office.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
-import type { Attachment } from "../core/llm/attach.ts";
-import { asUntrusted } from "../core/research/html.ts";
+import { composeMessageContent, type Attachment } from "../core/llm/attach.ts";
 import { hasVision } from "../core/models/roles.ts";
 import { estimateTokens } from "../core/agent/compact.ts";
 import { REPLY_TOKENS } from "../core/review/manuscript.ts";
@@ -610,20 +609,15 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
   );
   const images = attachments.filter((a): a is Extract<PendingAttachment, { kind: "image" }> => a.kind === "image");
   const data = attachments.filter((a): a is Extract<PendingAttachment, { kind: "data" }> => a.kind === "data");
-  /* Inlined as ordinary words in the message, wrapped exactly as
-     read_document wraps a file it reads off disk -- somebody else's writing,
-     dropped in for one question, is untrusted the same way a fetched page is:
-     read it and cite it, but an instruction inside it is not one to act on. */
-  const documentText = documents.map((d) => asUntrusted(d.name, d.text)).join("\n\n");
-  /* The shape only -- column names and a row count, never a value. This is
-     what the model reads to decide whether create_table or create_chart is
-     the right call and which columns to name; the numbers themselves reach a
-     tool only through data_id, never through this message's content. See
+  /* Both a document's text and a data attachment's shape line are inlined as
+     ordinary words in the message, and both wrapped as untrusted content --
+     somebody else's writing, dropped in for one question, whether it arrived
+     as prose or as a pasted table's own column headers. See
+     composeMessageContent's own header for why the data side gets the same
+     wrapping the document side always has; the numbers themselves still reach
+     a tool only through data_id, never through this message's content -- see
      core/agent/tools/table.ts's header for why that split is the whole point. */
-  const dataText = data
-    .map((d) => `[data ${d.id}: "${d.name}" -- ${d.columns.length} columns (${d.columns.join(", ")}), ${d.rows} rows]`)
-    .join("\n");
-  const content = [documentText, dataText, text].filter((s) => s).join("\n\n").trim();
+  const content = composeMessageContent(text, documents, data);
 
   conversation.messages_.push({
     role: "user",
