@@ -414,7 +414,10 @@ function binCount(n: number): number {
   return Math.max(1, Math.ceil(Math.log2(Math.max(1, n)) + 1));
 }
 
-function histBins(values: readonly number[]): { lo: number; hi: number; count: number }[] {
+/** Exported so pgfplots.ts's histogram export bins the same way this file's
+ *  own on-screen layout does, by construction rather than by two copies of
+ *  Sturges' rule kept identical by hand. */
+export function histBins(values: readonly number[]): { lo: number; hi: number; count: number }[] {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const k = binCount(values.length);
