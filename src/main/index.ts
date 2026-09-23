@@ -1779,24 +1779,36 @@ function installIpc(): void {
     try {
       const runId = String(id ?? "");
       const run = await ResearchRun.open(runId, researchRoot());
-      const candidates = await run.readJsonl<{ dedupeKey?: string }>("candidates.jsonl");
-      const snowball = await run.readJsonl<{ dedupeKey?: string }>("snowball.jsonl");
-      const screened = [
-        ...(await run.readJsonl<{ include?: boolean; keep?: boolean }>("screened.jsonl")),
-        ...(await run.readJsonl<{ include?: boolean; keep?: boolean }>("screened-snowball.jsonl")),
-      ].map((d) => ({ include: d.include === true || d.keep === true }));
-      if (!candidates.length && !snowball.length) {
+      // Six reads, none depending on another's result -- only the early-return
+      // check below depends on two of their lengths, which is a post-processing
+      // step, not a reason to serialise the reads themselves.
+      const [candidates, snowballRaw, screenedA, screenedB, sourcesRaw, question] = await Promise.all([
+        run.readJsonl<{ dedupeKey?: string }>("candidates.jsonl"),
+        run.readJsonl<{ dedupeKey?: string }>("snowball.jsonl"),
+        run.readJsonl<{ include?: boolean; keep?: boolean }>("screened.jsonl"),
+        run.readJsonl<{ include?: boolean; keep?: boolean }>("screened-snowball.jsonl"),
+        run.sources(),
+        run.readJson<{ question?: string }>("question.json"),
+      ]);
+      const screened = [...screenedA, ...screenedB].map((d) => ({ include: d.include === true || d.keep === true }));
+      if (!candidates.length && !snowballRaw.length) {
         return { ok: false, error: "This run has no search results to draw a flow diagram from." };
       }
-      const sources = await run.sources();
+      /* undefined, not an empty array, for a stage that never ran -- readJsonl
+         cannot tell "missing file" from "empty file" apart, but the stage's own
+         output file existing can. See prismaCounts's own header for why this
+         distinction is the whole point. */
+      const snowball = run.isDone("snowball") ? snowballRaw : undefined;
+      const sources = run.isDone("retrieve") ? sourcesRaw : undefined;
       /* A record with no dedupe key stands for itself rather than collapsing
-         with every other keyless one -- the same guard `counts()` makes. */
+         with every other keyless one -- the same guard `counts()` makes. Always
+         computed from the raw arrays: de-duplication counts what was found,
+         whether or not the snowball stage counts as "run" for the figure. */
       const distinct = new Set(
-        [...candidates, ...snowball].map((c, i) => c.dedupeKey ?? `__${i}`),
+        [...candidates, ...snowballRaw].map((c, i) => c.dedupeKey ?? `__${i}`),
       ).size;
       const counts = prismaCounts({ candidates, snowball, screened, sources, distinct });
-      const question = (await run.readJson<{ question?: string }>("question.json"))?.question;
-      const title = question ? `PRISMA — ${question.slice(0, 60)}` : "PRISMA flow diagram";
+      const title = question?.question ? `PRISMA — ${question.question.slice(0, 60)}` : "PRISMA flow diagram";
       send("myra:diagram", { id: `prisma-${runId}`, title, prisma: figureFromCounts(counts, title) });
       return { ok: true };
     } catch (err) {

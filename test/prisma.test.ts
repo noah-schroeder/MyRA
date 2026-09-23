@@ -53,13 +53,35 @@ test("screened is the shortlist, which is not the number identified", () => {
 
 test("a stage that did not run gets no box, rather than a box reading zero", () => {
   const got = prismaCounts({
-    candidates: new Array(20).fill(0), snowball: [], screened: decisions(5, 15), sources: [],
+    candidates: new Array(20).fill(0), snowball: undefined, screened: decisions(5, 15), sources: undefined,
   });
   assert.equal(got.viaSnowball, undefined, "no citation search happened");
   assert.equal(got.fullText, undefined, "nothing was retrieved in full");
+  assert.equal(got.included, undefined, "nothing reached the synthesis because retrieve never ran");
   const fig = figureFromCounts(got);
   assert.equal(fig.counts.citations, undefined);
   assert.equal(fig.counts.assessed, undefined);
+  assert.equal(fig.counts.includedStudies, undefined);
+});
+
+test("a stage that ran and found nothing draws a measured zero, not a missing box", () => {
+  /* The bug this replaces used array length to decide "did this run", so a
+     citation search that ran and turned up nothing was indistinguishable from
+     one that never happened -- silently dropping the "other methods" column
+     and, separately, showing an "Included (n = 0)" box with no "assessed" box
+     above it, since fullText used the same length-truthy check while included
+     did not. Passing an empty (not undefined) array is "ran, found zero". */
+  const got = prismaCounts({
+    candidates: new Array(20).fill(0), snowball: [], screened: decisions(5, 15), sources: [],
+  });
+  assert.equal(got.viaSnowball, 0, "the citation search ran and found nothing");
+  assert.equal(got.fullText, 0, "retrieval ran and nothing was retrieved");
+  assert.equal(got.included, 0, "nothing reached the synthesis, measured");
+  const fig = figureFromCounts(got);
+  assert.equal(fig.variant, "new+other", "a snowball round that ran, even finding nothing, is still +other");
+  assert.equal(fig.counts.citations, 0);
+  assert.equal(fig.counts.assessed, 0);
+  assert.equal(fig.counts.includedStudies, 0);
 });
 
 test("de-duplication is reported only when it actually removed something", () => {
@@ -94,7 +116,7 @@ test("a snowball round makes it a +other review, on the citation-searching row",
   assert.equal(withSnowball.counts.citations, 3);
 
   const without = figureFromCounts(prismaCounts({
-    candidates: new Array(20).fill(0), snowball: [], screened: decisions(5, 15), sources: [],
+    candidates: new Array(20).fill(0), snowball: undefined, screened: decisions(5, 15), sources: undefined,
   }));
   assert.equal(without.variant, "new");
 });

@@ -369,8 +369,10 @@ export class ResearchRun {
    * The funnel as one line, for the head of the report.
    *
    * PRISMA-lite on purpose: enough to answer "did I miss something?" and "how
-   * did I find this?", without the flow diagrams and dual independent screening
-   * that exist to satisfy reviewers this run does not have.
+   * did I find this?", without the dual independent screening that exists to
+   * satisfy reviewers this run does not have. The flow diagram itself is no
+   * longer missing -- `research/prisma.ts` draws one from these same files --
+   * but it is a figure somebody asks for, where this line is always printed.
    */
   async funnel(): Promise<string> {
     const c = await this.counts();
