@@ -157,6 +157,111 @@ test("box plot with several y columns and no x makes one box per column", async 
   }
 });
 
+test("a box column with no measured value at all is left out, not drawn collapsed to zero", async () => {
+  // Every cell in B is a recognized missing marker, so buildValues returns an
+  // empty array for it -- without the fix, boxOf's own fallback for an empty
+  // array drew a real-looking box sitting exactly at y=0.
+  setDataHost(async () => ({ name: "d.tsv", text: "A\tB\n1\tn/a\n2\tn/a\n3\tn/a" }));
+  const seen: ChartUpdate[] = [];
+  setChartWatcher((c) => seen.push(c));
+  try {
+    const res = await run({ data_id: "d1", kind: "box", y: ["A", "B"] });
+    assert.ok(seen[0]?.data.kind === "box");
+    if (seen[0]?.data.kind === "box") {
+      assert.deepEqual(seen[0].data.groups.map((g) => g.label), ["A"], "B drew no box");
+    }
+    assert.match(res.content, /"B".*no measured value/);
+  } finally {
+    setDataHost(undefined);
+    setChartWatcher(undefined);
+  }
+});
+
+test("a box plot where every given column is entirely missing is refused, not drawn empty", async () => {
+  setDataHost(async () => ({ name: "d.tsv", text: "A\tB\nn/a\t1\nn/a\t2" }));
+  const seen: ChartUpdate[] = [];
+  setChartWatcher((c) => seen.push(c));
+  try {
+    const res = await run({ data_id: "d1", kind: "box", y: ["A"] });
+    assert.equal(seen.length, 0);
+    assert.match(res.content, /None of the given columns has a measured value to draw a box from/);
+  } finally {
+    setDataHost(undefined);
+    setChartWatcher(undefined);
+  }
+});
+
+test("a scatter/line column pair with no row where both are present is refused, not drawn blank", async () => {
+  // Every row is missing x or y, so both buildXY results are empty --
+  // without the fix, Math.min/max over an empty array degraded into a blank
+  // plot frame with no ticks and no points, accepted with no explanation.
+  setDataHost(async () => ({ name: "d.tsv", text: "X\tY\nn/a\t1\n2\tn/a" }));
+  const seen: ChartUpdate[] = [];
+  setChartWatcher((c) => seen.push(c));
+  try {
+    const res = await run({ data_id: "d1", kind: "scatter", x: "X", y: ["Y"] });
+    assert.equal(seen.length, 0);
+    assert.match(res.content, /No row has both "X"/);
+  } finally {
+    setDataHost(undefined);
+    setChartWatcher(undefined);
+  }
+});
+
+test("group with more than one y column is refused, rather than silently ignored", async () => {
+  setDataHost(async () => ({ name: "d.tsv", text: "Dose\tResponse\tToxicity\tTreatment\n1\t2\t3\tA" }));
+  const seen: ChartUpdate[] = [];
+  setChartWatcher((c) => seen.push(c));
+  try {
+    const res = await run({
+      data_id: "d1", kind: "scatter", x: "Dose", y: ["Response", "Toxicity"], group: "Treatment",
+    });
+    assert.equal(seen.length, 0, "nothing should be drawn from a request that cannot be honoured as asked");
+    assert.match(res.content, /group only works with exactly one y column/);
+  } finally {
+    setDataHost(undefined);
+    setChartWatcher(undefined);
+  }
+});
+
+test("a grouped scatter's fit line is skipped, with a note, when there is more than one group", async () => {
+  // Pooling every group's points into one OLS line was the bug: a fit line
+  // drawn across groups a model asked to see kept separate, with no caveat,
+  // while the identical situation without grouping was already refused.
+  setDataHost(async () => ({
+    name: "d.tsv",
+    text: "Dose\tResponse\tCohort\n1\t2\tA\n2\t4\tA\n1\t9\tB\n2\t7\tB",
+  }));
+  const seen: ChartUpdate[] = [];
+  setChartWatcher((c) => seen.push(c));
+  try {
+    const res = await run({ data_id: "d1", kind: "scatter", x: "Dose", y: ["Response"], group: "Cohort", fit: true });
+    assert.ok(seen[0]?.data.kind === "scatter");
+    if (seen[0]?.data.kind === "scatter") assert.equal(seen[0].data.fit, undefined);
+    assert.match(res.content, /A fit line is only drawn for a single series/);
+  } finally {
+    setDataHost(undefined);
+    setChartWatcher(undefined);
+  }
+});
+
+test("a grouped scatter with exactly one group still fits a line, same as ungrouped", async () => {
+  setDataHost(async () => ({
+    name: "d.tsv",
+    text: "Dose\tResponse\tCohort\n1\t2\tA\n2\t4\tA\n3\t6\tA",
+  }));
+  const seen: ChartUpdate[] = [];
+  setChartWatcher((c) => seen.push(c));
+  try {
+    await run({ data_id: "d1", kind: "scatter", x: "Dose", y: ["Response"], group: "Cohort", fit: true });
+    assert.ok(seen[0]?.data.kind === "scatter");
+    if (seen[0]?.data.kind === "scatter") assert.ok(seen[0].data.fit, "a single group still fits a line");
+  } finally {
+    setDataHost(undefined);
+    setChartWatcher(undefined);
+  }
+});
+
 test("a histogram with too few numeric values is refused rather than drawing a meaningless bin", async () => {
   setDataHost(async () => ({ name: "d.tsv", text: "X\n5" }));
   try {

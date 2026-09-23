@@ -5,8 +5,8 @@
  * Same guarantee as tools/table.ts, checked the same way in
  * chartTool.test.ts: no property in this tool's schema, at any depth, is
  * typed as a number. `data_id` names an attachment; `x`, `y`, `group` and
- * `errors` name columns; `stacked`, `fit` and `logY` are booleans. There is
- * no argument slot a plotted value could occupy.
+ * `errors` name columns; `stacked` and `fit` are booleans. There is no
+ * argument slot a plotted value could occupy.
  *
  * What is computed rather than supplied, and by whom:
  *
@@ -141,6 +141,20 @@ function buildChartData(table: DataTable, spec: ChartSpec): { data: ChartData; d
     const errIdx = spec.errors ? findColumn(table, spec.errors) : undefined;
     if (isRefused(errIdx)) return errIdx;
 
+    /* group restructures the series -- it is not an annotation like fit --
+       so silently falling through to the plain, ungrouped branch below (the
+       only other place `spec.kind === "scatter"` leads) would draw
+       something other than what was asked for with nothing telling the
+       model its grouping never happened. The schema names this restriction
+       now too, but a model that misses it should hear about it here. */
+    if (spec.kind === "scatter" && spec.group && spec.y.length !== 1) {
+      return {
+        error:
+          `group only works with exactly one y column, but ${spec.y.length} were given. Call ` +
+          "again with a single y column to use group, or remove group to plot them all ungrouped.",
+      };
+    }
+
     if (spec.kind === "scatter" && spec.group && spec.y.length === 1) {
       const groupIdx = findColumn(table, spec.group);
       if (isRefused(groupIdx)) return groupIdx;
@@ -166,12 +180,27 @@ function buildChartData(table: DataTable, spec: ChartSpec): { data: ChartData; d
       }
       const series: Series[] = [...byGroup.entries()].map(([name, points]) => ({ name, points }));
       if (dropped) notes.push(`${dropped} row(s) with a missing x or y were dropped from the plot.`);
+      /* byGroup only ever gains a key at the moment a real point is pushed
+         into it, so an empty `series` here means every row was dropped --
+         the same blank-plot failure the plain scatter/line branch below
+         refuses, not a case unique to grouping. */
+      if (!series.length) {
+        return { error: `No row has both "${spec.x}" and "${spec.y[0]}" present at once.` };
+      }
       let fit: { slope: number; intercept: number; r2: number } | undefined;
-      if (spec.fit) {
-        const all = series.flatMap((s) => s.points);
-        const f = linearFit(all.map((p) => p.x), all.map((p) => p.y));
+      /* Matches the plain multi-series branch's own rule below: a fit line
+         is drawn only when there is exactly one series to draw it through.
+         Pooling every group's points into one OLS line was the bug -- a
+         single fit across groups a model asked to see kept separate is a
+         real Simpson's-paradox risk, drawn with no caveat, while the
+         identical "more than one series" situation without a group was
+         already refused with an explanatory note. */
+      if (spec.fit && series.length === 1) {
+        const f = linearFit(series[0]!.points.map((p) => p.x), series[0]!.points.map((p) => p.y));
         if (Number.isFinite(f.slope)) fit = f;
         else notes.push("A fit line was requested but the x values do not vary enough to define one.");
+      } else if (spec.fit) {
+        notes.push("A fit line is only drawn for a single series; this data had more than one group.");
       }
       return { data: { kind: "scatter", series, ...(fit ? { fit } : {}) }, dropped, notes };
     }
@@ -187,6 +216,14 @@ function buildChartData(table: DataTable, spec: ChartSpec): { data: ChartData; d
       dropped += built.dropped;
     }
     if (dropped) notes.push(`${dropped} row(s) with a missing x or y were dropped from the plot.`);
+    /* Every series empty means Math.min/max over an empty array on the axis
+       scale, which degrades to a blank plot frame with no ticks and no
+       points -- silently accepting the request rather than saying why
+       nothing is drawn. Refused the way the histogram kind already refuses
+       too few values. */
+    if (!series.some((s) => s.points.length)) {
+      return { error: `No row has both "${spec.x}" and a given y column present at once.` };
+    }
 
     if (spec.kind === "line") return { data: { kind: "line", series }, dropped, notes };
 
@@ -258,15 +295,31 @@ function buildChartData(table: DataTable, spec: ChartSpec): { data: ChartData; d
     if (!spec.y.length) return { error: "A box plot needs either an x column to group by, or one y column per box." };
     let dropped = 0;
     const groups: BoxGroupData[] = [];
+    const empty: string[] = [];
     for (const yName of spec.y) {
       const yIdx = findColumn(table, yName);
       if (isRefused(yIdx)) return yIdx;
       const built = buildValues(table, yIdx);
       if (isRefused(built)) return built;
-      groups.push({ label: yName, values: built.values });
       dropped += built.dropped;
+      /* A column with no measured value at all is left out, never drawn as a
+         box collapsed to zero -- the same "count nobody measured" rule the
+         PRISMA figure already keeps. Without this, boxOf's own fallback for
+         an empty array produces a real-looking box sitting exactly at y=0,
+         indistinguishable from "measured, and it was zero". */
+      if (!built.values.length) { empty.push(yName); continue; }
+      groups.push({ label: yName, values: built.values });
     }
     if (dropped) notes.push(`${dropped} missing cell(s) were left out.`);
+    if (empty.length) {
+      notes.push(
+        `${empty.map((n) => `"${n}"`).join(", ")} had no measured value and drew no box, rather ` +
+          "than one collapsed to zero.",
+      );
+    }
+    if (!groups.length) {
+      return { error: "None of the given columns has a measured value to draw a box from." };
+    }
     return { data: { kind: "box", groups }, dropped, notes };
   }
 
@@ -311,11 +364,14 @@ export const createChartTool: ToolDef = {
         items: { type: "string" },
         description: "One or more value columns, by their exact header text. See kind-specific rules above.",
       },
-      group: { type: "string", description: "Scatter only: split points into a series per value of this column." },
+      group: {
+        type: "string",
+        description:
+          "Scatter only, with exactly one y column: split points into a series per value of this column.",
+      },
       errors: { type: "string", description: "A column of already-computed error-bar half-widths." },
       stacked: { type: "boolean", description: "Bar only: stack the series instead of grouping them side by side." },
       fit: { type: "boolean", description: "Scatter only: draw an ordinary least-squares fit line, computed here, never supplied." },
-      logY: { type: "boolean", description: "Draw the y axis on a log scale." },
       title: { type: "string", description: "A short caption for the figure, as it would read in a paper." },
       xLabel: { type: "string", description: "The x-axis title. Defaults to the x column's name." },
       yLabel: { type: "string", description: "The y-axis title. Defaults to the y column's name." },
@@ -366,7 +422,6 @@ export const createChartTool: ToolDef = {
       ...(typeof params["errors"] === "string" ? { errors: params["errors"] } : {}),
       ...(params["stacked"] === true ? { stacked: true } : {}),
       ...(params["fit"] === true ? { fit: true } : {}),
-      ...(params["logY"] === true ? { logY: true } : {}),
       ...(typeof params["xLabel"] === "string" ? { xLabel: params["xLabel"] } : {}),
       ...(typeof params["yLabel"] === "string" ? { yLabel: params["yLabel"] } : {}),
     };
