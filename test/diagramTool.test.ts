@@ -1,0 +1,104 @@
+/**
+ * The tool, whose job is mostly to refuse well.
+ *
+ * `ToolResult.content` is what the model reads, so a refusal here IS the repair
+ * loop -- the agent loop calls the tool again with a corrected source the same
+ * way it retries any other failed call. Each refusal is therefore asserted to
+ * name the line and say what to do, because a message that only says "invalid"
+ * gives the model nothing to act on.
+ */
+
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+
+import {
+  createDiagramTool, resetDiagramIds, setDiagramWatcher, type DiagramUpdate,
+} from "../src/core/agent/tools/diagram.ts";
+
+const ctx = {} as never;
+const run = (params: Record<string, unknown>) => createDiagramTool.handler(params, ctx);
+
+test("it is safe, because nothing it does touches a disk", () => {
+  /* The figure lives in the conversation; a file appears only when a person
+     presses Export, which is their action rather than the agent's. */
+  assert.equal(createDiagramTool.risk, "safe");
+});
+
+test("a good diagram is announced to whatever is showing them", async () => {
+  resetDiagramIds();
+  const seen: DiagramUpdate[] = [];
+  setDiagramWatcher((d) => seen.push(d));
+  try {
+    const res = await run({ title: "Screening", source: "flowchart TD\n A[One] --> B[Two]" });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]?.title, "Screening");
+    assert.equal(seen[0]?.id, "diagram-1");
+    assert.match(res.content, /2 nodes and 1 edge/);
+  } finally {
+    setDiagramWatcher(undefined);
+  }
+});
+
+test("with no watcher installed it draws and tells nobody, rather than throwing", async () => {
+  setDiagramWatcher(undefined);
+  const res = await run({ source: "flowchart TD\n A --> B" });
+  assert.match(res.content, /Drew/);
+});
+
+test("a parse error comes back as the result, which is the repair loop", async () => {
+  const res = await run({ source: "flowchart TD\n A --> " });
+  assert.match(res.content, /Line 2/);
+  assert.match(res.content, /call create_diagram again/i);
+});
+
+test("nothing is announced when the diagram did not parse", async () => {
+  const seen: DiagramUpdate[] = [];
+  setDiagramWatcher((d) => seen.push(d));
+  try {
+    await run({ source: "sequenceDiagram\n A->>B: hi" });
+    assert.equal(seen.length, 0, "a broken diagram must not reach the panel");
+  } finally {
+    setDiagramWatcher(undefined);
+  }
+});
+
+test("an unsupported diagram type is named so the model can rewrite it", async () => {
+  const res = await run({ source: "gantt\n title A" });
+  assert.match(res.content, /gantt/);
+  assert.match(res.content, /flowchart TD/);
+});
+
+test("empty source is refused without pretending to draw", async () => {
+  const res = await run({ source: "   " });
+  assert.match(res.content, /No diagram source/);
+});
+
+test("a missing title falls back rather than producing an unnamed figure", async () => {
+  const seen: DiagramUpdate[] = [];
+  setDiagramWatcher((d) => seen.push(d));
+  try {
+    await run({ source: "flowchart TD\n A --> B" });
+    assert.equal(seen[0]?.title, "Diagram");
+  } finally {
+    setDiagramWatcher(undefined);
+  }
+});
+
+test("ids advance, so a redraw is a new figure rather than a silent overwrite", async () => {
+  resetDiagramIds();
+  const seen: DiagramUpdate[] = [];
+  setDiagramWatcher((d) => seen.push(d));
+  try {
+    await run({ source: "flowchart TD\n A --> B" });
+    await run({ source: "flowchart TD\n C --> D" });
+    assert.deepEqual(seen.map((d) => d.id), ["diagram-1", "diagram-2"]);
+  } finally {
+    setDiagramWatcher(undefined);
+  }
+});
+
+test("the model is told not to repeat the source in its reply", async () => {
+  // Otherwise the diagram arrives twice: once drawn, once as a wall of syntax.
+  const res = await run({ source: "flowchart TD\n A --> B" });
+  assert.match(res.content, /Do not repeat the diagram source/);
+});

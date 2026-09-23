@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CitedSource, DocumentUpdate } from "../types.ts";
+import type {
+  ArtifactRecord, ChartUpdate, CitedSource, DiagramUpdate, DocumentUpdate, TableUpdate,
+} from "../types.ts";
 import { clampWidth, DEFAULT_WIDTH, WIDTH_KEY } from "./artifactWidth.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { DiagramView } from "./DiagramView.tsx";
+import { TableView } from "./TableView.tsx";
+import { ChartView } from "./ChartView.tsx";
 
 /**
  * The documents this conversation has written, beside the conversation.
@@ -18,21 +23,37 @@ import { Markdown } from "./Markdown.tsx";
  * produced it, and something covering that conversation makes the two
  * impossible to hold at once.
  */
+/**
+ * One thing this conversation produced, of the three kinds it can produce.
+ *
+ * A document, a figure and a table share the panel because they are the same
+ * claim on the screen -- work you read against the conversation that made it
+ * -- and differ only in what fills the body and what the footer offers. Keyed
+ * rather than identified by path, because a diagram or a table has no path:
+ * each is held in the conversation until somebody exports it.
+ */
+export type Artifact =
+  | { kind: "doc"; key: string; name: string; doc: DocumentUpdate }
+  | { kind: "diagram"; key: string; name: string; diagram: DiagramUpdate }
+  | { kind: "table"; key: string; name: string; table: TableUpdate }
+  | { kind: "chart"; key: string; name: string; chart: ChartUpdate };
+
 export function ArtifactPanel({
-  docs,
+  items,
   active,
   onSelect,
   onClose,
   onResize,
 }: {
-  /** In the order they were first written. */
-  docs: DocumentUpdate[];
+  /** In the order they were first produced. */
+  items: Artifact[];
   active: string;
-  onSelect: (path: string) => void;
+  onSelect: (key: string) => void;
   onClose: () => void;
   onResize: (width: number) => void;
 }) {
-  const doc = docs.find((d) => d.path === active) ?? docs[docs.length - 1];
+  const item = items.find((d) => d.key === active) ?? items[items.length - 1];
+  const doc = item?.kind === "doc" ? item.doc : undefined;
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -51,16 +72,16 @@ export function ArtifactPanel({
     el.scrollTop = el.scrollHeight;
   }, [doc?.markdown]);
 
-  if (!doc) return null;
+  if (!item) return null;
 
-  const words = doc.markdown.trim() ? doc.markdown.trim().split(/\s+/).length : 0;
+  const words = doc && doc.markdown.trim() ? doc.markdown.trim().split(/\s+/).length : 0;
 
   return (
     <aside className="artifact" aria-label="Documents written in this conversation">
       <ResizeHandle onResize={onResize} />
       <header className="artifact-head">
-        <div className="artifact-title" title={doc.path}>
-          {doc.name}
+        <div className="artifact-title" title={item.kind === "doc" ? item.doc.path : item.name}>
+          {item.name}
         </div>
         <button type="button" className="artifact-x" onClick={onClose} aria-label="Hide documents">
           ×
@@ -68,16 +89,16 @@ export function ArtifactPanel({
       </header>
 
       {/* Only when there is a choice to make. One document needs no picker. */}
-      {docs.length > 1 ? (
-        <div className="artifact-tabs" role="tablist" aria-label="Documents">
-          {docs.map((d) => (
+      {items.length > 1 ? (
+        <div className="artifact-tabs" role="tablist" aria-label="Documents and figures">
+          {items.map((d) => (
             <button
-              key={d.path}
+              key={d.key}
               type="button"
               role="tab"
-              aria-selected={d.path === doc.path}
-              className={d.path === doc.path ? "artifact-tab on" : "artifact-tab"}
-              onClick={() => onSelect(d.path)}
+              aria-selected={d.key === item.key}
+              className={d.key === item.key ? "artifact-tab on" : "artifact-tab"}
+              onClick={() => onSelect(d.key)}
               title={d.name}
             >
               {d.name}
@@ -94,26 +115,40 @@ export function ArtifactPanel({
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
-        <Markdown text={doc.markdown} sources={NO_SOURCES} />
+        {item.kind === "doc" ? (
+          <Markdown text={item.doc.markdown} sources={NO_SOURCES} />
+        ) : item.kind === "diagram" ? (
+          <DiagramView diagram={item.diagram} />
+        ) : item.kind === "table" ? (
+          <TableView table={item.table} />
+        ) : (
+          <ChartView chart={item.chart} />
+        )}
       </div>
 
+      {/* A figure or a table carries its own actions, beside the thing they
+          act on -- so the footer below is the document's alone. */}
+      {item.kind === "doc" ? (
       <footer className="artifact-foot">
         <span className="artifact-count">
           {/* Said plainly while it is happening. The file on disk is real and
               readable at this point -- it is saved after every section -- so
               "still writing" is a statement about the document, not a warning
               that nothing exists yet. */}
-          {doc.final ? `${words.toLocaleString()} words` : `${words.toLocaleString()} words · still writing…`}
+          {item.doc.final
+            ? `${words.toLocaleString()} words`
+            : `${words.toLocaleString()} words · still writing…`}
         </span>
         {/* The markdown as written, not the rendered HTML: this is a document
             somebody is about to paste into their own draft, and headings and
             citation markers have to survive that. Read at click time, so
             copying a document still being written takes what exists now. */}
-        <CopyButton className="artifact-open" text={() => doc.markdown} title="Copy the document as Markdown" />
-        <button type="button" className="artifact-open" onClick={() => void reveal(doc.path)}>
+        <CopyButton className="artifact-open" text={() => item.doc.markdown} title="Copy the document as Markdown" />
+        <button type="button" className="artifact-open" onClick={() => void reveal(item.doc.path)}>
           Show in folder
         </button>
       </footer>
+      ) : null}
     </aside>
   );
 }
@@ -208,17 +243,36 @@ async function reveal(path: string): Promise<void> {
  * ordered by when each path was FIRST seen so the tabs do not reshuffle
  * themselves every time a section lands.
  */
-export function useDocuments(): {
-  docs: DocumentUpdate[];
+/** Turn one buffered record into the shape `arrive` deals in -- the one place
+ *  that maps a diagram/table/chart to an `Artifact`, shared by the live
+ *  subscriptions below and by `replay`, so the two cannot drift into
+ *  building the key or name differently. */
+function toArtifact(record: ArtifactRecord): Artifact {
+  switch (record.kind) {
+    case "diagram":
+      return { kind: "diagram", key: record.value.id, name: record.value.title, diagram: record.value };
+    case "table":
+      return { kind: "table", key: record.value.id, name: record.value.title, table: record.value };
+    case "chart":
+      return { kind: "chart", key: record.value.id, name: record.value.title, chart: record.value };
+  }
+}
+
+export function useArtifacts(): {
+  items: Artifact[];
   active: string;
-  setActive: (path: string) => void;
+  setActive: (key: string) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
   width: number;
   setWidth: (px: number) => void;
-  reset: () => void;
+  reset: (sessionId?: string) => void;
+  /** Show what a conversation already produced, for a panel mounting after
+   *  the fact -- see the ref's own comment for why this is filtered like a
+   *  live push rather than always applied. */
+  replay: (sessionId: string, records: ArtifactRecord[]) => void;
 } {
-  const [docs, setDocs] = useState<DocumentUpdate[]>([]);
+  const [items, setItems] = useState<Artifact[]>([]);
   const [active, setActive] = useState("");
   const [open, setOpen] = useState(false);
   /* Remembered, because a width is a decision about how you read and not about
@@ -233,24 +287,69 @@ export function useDocuments(): {
   /* Reopening on every save would fight a reader who had just closed it -- and
      a draft saves a dozen times. Opens itself once per document instead. */
   const announced = useRef(new Set<string>());
+  /**
+   * The conversation on screen right now, if `reset` or `replay` has named
+   * one -- the same guard `useAgent.ts`'s `currentSessionId` keeps, for the
+   * identical reason: a diagram/table/chart push carries no session tag of
+   * its own reliably (an untagged one, or one from before a turn existed,
+   * still has to reach a brand-new conversation's first artifact), but a
+   * TAGGED push for some other conversation must not land here. Left
+   * `undefined` until a session is explicitly opened or created.
+   */
+  const currentSessionId = useRef<string | undefined>(undefined);
+
+  /* One arrival path for every kind: replace the entry with this key, or
+     append it. Keeping them in one list rather than several is what lets the
+     tabs and the open-once rule stay single copies of themselves.
+
+     `sessionId` is checked the same way `useAgent.ts`'s live subscription
+     checks an agent event: unset ref or untagged push still applies (so a
+     brand-new conversation's first artifact, or the document channel, which
+     carries no tag at all, is never filtered against an id nothing has set
+     yet), but a push tagged for a conversation that is not this one is
+     dropped rather than drawn on top of whatever is on screen. */
+  const arrive = useCallback((item: Artifact, sessionId?: string) => {
+    if (currentSessionId.current && sessionId && sessionId !== currentSessionId.current) return;
+    setItems((prev) => {
+      const at = prev.findIndex((d) => d.key === item.key);
+      if (at === -1) return [...prev, item];
+      const next = [...prev];
+      next[at] = item;
+      return next;
+    });
+    setActive(item.key);
+    if (!announced.current.has(item.key)) {
+      announced.current.add(item.key);
+      setOpen(true);
+    }
+  }, []);
 
   useEffect(
-    () =>
-      window.myra.onDocument((doc) => {
-        setDocs((prev) => {
-          const at = prev.findIndex((d) => d.path === doc.path);
-          if (at === -1) return [...prev, doc];
-          const next = [...prev];
-          next[at] = doc;
-          return next;
-        });
-        setActive(doc.path);
-        if (!announced.current.has(doc.path)) {
-          announced.current.add(doc.path);
-          setOpen(true);
-        }
-      }),
-    [],
+    () => window.myra.onDocument((doc) => {
+      arrive({ kind: "doc", key: doc.path, name: doc.name, doc });
+    }),
+    [arrive],
+  );
+
+  useEffect(
+    () => window.myra.onDiagram((diagram) => {
+      arrive({ kind: "diagram", key: diagram.id, name: diagram.title, diagram }, diagram.sessionId);
+    }),
+    [arrive],
+  );
+
+  useEffect(
+    () => window.myra.onTable((table) => {
+      arrive({ kind: "table", key: table.id, name: table.title, table }, table.sessionId);
+    }),
+    [arrive],
+  );
+
+  useEffect(
+    () => window.myra.onChart((chart) => {
+      arrive({ kind: "chart", key: chart.id, name: chart.title, chart }, chart.sessionId);
+    }),
+    [arrive],
   );
 
   const setWidth = useCallback((px: number) => {
@@ -265,18 +364,23 @@ export function useDocuments(): {
   }, []);
 
   return {
-    docs,
+    items,
     active,
     setActive,
     open,
     setOpen,
     width,
     setWidth,
-    reset: () => {
-      setDocs([]);
+    reset: (sessionId?: string) => {
+      currentSessionId.current = sessionId;
+      setItems([]);
       setActive("");
       setOpen(false);
       announced.current.clear();
+    },
+    replay: (sessionId: string, records: ArtifactRecord[]) => {
+      currentSessionId.current = sessionId;
+      for (const record of records) arrive(toArtifact(record), sessionId);
     },
   };
 }

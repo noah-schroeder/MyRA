@@ -3,7 +3,7 @@ import { useAgent } from "./useAgent.ts";
 import { answerText } from "./components/turnText.ts";
 import { CopyButton } from "./components/CopyButton.tsx";
 import { Markdown } from "./components/Markdown.tsx";
-import { ArtifactPanel, useDocuments } from "./components/ArtifactPanel.tsx";
+import { ArtifactPanel, useArtifacts } from "./components/ArtifactPanel.tsx";
 import { ToolCard } from "./components/ToolCard.tsx";
 import { Reasoning } from "./components/Reasoning.tsx";
 import { MessageStatsLine } from "./components/MessageStats.tsx";
@@ -43,6 +43,7 @@ import { TasksPage } from "./components/TasksPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import { downscaleImage } from "./downscale.ts";
+import { parse } from "../core/tabular/parse.ts";
 import type {
   ActiveRun, CitedSource, JobSnapshot, MemberKind, PendingAttachment, ProjectSummary, PromptRequest,
   RuntimeState, Settings,
@@ -82,7 +83,7 @@ export function App() {
   const [appVersion, setAppVersion] = useState<string | undefined>();
   /* The documents this conversation has written. Session-scoped on purpose:
      these are what MyRA made while you watched, not a file browser. */
-  const documents = useDocuments();
+  const documents = useArtifacts();
   const [prompt, setPrompt] = useState<PromptRequest | undefined>();
   const [progress, setProgress] = useState<string | undefined>();
   /* Separate from the note above: this changes once per stage, that one many
@@ -98,6 +99,11 @@ export function App() {
    */
   const [draft, setDraft] = useState("");
   const [queryDraft, setQueryDraft] = useState("");
+  /* Grows with the text up to ten lines, then scrolls internally rather than
+     pushing the send row off-screen; the expand button hands the whole app's
+     height to it instead, for a message too long to compose in ten lines. */
+  const [composerExpanded, setComposerExpanded] = useState(false);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   /* Held only until Send: main already has an image's bytes on disk and a
      document's text extracted by the time one of these exists, so this is a
      reference and a chip's worth of display, never the file itself. */
@@ -366,6 +372,32 @@ export function App() {
   const typed = lookup ? queryDraft : draft;
   const setTyped = lookup ? setQueryDraft : setDraft;
 
+  /*
+   * The textarea's own height tracks what is typed, capped at ten lines --
+   * measured off its own line-height rather than a guessed pixel figure, so
+   * it still holds at ten lines if the font size ever changes. Past the cap
+   * it scrolls internally instead of growing the composer indefinitely.
+   * Expanded mode hands sizing to CSS flex instead: clearing the inline
+   * height here is what lets `.composer.expanded .input` actually fill it.
+   */
+  useEffect(() => {
+    const el = composerInput.current;
+    if (!el) return;
+    if (composerExpanded) {
+      el.style.height = "";
+      return;
+    }
+    el.style.height = "auto";
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 21;
+    el.style.height = `${Math.min(el.scrollHeight, lineHeight * 10)}px`;
+  }, [typed, composerExpanded, lookup]);
+
+  // Lookup's results panel holds the same `flex: 1` row the expanded composer
+  // grows into, so a composer left expanded from chat would fight it for space.
+  useEffect(() => {
+    if (lookup) setComposerExpanded(false);
+  }, [lookup]);
+
   /**
    * A file dropped, pasted or picked, read and sized before it is ever sent.
    *
@@ -394,7 +426,10 @@ export function App() {
 
   const removeAttachment = useCallback((att: PendingAttachment): void => {
     setPendingAttachments((prev) => prev.filter((a) => a !== att));
-    if (att.kind === "image") void window.myra.chatAttachRemove(att.id);
+    // Documents carry no id -- inlined as text, never written to disk. Images
+    // and data attachments are both files under the session's attachment
+    // directory, and both need the same cleanup.
+    if (att.kind !== "document") void window.myra.chatAttachRemove(att.id);
   }, []);
 
   const submit = useCallback(() => {
@@ -410,6 +445,7 @@ export function App() {
     // "what is this" is implied -- so only an entirely empty composer refuses.
     if ((!text && !pendingAttachments.length) || busy) return;
     setDraft("");
+    setComposerExpanded(false);
     /*
      * Cleared here, or the previous run's last words reappear over this one.
      *
@@ -427,20 +463,21 @@ export function App() {
 
   /**
    * Drop whatever is sitting in the composer unsent, and delete the file
-   * behind any pending image -- the same cleanup `removeAttachment` does for
-   * one chip, done for all of them.
+   * behind any pending image or data attachment -- the same cleanup
+   * `removeAttachment` does for one chip, done for all of them.
    *
    * Without this, a chip attached under the conversation being left behind
    * survives the switch in the composer's own state, saved on disk under the
    * OLD session's id. Sending it afterward pushes the reference into the NEW
-   * session's messages, but `imageResolver` looks for the file under the new
-   * session's directory, finds nothing, and `expandImages` degrades to plain
-   * text -- so the chip shows as sent while the model silently never sees the
-   * image, and the original file is never cleaned up either.
+   * session's messages, but `imageResolver` (or a table tool's `resolveDataSource`)
+   * looks for the file under the new session's directory, finds nothing, and
+   * the reference degrades to plain text or a "no such attachment" refusal --
+   * so the chip shows as sent while the model silently never sees it, and the
+   * original file is never cleaned up either.
    */
   const clearPendingAttachments = (): void => {
     for (const att of pendingAttachments) {
-      if (att.kind === "image") void window.myra.chatAttachRemove(att.id);
+      if (att.kind !== "document") void window.myra.chatAttachRemove(att.id);
     }
     setPendingAttachments([]);
     setAttachError(undefined);
@@ -466,14 +503,19 @@ export function App() {
     if (live && live.sessionId === id) resume(id, live.events);
     /* The panel showed what THIS conversation wrote. Carrying it into another
        one would attribute a document to a thread that never produced it. */
-    documents.reset();
+    documents.reset(id);
+    /* Whatever this conversation already drew, replayed now that the panel
+       is scoped to it -- reset above, never before it, or a push replayed
+       here would just be cleared by the reset that followed. */
+    const artifacts = await window.myra.sessionArtifacts(id);
+    if (artifacts.length) documents.replay(id, artifacts);
   };
 
   const newSession = async (): Promise<void> => {
     const id = await window.myra.newSession();
     setSessionId(id);
     reset([], undefined, id);
-    documents.reset();
+    documents.reset(id);
     clearPendingAttachments();
     startFresh();
   };
@@ -819,15 +861,15 @@ export function App() {
           {/* The way back. Closing the panel must not be the same as losing the
               document -- it is still on disk and still in this conversation,
               and without this the only route back to it is the file manager. */}
-          {documents.docs.length && !documents.open && page === "chat" && !lookup ? (
+          {documents.items.length && !documents.open && page === "chat" && !lookup ? (
             <button
               type="button"
               className="chip artifact-chip"
               onClick={() => documents.setOpen(true)}
             >
-              {documents.docs.length === 1
-                ? documents.docs[0]!.name
-                : `${documents.docs.length} documents`}
+              {documents.items.length === 1
+                ? documents.items[0]!.name
+                : `${documents.items.length} items`}
             </button>
           ) : null}
           {/* Last in the bar, and on every page including Images: a download
@@ -919,7 +961,10 @@ export function App() {
           />
         ) : null}
 
-        <div className="thread" hidden={page !== "chat" || lookup}>
+        <div
+          className={composerExpanded ? "thread thread-collapsed" : "thread"}
+          hidden={page !== "chat" || lookup}
+        >
           {items.length === 0 ? (
             <div className="welcome">
               <h1>What are you working on?</h1>
@@ -1016,7 +1061,7 @@ export function App() {
           * nor navigation: picking Deep gates the tool set for the very next
           * turn, so it belongs where that turn is written.
           */}
-        <footer className="composer" hidden={page !== "chat"}>
+        <footer className={composerExpanded ? "composer expanded" : "composer"} hidden={page !== "chat"}>
           <div
             className={dragOver ? "composer-card over" : "composer-card"}
             data-tour="composer"
@@ -1075,10 +1120,17 @@ export function App() {
                        collided, letting React reuse one chip's DOM node and
                        remove handler for the other. The index disambiguates
                        within this one render without claiming a stable
-                       identity the value does not have. */
-                    key={att.kind === "image" ? att.id : `doc-${i}-${att.name}`}
+                       identity the value does not have. Data attachments have
+                       a real id, the same as images. */
+                    key={att.kind === "document" ? `doc-${i}-${att.name}` : att.id}
                     className={att.kind === "image" && !att.canSee ? "composer-chip warn" : "composer-chip"}
-                    title={att.kind === "image" ? att.warning : `${att.words.toLocaleString()} words`}
+                    title={
+                      att.kind === "image"
+                        ? att.warning
+                        : att.kind === "data"
+                          ? `${att.columns.length} columns, ${att.rows.toLocaleString()} rows`
+                          : `${att.words.toLocaleString()} words`
+                    }
                   >
                     {att.name}
                     <button
@@ -1110,7 +1162,7 @@ export function App() {
                     ref={fileInput}
                     type="file"
                     hidden
-                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt"
+                    accept="image/png,image/jpeg,image/gif,image/bmp,image/webp,.pdf,.docx,.doc,.odt,.rtf,.md,.markdown,.txt,.csv,.tsv"
                     onChange={(e) => {
                       for (const file of e.target.files ?? []) void attachFile(file);
                       // Reset, so choosing the same file twice fires a change event twice.
@@ -1133,6 +1185,7 @@ export function App() {
                 </>
               )}
               <textarea
+                ref={composerInput}
                 className="input"
                 placeholder={
                   lookup
@@ -1150,9 +1203,37 @@ export function App() {
                 }}
                 onPaste={(e) => {
                   if (lookup) return;
+                  let attachedFile = false;
                   for (const item of e.clipboardData.items) {
                     const file = item.kind === "file" ? item.getAsFile() : null;
-                    if (file) void attachFile(file);
+                    if (file) { void attachFile(file); attachedFile = true; }
+                  }
+                  // A screenshot or a file manager's copied file takes
+                  // priority; do not also try to read the same clipboard as a
+                  // pasted table.
+                  if (attachedFile) return;
+                  /*
+                   * A pasted table becomes a data attachment, never text the
+                   * model retypes into a tool argument -- see
+                   * core/agent/tools/table.ts's header for why that split is
+                   * the whole point of this feature. Detected with the real
+                   * parser, not a lookalike heuristic, so "will this become a
+                   * chip" and "will create_table accept it" are the same
+                   * question asked twice with the same code. Two columns
+                   * minimum: a bare two-line note ("Name: John" / "Age: 30")
+                   * parses as a one-column table under this same parser, and
+                   * is not what pasting a table means.
+                   *
+                   * `preventDefault` is never called: the browser's own
+                   * default text insertion still runs, so the pasted table
+                   * stays visible and editable in the composer -- the
+                   * human's own check against what MyRA read from it.
+                   */
+                  const text = e.clipboardData.getData("text/plain");
+                  if (!text.trim()) return;
+                  const parsed = parse(text);
+                  if (parsed.ok && parsed.table.columns.length >= 2 && parsed.table.rows.length >= 1) {
+                    void attachFile(new File([text], "pasted table.tsv", { type: "text/tab-separated-values" }));
                   }
                 }}
               />
@@ -1224,6 +1305,41 @@ export function App() {
                   <path d="M19 11a7 7 0 0 1-14 0M12 18v3" />
                 </svg>
               </button>
+
+              {/* Ten lines is enough for most questions; this is for the rest --
+                  the composer takes the app's full height instead of scrolling
+                  internally, and the same control folds it back down. Not in
+                  lookup mode: a search query does not run to ten lines, and the
+                  results panel beside it claims the same flex:1 row this relies
+                  on to grow. */}
+              {lookup ? null : (
+                <button
+                  type="button"
+                  className={composerExpanded ? "mic expand active" : "mic expand"}
+                  aria-pressed={composerExpanded}
+                  aria-label={composerExpanded ? "Minimize the composer" : "Expand the composer"}
+                  title={composerExpanded ? "Minimize the composer" : "Expand the composer to the full window height"}
+                  onClick={() => setComposerExpanded((v) => !v)}
+                >
+                  {composerExpanded ? (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="4 14 10 14 10 20" />
+                      <polyline points="20 10 14 10 14 4" />
+                      <line x1="14" y1="10" x2="21" y2="3" />
+                      <line x1="3" y1="21" x2="10" y2="14" />
+                    </svg>
+                  ) : (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="15 3 21 3 21 9" />
+                      <polyline points="9 21 3 21 3 15" />
+                      <line x1="21" y1="3" x2="14" y2="10" />
+                      <line x1="3" y1="21" x2="10" y2="14" />
+                    </svg>
+                  )}
+                </button>
+              )}
               {lookup ? (
                 <button
                   type="button"
@@ -1271,7 +1387,7 @@ export function App() {
       {documents.open && page === "chat" && !lookup ? (
         <ArtifactPanel
           onResize={documents.setWidth}
-          docs={documents.docs}
+          items={documents.items}
           active={documents.active}
           onSelect={documents.setActive}
           onClose={() => documents.setOpen(false)}
