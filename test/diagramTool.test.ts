@@ -115,3 +115,29 @@ test("a diagram past the category cap tells the model which names were dropped, 
   assert.match(res.content, /Only the first 6 categories are shown in colour/);
   assert.match(res.content, /"cat6", "cat7"/);
 });
+
+test("a colour the parser could not use is drawn around and named back to the model", async () => {
+  const result = await createDiagramTool.handler(
+    { source: "flowchart TD\n A --> B\n style A fill:blurple,stroke:#333" },
+    {},
+  );
+  assert.match(result.content, /^Drew/);
+  assert.match(result.content, /Not everything was applied/);
+  assert.match(result.content, /`blurple` is not a colour/);
+});
+
+test("a style the model names reaches the figure and is said back; an unknown one is dropped", async () => {
+  resetDiagramIds();
+  const seen: DiagramUpdate[] = [];
+  setDiagramWatcher((d) => seen.push(d));
+  try {
+    const posh = await run({ source: "flowchart TD\n A --> B", style: "poster" });
+    assert.match(posh.content, /in the Poster style/);
+    assert.equal(seen[0]?.style, "poster");
+    const odd = await run({ source: "flowchart TD\n A --> B", style: "sparkly" });
+    assert.match(odd.content, /^Drew/);
+    assert.equal("style" in seen[1]!, false);
+  } finally {
+    setDiagramWatcher(undefined);
+  }
+});

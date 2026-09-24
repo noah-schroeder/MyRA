@@ -276,7 +276,28 @@ nothing here ever overwrites what a person wrote or approved.
 [work.ts](src/main/work.ts)'s lease and a resident-model check both gate the automatic
 pass — a local model MyRA is not already holding must never be loaded just to write a
 note, the exact reload `resolveLlm`'s own header warns against; a hosted choice has no
-such card to spare and is always allowed to run.
+such card to spare and is always allowed to run, and so does the user's own endpoint,
+which has nothing to load (`runtime.wouldLoadForChat()` is the question, not "is a local
+model resident"). A pass that saves anything says so in the conversation it read, as a
+notice: one that wrote notes where nobody was looking was indistinguishable from one that
+never ran.
+
+**`remember` is the third door, and it goes through the same grounding.** The idle pass
+is right for what nobody pointed at and wrong for "remember that we're using grounded
+theory", which someone says expecting to see it kept now. So the model has a tool
+([tools/memory.ts](src/core/agent/tools/memory.ts)) whose note is saved only when its
+`quote` passes `groundProposals` — injection can reach the tool and cannot get past it.
+It is offered only in a project that has a memory file and `auto` on (a simple folder must
+not become a research project because a model called a tool in it), and `addAuto` appends
+without moving the conversation's `seen` watermark. Beside it, each turn in a project has a
+**Remember** button that saves the message, or the part of it selected, as a `"you"` note:
+the person's own action, so it is reviewed in the dialog rather than grounded.
+
+**The setup chat streams, so its reasoning shows.** Each of its model calls is JSON nobody
+reads, which on a local model meant minutes with nothing on screen. `runProjectSetup` takes
+a `SetupOutput` — `say` for the narrative the conversation keeps, `think` for reasoning
+that is shown and never kept, `progress` for the status row — and passes the chat turn's own
+reasoning switch (`extra`) to `runSubagent`, which otherwise sends none.
 
 **A separate file, in a subdirectory, never a project's own record.**
 [memoryStore.ts](src/main/memoryStore.ts) keeps `projects/memory/<id>.json` beside
@@ -314,6 +335,34 @@ declines to follow, which is the failure `documents/draft.ts` exists to prevent.
 tool *is* the retry — the agent loop already re-calls a failed tool. What is not
 drawable is refused by name (`sequenceDiagram`, subgraphs) rather than
 half-drawn, because that message is what the model acts on.
+
+**Colours are read, but only as colours.** `classDef`, `style` and `linkStyle`
+are how a model does what a user means by "make the screening steps green", so
+they are parsed — every value through [colors.ts](src/core/diagrams/colors.ts),
+which returns `#rrggbb` from a hex code, `rgb()` or a CSS colour name and
+nothing otherwise, so no string a model wrote reaches an SVG attribute. A value
+that is not a colour is dropped and named in the tool's reply rather than
+failing the diagram. A fill with no stated text colour gets near-black or white,
+whichever has the better contrast; explicit colours beat the theme and the
+category palette on screen and on export alike, and a filled category takes no
+palette slot. A diagram that names no colour is byte-for-byte what it was.
+
+**Looks are presets, not a theme editor.** [styles.ts](src/core/diagrams/styles.ts)
+defines four — Standard, Journal (Helvetica/Arial, thin rules, Okabe–Ito tints, no
+shadows), Poster (semibold, roomy, rounded boxes and elbows, heavier arrows, a stroke
+per category) and Monochrome (Journal's geometry in greys, every chosen colour mapped to
+the grey of the same lightness) — because a researcher should get a finished look by
+picking a word, not by tuning a dozen sliders into something that is none of them. A
+look has two halves: geometry (`Look`), which `layoutDiagram` takes because type size and
+padding change where boxes go, and a palette (`DiagramTheme`), which only paints. Standard
+places no `look` on its `Layout` and draws exactly what it always did, on screen from CSS
+and on export from `PAPER_THEME`; a named look is drawn on screen in its export colours on
+a white ground (WYSIWYG — a poster previewed in dark mode previews something else), both
+through one shared [DiagramSvg.tsx](src/renderer/components/DiagramSvg.tsx) and the same
+`nodeColors`/`edgeColors` the exporter uses. The model may name a look (`create_diagram`'s
+`style`) when asked; the figure's Style menu always wins, rewrites that figure's style, and
+is remembered for figures drawn without one. PRISMA figures take no look: their appearance
+is the official template.
 
 **One geometry, two consumers, two palettes.** The renderer maps `nodePath`/
 `edgePath` onto React elements and colours them from CSS so the figure follows
@@ -674,6 +723,19 @@ wrong reply or have to sum times that meant different things. The same figure ri
 stored assistant message as `meta`, which is how it survives reopening a conversation;
 `buildRequest` strips it before anything reaches the wire, because a field the server does not
 expect is a reason some of them refuse the whole request.
+
+**And how far along it is, while it runs.** Between Send and the first word there was
+nothing on screen, and on a local model that gap is the prompt being read — a minute on a
+long conversation, identical to a wedged server. `chat()` now reports progress
+([progress.ts](src/core/llm/progress.ts), no imports so the renderer shares it): a
+`prompt_progress` frame per batch when the server sends one, then a count of reply frames,
+throttled to four a second. `return_progress` is asked for **only on the bundled runtime**
+(`EndpointResolution.promptProgress`), measured against llama-server b10375 and through
+lemond 11.8.0 — `processed` includes the cache, so the bar measures the uncached share —
+and never of anything else, for the `timings_per_token` reason above. The loop emits
+`"progress"` before every model call, since after a tool the prompt is read again; main
+never stores it for replay. The window's `TurnStatus` always shows a moving clock, and a
+bar only when a server reported a figure.
 
 ### Files dropped into the chat
 

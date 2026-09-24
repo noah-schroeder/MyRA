@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { useAgent } from "./useAgent.ts";
 import { answerText } from "./components/turnText.ts";
 import { CopyButton } from "./components/CopyButton.tsx";
@@ -40,6 +40,9 @@ import { PaperDrafter } from "./components/PaperDrafter.tsx";
 import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { NewProjectDialog } from "./components/NewProjectDialog.tsx";
+import { RememberDialog } from "./components/RememberDialog.tsx";
+import { TurnStatus } from "./components/TurnStatus.tsx";
+import { describeProgress } from "../core/llm/progress.ts";
 import { TasksPage } from "./components/TasksPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
@@ -47,7 +50,7 @@ import { downscaleImage } from "./downscale.ts";
 import { parse } from "../core/tabular/parse.ts";
 import { SETUP_GREETING } from "../core/projects/greeting.ts";
 import type {
-  ActiveRun, CitedSource, JobSnapshot, MemberKind, PendingAttachment, ProjectSummary, PromptRequest,
+  ActiveRun, CitedSource, JobSnapshot, MemberKind, MemorySlot, PendingAttachment, ProjectSummary, PromptRequest,
   RuntimeState, Settings,
 } from "./types.ts";
 
@@ -66,7 +69,9 @@ const PAGE_FOR: Record<MemberKind, Page> = {
 };
 
 export function App() {
-  const { items, busy, usage, error, sources, send, abort, reset, resume, dismissError } = useAgent();
+  const {
+    items, busy, usage, error, sources, progress: turnProgress, send, abort, reset, resume, dismissError,
+  } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   /* Which tab Settings opens on, when something sent you there for a reason. */
@@ -199,6 +204,49 @@ export function App() {
     }
   };
 
+  /**
+   * "Remember" on one message: what was selected inside it, or all of it.
+   *
+   * The selection is read on mousedown, before the click can move it -- by the
+   * time `onClick` runs, pressing the button may already have collapsed what
+   * the person had highlighted.
+   */
+  const [remembering, setRemembering] = useState<{ text: string } | undefined>();
+  const [remembered, setRemembered] = useState<string | undefined>();
+  const selectionAtPress = useRef("");
+  const rememberingId = useRef("");
+  const noteSelection = (e: ReactMouseEvent<HTMLElement>): void => {
+    const turn = e.currentTarget.closest(".turn");
+    const selection = window.getSelection();
+    selectionAtPress.current =
+      turn && selection && !selection.isCollapsed && selection.anchorNode && turn.contains(selection.anchorNode)
+        ? selection.toString().trim()
+        : "";
+  };
+  const openRemember = (id: string, whole: string): void => {
+    rememberingId.current = id;
+    setRemembering({ text: selectionAtPress.current || whole.trim() });
+  };
+  const saveRemembered = async (slot: MemorySlot, text: string): Promise<void> => {
+    setRemembering(undefined);
+    if (!activeProject) return;
+    const result = await window.myra.projectMemoryAdd(activeProject, slot, text);
+    if (!result.ok) return;
+    const id = rememberingId.current;
+    setRemembered(id);
+    setTimeout(() => setRemembered((current) => (current === id ? undefined : current)), 1600);
+  };
+
+  /* Re-read whenever it could have changed, not only when the project does:
+     setup finishing flips it inside a conversation that never left the
+     project, and a flag read once went on hiding the notes button and
+     greeting every new chat as a setup chat until another project was
+     opened. `busy` ending covers a turn; the push covers everything else. */
+  const [memoryVersion, setMemoryVersion] = useState(0);
+  useEffect(
+    () => window.myra.onProjectMemoryChanged(() => setMemoryVersion((v) => v + 1)),
+    [],
+  );
   useEffect(() => {
     let cancelled = false;
     if (!activeProject) {
@@ -211,7 +259,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeProject]);
+  }, [activeProject, memoryVersion, busy]);
 
   useEffect(() => {
     refreshProjects();
@@ -833,7 +881,7 @@ export function App() {
         {busy && page !== "chat" ? (
           <WorkingBar
             stage={activeRun?.stage ?? stage}
-            note={activeRun?.note ?? progress}
+            note={activeRun?.note ?? progress ?? (turnProgress ? describeProgress(turnProgress.value) : undefined)}
             onOpen={toChat}
             onStop={abort}
           />
@@ -1056,6 +1104,13 @@ export function App() {
                   ) : null}
                   {item.text ? <p>{item.text}</p> : null}
                   <CopyButton className="turn-copy" text={() => item.text} />
+                  {activeProject && !pendingProjectSetup && item.text ? (
+                    <RememberButton
+                      done={remembered === item.id}
+                      onPress={noteSelection}
+                      onClick={() => openRemember(item.id, item.text)}
+                    />
+                  ) : null}
                 </article>
               );
             }
@@ -1097,6 +1152,13 @@ export function App() {
                   text={() => answerText(item.blocks)}
                   title="Copy this answer as Markdown"
                 />
+                {activeProject && !pendingProjectSetup && !item.streaming && answerText(item.blocks).trim() ? (
+                  <RememberButton
+                    done={remembered === item.id}
+                    onPress={noteSelection}
+                    onClick={() => openRemember(item.id, answerText(item.blocks))}
+                  />
+                ) : null}
               </article>
             );
           })}
@@ -1119,6 +1181,10 @@ export function App() {
           {/* Above the scroll anchor, so the view follows it: a card added
               below the anchor is a card the thread scrolls away from. */}
           {busy && stage ? <ResearchProgress stage={stage} note={progress} /> : null}
+          {/* Everything else a turn does -- reading the prompt, writing, a tool
+              -- says so here, so a slow local model is visibly slow rather than
+              indistinguishable from a stuck one. */}
+          {busy && !stage && turnProgress ? <TurnStatus progress={turnProgress} /> : null}
           <div ref={bottom} />
         </div>
 
@@ -1470,6 +1536,7 @@ export function App() {
           active={documents.active}
           onSelect={documents.setActive}
           onClose={() => documents.setOpen(false)}
+          onRestyle={documents.restyle}
         />
       ) : null}
 
@@ -1528,6 +1595,14 @@ export function App() {
         />
       ) : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
+      {remembering ? (
+        <RememberDialog
+          projectName={projectName || "this project"}
+          initialText={remembering.text}
+          onCancel={() => setRemembering(undefined)}
+          onSave={(slot, text) => void saveRemembered(slot, text)}
+        />
+      ) : null}
       {showNewProject ? (
         <NewProjectDialog
           onCancel={() => setShowNewProject(false)}
@@ -1538,6 +1613,34 @@ export function App() {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Beside a turn's Copy, and held back the same way until the turn is pointed
+ * at. "Noted" for a moment afterwards, because saving a note changes nothing
+ * on this screen and a click with no answer reads as one that did not land.
+ */
+function RememberButton({
+  done,
+  onPress,
+  onClick,
+}: {
+  done: boolean;
+  onPress: (e: ReactMouseEvent<HTMLElement>) => void;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={done ? "turn-copy turn-remember done" : "turn-copy turn-remember"}
+      title="Keep this — or the part of it you selected — in this project's notes"
+      aria-live="polite"
+      onMouseDown={onPress}
+      onClick={onClick}
+    >
+      {done ? "Noted" : "Remember"}
+    </button>
   );
 }
 

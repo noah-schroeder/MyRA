@@ -22,20 +22,17 @@
  */
 
 import type { Diagram, DiagramEdge, DiagramNode, Direction, NodeShape } from "./mermaid.ts";
+import { readableTextOn, type Paint } from "./colors.ts";
+import { LOOKS, type Look } from "./styles.ts";
 
-export const FONT_SIZE = 13;
-export const LINE_HEIGHT = 17;
+/* The standard look's type metrics, still exported by name: PRISMA's placer
+   (prisma/layout.ts) sizes its boxes with them and never takes a look. */
+export const FONT_SIZE = LOOKS.standard.fontSize;
+export const LINE_HEIGHT = LOOKS.standard.lineHeight;
 /** Fraction of the font size one character is assumed to occupy. */
-export const CHAR_W = 0.58;
-const PAD_X = 16;
-const PAD_Y = 12;
-const MIN_W = 96;
-const MIN_H = 40;
+export const CHAR_W = LOOKS.standard.charW;
 /** Characters before a label wraps. Chosen so a box stays taller than it is wide-ish. */
 const WRAP_AT = 26;
-const RANK_GAP = 56;
-const SIBLING_GAP = 28;
-const MARGIN = 20;
 
 /**
  * How a box is drawn, when the default is wrong for it.
@@ -43,8 +40,9 @@ const MARGIN = 20;
  * A hand-built figure sets most of this -- `layoutDiagram` places every
  * ordinary flowchart's boxes with no `radius`/`inset`/`tint`/`turn` of their
  * own, so a model-drawn diagram is the same bytes it was before this existed.
- * `category` is the one field `layoutDiagram` itself populates, from a
- * Mermaid `class`/`:::` grouping -- see `assignCategoryColors` below. Nothing
+ * `layoutDiagram` itself populates only `category`, from a Mermaid
+ * `class`/`:::` grouping (see `assignCategoryColors` below), and the colour
+ * fields, from `classDef`/`style` -- and only when the source used them. Nothing
  * in svg.ts or DiagramView.tsx learns the word "PRISMA"; this is
  * presentational and diagram-agnostic, the same shape `subroutineBars`
  * already has.
@@ -62,6 +60,14 @@ export interface BoxStyle {
    *  has no DOM or CSS to read, so it carries an index rather than a colour --
    *  as theme-agnostic as the boolean `tint` above. */
   category?: number | undefined;
+  /** Colours the diagram's own source asked for, as `#rrggbb`. They win over
+   *  the theme and the category palette on screen and on export alike: a user
+   *  who asked for a red box wants it red in dark mode too. `text` is always
+   *  set alongside a `fill`, picked for contrast when the source named none. */
+  fill?: string | undefined;
+  stroke?: string | undefined;
+  text?: string | undefined;
+  strokeWidth?: number | undefined;
 }
 
 export interface PlacedNode {
@@ -85,6 +91,8 @@ export interface PlacedEdge {
   points: { x: number; y: number }[];
   /** Where the label sits, when there is one. */
   labelAt?: { x: number; y: number } | undefined;
+  /** From `linkStyle`: the line and arrowhead colour, the label's, a width. */
+  paint?: Paint | undefined;
 }
 
 export interface Layout {
@@ -92,6 +100,9 @@ export interface Layout {
   height: number;
   nodes: PlacedNode[];
   edges: PlacedEdge[];
+  /** The look this was placed for, when it is not the standard one -- svg.ts
+   *  reads its type, strokes and corners from here. */
+  look?: Look | undefined;
 }
 
 /** Break a label on spaces so no line runs past `WRAP_AT`. */
@@ -114,10 +125,10 @@ export function wrapLabel(text: string, at: number = WRAP_AT): string[] {
   return out.length ? out : [text];
 }
 
-function sizeOf(lines: string[], shape: NodeShape): { w: number; h: number } {
+function sizeOf(lines: string[], shape: NodeShape, look: Look): { w: number; h: number } {
   const longest = lines.reduce((n, l) => Math.max(n, l.length), 0);
-  let w = Math.max(MIN_W, Math.round(longest * FONT_SIZE * CHAR_W) + PAD_X * 2);
-  let h = Math.max(MIN_H, lines.length * LINE_HEIGHT + PAD_Y * 2);
+  let w = Math.max(look.minW, Math.round(longest * look.fontSize * look.charW) + look.padX * 2);
+  let h = Math.max(look.minH, lines.length * look.lineHeight + look.padY * 2);
   /* A diamond's text sits in the middle half of its bounding box, so a box
      fitted to the text would push the label out through the slanted sides. */
   if (shape === "diamond") { w = Math.round(w * 1.45); h = Math.round(h * 1.5); }
@@ -180,6 +191,10 @@ export const CATEGORY_PALETTE_SIZE = 6;
  * reusing one already spoken for -- recycling a colour would claim two
  * unrelated groupings are the same category, which reads worse than leaving
  * the extra ones undecorated.
+ *
+ * A node whose source gave it a fill of its own takes no slot: its colour is
+ * already decided, and spending a palette entry on it would push a category
+ * that still needs one past the cap.
  */
 export function assignCategoryColors(
   diagram: Diagram,
@@ -187,6 +202,7 @@ export function assignCategoryColors(
   const colorOf = new Map<string, number>();
   const overflow: string[] = [];
   for (const n of diagram.nodes) {
+    if (n.paint?.fill) continue;
     if (n.category === undefined || colorOf.has(n.category) || overflow.includes(n.category)) continue;
     if (colorOf.size < CATEGORY_PALETTE_SIZE) colorOf.set(n.category, colorOf.size);
     else overflow.push(n.category);
@@ -195,7 +211,7 @@ export function assignCategoryColors(
 }
 
 /** Place a parsed diagram. Coordinates are final, origin top-left. */
-export function layoutDiagram(diagram: Diagram): Layout {
+export function layoutDiagram(diagram: Diagram, look: Look = LOOKS.standard): Layout {
   const ranks = rankNodes(diagram);
   const horizontal = diagram.direction === "LR" || diagram.direction === "RL";
 
@@ -209,7 +225,7 @@ export function layoutDiagram(diagram: Diagram): Layout {
   const sized = new Map<string, { lines: string[]; w: number; h: number }>();
   for (const n of diagram.nodes) {
     const lines = wrapLabel(n.label);
-    sized.set(n.id, { lines, ...sizeOf(lines, n.shape) });
+    sized.set(n.id, { lines, ...sizeOf(lines, n.shape, look) });
   }
 
   /* One barycentre pass: a node sits over the average position of the things
@@ -244,10 +260,10 @@ export function layoutDiagram(diagram: Diagram): Layout {
     let thick = 0;
     for (const n of row) {
       const s = sized.get(n.id)!;
-      span += (horizontal ? s.h : s.w) + SIBLING_GAP;
+      span += (horizontal ? s.h : s.w) + look.siblingGap;
       thick = Math.max(thick, horizontal ? s.w : s.h);
     }
-    rankSpan.set(r, Math.max(0, span - SIBLING_GAP));
+    rankSpan.set(r, Math.max(0, span - look.siblingGap));
     rankSize.set(r, thick);
   }
   const widest = Math.max(0, ...rankSpan.values());
@@ -255,23 +271,34 @@ export function layoutDiagram(diagram: Diagram): Layout {
   const { colorOf } = assignCategoryColors(diagram);
 
   const placed = new Map<string, PlacedNode>();
-  let along = MARGIN;
+  let along = look.margin;
   const reverse = diagram.direction === "BT" || diagram.direction === "RL";
   const orderedRanks = reverse ? [...rankKeys].reverse() : rankKeys;
   for (const r of orderedRanks) {
     const row = byRank.get(r)!;
-    let across = MARGIN + (widest - (rankSpan.get(r) ?? 0)) / 2;
+    let across = look.margin + (widest - (rankSpan.get(r) ?? 0)) / 2;
     for (const n of row) {
       const s = sized.get(n.id)!;
-      const category = n.category !== undefined ? colorOf.get(n.category) : undefined;
+      const category = n.category !== undefined && !n.paint?.fill ? colorOf.get(n.category) : undefined;
       const node: PlacedNode = horizontal
         ? { id: n.id, lines: s.lines, shape: n.shape, x: along, y: across, w: s.w, h: s.h }
         : { id: n.id, lines: s.lines, shape: n.shape, x: across, y: along, w: s.w, h: s.h };
       if (category !== undefined) node.box = { category };
+      const paint = n.paint;
+      if (paint) {
+        const text = paint.text ?? (paint.fill ? readableTextOn(paint.fill) : undefined);
+        node.box = {
+          ...node.box,
+          ...(paint.fill ? { fill: paint.fill } : {}),
+          ...(paint.stroke ? { stroke: paint.stroke } : {}),
+          ...(text ? { text } : {}),
+          ...(paint.strokeWidth !== undefined ? { strokeWidth: paint.strokeWidth } : {}),
+        };
+      }
       placed.set(n.id, node);
-      across += (horizontal ? s.h : s.w) + SIBLING_GAP;
+      across += (horizontal ? s.h : s.w) + look.siblingGap;
     }
-    along += (rankSize.get(r) ?? 0) + RANK_GAP;
+    along += (rankSize.get(r) ?? 0) + look.rankGap;
   }
 
   const edges: PlacedEdge[] = [];
@@ -284,16 +311,23 @@ export function layoutDiagram(diagram: Diagram): Layout {
     edges.push({
       from: e.from, to: e.to, style: e.style, arrow: e.arrow, points,
       ...(e.label ? { label: e.label, labelAt: { x: mid.x, y: mid.y } } : {}),
+      ...(e.paint ? { paint: e.paint } : {}),
     });
   }
 
-  let width = MARGIN;
-  let height = MARGIN;
+  let width = look.margin;
+  let height = look.margin;
   for (const n of placed.values()) {
-    width = Math.max(width, n.x + n.w + MARGIN);
-    height = Math.max(height, n.y + n.h + MARGIN);
+    width = Math.max(width, n.x + n.w + look.margin);
+    height = Math.max(height, n.y + n.h + look.margin);
   }
-  return { width, height, nodes: [...placed.values()], edges };
+  return {
+    width, height, nodes: [...placed.values()], edges,
+    /* Only a named look is carried: the standard one is the default everything
+       downstream already assumes, and leaving it off keeps a standard layout
+       exactly the object it always was. */
+    ...(look.name !== "standard" ? { look } : {}),
+  };
 }
 
 /**

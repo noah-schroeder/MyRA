@@ -1,16 +1,16 @@
-import { useId, useMemo } from "react";
+import { useMemo } from "react";
 
 import { drawDiagram } from "../../core/diagrams/draw.ts";
-import type { Layout, PlacedNode } from "../../core/diagrams/layout.ts";
-import {
-  arrowHead, dashFor, edgePath, hasShadow, lineY, nodePath, strokeFor, subroutineBars, textAnchorAt, textTurn,
-  toSvg,
-} from "../../core/diagrams/svg.ts";
+import type { Layout } from "../../core/diagrams/layout.ts";
+import type { DiagramStyleName } from "../../core/diagrams/styles.ts";
+import { themeForStyle, toSvg } from "../../core/diagrams/svg.ts";
 import { fitWithin, PNG_SCALE_PAGE, PNG_SCALE_STANDARD, PX_PER_IN, type ExportSize } from "../../core/figures/exportSize.ts";
 import type { DiagramUpdate } from "../types.ts";
 import { useSaid } from "./useSaid.ts";
 import { svgToPng } from "./rasterise.ts";
 import { ExportSizeSelect, pageBoxForExport, useExportSize } from "./ExportSize.tsx";
+import { DiagramStyleSelect, useDiagramStyle } from "./DiagramStyle.tsx";
+import { DiagramSvg } from "./DiagramSvg.tsx";
 
 /**
  * A figure, drawn from its source every time it is shown -- Mermaid parsed and
@@ -27,9 +27,13 @@ import { ExportSizeSelect, pageBoxForExport, useExportSize } from "./ExportSize.
  * page the model fetched. A label becomes the text of a `<text>` node and can
  * be nothing else.
  *
- * Colours come from CSS so the figure follows the app's theme on screen, while
- * export uses `PAPER_THEME` and is always light -- a figure goes into a
- * manuscript, and one exported in dark mode arrives as white text on white.
+ * In the standard look colours come from CSS so the figure follows the app's
+ * theme on screen, while export uses `PAPER_THEME` and is always light -- a
+ * figure goes into a manuscript, and one exported in dark mode arrives as white
+ * text on white. A named look (Journal, Poster, Monochrome -- see
+ * core/diagrams/styles.ts) is drawn on screen in exactly its export colours
+ * instead, since previewing a poster in dark mode would preview something else.
+ * The Style menu always wins over a look the model named.
  *
  * On screen a diagram's own size is never touched by the export choice: the
  * canvas scrolls rather than shrinking it, because a flowchart's labels are
@@ -38,18 +42,32 @@ import { ExportSizeSelect, pageBoxForExport, useExportSize } from "./ExportSize.
  * page and a flowchart a landscape one, and "whatever fits the panel" answers
  * neither. See ExportSize.tsx.
  */
-export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
+export function DiagramView({
+  diagram,
+  onRestyle,
+}: {
+  diagram: DiagramUpdate;
+  /** Rewrites this figure's own style in the panel's list, so the thumbnail
+   *  in the thread redraws in the same look. */
+  onRestyle?: (style: DiagramStyleName) => void;
+}) {
   const [said, say] = useSaid();
   const [exportSize, setExportSize] = useExportSize(diagram.prisma ? "prisma" : "diagram");
-  /* A conversation can hold several diagrams, so a literal filter id would
-     collide the moment two are on screen at once -- the same reason svg.ts
-     draws arrowheads as triangles instead of `<marker>` refs. */
-  const shadowId = useId();
+  const [preferred, setPreferred] = useDiagramStyle();
+  /* A PRISMA figure's look is the official template, so it has no style. */
+  const style: DiagramStyleName = diagram.prisma ? "standard" : diagram.style ?? preferred;
+  /* Undefined for the standard look, which on screen follows the app's CSS. */
+  const screenTheme = style === "standard" ? undefined : themeForStyle(style);
 
   const drawn = useMemo(
-    () => drawDiagram(diagram),
-    [diagram.source, diagram.prisma],
+    () => drawDiagram(diagram, style),
+    [diagram.source, diagram.prisma, style],
   );
+
+  const restyle = (v: DiagramStyleName): void => {
+    setPreferred(v);
+    onRestyle?.(v);
+  };
 
   /** "Standard" writes no physical size at all -- the file's pixel size IS
    *  its size, exactly as before this existed. A page size scales the
@@ -70,7 +88,7 @@ export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
     if (!("layout" in drawn)) return undefined;
     const { layout } = drawn;
     const physical = exportPhysical(layout);
-    const svg = toSvg(layout, undefined, physical);
+    const svg = toSvg(layout, themeForStyle(style), physical);
     /* Two-times scale at the natural size, because a figure lands in a
        document at print resolution and a 1x PNG looks soft next to the
        text; 300dpi at a page size, since that size is meant to print. */
@@ -81,7 +99,7 @@ export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
   const saveSvg = async (): Promise<void> => {
     if (!("layout" in drawn)) return;
     const physical = exportPhysical(drawn.layout);
-    const res = await window.myra.diagramSave(diagram.title, "svg", toSvg(drawn.layout, undefined, physical));
+    const res = await window.myra.diagramSave(diagram.title, "svg", toSvg(drawn.layout, themeForStyle(style), physical));
     say(res.ok ? "Saved to Documents" : res.error ?? "Could not save it");
   };
 
@@ -132,80 +150,20 @@ export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
 
   return (
     <div className="dg">
-      <div className="dg-canvas">
-        <svg
-          viewBox={`0 0 ${layout.width} ${layout.height}`}
+      <div className={screenTheme ? "dg-canvas paper" : "dg-canvas"}>
+        <DiagramSvg
+          layout={layout}
+          theme={screenTheme}
+          edgeLabels
           width={layout.width}
           height={layout.height}
-          role="img"
-          aria-label={diagram.title}
+          label={diagram.title}
           className="dg-svg"
-        >
-          <defs>
-            <filter id={shadowId} x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="var(--dg-shadow)" />
-            </filter>
-          </defs>
-          {layout.edges.map((e, i) => {
-            const head = arrowHead(e);
-            const dash = dashFor(e.style);
-            return (
-              <g key={`e${i}`}>
-                <path
-                  d={edgePath(e)}
-                  className="dg-edge"
-                  fill="none"
-                  strokeWidth={strokeFor(e.style)}
-                  {...(dash ? { strokeDasharray: dash } : {})}
-                />
-                {head ? <path d={head} className="dg-arrow" /> : null}
-                {e.label && e.labelAt ? (
-                  <g>
-                    <rect
-                      className="dg-elabel-bg"
-                      x={e.labelAt.x - (e.label.length * 7.2) / 2 - 4}
-                      y={e.labelAt.y - 9}
-                      width={e.label.length * 7.2 + 8}
-                      height={18}
-                      rx={3}
-                    />
-                    <text className="dg-elabel" x={e.labelAt.x} y={e.labelAt.y + 4} textAnchor="middle">
-                      {e.label}
-                    </text>
-                  </g>
-                ) : null}
-              </g>
-            );
-          })}
-          {layout.nodes.map((n: PlacedNode) => {
-            const bars = subroutineBars(n);
-            const { x, anchor } = textAnchorAt(n);
-            const turn = textTurn(n);
-            const texts = n.lines.map((line, i) => (
-              <text key={i} className="dg-text" x={x} y={lineY(n, i, n.lines.length)} textAnchor={anchor}>
-                {line}
-              </text>
-            ));
-            return (
-              <g key={n.id}>
-                <path
-                  d={nodePath(n)}
-                  className={
-                    n.box?.category !== undefined
-                      ? `dg-node dg-cat-${n.box.category}`
-                      : n.box?.tint ? "dg-node dg-tint" : "dg-node"
-                  }
-                  filter={hasShadow(n) ? `url(#${shadowId})` : undefined}
-                />
-                {bars ? <path d={bars} className="dg-node-bars" fill="none" /> : null}
-                {turn ? <g transform={turn}>{texts}</g> : texts}
-              </g>
-            );
-          })}
-        </svg>
+        />
       </div>
 
       <div className="dg-acts">
+        {diagram.prisma ? null : <DiagramStyleSelect value={style} onChange={restyle} />}
         <ExportSizeSelect
           value={exportSize}
           onChange={(v: ExportSize) => setExportSize(v)}

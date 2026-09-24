@@ -12,6 +12,28 @@ import type {
   AgentEvent, AssistantItem, CitedSource, Item, PendingAttachment, ToolItem, Usage,
 } from "./types.ts";
 import { harvestSources } from "./restore.ts";
+import type { TurnProgress } from "../core/llm/progress.ts";
+
+/**
+ * What the turn in flight is doing, and since when.
+ *
+ * `since` restarts only when the phase changes, so "Reading the conversation"
+ * counts up across its several batch updates rather than resetting on each;
+ * `startedAt` is the whole turn, for the total beside it.
+ */
+export interface LiveProgress {
+  value: TurnProgress;
+  since: number;
+  startedAt: number;
+}
+
+function advance(prev: LiveProgress | undefined, value: TurnProgress): LiveProgress {
+  const now = Date.now();
+  if (!prev) return { value, since: now, startedAt: now };
+  const same = prev.value.phase === value.phase &&
+    (value.phase !== "tool" || (prev.value.phase === "tool" && prev.value.tool === value.tool));
+  return { value, since: same ? prev.since : now, startedAt: prev.startedAt };
+}
 
 let seq = 0;
 const nextId = (): string => `i${++seq}`;
@@ -37,6 +59,7 @@ export function useAgent() {
   const [usage, setUsage] = useState<Usage | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [sources, setSources] = useState<Map<number, CitedSource>>(new Map());
+  const [progress, setProgress] = useState<LiveProgress | undefined>();
   /** The assistant item currently being streamed into. */
   const open = useRef<string | undefined>(undefined);
   /**
@@ -110,10 +133,21 @@ export function useAgent() {
         break;
       }
 
+      case "progress":
+        if (event.progress) {
+          const value = event.progress;
+          setProgress((prev) => advance(prev, value));
+        }
+        break;
+
       case "tool_start": {
         // A tool call ends the assistant message it was requested from: the
         // next text belongs after the card, not before it.
         open.current = undefined;
+        {
+          const tool = event.tool ?? "tool";
+          setProgress((prev) => advance(prev, { phase: "tool", tool }));
+        }
         const card: ToolItem = {
           id: nextId(),
           kind: "tool",
@@ -187,6 +221,7 @@ export function useAgent() {
 
       case "done": {
         setBusy(false);
+        setProgress(undefined);
         open.current = undefined;
         setItems((prev) =>
           prev.map((i) =>
@@ -205,6 +240,7 @@ export function useAgent() {
 
       case "error":
         setBusy(false);
+        setProgress(undefined);
         open.current = undefined;
         setItems((prev) => prev.map(settle));
         setError(event.text ?? "Something went wrong.");
@@ -232,6 +268,7 @@ export function useAgent() {
     if (!trimmed && !attachments.length) return;
     setError(undefined);
     setBusy(true);
+    setProgress(advance(undefined, { phase: "waiting" }));
     open.current = undefined;
     setItems((prev) => [
       ...prev,
@@ -250,6 +287,7 @@ export function useAgent() {
   const abort = useCallback(() => {
     void window.myra.abort();
     setBusy(false);
+    setProgress(undefined);
   }, []);
 
   const reset = useCallback(
@@ -260,6 +298,7 @@ export function useAgent() {
       setUsage(undefined);
       setError(undefined);
       setBusy(false);
+      setProgress(undefined);
       open.current = undefined;
     },
     [],
@@ -278,6 +317,9 @@ export function useAgent() {
     (sessionId: string, events: AgentEvent[]) => {
       currentSessionId.current = sessionId;
       setBusy(true);
+      /* Progress is never replayed, so the clock starts from coming back to
+         it -- honest about what this window saw, not about when it began. */
+      setProgress(advance(undefined, { phase: "waiting" }));
       open.current = undefined;
       for (const event of events) apply(event);
     },
@@ -294,7 +336,7 @@ export function useAgent() {
    */
   const dismissError = useCallback(() => setError(undefined), []);
 
-  return { items, busy, usage, error, sources, send, abort, reset, resume, dismissError };
+  return { items, busy, usage, error, sources, progress, send, abort, reset, resume, dismissError };
 }
 
 /*

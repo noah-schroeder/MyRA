@@ -145,6 +145,18 @@ describe("a project's memory", () => {
     assert.doesNotMatch(prompt, /working inside the user's project/);
   });
 
+  it("says when to use remember, even before there are notes, but only where the tool exists", () => {
+    const project = { name: "P", memory: newMemory(), remembers: true };
+    assert.match(systemPrompt({ mode: "assistant", project }), /save it with the remember tool/);
+    // At "off" there are no tools at all, so naming one would be a lie.
+    assert.doesNotMatch(systemPrompt({ mode: "off", project }), /remember tool/);
+    // And main not offering it this turn means no mention either.
+    assert.doesNotMatch(
+      systemPrompt({ mode: "assistant", project: { name: "P", memory: newMemory() } }),
+      /remember tool/,
+    );
+  });
+
   it("names the project and carries its notes, once it has any", () => {
     const memory = addItems(newMemory(), [{ slot: "questions", text: "Does X predict Y?" }], "you");
     const prompt = systemPrompt({ mode: "off", project: { name: "NSF concept note", memory } });

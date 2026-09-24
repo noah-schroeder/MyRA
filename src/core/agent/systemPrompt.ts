@@ -13,7 +13,7 @@
  * test at all.
  */
 
-import { readsDocuments, readsLibrary, searches, type ResearchMode } from "../research/ladder.ts";
+import { actsLocally, readsDocuments, readsLibrary, searches, type ResearchMode } from "../research/ladder.ts";
 import { spokenGuidance } from "./spokenPrompt.ts";
 import { todayLine } from "./datePrompt.ts";
 import { renderMemory, type ProjectMemory } from "../projects/memory.ts";
@@ -100,7 +100,14 @@ export function systemPrompt(opts: {
    * persona could, and nothing downstream of this function is built to guard
    * against that.
    */
-  project?: { name: string; memory: ProjectMemory; contextTokens?: number } | undefined;
+  project?: {
+    name: string;
+    memory: ProjectMemory;
+    contextTokens?: number;
+    /** Whether `remember` is offered this turn -- main decides, since only it
+     *  knows the project keeps notes that may grow on their own. */
+    remembers?: boolean;
+  } | undefined;
   /** Injectable so this stays a pure function of its inputs and a test does
    *  not depend on the day it happens to run. Main passes nothing, so every
    *  turn gets the real clock -- which is also what makes a conversation left
@@ -124,6 +131,18 @@ export function systemPrompt(opts: {
           "",
           "Use this as background, not as something to recite back. If the user says something that",
           "contradicts it now, the user is right -- these are notes from earlier, not a fixed brief.",
+        ]
+      : [];
+  /* Its own line, and present even while the notes are empty -- the first
+     thing worth remembering arrives in a project with nothing noted yet. A
+     tool description alone is something a small model reads and then never
+     calls; saying when to use it here is what makes it get used. */
+  const remember =
+    opts.project?.remembers && actsLocally(mode)
+      ? [
+          "When the user asks you to remember something about this project, or settles something",
+          "lasting about it -- a research question, an aim, a guiding theory, a method, a decision --",
+          "save it with the remember tool, quoting their own words.",
         ]
       : [];
 
@@ -184,6 +203,7 @@ export function systemPrompt(opts: {
        this only ever supplies a number. */
     "", ...todayLine(opts.now),
     ...(project.length ? ["", ...project] : []),
+    ...(remember.length ? ["", ...remember] : []),
     ...tools, "", ...SYSTEM_PROMPT,
     ...(closing.length ? ["", ...closing] : []),
     ...(spoken.length ? ["", ...spoken] : []),

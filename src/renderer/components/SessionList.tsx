@@ -83,10 +83,16 @@ export function SessionList({
 
   useEffect(load, [refreshKey, load]);
 
+  /* A change to the project index can move a row between groups -- a
+     conversation filed the moment its first message is sent, most of all --
+     so the rows are re-read with it rather than waiting for the turn to end. */
   useEffect(() => {
     void window.myra.projectList().then((r) => setProjects(r.projects ?? []));
-    return window.myra.onProjects(setProjects);
-  }, []);
+    return window.myra.onProjects((next) => {
+      setProjects(next);
+      load();
+    });
+  }, [load]);
   /* A review saved by a run that finished while another page was open. */
   useEffect(() => window.myra.onReviews(() => load()), [load]);
   /* A paper section committed by main while this list, not the drafter, was

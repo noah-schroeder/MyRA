@@ -8,15 +8,21 @@
 
 import { layoutDiagram, type Layout } from "./layout.ts";
 import { parseMermaid } from "./mermaid.ts";
+import { LOOKS, type DiagramStyleName } from "./styles.ts";
 import { prismaLayout } from "../prisma/layout.ts";
 import type { PrismaFigure } from "../prisma/spec.ts";
 
 export type DrawResult = { layout: Layout } | { error: string };
 
-/** Exactly one of `source`/`prisma` is ever set, mirroring `DiagramUpdate`. */
-export function drawDiagram(diagram: { source?: string | undefined; prisma?: PrismaFigure | undefined }): DrawResult {
+/** Exactly one of `source`/`prisma` is ever set, mirroring `DiagramUpdate`.
+ *  A style applies to a Mermaid diagram only: a PRISMA figure's look is the
+ *  official template, so it is placed the same whatever is asked. */
+export function drawDiagram(
+  diagram: { source?: string | undefined; prisma?: PrismaFigure | undefined },
+  style?: DiagramStyleName,
+): DrawResult {
   if (diagram.prisma) return { layout: prismaLayout(diagram.prisma) };
   const parsed = parseMermaid(diagram.source ?? "");
   if (!parsed.ok) return { error: `Line ${parsed.line}: ${parsed.error}` };
-  return { layout: layoutDiagram(parsed.diagram) };
+  return { layout: layoutDiagram(parsed.diagram, LOOKS[style ?? "standard"]) };
 }

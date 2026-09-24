@@ -12,7 +12,10 @@ import { test } from "node:test";
 
 import { parseMermaid } from "../src/core/diagrams/mermaid.ts";
 import { layoutDiagram } from "../src/core/diagrams/layout.ts";
-import { arrowHead, dashFor, hasShadow, nodePath, toSvg, xmlEscape, PAPER_THEME } from "../src/core/diagrams/svg.ts";
+import {
+  arrowHead, dashFor, edgePath, hasShadow, nodeColors, nodePath, toSvg, xmlEscape, PAPER_THEME,
+} from "../src/core/diagrams/svg.ts";
+import { LOOKS, STYLE_THEMES } from "../src/core/diagrams/styles.ts";
 
 function svgOf(src: string): string {
   const parsed = parseMermaid(src);
@@ -124,4 +127,73 @@ test("a physical size is written in inches on the outer element, while the viewB
   const svg = toSvg(layout, undefined, { widthIn: 9, heightIn: 6.5 });
   assert.match(svg, /width="9in" height="6\.5in"/);
   assert.match(svg, new RegExp(`viewBox="0 0 ${layout.width} ${layout.height}"`));
+});
+
+test("colours the source asked for reach the file, with readable text picked for a dark fill", () => {
+  const svg = svgOf(`flowchart TD
+    A:::dark --> B
+    classDef dark fill:navy,stroke:#ff0
+    linkStyle 0 stroke:#c62828,stroke-width:4px`);
+  assert.ok(svg.includes(`fill="#000080" stroke="#ffff00"`), "the box takes its classDef colours");
+  assert.ok(svg.includes(`fill="#ffffff">A</text>`), "white text on navy, since the source named none");
+  assert.ok(svg.includes(`stroke="#c62828" stroke-width="4"`), "the edge takes its linkStyle");
+  assert.ok(svg.includes(`fill="${PAPER_THEME.text}">B</text>`), "an unstyled node keeps the paper theme");
+});
+
+test("an explicitly filled category does not use up one of MyRA's palette slots", () => {
+  const parsed = parseMermaid(`flowchart TD
+    A:::mine --> B:::other
+    classDef mine fill:#abcdef`);
+  assert.ok(parsed.ok);
+  const layout = layoutDiagram(parsed.diagram);
+  assert.equal(layout.nodes.find((n) => n.id === "A")?.box?.category, undefined);
+  assert.equal(layout.nodes.find((n) => n.id === "A")?.box?.fill, "#abcdef");
+  assert.equal(layout.nodes.find((n) => n.id === "B")?.box?.category, 0, "the other category gets the first slot");
+});
+
+test("a colour that tries to break out of its attribute never reaches the file", () => {
+  const svg = svgOf('flowchart TD\n A --> B\n style A fill:red" onload="alert(1)');
+  assert.ok(!svg.includes("onload"));
+});
+
+/* ----------------------------------------------------------------- looks -- */
+
+const BRANCHING = "flowchart TD\n A[Search] --> B[Include]\n A --> C[Exclude]";
+
+function laidOut(src: string, look = LOOKS.standard) {
+  const parsed = parseMermaid(src);
+  assert.ok(parsed.ok);
+  return layoutDiagram(parsed.diagram, look);
+}
+
+test("a poster export carries its own type, and its elbows are rounded", () => {
+  const layout = laidOut(BRANCHING, LOOKS.poster);
+  const svg = toSvg(layout, STYLE_THEMES.poster);
+  assert.ok(svg.includes(`font-size="16" font-weight="600"`));
+  assert.ok(svg.includes(`font-family="Inter,`));
+  const bent = layout.edges.find((e) => e.points.length > 2)!;
+  assert.match(edgePath(bent, LOOKS.poster), / Q /, "a rounded elbow is a curve");
+  assert.doesNotMatch(edgePath(bent), / Q /, "the standard look keeps its sharp polyline");
+});
+
+test("a journal export has no shadow anywhere", () => {
+  const svg = toSvg(laidOut(BRANCHING, LOOKS.journal), STYLE_THEMES.journal);
+  assert.ok(!svg.includes("dg-shadow"));
+  assert.ok(!svg.includes("font-weight"), "regular weight is the default and is not written");
+});
+
+test("monochrome turns a colour the source asked for into grey, text still legible", () => {
+  const layout = laidOut("flowchart TD\n A --> B\n style A fill:red,stroke:blue", LOOKS.monochrome);
+  const a = layout.nodes.find((n) => n.id === "A")!;
+  const colors = nodeColors(a, STYLE_THEMES.monochrome, LOOKS.monochrome);
+  assert.match(colors.fill, /^#([0-9a-f]{2})\1\1$/);
+  assert.match(colors.stroke, /^#([0-9a-f]{2})\1\1$/);
+  const svg = toSvg(layout, STYLE_THEMES.monochrome);
+  assert.ok(!svg.includes("#ff0000") && !svg.includes("#0000ff"));
+});
+
+test("a poster category is outlined in its own hue", () => {
+  const layout = laidOut("flowchart TD\n A:::x --> B", LOOKS.poster);
+  const a = layout.nodes.find((n) => n.id === "A")!;
+  assert.equal(nodeColors(a, STYLE_THEMES.poster, LOOKS.poster).stroke, STYLE_THEMES.poster.categoryStroke![0]);
 });

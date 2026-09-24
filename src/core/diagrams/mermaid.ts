@@ -21,7 +21,16 @@
  * are then reported by name, because a diagram missing a third of itself is
  * worse than one that says it cannot be drawn -- and because the message is
  * what the model reads and acts on.
+ *
+ * **Colours are read, but only as colours.** `classDef`, `style` and
+ * `linkStyle` are how a model does what a user asks for when they say "make
+ * the screening steps green", and the model reaches for them unprompted. Every
+ * value goes through [colors.ts](./colors.ts), which accepts a hex code,
+ * `rgb()` or a CSS colour name and nothing else, so the string that reaches an
+ * SVG attribute is always one MyRA wrote.
  */
+
+import { mergePaint, parsePaint, type Paint } from "./colors.ts";
 
 export type Direction = "TD" | "TB" | "BT" | "LR" | "RL";
 
@@ -34,10 +43,13 @@ export interface DiagramNode {
   id: string;
   label: string;
   shape: NodeShape;
-  /** A grouping key from `class`/`:::`, never a colour -- MyRA owns the
-   *  palette that eventually paints it, the same reason `classDef`'s own
-   *  colours are read nowhere in this file. */
+  /** A grouping key from `class`/`:::`. Painted from MyRA's own palette
+   *  unless a `classDef` of the same name sets a fill -- see `paint`. */
   category?: string | undefined;
+  /** Colours the source asked for, already resolved from `classDef default`,
+   *  the node's class and its own `style` line, in that order. Absent is the
+   *  ordinary case: most diagrams name no colour and should not have to. */
+  paint?: Paint | undefined;
 }
 
 export type EdgeStyle = "solid" | "dotted" | "thick";
@@ -49,6 +61,8 @@ export interface DiagramEdge {
   style: EdgeStyle;
   /** `-->` has one, `---` does not. */
   arrow: boolean;
+  /** From `linkStyle`, by the edge's position in the source. */
+  paint?: Paint | undefined;
 }
 
 export interface Diagram {
@@ -58,7 +72,10 @@ export interface Diagram {
 }
 
 export type ParseResult =
-  | { ok: true; diagram: Diagram }
+  /* `warnings` only when there is something to say -- a colour that did not
+     parse, a `style` naming a node that is not there. The diagram is still
+     drawn; the tool passes these back so the model can fix what it meant. */
+  | { ok: true; diagram: Diagram; warnings?: string[] }
   | { ok: false; line: number; error: string };
 
 /** The opening keyword of every diagram type, so an unsupported one is named. */
@@ -213,15 +230,40 @@ function splitStatements(line: string): string[] {
   return parts;
 }
 
-/** `class A,B,C categoryName` -- a category is a grouping key, never a colour;
- *  see `CATEGORY_SUFFIX` above for the terser `:::categoryName` form. */
+/** `class A,B,C categoryName` -- a category is a grouping key; a `classDef`
+ *  of the same name is what gives it colours of its own. See
+ *  `CATEGORY_SUFFIX` above for the terser `:::categoryName` form. */
 const CLASS_STATEMENT = /^class\s+([\w.-]+(?:\s*,\s*[\w.-]+)*)\s+([A-Za-z_][\w-]*)\s*;?$/;
+
+/** `classDef warm,hot fill:#f96,stroke:#333` -- one or more class names, then properties. */
+const CLASSDEF_STATEMENT = /^classDef\s+([A-Za-z_][\w-]*(?:\s*,\s*[A-Za-z_][\w-]*)*)\s+(.+?)\s*;?$/;
+/** `style A fill:#f96` -- one node, then properties. */
+const STYLE_STATEMENT = /^style\s+([A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)*)\s+(.+?)\s*;?$/;
+/** `linkStyle 0,2 stroke:#f00` or `linkStyle default ...` -- edges by position. */
+const LINKSTYLE_STATEMENT = /^linkStyle\s+(default|\d+(?:\s*,\s*\d+)*)\s+(.+?)\s*;?$/;
 
 export function parseMermaid(source: string): ParseResult {
   const raw = source.split(/\r?\n/);
   const nodes = new Map<string, DiagramNode>();
   const edges: DiagramEdge[] = [];
   let direction: Direction | undefined;
+  /* Collected as they come and applied at the end: `classDef` and `style`
+     conventionally follow the nodes they paint, and a class can be assigned
+     after its definition or before it. */
+  const classDefs = new Map<string, Paint>();
+  const styles: { id: string; paint: Paint; line: number }[] = [];
+  const linkStyles: { which: "default" | number[]; paint: Paint; line: number }[] = [];
+  const warnings: string[] = [];
+  const readPaint = (props: string, lineNo: number): Paint => {
+    const { paint, bad } = parsePaint(props);
+    for (const value of bad) {
+      warnings.push(
+        `Line ${lineNo}: \`${value}\` is not a colour MyRA can draw, so it was left at the default. ` +
+          "Use a hex code such as #4a90d9, rgb(74, 144, 217), or a CSS colour name.",
+      );
+    }
+    return paint;
+  };
 
   const remember = (ref: NodeRef): void => {
     const existing = nodes.get(ref.id);
@@ -290,16 +332,33 @@ export function parseMermaid(source: string): ParseResult {
           "grouping as its own nodes joined by dotted edges (`-.->`).",
       };
     }
-    if (/^(end|classDef|style|linkStyle|click)\b/.test(line)) continue;
+    if (/^classDef\b/.test(line)) {
+      const m = CLASSDEF_STATEMENT.exec(line);
+      if (m) {
+        const paint = readPaint(m[2]!, lineNo);
+        for (const name of m[1]!.split(",")) classDefs.set(name.trim(), mergePaint(classDefs.get(name.trim()), paint) ?? {});
+      }
+      continue;
+    }
+    if (/^style\b/.test(line)) {
+      const m = STYLE_STATEMENT.exec(line);
+      if (m) styles.push({ id: m[1]!, paint: readPaint(m[2]!, lineNo), line: lineNo });
+      continue;
+    }
+    if (/^linkStyle\b/.test(line)) {
+      const m = LINKSTYLE_STATEMENT.exec(line);
+      if (m) {
+        const which = m[1] === "default" ? "default" as const : m[1]!.split(",").map((n) => Number(n.trim()));
+        linkStyles.push({ which, paint: readPaint(m[2]!, lineNo), line: lineNo });
+      }
+      continue;
+    }
+    if (/^(end|click)\b/.test(line)) continue;
     if (/^class\b/.test(line)) {
-      /* `classDef`'s own colours are never read -- only which nodes share a
-         category matters, so `class` is the one discarded directive that is
-         now actually parsed. A line that does not match the `class <ids>
-         <name>` shape is still swallowed rather than reported: every other
-         directive on this line has always been ignored silently, and an
-         unrecognised spelling of this one should fail the same quiet way
-         rather than surface as a parse error over a feature the model was
-         never asked to use carefully. */
+      /* A line that does not match the `class <ids> <name>` shape is
+         swallowed rather than reported, the same quiet failure `classDef`
+         and `style` get above: an unrecognised spelling of a decoration is
+         not worth refusing the whole diagram over. */
       const m = CLASS_STATEMENT.exec(line);
       if (m) {
         const category = m[2]!;
@@ -327,7 +386,50 @@ export function parseMermaid(source: string): ParseResult {
       error: "The flowchart has a direction but no nodes. Add at least one, as `A[Label]`.",
     };
   }
-  return { ok: true, diagram: { direction, nodes: [...nodes.values()], edges } };
+
+  const ownStyle = new Map<string, Paint>();
+  for (const s of styles) {
+    /* Not created on the spot the way an edge creates the node it names: a
+       box that exists only to be coloured is a typo for one that is there. */
+    if (!nodes.has(s.id)) {
+      warnings.push(`Line ${s.line}: \`style ${s.id}\` names a node that is not in the diagram, so it was skipped.`);
+      continue;
+    }
+    ownStyle.set(s.id, mergePaint(ownStyle.get(s.id), s.paint) ?? {});
+  }
+  for (const node of nodes.values()) {
+    const paint = mergePaint(
+      classDefs.get("default"),
+      node.category !== undefined ? classDefs.get(node.category) : undefined,
+      ownStyle.get(node.id),
+    );
+    if (paint) node.paint = paint;
+  }
+
+  /* `default` first whatever line it sits on, so a numbered linkStyle always
+     wins over it -- the same layering classDef default gets under a class. */
+  const linkDefault = mergePaint(...linkStyles.filter((l) => l.which === "default").map((l) => l.paint));
+  const edgePaint: (Paint | undefined)[] = edges.map(() => linkDefault);
+  for (const l of linkStyles) {
+    if (l.which === "default") continue;
+    for (const i of l.which) {
+      if (i >= edges.length) {
+        warnings.push(
+          `Line ${l.line}: \`linkStyle ${i}\` points past the last edge -- edges are counted from 0 ` +
+            `in the order they are written, and this diagram has ${edges.length}.`,
+        );
+        continue;
+      }
+      edgePaint[i] = mergePaint(edgePaint[i], l.paint);
+    }
+  }
+  edgePaint.forEach((paint, i) => { if (paint) edges[i]!.paint = paint; });
+
+  return {
+    ok: true,
+    diagram: { direction, nodes: [...nodes.values()], edges },
+    ...(warnings.length ? { warnings } : {}),
+  };
 }
 
 /** One statement: a node, or a chain of nodes joined by edges. Returns an error. */

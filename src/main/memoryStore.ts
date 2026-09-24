@@ -14,7 +14,7 @@
  * drop whichever wrote second if the two shared a file. They never do.
  */
 
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
@@ -53,6 +53,24 @@ export async function readMemory(id: string): Promise<ProjectMemory> {
     return parseMemory(JSON.parse(await readFile(pathFor(id), "utf8")));
   } catch {
     return newMemory();
+  }
+}
+
+/**
+ * Whether this project keeps notes at all.
+ *
+ * `readMemory` cannot say: it reads a missing file as an empty, settled
+ * memory, which is right for drawing a project page and wrong for deciding
+ * whether the model may write one -- having a memory file is what makes a
+ * project a research project, and a simple folder must not become one because
+ * a model called `remember` inside it.
+ */
+export async function hasMemory(id: string): Promise<boolean> {
+  try {
+    await access(pathFor(id));
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -407,9 +407,14 @@ body {
 
 /* ---------- tool cards ---------- */
 
+/* `flex-shrink: 0` because `.thread` is a flex column and `overflow: hidden`
+   lets a flex item shrink below its content: once a thread was long enough to
+   scroll, a card holding a diagram thumbnail was squeezed to half its height
+   and the figure cut off mid-box. */
 .tool {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-raised); overflow: hidden; box-shadow: var(--lift);
+  flex-shrink: 0;
 }
 .tool-head {
   display: flex; align-items: center; gap: 9px;
@@ -1174,6 +1179,14 @@ body:has(.artifact-grip:active) { user-select: none; }
 /* A user turn is a bubble the button would otherwise sit inside. */
 .turn.user .turn-copy { top: -8px; right: -4px; }
 
+/* A note, not a document: sized to its text rather than to half the window,
+   and in the reading font, since it is prose somebody will read back. */
+.dialog-editor.remember-text { min-height: 0; font-family: inherit; font-size: 13px; }
+
+/* Remember sits just left of Copy, which is at most "Copied" wide. */
+.turn-remember { right: 62px; }
+.turn.user .turn-remember { right: 58px; }
+
 .artifact-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Below this the three columns stop fitting: the thread is squeezed to nothing
@@ -1524,6 +1537,44 @@ body:has(.artifact-grip:active) { user-select: none; }
   font-size: 11.5px;
   color: var(--text-faint);
   margin: 0;
+}
+
+/*
+ * The turn in flight, under the thread: a phase, a clock and -- only when the
+ * server reported one -- a bar. Mono like the composer's own progress line,
+ * because the digits change every second and proportional ones jitter.
+ */
+.turn-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.turn-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.turn-status-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-status-bar {
+  flex: 0 1 160px;
+  min-width: 60px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.turn-status-fill { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.turn-status-time { color: var(--text-faint); flex: none; }
+@media (prefers-reduced-motion: reduce) {
+  .turn-status-dot { animation: none; }
+  .turn-status-fill { transition: none; }
 }
 
 /*
@@ -6261,14 +6312,21 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
   background: var(--bg-raised);
 }
 .dg-svg { display: block; }
+/* A named look (Journal, Poster, Monochrome) is shown exactly as it exports,
+   on the white of the page it is bound for -- in dark mode too, because a
+   poster previewed on a dark canvas is a preview of a different poster. */
+.dg-canvas.paper,
+.dg-thumb.paper { background: #ffffff; border-color: var(--border-hover); }
 .dg-node { fill: var(--bg-float); stroke: var(--border-hover); stroke-width: 1.5; }
 /* A PRISMA phase band or column heading -- its only second fill, on screen
    too. --border rather than --bg-raised: the latter is identical to
    --dg-node's own --bg-float in light mode, so a "tinted" box would not be. */
 .dg-node.dg-tint { fill: var(--border); }
-/* A model's `class`/`:::` grouping, never the model's own colour -- these six
-   hues are MyRA's, mixed lightly into the node's own fill so `.dg-text`'s one
-   `--text` stays legible over every one without a per-category text colour. */
+/* A model's `class`/`:::` grouping that named no colour of its own -- these
+   six hues are MyRA's, mixed lightly into the node's own fill so `.dg-text`'s
+   one `--text` stays legible over every one. A colour the source did name
+   arrives as an inline style instead (svg.ts's `boxPaintStyle`), with its own
+   text colour picked for contrast, and beats these. */
 .dg-node.dg-cat-0 { fill: color-mix(in srgb, var(--blue) 25%, var(--bg-float)); }
 .dg-node.dg-cat-1 { fill: color-mix(in srgb, var(--green) 25%, var(--bg-float)); }
 .dg-node.dg-cat-2 { fill: color-mix(in srgb, var(--amber) 25%, var(--bg-float)); }

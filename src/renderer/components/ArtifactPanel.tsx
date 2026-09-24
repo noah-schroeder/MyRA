@@ -6,6 +6,7 @@ import { clampWidth, DEFAULT_WIDTH, WIDTH_KEY } from "./artifactWidth.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { DiagramView } from "./DiagramView.tsx";
+import type { DiagramStyleName } from "../../core/diagrams/styles.ts";
 import { TableView } from "./TableView.tsx";
 import { ChartView } from "./ChartView.tsx";
 
@@ -45,6 +46,7 @@ export function ArtifactPanel({
   onSelect,
   onClose,
   onResize,
+  onRestyle,
 }: {
   /** In the order they were first produced. */
   items: Artifact[];
@@ -52,6 +54,8 @@ export function ArtifactPanel({
   onSelect: (key: string) => void;
   onClose: () => void;
   onResize: (width: number) => void;
+  /** A diagram's Style menu, reaching `useArtifacts().restyle`. */
+  onRestyle?: (key: string, style: DiagramStyleName) => void;
 }) {
   const item = items.find((d) => d.key === active) ?? items[items.length - 1];
   const doc = item?.kind === "doc" ? item.doc : undefined;
@@ -142,7 +146,10 @@ export function ArtifactPanel({
         {item.kind === "doc" ? (
           <Markdown text={item.doc.markdown} sources={NO_SOURCES} />
         ) : item.kind === "diagram" ? (
-          <DiagramView diagram={item.diagram} />
+          <DiagramView
+            diagram={item.diagram}
+            {...(onRestyle ? { onRestyle: (style: DiagramStyleName) => onRestyle(item.key, style) } : {})}
+          />
         ) : item.kind === "table" ? (
           <TableView table={item.table} />
         ) : (
@@ -295,6 +302,9 @@ export function useArtifacts(): {
    *  the fact -- see the ref's own comment for why this is filtered like a
    *  live push rather than always applied. */
   replay: (sessionId: string, records: ArtifactRecord[]) => void;
+  /** Set one diagram's look from its Style menu, so the panel and the
+   *  thumbnail in the thread both redraw in it. */
+  restyle: (key: string, style: DiagramStyleName) => void;
 } {
   const [items, setItems] = useState<Artifact[]>([]);
   const [active, setActive] = useState("");
@@ -405,6 +415,13 @@ export function useArtifacts(): {
     replay: (sessionId: string, records: ArtifactRecord[]) => {
       currentSessionId.current = sessionId;
       for (const record of records) arrive(toArtifact(record), sessionId);
+    },
+    restyle: (key: string, style: DiagramStyleName) => {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.kind === "diagram" && item.key === key ? { ...item, diagram: { ...item.diagram, style } } : item,
+        ),
+      );
     },
   };
 }

@@ -15,6 +15,7 @@ import { ipcMain } from "electron";
 import type { ConfigStore, EndpointSettings } from "../core/config.ts";
 import type { Session } from "../core/sessions.ts";
 import { runSubagent } from "../core/llm/chat.ts";
+import type { TurnProgress } from "../core/llm/progress.ts";
 import type { Choice } from "../core/research/questions.ts";
 import {
   addItems, editItem, fieldsToItems, itemsToFields, markSetupDone, mergeAuto, removeItem, setAuto,
@@ -45,7 +46,14 @@ export interface MemoryDeps {
   config: ConfigStore;
   send: (channel: string, payload?: unknown) => void;
   /** Resolved the way the chat turn resolves it -- see papers.ts's own note on why not settings.llm directly. */
-  llm: () => Promise<{ endpoint: EndpointSettings; apiKey?: string }>;
+  llm: () => Promise<{
+    endpoint: EndpointSettings;
+    apiKey?: string;
+    /** The reasoning switch this model takes, the one the chat turn sends. */
+    extra?: Record<string, unknown>;
+    /** Whether the endpoint is the bundled runtime -- see EndpointResolution in index.ts. */
+    promptProgress?: boolean;
+  }>;
   /** The conversation "update from this chat" reads -- always whichever one is open. */
   currentSession: () => Session;
   ui: MemoryUi;
@@ -68,8 +76,31 @@ function host(): MemoryDeps {
   return deps;
 }
 
-async function ask(prompt: string, signal?: AbortSignal): Promise<string> {
+/**
+ * Where the setup chat shows what it is doing, all of it on the one reply the
+ * user is watching.
+ *
+ * `say` is the narrative and is kept as the conversation's message. `think`
+ * is the model's reasoning as it arrives and is never kept -- the same rule
+ * an ordinary turn follows, since reasoning is workings, not an answer.
+ * `progress` feeds the status row under the thread.
+ */
+export interface SetupOutput {
+  say: (delta: string) => void;
+  think: (delta: string) => void;
+  progress: (progress: TurnProgress) => void;
+}
+
+/**
+ * One model call. With `live`, it streams: the reasoning is shown and the
+ * reply's progress reported, which is the difference between a setup step the
+ * user can watch and two silent minutes spent writing JSON nobody sees. The
+ * JSON itself is never shown -- only `text` is parsed, and it is parsed, not
+ * printed.
+ */
+async function ask(prompt: string, signal?: AbortSignal, live?: SetupOutput): Promise<string> {
   const { llm } = host();
+  live?.progress({ phase: "waiting" });
   const resolved = await llm();
   const { text } = await runSubagent({
     model: resolved.endpoint.model ?? "",
@@ -77,6 +108,16 @@ async function ask(prompt: string, signal?: AbortSignal): Promise<string> {
     endpoint: resolved.endpoint,
     ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
     ...(signal ? { signal } : {}),
+    ...(live
+      ? {
+          onDelta: (delta: string, kind: "text" | "thinking") => {
+            if (kind === "thinking") live.think(delta);
+          },
+          onStreamProgress: live.progress,
+          ...(resolved.extra ? { extra: resolved.extra } : {}),
+          ...(resolved.promptProgress ? { promptProgress: true } : {}),
+        }
+      : {}),
   });
   return text;
 }
@@ -90,7 +131,7 @@ export { SETUP_GREETING };
 /**
  * Run the whole setup chat, narrating as it goes.
  *
- * `say` receives DELTAS, the same shape an ordinary reply's text events are --
+ * `out.say` receives DELTAS, the same shape an ordinary reply's text events are --
  * every call here joins the one growing reply the user is already watching,
  * the way a turn that thinks and then answers is still one bubble. Nothing
  * here calls a registry tool; the loop this replaces never runs, which is the
@@ -104,17 +145,18 @@ export { SETUP_GREETING };
 export async function runProjectSetup(
   projectId: string,
   description: string,
-  say: (delta: string) => void,
+  out: SetupOutput,
   signal?: AbortSignal,
 ): Promise<ProjectMemory> {
   let memory = await readMemory(projectId);
-  const { ui } = host();
+  const ui = asking(host().ui, out);
+  const { say } = out;
 
   say("Thanks. Let me see what's worth noting here.");
 
   const draft = await (async () => {
     try {
-      return parseOffers(await ask(buildOffersPrompt(description), signal));
+      return parseOffers(await ask(buildOffersPrompt(description), signal, out));
     } catch {
       return { items: [] as NewItem[], offers: [...FIXED_TASKS] };
     }
@@ -154,13 +196,28 @@ export async function runProjectSetup(
 
   for (const task of chosen) {
     say(`\n\n**${task.label}**`);
-    memory = await runTask(projectId, memory, task, description, ui, say, signal);
+    memory = await runTask(projectId, memory, task, description, ui, out, signal);
   }
 
   memory = markSetupDone(memory);
   await writeMemory(projectId, memory);
   say("\n\nThat's your project set up -- I'll keep building on these notes as we go.");
   return memory;
+}
+
+/**
+ * The same dialogs, saying on the status row that the wait is the user's.
+ *
+ * Without this the row went on showing the last model call's clock behind an
+ * open question -- "Writing, 2m 10s" over a form nobody had filled in yet,
+ * which reads as a model that has hung.
+ */
+function asking(ui: MemoryUi, out: SetupOutput): MemoryUi {
+  return {
+    choose: (choice) => { out.progress({ phase: "asking" }); return ui.choose(choice); },
+    input: (title, placeholder) => { out.progress({ phase: "asking" }); return ui.input(title, placeholder); },
+    form: (title, message, fields) => { out.progress({ phase: "asking" }); return ui.form(title, message, fields); },
+  };
 }
 
 async function review(ui: MemoryUi, title: string, items: readonly NewItem[]): Promise<NewItem[]> {
@@ -174,12 +231,13 @@ async function runTask(
   task: Task,
   description: string,
   ui: MemoryUi,
-  say: (delta: string) => void,
+  out: SetupOutput,
   signal?: AbortSignal,
 ): Promise<ProjectMemory> {
+  const { say } = out;
   const questions = await (async () => {
     try {
-      return parseTaskQuestions(await ask(buildTaskQuestionsPrompt(task, description, memory), signal));
+      return parseTaskQuestions(await ask(buildTaskQuestionsPrompt(task, description, memory), signal, out));
     } catch {
       return [];
     }
@@ -195,7 +253,7 @@ async function runTask(
 
   const items = await (async () => {
     try {
-      return parseTaskResult(await ask(buildTaskResultPrompt(task, description, answered, memory), signal));
+      return parseTaskResult(await ask(buildTaskResultPrompt(task, description, answered, memory), signal, out));
     } catch {
       return [];
     }
@@ -274,8 +332,20 @@ async function runAutoUpdate(projectId: string, session: Session): Promise<void>
 
   const merged = mergeAuto(memory, grounded, session.id, session.messages_.length);
   await writeMemory(projectId, merged);
-  if (merged.items.length !== memory.items.length) {
+  const added = merged.items.slice(memory.items.length);
+  if (added.length) {
     d.send("myra:project-memory-changed", { projectId });
+    /* Said in the conversation it came from. A pass that saved notes where
+       nobody was looking was indistinguishable from one that never ran --
+       which is how this feature came to be reported as not working. The
+       window shows it only if that conversation is the one on screen. */
+    d.send("myra:agent-event", {
+      type: "notice",
+      sessionId: session.id,
+      text:
+        `Added to this project's notes: ${added.map((it) => `“${it.text}”`).join("; ")} — ` +
+        `edit or remove ${added.length === 1 ? "it" : "them"} from the project page.`,
+    });
   }
 }
 

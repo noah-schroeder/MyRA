@@ -53,6 +53,7 @@ complete list.
 | `create_table` | `safe` |
 | `create_prisma_diagram` | `safe` |
 | `create_chart` | `safe` |
+| `remember` | `write` |
 
 *Machine-checked.* `test/threatModel.test.ts` parses this table and compares it
 to the registry, so a tool added without a row here fails `npm test`.
@@ -79,6 +80,11 @@ jail's tests are the ones that matter.
 - The research root, for runs it creates. The directory name is a slug of the
   question, reduced to `[a-z0-9-]`.
 - MyRA's own task store, a flat directory of JSON files in MyRA's own folder.
+- A research project's notes, append-only, through `remember` — and only a
+  note whose quote is something the user typed (or the user's own reply
+  agreeing to a suggestion), checked after every untrusted block is stripped.
+  A fetched page can ask the model to remember something; it cannot supply the
+  quote the note has to rest on. Pinned by `test/rememberTool.test.ts`.
 - The network, only through `fetch_page` and the four scholarly APIs in
   `databases.ts`. `fetch_page` refuses loopback, private, link-local and CGNAT
   addresses **after** resolving them, which covers the cloud metadata endpoint

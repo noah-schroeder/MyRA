@@ -115,10 +115,7 @@ test("an id may hold a hyphen, and an arrow may have no spaces around it", () =>
   assert.equal(ok("flowchart TD\n A==>B").edges[0]?.style, "thick");
 });
 
-test("comments and colour directives are skipped, not parsed", () => {
-  // classDef's own hex is never read -- MyRA owns the palette a category is
-  // eventually painted with -- so only classDef/style/linkStyle/click stay
-  // no-ops. `class` itself is asserted separately below: it now groups nodes.
+test("comments and click lines are skipped, and colour lines add no nodes or edges", () => {
   const d = ok(`flowchart TD
     %% this is a comment
     A --> B
@@ -129,6 +126,67 @@ test("comments and colour directives are skipped, not parsed", () => {
   assert.equal(d.nodes.length, 2);
   assert.equal(d.edges.length, 1);
   assert.equal(d.nodes[0]?.category, undefined);
+});
+
+/* --------------------------------------------------------------- colours -- */
+
+test("classDef colours the nodes in its class, style one node, and style wins", () => {
+  const d = ok(`flowchart TD
+    A:::warm --> B:::warm --> C
+    classDef warm fill:#f96,stroke:#333,stroke-width:3px
+    style B fill:lightblue`);
+  const paint = (id: string) => d.nodes.find((n) => n.id === id)?.paint;
+  assert.deepEqual(paint("A"), { fill: "#ff9966", stroke: "#333333", strokeWidth: 3 });
+  // style overrides the class field by field, keeping what it did not name.
+  assert.deepEqual(paint("B"), { fill: "#add8e6", stroke: "#333333", strokeWidth: 3 });
+  assert.equal(paint("C"), undefined);
+});
+
+test("classDef default sits under everything else", () => {
+  const d = ok(`flowchart TD
+    A --> B:::hot
+    classDef default fill:#eeeeee,stroke:#000
+    classDef hot fill:red`);
+  assert.deepEqual(d.nodes.find((n) => n.id === "A")?.paint, { fill: "#eeeeee", stroke: "#000000" });
+  assert.deepEqual(d.nodes.find((n) => n.id === "B")?.paint, { fill: "#ff0000", stroke: "#000000" });
+});
+
+test("a class defined before it is assigned still applies", () => {
+  const d = ok("flowchart TD\n classDef done fill:#0a0\n A --> B\n class B done");
+  assert.equal(d.nodes.find((n) => n.id === "B")?.paint?.fill, "#00aa00");
+});
+
+test("linkStyle colours edges by position, over linkStyle default", () => {
+  const d = ok(`flowchart LR
+    A --> B --> C
+    linkStyle 1 stroke:#c62828,color:#c62828
+    linkStyle default stroke:gray,stroke-width:2px`);
+  assert.deepEqual(d.edges[0]?.paint, { stroke: "#808080", strokeWidth: 2 });
+  assert.deepEqual(d.edges[1]?.paint, { stroke: "#c62828", strokeWidth: 2, text: "#c62828" });
+});
+
+test("a colour that is not one is dropped and named, and the diagram is still drawn", () => {
+  const got = parseMermaid('flowchart TD\n A --> B\n style A fill:url(#x),stroke:"red" onload="x"');
+  assert.ok(got.ok);
+  assert.equal(got.diagram.nodes[0]?.paint, undefined);
+  assert.equal(got.warnings?.length, 2);
+  assert.match(got.warnings![0]!, /Line 3: `url\(#x\)` is not a colour/);
+});
+
+test("style naming a missing node, and linkStyle past the last edge, are warnings", () => {
+  const got = parseMermaid("flowchart TD\n A --> B\n style Z fill:red\n linkStyle 4 stroke:red");
+  assert.ok(got.ok);
+  assert.equal(got.diagram.nodes.length, 2);
+  assert.match(got.warnings![0]!, /`style Z` names a node that is not in the diagram/);
+  assert.match(got.warnings![1]!, /this diagram has 1/);
+});
+
+test("a diagram with no colour lines carries no paint and no warnings", () => {
+  const got = parseMermaid("flowchart TD\n A:::x --> B");
+  assert.ok(got.ok);
+  assert.equal("warnings" in got, false);
+  assert.equal(got.diagram.nodes.some((n) => "paint" in n), false);
+  assert.equal(got.diagram.edges.some((e) => "paint" in e), false);
 });
 
 test("a `class` statement groups the nodes it names", () => {
