@@ -39,11 +39,13 @@ import { ImagePage } from "./components/ImagePage.tsx";
 import { PaperDrafter } from "./components/PaperDrafter.tsx";
 import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
+import { NewProjectDialog } from "./components/NewProjectDialog.tsx";
 import { TasksPage } from "./components/TasksPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
 import { downscaleImage } from "./downscale.ts";
 import { parse } from "../core/tabular/parse.ts";
+import { SETUP_GREETING } from "../core/projects/greeting.ts";
 import type {
   ActiveRun, CitedSource, JobSnapshot, MemberKind, PendingAttachment, ProjectSummary, PromptRequest,
   RuntimeState, Settings,
@@ -129,6 +131,8 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const { open: projectsOpen, toggle: toggleProjects } = useRailSection("projects");
   const [openProject, setOpenProject] = useState<string | undefined>();
+  /** The "simple folder or research project?" dialog, open while creating one. */
+  const [showNewProject, setShowNewProject] = useState(false);
   /* Which record each page should show when it is opened from somewhere else --
      the rail's recent list, or a project. Four kinds have their own page now, so
      "go to the Papers page" is no longer the same thing as "open this paper". */
@@ -167,6 +171,47 @@ export function App() {
   const refreshProjects = useCallback(() => {
     void window.myra.projectList().then((r) => setProjects(r.projects ?? []));
   }, []);
+
+  /*
+   * Whether the active project is still waiting for its setup chat.
+   *
+   * Read whenever the active project changes rather than carried on
+   * `ProjectSummary` -- a project just created for this is the common case,
+   * and the rail's own list has no reason to know a word about memory the
+   * moment it lists a project's name.
+   */
+  const [pendingProjectSetup, setPendingProjectSetup] = useState(false);
+  const [memoryUpdating, setMemoryUpdating] = useState(false);
+  /**
+   * "Update project notes from this chat": the same grounding pass the
+   * background timer runs, but now, and with a review dialog -- see
+   * main/projectMemory.ts's own header. `myra:project-memory-update` pops
+   * that dialog itself over the same `myra:prompt` channel `UiDialog`
+   * already renders, so there is nothing else for this to do but wait.
+   */
+  const updateProjectMemory = async (): Promise<void> => {
+    if (!activeProject || memoryUpdating) return;
+    setMemoryUpdating(true);
+    try {
+      await window.myra.projectMemoryUpdate(activeProject);
+    } finally {
+      setMemoryUpdating(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeProject) {
+      setPendingProjectSetup(false);
+      return;
+    }
+    void window.myra.projectMemory(activeProject).then((r) => {
+      if (!cancelled) setPendingProjectSetup(r.memory?.setup === "pending");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject]);
 
   useEffect(() => {
     refreshProjects();
@@ -542,11 +587,40 @@ export function App() {
     setLookup(false);
   };
 
-  const makeProject = async (): Promise<void> => {
-    const result = await window.myra.projectCreate("Untitled project");
+  /**
+   * Create a project, and go to wherever it makes sense to look at it next.
+   *
+   * A simple folder opens its own page, the way it always has. A research
+   * project instead opens a fresh conversation with it as the active
+   * project: the setup chat is a conversation ("tell me about this project"),
+   * so the natural place to land is the composer, not the project page.
+   */
+  const makeProject = async (research: boolean): Promise<void> => {
+    const result = await window.myra.projectCreate("Untitled project", research);
     if (!result.project) return;
     refreshProjects();
+    if (research) {
+      setSettings((await window.myra.projectSetActive(result.project.id)).settings);
+      await newSession();
+      toChat();
+      return;
+    }
     await chooseProject(result.project.id);
+  };
+
+  /**
+   * Opt a plain folder into the research workflow, after the fact.
+   *
+   * The same landing as creating a research project outright: setup is a
+   * conversation, so the natural next screen is the composer, with the
+   * greeting already waiting because `pendingProjectSetup` reads the memory
+   * this just flipped to "pending".
+   */
+  const startProjectSetup = async (id: string): Promise<void> => {
+    await window.myra.projectMemoryStartSetup(id);
+    setSettings((await window.myra.projectSetActive(id)).settings);
+    await newSession();
+    toChat();
   };
 
   /** Whatever page you were on, a conversation is what you asked for. */
@@ -705,7 +779,7 @@ export function App() {
             open={projectsOpen}
             count={projects.length}
             onToggle={toggleProjects}
-            onAdd={() => void makeProject()}
+            onAdd={() => setShowNewProject(true)}
             addLabel="New project"
           />
           {!projectsOpen ? null : (
@@ -734,7 +808,7 @@ export function App() {
                   </li>
                 ))}
               </ul>
-              <button type="button" className="project-new" onClick={() => void makeProject()}>
+              <button type="button" className="project-new" onClick={() => setShowNewProject(true)}>
                 + New project
               </button>
             </>
@@ -886,6 +960,7 @@ export function App() {
             onClose={toChat}
             onOpenItem={openItem}
             onChanged={refreshProjects}
+            onStartSetup={() => void startProjectSetup(openProject)}
           />
         ) : null}
         {page === "papers" ? (
@@ -946,14 +1021,23 @@ export function App() {
         >
           {items.length === 0 ? (
             <div className="welcome">
-              <h1>What are you working on?</h1>
-              {/* Three sentences rather than three buttons: these are the
-                  things MyRA does, and naming them is more use than a row of
-                  shortcuts to panels that are already one click away. */}
-              <p>
-                Ask a question, record a meeting and get it written up, or start a piece of
-                research that reads the literature and cites what it found.
-              </p>
+              {pendingProjectSetup ? (
+                <>
+                  <h1>Tell me about this project</h1>
+                  <p>{SETUP_GREETING}</p>
+                </>
+              ) : (
+                <>
+                  <h1>What are you working on?</h1>
+                  {/* Three sentences rather than three buttons: these are the
+                      things MyRA does, and naming them is more use than a row
+                      of shortcuts to panels that are already one click away. */}
+                  <p>
+                    Ask a question, record a meeting and get it written up, or start a piece of
+                    research that reads the literature and cites what it found.
+                  </p>
+                </>
+              )}
             </div>
           ) : null}
 
@@ -1356,6 +1440,16 @@ export function App() {
 
         <div className="statusbar" hidden={page !== "chat" || lookup}>
           <ContextMeter usage={usage} />
+          {activeProject && !pendingProjectSetup && items.length > 0 ? (
+            <button
+              type="button"
+              className="statusbar-action"
+              disabled={memoryUpdating || busy}
+              onClick={() => void updateProjectMemory()}
+            >
+              {memoryUpdating ? "Checking this chat…" : "Update project notes from this chat"}
+            </button>
+          ) : null}
         </div>
       </main>
 
@@ -1427,6 +1521,15 @@ export function App() {
         />
       ) : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
+      {showNewProject ? (
+        <NewProjectDialog
+          onCancel={() => setShowNewProject(false)}
+          onChoose={(research) => {
+            setShowNewProject(false);
+            void makeProject(research);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

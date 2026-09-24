@@ -105,10 +105,14 @@ import { installPaperIpc } from "./papers.ts";
 import { installReviewIpc } from "./review.ts";
 import { installTaskIpc, taskHost } from "./tasks.ts";
 import { startReminders } from "./reminders.ts";
-import { createJobs } from "./work.ts";
+import { createJobs, type Jobs } from "./work.ts";
 import { factsFor, setAllowOffload, setIgnoreSuggested, suggestedFor } from "./runtime/modelFacts.ts";
 import { defaultStores, installProjectIpc } from "./projects.ts";
-import { fileInActiveProject, filedRefs } from "./projectStore.ts";
+import { fileInActiveProject, filedRefs, readAll as readAllProjects } from "./projectStore.ts";
+import { ownerOf, type Project } from "../core/projects/project.ts";
+import { installMemoryIpc, runProjectSetup, scheduleAutoUpdate, SETUP_GREETING } from "./projectMemory.ts";
+import { readMemory } from "./memoryStore.ts";
+import type { ProjectMemory } from "../core/projects/memory.ts";
 import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -528,6 +532,34 @@ let resolveEndpoint: () => Promise<EndpointResolution> = () => {
   throw new Error("The app is still starting up.");
 };
 
+/**
+ * The lease on long work, shared with the paper drafter and the reviewer.
+ *
+ * A local const inside `main()` until now, which was fine for everything that
+ * only ever ran after `main()` had returned it -- but the automatic memory
+ * updater needs to ask "is something else using the model right now" from a
+ * timer that outlives any one call, the same reason `resolveEndpoint` above
+ * is a reassigned module-level binding rather than a local one.
+ */
+let jobs: Jobs | undefined;
+
+/**
+ * Which project this conversation belongs to, if any.
+ *
+ * The project that already owns it wins; a brand-new conversation has no
+ * owner yet -- it is filed only after its first turn finishes, in
+ * `handleSend`'s own `finally` block -- so the active project stands in for
+ * it, the same fallback `fileInActiveProject` uses to decide where a turn's
+ * conversation, image or run will land.
+ */
+async function projectForSession(sessionId: string): Promise<Project | undefined> {
+  const projects = await readAllProjects();
+  const owner = ownerOf(projects, { kind: "chat", ref: sessionId });
+  if (owner) return owner;
+  const active = config.current.activeProject;
+  return active ? projects.find((p) => p.id === active) : undefined;
+}
+
 function currentSession(): Session {
   if (!session_) {
     const now = new Date().toISOString();
@@ -634,7 +666,18 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
         }
       : {}),
   });
-  if (conversation.messages_.length === 1) conversation.title = titleFrom(conversation.messages_);
+  /* Whether this is the very first thing said in this conversation, decided
+     before the greeting (setup's own, unshifted below) can change the count. */
+  const isFirstMessage = conversation.messages_.length === 1;
+  if (isFirstMessage) conversation.title = titleFrom(conversation.messages_);
+
+  const project = await projectForSession(conversation.id);
+  const memory = project ? await readMemory(project.id) : undefined;
+  /* The research project's own setup chat, run once: the first message in a
+     conversation filed to a project whose memory is still "pending". Every
+     later message in the same project is an ordinary turn, project block and
+     all -- see the `else` branch below. */
+  const runsSetup = Boolean(project && memory?.setup === "pending" && isFirstMessage);
 
   inFlight?.abort();
   inFlight = new AbortController();
@@ -658,6 +701,23 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
   beginPrismaTurn();
 
   try {
+    if (runsSetup) {
+      /*
+       * Code runs the setup, not the model -- the same discipline
+       * documents/draft.ts's own header names. `runTurn` never sees this
+       * message at all; the loop it would have run is replaced outright, the
+       * way `deep_research`'s own scoping stage replaces an ordinary reply.
+       */
+      conversation.messages_.unshift({ role: "assistant", content: SETUP_GREETING });
+      let narrative = "";
+      const say = (delta: string): void => {
+        narrative += delta;
+        emit({ type: "text", text: delta });
+      };
+      await runProjectSetup(project!.id, text, say, inFlight.signal);
+      if (narrative.trim()) conversation.messages_.push({ role: "assistant", content: narrative });
+      emit({ type: "done", result: JSON.stringify({}) });
+    } else {
     /*
      * Resolved by the one resolver, not a second copy of its reasoning.
      *
@@ -699,6 +759,12 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
         ...(persona ? { persona } : {}),
         mode: readResearchConfig().mode,
         spoken: config.current.audio.speechToSpeech,
+        /* The ONE place a project's memory is read -- see systemPrompt's own
+           note on why nowhere else may. `memory` is read once, above, before
+           branching on `runsSetup`, so a project just set up on this very
+           turn is still empty here -- correct, since its notes did not exist
+           before this message arrived either. */
+        ...(project && memory ? { project: { name: project.name, memory, ...(limit ? { contextTokens: limit } : {}) } } : {}),
       }),
       ...(apiKey ? { apiKey } : {}),
       ...(Object.keys(sampling ?? {}).length ? { sampling: sampling! } : {}),
@@ -743,6 +809,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
         ...(limit ? { contextLimit: limit } : {}),
       }),
     });
+    }
   } catch (err) {
     emit({ type: "error", text: (err as Error).message });
   } finally {
@@ -758,6 +825,12 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      * that is already there changes nothing and writes nothing.
      */
     void fileInActiveProject(config, "chat", conversation.id);
+    /* Restarted on every turn in a project, setup included -- a quiet
+       stretch of conversation is what the automatic pass waits for, and
+       "quiet" only means anything measured from the turn that just
+       finished. See projectMemory.ts's own header for why this is not read
+       until the conversation has actually gone idle. */
+    if (project) scheduleAutoUpdate(project.id, conversation);
     inFlight = undefined;
     inFlightConversation = undefined;
     liveEvents = [];
@@ -2829,12 +2902,12 @@ async function main(): Promise<void> {
    * out-of-memory meetings avoids by transcribing serially. A chat turn is
    * deliberately outside it -- somebody is waiting for that one.
    */
-  const jobs = createJobs(send);
+  jobs = createJobs(send);
   /* The snapshot a page asks for when it mounts. Without it, coming back to a
      review that is four minutes into its second reviewer shows an empty page
      until the reviewer after that begins -- which is the whole complaint
      `myra:research-active` still has. */
-  ipcMain.handle("myra:work-state", () => jobs.current() ?? null);
+  ipcMain.handle("myra:work-state", () => jobs?.current() ?? null);
   installActiveRunQuestion();
 
   installPaperIpc({
@@ -2859,6 +2932,46 @@ async function main(): Promise<void> {
   /* Last of the five, because it reads all of them: a project is an index over
      the other stores rather than a store of its own. */
   installProjectIpc({ config, send, stores: defaultStores(config) });
+  installMemoryIpc({
+    config,
+    send,
+    llm: resolveLlm,
+    currentSession,
+    ui: {
+      choose: (choice) =>
+        prompt({
+          method: "choice",
+          title: choice.title,
+          ...(choice.message ? { message: choice.message } : {}),
+          options: choice.options,
+          ...(choice.multi ? { multi: true } : {}),
+          ...(choice.required ? { required: true } : {}),
+        }),
+      input: (title, placeholder) => ask("input", title, placeholder),
+      form: async (title, message, fields) => {
+        const answer = await prompt({ method: "form", title, ...(message ? { message } : {}), fields });
+        if (answer === undefined) return undefined;
+        try {
+          const parsed = JSON.parse(answer) as unknown;
+          return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+        } catch {
+          return {};
+        }
+      },
+    },
+    busy: () => inFlight !== undefined || jobs?.current() !== undefined,
+    /*
+     * Whether calling the resolver right now would load a LOCAL model that is
+     * not already resident -- never a question for a hosted choice, which has
+     * no card to spare and nothing this app would be reloading. The same
+     * check the reviewer's own context-fit callback makes a few lines above,
+     * for the same reason.
+     */
+    modelReady: () => {
+      if (providerFor(config.current.providers, config.current.llm.model ?? "")) return true;
+      return Boolean(runtime.chatModel());
+    },
+  });
 
   createWindow();
   setPdfRenderer(installPdfRenderer());

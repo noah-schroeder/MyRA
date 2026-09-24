@@ -128,7 +128,9 @@ const api = {
    * A project is an index over the other five stores, not a sixth store: the
    * files never move, and "all of it together" is what Export writes. */
   projectList: () => ipcRenderer.invoke("myra:project-list"),
-  projectCreate: (name: string) => ipcRenderer.invoke("myra:project-create", name),
+  /** `research` true starts the project with its memory "pending" -- the setup chat runs on its first message. */
+  projectCreate: (name: string, research?: boolean) =>
+    ipcRenderer.invoke("myra:project-create", name, research === true),
   projectRename: (id: string, name: string) =>
     ipcRenderer.invoke("myra:project-rename", id, name),
   projectOpen: (id: string) => ipcRenderer.invoke("myra:project-open", id),
@@ -145,6 +147,26 @@ const api = {
   projectExport: (id: string) => ipcRenderer.invoke("myra:project-export", id),
   projectReveal: (path: string) => ipcRenderer.invoke("myra:project-reveal", path),
   onProjects: (cb: (list: unknown) => void) => on("myra:projects", cb),
+
+  /* ---- project memory ----
+   * A research project's notes, kept across the conversations filed to it.
+   * Optional -- a plain project's memory is just an empty, already-settled
+   * record, and every one of these still answers for it. */
+  projectMemory: (id: string) => ipcRenderer.invoke("myra:project-memory", id),
+  projectMemoryStartSetup: (id: string) => ipcRenderer.invoke("myra:project-memory-start-setup", id),
+  projectMemoryAdd: (id: string, slot: string, text: string) =>
+    ipcRenderer.invoke("myra:project-memory-add", id, slot, text),
+  projectMemoryEdit: (id: string, itemId: string, text: string) =>
+    ipcRenderer.invoke("myra:project-memory-edit", id, itemId, text),
+  projectMemoryRemove: (id: string, itemId: string) =>
+    ipcRenderer.invoke("myra:project-memory-remove", id, itemId),
+  projectMemorySetAuto: (id: string, auto: boolean) =>
+    ipcRenderer.invoke("myra:project-memory-set-auto", id, auto),
+  /** Grounds whatever the current conversation offers, shows a review dialog, saves what is approved. */
+  projectMemoryUpdate: (id: string) => ipcRenderer.invoke("myra:project-memory-update", id),
+  /** A memory changed somewhere other than this call -- the auto pass, or the update button. */
+  onProjectMemoryChanged: (cb: (payload: { projectId: string }) => void) =>
+    on("myra:project-memory-changed", cb),
 
   /* ---- paper drafter ----
    * Notes in, first-draft prose out, one section at a time. No endpoint and no

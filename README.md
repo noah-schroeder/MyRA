@@ -263,6 +263,12 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   your notes and your instructions — to whichever model the bar names, and
   nothing else. A local model means it stays here. The prompt preview shows
   exactly what would be sent, and showing it sends nothing.
+- **A research project's notes** ride in every chat request made inside that
+  project, to whichever model the bar names — the same rule as any other
+  system prompt. Growing them on their own makes one extra request after a
+  conversation goes quiet for about 90 seconds; it is skipped rather than
+  loading a local model that is not already resident, so it never costs you a
+  reload you did not ask for.
 - **Scholarly searches** reach OpenAlex and arXiv, which need no key. PubMed and
   CORE are off until you add your own free key for each in Settings → Database
   keys; once added, a search that includes them sends your search terms and
