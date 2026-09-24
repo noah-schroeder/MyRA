@@ -1,6 +1,6 @@
 {
   "name": "myra",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "MyRA — a private, local-first assistant for academic work",

@@ -50,6 +50,9 @@ const api = {
   /** Whatever conversation is still generating right now, and every event it
    *  has emitted so far -- so reopening it mid-turn can catch up. */
   liveTurn: () => ipcRenderer.invoke("myra:live-turn"),
+  /** Every diagram/table/chart this conversation already produced, for a
+   *  panel that mounts after they were drawn. */
+  sessionArtifacts: (id: string) => ipcRenderer.invoke("myra:session-artifacts", id),
   deleteSession: (id: string) => ipcRenderer.invoke("myra:delete-session", id),
   deleteAllSessions: () => ipcRenderer.invoke("myra:delete-all-sessions"),
 
@@ -70,6 +73,20 @@ const api = {
   /* Every save of a written document, including the draft flow's per-section
      ones. Carries the text, so the panel showing it never races the writer. */
   onDocument: (cb: (doc: unknown) => void) => on("myra:document", cb),
+  onDiagram: (cb: (diagram: unknown) => void) => on("myra:diagram", cb),
+  diagramSave: (name: string, format: string, data: string) =>
+    ipcRenderer.invoke("myra:diagram-save", name, format, data),
+  diagramCopyImage: (dataUrl: string) => ipcRenderer.invoke("myra:diagram-copy-image", dataUrl),
+  /** Reopen a drawn PRISMA figure's form, prefilled, and redraw it in place. */
+  prismaEdit: (id: string, title: string, figure: unknown) =>
+    ipcRenderer.invoke("myra:prisma-edit", id, title, figure),
+  onTable: (cb: (table: unknown) => void) => on("myra:table", cb),
+  tableSave: (name: string, data: string) => ipcRenderer.invoke("myra:table-save", name, data),
+  tableCopyWord: (html: string, text: string) => ipcRenderer.invoke("myra:table-copy-word", html, text),
+  onChart: (cb: (chart: unknown) => void) => on("myra:chart", cb),
+  chartSave: (name: string, format: string, data: string) =>
+    ipcRenderer.invoke("myra:chart-save", name, format, data),
+  chartCopyImage: (dataUrl: string) => ipcRenderer.invoke("myra:chart-copy-image", dataUrl),
   revealDocument: (path: string) => ipcRenderer.invoke("myra:document-reveal", path),
 
   copy: (text: string) => ipcRenderer.invoke("myra:copy", text),
@@ -364,6 +381,8 @@ const api = {
     ipcRenderer.invoke("myra:registry-variants", checkpoint, source),
   registryPull: (name: string, checkpoint: string, source: string, recipe?: string, gated?: boolean) =>
     ipcRenderer.invoke("myra:registry-pull", name, checkpoint, source, recipe, gated ?? false),
+  registerImageModel: (name: string, parts: Record<string, string>, source: string) =>
+    ipcRenderer.invoke("myra:register-image-model", name, parts, source),
   modelOptions: (name: string) => ipcRenderer.invoke("myra:model-options", name),
   modelOptionsSet: (name: string, patch: Record<string, unknown>) =>
     ipcRenderer.invoke("myra:model-options-set", name, patch),
@@ -383,6 +402,7 @@ const api = {
   researchRun: (id: string) => ipcRenderer.invoke("myra:research-run", id),
   researchSource: (id: string, n: number) => ipcRenderer.invoke("myra:research-source", id, n),
   researchReveal: (id: string) => ipcRenderer.invoke("myra:research-reveal", id),
+  researchPrisma: (id: string) => ipcRenderer.invoke("myra:research-prisma", id),
   researchFootprint: (id: string) => ipcRenderer.invoke("myra:research-footprint", id),
   researchDelete: (id: string) => ipcRenderer.invoke("myra:research-delete", id),
   onResearchProgress: (cb: (note: string) => void) => on("myra:research-progress", cb),
@@ -400,7 +420,7 @@ const api = {
     cb: (request: {
       id: string;
       title: string;
-      method: "input" | "editor" | "confirm" | "choice" | "models";
+      method: "input" | "editor" | "confirm" | "choice" | "models" | "form";
       message?: string;
       prefill?: string;
       options?: string[];
@@ -408,6 +428,10 @@ const api = {
       required?: boolean;
       slots?: { key: string; label: string; hint: string }[];
       current?: Record<string, string>;
+      fields?: {
+        key: string; label: string; hint?: string; group: string;
+        kind?: "list"; value?: string; guessed?: boolean;
+      }[];
     }) => void,
   ) => on("myra:prompt", cb),
 };

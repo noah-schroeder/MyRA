@@ -29,9 +29,11 @@ import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
  *
  * The labels name what each rung can reach, not how hard it tries, because the
  * thing a person needs to predict is what MyRA might do without being asked.
- * "Off" in particular has to be true: it used to leave the three document tools
- * in the schema, so a model greeted with "hi" had something to call and called
- * it, under a button that said the opposite.
+ * The bottom rung reads "Chat" -- this is the composer's ordinary state, and
+ * "Off" described the tools rather than the box people are typing into -- but
+ * it still has to mean no tools at all: it used to leave the three document
+ * tools in the schema, so a model greeted with "hi" had something to call and
+ * called it, under a button that said the opposite.
  *
  * "Look up" is deliberately not a persisted mode. It changes nothing about what
  * the agent may do on your next turn; it changes where the composer sends what
@@ -42,7 +44,7 @@ import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 interface Rung { value: ResearchMode; label: string; hint: string }
 
 const LOCAL: Rung[] = [
-  { value: "off", label: "Off", hint: "No tools at all. The model answers from what it knows, and cannot search, open a URL, or touch a file." },
+  { value: "off", label: "Chat", hint: "No tools at all. The model answers from what it knows, and cannot search, open a URL, or touch a file." },
   /* "Assistant", not "Documents", since the task list joined it: the rung is
      everything MyRA may do on this machine without being asked twice, and
      naming it after one of the two things it covers left "make me a task for
@@ -197,7 +199,7 @@ export function ResearchBar({
 
       {/* Shared by Quick, Deep and Look up -- all three search the literature,
           and it is one setting for what "the literature" means here, not
-          three. Not shown at Off/Assistant/Zotero: those rungs do not
+          three. Not shown at Chat/Assistant/Zotero: those rungs do not
           search databases at all. */}
       {(searches(config.mode) || lookup) && !exactly(config.mode, "library") ? (
         <DatabasePicker chosen={config.databases ?? []} onChoose={(databases) => apply({ databases })} />

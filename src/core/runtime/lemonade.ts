@@ -35,6 +35,8 @@
  * upgrade should be a decision with a test run behind it, not something that
  * arrives because a URL said "latest".
  */
+import { hasChatLabel } from "./catalog.ts";
+
 export const LEMONADE_VERSION = "11.8.0";
 
 export const LEMONADE_REPO = "lemonade-sdk/lemonade";
@@ -222,10 +224,35 @@ export interface LemonadeHealth {
  * By recipe rather than by model name, because the recipe is what the daemon
  * launched and cannot be renamed out of correctness -- `whisper-tts` would
  * defeat a name test, and the catalogue is free to add such a thing.
+ *
+ * The list is every recipe in `server_models.json` whose models carry no chat
+ * label at all: image (`sd-cpp`, `thenoise`), audio generation (`acestep`,
+ * `thinksound`), speech (`whispercpp`, `moonshine`, `kokoro`, `openmoss`) and
+ * 3D (`trellis`). `thenoise` was the one missing, and it is the reason this is
+ * checked against the catalogue rather than extended a name at a time: it
+ * serves seven image models, so `startOnLaunch` would happily have loaded one
+ * as the model a conversation goes to. `ds4` is deliberately absent -- its
+ * models are labelled `chat`, whatever else the engine is used for.
  */
-const NON_CHAT_RECIPES = new Set(["whispercpp", "moonshine", "kokoro", "openmoss", "sd-cpp"]);
+const NON_CHAT_RECIPES = new Set([
+  "whispercpp", "moonshine", "kokoro", "openmoss",
+  "sd-cpp", "thenoise", "acestep", "thinksound", "trellis",
+]);
 
-export function isChatEngine(recipe?: string | undefined): boolean {
+/**
+ * Whether this recipe runs a chat-capable model.
+ *
+ * `labels`, when the caller has the full catalogue entry, is the general
+ * mechanism: `CatalogEntry.labels` is already "the only thing that says
+ * which is which" (see catalog.ts's own header), so a caller that has it
+ * should never re-derive the same fact through this file's separately
+ * maintained list. `NON_CHAT_RECIPES` is what is left for a caller with
+ * only a bare recipe string and no entry to ask -- a `LoadedModel` off the
+ * daemon's own `/models`, which may name a recipe the catalogue has nothing
+ * registered for at all.
+ */
+export function isChatEngine(recipe?: string | undefined, labels?: readonly string[] | undefined): boolean {
+  if (labels) return hasChatLabel(labels);
   return !recipe || !NON_CHAT_RECIPES.has(recipe);
 }
 
@@ -290,12 +317,15 @@ export function chatModelToReload(opts: {
   activeModel?: string | undefined;
   /** The chosen model's engine, when the catalogue knows it. */
   recipe?: string | undefined;
+  /** The chosen model's own labels, when the catalogue has an entry for it --
+   *  preferred over `recipe` the same way `isChatEngine` prefers it. */
+  labels?: readonly string[] | undefined;
 }): string | undefined {
   if (!opts.useForChat || !opts.ready) return undefined;
   if (opts.resolved) return undefined;
   const wanted = opts.activeModel?.trim();
   if (!wanted) return undefined;
-  if (opts.recipe && !isChatEngine(opts.recipe)) return undefined;
+  if ((opts.recipe || opts.labels) && !isChatEngine(opts.recipe, opts.labels)) return undefined;
   return wanted;
 }
 

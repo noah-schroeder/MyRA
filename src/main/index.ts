@@ -9,7 +9,7 @@
  * loop running in this same process.
  */
 
-import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, nativeImage, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import {
@@ -27,6 +27,22 @@ import {
   DOCUMENT_TOOL_DEFS, resolveInJail, setDocumentWatcher, setDraftHost,
 } from "../core/agent/tools/documents.ts";
 import { LIBRARY_TOOL_DEFS, setLibraryHost } from "../core/agent/tools/library.ts";
+import {
+  DIAGRAM_TOOL_DEFS, resetDiagramIds, setDiagramWatcher, type DiagramUpdate,
+} from "../core/agent/tools/diagram.ts";
+import { maxDrawnId } from "../core/agent/tools/artifactWatch.ts";
+import { beginPrismaTurn, PRISMA_TOOL_DEFS, setPrismaHost } from "../core/agent/tools/prisma.ts";
+import {
+  figureFormFields, figureFromFormAnswers, figureIsBlank, type PrismaFigure,
+} from "../core/prisma/spec.ts";
+import {
+  resetTableIds, setDataHost, setTableWatcher, TABLE_TOOL_DEFS, type DataSource, type TableUpdate,
+} from "../core/agent/tools/table.ts";
+import {
+  CHART_TOOL_DEFS, resetChartIds, setChartWatcher, type ChartUpdate,
+} from "../core/agent/tools/chart.ts";
+import { parse } from "../core/tabular/parse.ts";
+import { rowCount } from "../core/tabular/table.ts";
 import { setTaskHost, TASK_TOOL_DEFS } from "../core/agent/tools/tasks.ts";
 import {
   libraryCollections, librarySearch, libraryRoute, libraryStatus,
@@ -50,18 +66,19 @@ import {
   cachedLocalDialects, forgetReasoning, hostedCapability, localCapability,
 } from "./llm/reasoning.ts";
 import { setPdfRenderer, engines, documentsDir, setWorkspaceRoot } from "../core/documents/office.ts";
+import { fileName } from "../core/projects/render.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
-import type { Attachment } from "../core/llm/attach.ts";
-import { asUntrusted } from "../core/research/html.ts";
+import { composeMessageContent, type Attachment } from "../core/llm/attach.ts";
 import { hasVision } from "../core/models/roles.ts";
 import { estimateTokens } from "../core/agent/compact.ts";
 import { REPLY_TOKENS } from "../core/review/manuscript.ts";
 import { sniffImage } from "../core/images/generate.ts";
-import { extractDocument } from "./extract.ts";
+import { extractDocument, extensionOfName } from "./extract.ts";
 import { PendingPrompts } from "../core/agent/pending.ts";
 import {
-  deleteAllAttachments, deleteAttachment, deleteSessionAttachments, readImageDataUri, saveImageAttachment,
+  deleteAllAttachments, deleteAttachment, deleteSessionAttachments, readDataText, readImageDataUri,
+  saveDataAttachment, saveImageAttachment,
 } from "./attachments.ts";
 
 /**
@@ -74,7 +91,8 @@ import {
  */
 type PendingAttachment =
   | { kind: "image"; id: string; name: string; mime: string }
-  | { kind: "document"; name: string; text: string };
+  | { kind: "document"; name: string; text: string }
+  | { kind: "data"; id: string; name: string; rows: number; columns: string[] };
 import {
   deleteAllSessions, deleteSession, listSessions, loadSession, saveSession,
   sessionId, titleFrom, type Session,
@@ -102,6 +120,7 @@ import { displayModelName } from "../core/runtime/foreign.ts";
 import { runSubagent, setEndpointResolver } from "../core/llm/chat.ts";
 import { SUMMARY_SYSTEM, summaryPrompt } from "../core/agent/compact.ts";
 import { ResearchRun, deleteRun, listRuns, readRun, readRunSource, runFootprint } from "../core/research/run.ts";
+import { figureFromCounts, prismaCounts } from "../core/research/prisma.ts";
 import { academicLookup, type LookupOptions } from "../core/research/lookup.ts";
 import { setDatabaseKeys } from "../core/research/keys.ts";
 import {
@@ -214,6 +233,55 @@ type ChatEvent = AgentEvent | { type: "done"; result: string } | { type: "error"
 /** Every event this turn has emitted so far, replayed to a session reopened
  *  while its own turn is still running -- see `myra:live-turn`. */
 let liveEvents: ChatEvent[] = [];
+
+/**
+ * A diagram, table or chart a conversation has drawn, tagged with which one.
+ *
+ * The push itself (`myra:diagram`/`myra:table`/`myra:chart`) carries the same
+ * tag for a panel that is open right now to filter by; this is the same
+ * information kept so a panel that mounts *later* -- reopening a conversation
+ * that already drew something -- can catch up, the way `liveEvents` already
+ * lets a session reopened mid-turn catch up on its chat messages.
+ */
+type ArtifactRecord =
+  | { kind: "diagram"; value: DiagramUpdate }
+  | { kind: "table"; value: TableUpdate }
+  | { kind: "chart"; value: ChartUpdate };
+
+/** Per conversation, oldest first. Capped so a very long-lived conversation
+ *  cannot grow this without bound; a panel only ever needs enough to seed its
+ *  tabs, not a full history. */
+const sessionArtifacts = new Map<string, ArtifactRecord[]>();
+const MAX_BUFFERED_ARTIFACTS = 50;
+
+function bufferArtifact(sessionId: string | undefined, record: ArtifactRecord): void {
+  if (!sessionId) return;
+  const list = sessionArtifacts.get(sessionId) ?? [];
+  list.push(record);
+  if (list.length > MAX_BUFFERED_ARTIFACTS) list.shift();
+  sessionArtifacts.set(sessionId, list);
+}
+
+/**
+ * Seed the id counters from whatever this conversation has already drawn, so
+ * a figure drawn next continues the sequence instead of relabelling one that
+ * was just replayed into the panel.
+ *
+ * Only safe to call when no turn is in flight anywhere: the counters are one
+ * shared sequence, not one per conversation, so reseeding them while a
+ * DIFFERENT conversation's turn is still running would pull the sequence out
+ * from under it -- its next figure could relabel one it already drew. Every
+ * caller checks `!inFlightConversation` first.
+ */
+function reseedArtifactIds(sessionId: string): void {
+  const buffered = sessionArtifacts.get(sessionId) ?? [];
+  const idsOf = (kind: ArtifactRecord["kind"]): string[] =>
+    buffered.filter((a): a is Extract<ArtifactRecord, { kind: typeof kind }> => a.kind === kind)
+      .map((a) => a.value.id);
+  resetDiagramIds(maxDrawnId("diagram", idsOf("diagram")));
+  resetTableIds(maxDrawnId("table", idsOf("table")));
+  resetChartIds(maxDrawnId("chart", idsOf("chart")));
+}
 /*
  * Which research run is executing right now.
  *
@@ -541,18 +609,29 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
     a.kind === "document",
   );
   const images = attachments.filter((a): a is Extract<PendingAttachment, { kind: "image" }> => a.kind === "image");
-  /* Inlined as ordinary words in the message, wrapped exactly as
-     read_document wraps a file it reads off disk -- somebody else's writing,
-     dropped in for one question, is untrusted the same way a fetched page is:
-     read it and cite it, but an instruction inside it is not one to act on. */
-  const documentText = documents.map((d) => asUntrusted(d.name, d.text)).join("\n\n");
-  const content = documentText ? `${documentText}\n\n${text}`.trim() : text;
+  const data = attachments.filter((a): a is Extract<PendingAttachment, { kind: "data" }> => a.kind === "data");
+  /* Both a document's text and a data attachment's shape line are inlined as
+     ordinary words in the message, and both wrapped as untrusted content --
+     somebody else's writing, dropped in for one question, whether it arrived
+     as prose or as a pasted table's own column headers. See
+     composeMessageContent's own header for why the data side gets the same
+     wrapping the document side always has; the numbers themselves still reach
+     a tool only through data_id, never through this message's content -- see
+     core/agent/tools/table.ts's header for why that split is the whole point. */
+  const content = composeMessageContent(text, documents, data);
 
   conversation.messages_.push({
     role: "user",
     content,
-    ...(images.length
-      ? { attachments: images.map((i): Attachment => ({ id: i.id, kind: "image", name: i.name, mime: i.mime })) }
+    ...(images.length || data.length
+      ? {
+          attachments: [
+            ...images.map((i): Attachment => ({ id: i.id, kind: "image", name: i.name, mime: i.mime })),
+            ...data.map((d): Attachment => ({
+              id: d.id, kind: "data", name: d.name, rows: d.rows, columns: d.columns,
+            })),
+          ],
+        }
       : {}),
   });
   if (conversation.messages_.length === 1) conversation.title = titleFrom(conversation.messages_);
@@ -575,6 +654,8 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      question, each from zero, so the scoping questions and the plan came back
      each time in front of a user who had been told they could walk away. */
   beginResearchTurn();
+  // Same rule, same reason, for the PRISMA figure's own dialogs.
+  beginPrismaTurn();
 
   try {
     /*
@@ -797,6 +878,62 @@ function installIpc(): void {
       }
     }
 
+    /* A table, dropped as a file rather than pasted. Checked by extension,
+       ahead of extractDocument, so it never takes the "inlined as untrusted
+       prose" path a document does -- kept as a reference instead, for exactly
+       the reason an image is: so the model reaches the numbers only through a
+       tool call, never by having them typed into its own context. */
+    const ext = extensionOfName(fileName);
+    if (ext === ".csv" || ext === ".tsv") {
+      const text = new TextDecoder().decode(view);
+      const parsed = parse(text);
+      if (!parsed.ok) {
+        return {
+          ok: false,
+          error:
+            `Row ${parsed.row}${parsed.column !== undefined ? `, column ${parsed.column + 1}` : ""}: ` +
+            parsed.error,
+        };
+      }
+      try {
+        const columns = parsed.table.columns.map((c) => c.name);
+        const rows = rowCount(parsed.table);
+        /* The same guard the document branch below makes, against the same
+           shape-summary line handleSend actually builds and sends -- before
+           anything is written to disk, the same order that branch checks
+           in. A table with very many or very long column headers can blow a
+           small model's context with no upfront error otherwise; unlike a
+           document, nothing here would even be over the byte-size cap
+           saveDataAttachment enforces, since this line's length tracks
+           column count and header length, not row count. */
+        const summary =
+          `[data 0000000000000000: "${fileName}" -- ${columns.length} columns (${columns.join(", ")}), ` +
+          `${rows} rows]`;
+        const tokens = estimateTokens([{ role: "user", content: summary }]);
+        const limit = runtime.chatEndpoint()?.contextTokens;
+        if (limit && tokens + REPLY_TOKENS > limit) {
+          return {
+            ok: false,
+            error:
+              `${fileName}'s column list alone is ${tokens.toLocaleString()} tokens and this model ` +
+              `holds ${limit.toLocaleString()}. Raise the context window in the model's settings, or ` +
+              "paste fewer columns.",
+          };
+        }
+        const saved = await saveDataAttachment(currentSession().id, text);
+        return {
+          ok: true,
+          kind: "data" as const,
+          id: saved.id,
+          name: fileName,
+          rows,
+          columns,
+        };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message || "That table could not be read." };
+      }
+    }
+
     const extracted = await extractDocument(fileName, view);
     if (!extracted.ok || !extracted.text) {
       return { ok: false, error: extracted.error, ...(extracted.needsPandoc ? { needsPandoc: true } : {}) };
@@ -842,6 +979,15 @@ function installIpc(): void {
     // old numbers any more, and carrying them over would start every thread at
     // a different, arbitrary place.
     resetCitations();
+    // Same reasoning for a figure or a table's own id: "diagram-1" in a new
+    // conversation must not silently replace a "diagram-1" tab still open
+    // from the one just left. Guarded on nothing being in flight, the same as
+    // `open-session` below: the counters are one sequence shared by whichever
+    // conversation's turn is running, so resetting them while a DIFFERENT
+    // conversation is still generating would pull the sequence out from under
+    // it. A brand-new conversation has nothing buffered either way, so this
+    // only ever seeds it to zero.
+    if (!inFlightConversation) reseedArtifactIds(currentSession().id);
     return currentSession().id;
   });
   ipcMain.handle("myra:list-sessions", () => listSessions());
@@ -857,6 +1003,8 @@ function installIpc(): void {
       resumeCitations(
         session_.messages_.filter((m) => m.role === "tool").map((m) => String(m.content ?? "")),
       );
+      // No id reseed here: this conversation's own turn is still running and
+      // is the thing actually using the counters right now.
       return session_.messages_;
     }
     if (session_ && session_.messages_.length) await saveSession(session_).catch(() => {});
@@ -870,6 +1018,12 @@ function installIpc(): void {
         .filter((m) => m.role === "tool")
         .map((m) => String(m.content ?? "")),
     );
+    // Ids restart with the thread here too -- see reseedArtifactIds's own
+    // comment for why this is skipped whenever some OTHER conversation's turn
+    // is still running: the counters are one sequence, not one per
+    // conversation, and reseeding them out from under a live turn could hand
+    // its next figure an id it already used.
+    if (!inFlightConversation) reseedArtifactIds(wanted);
     return loaded?.messages_ ?? [];
   });
   /* What a session reopened mid-turn needs to catch up: which conversation is
@@ -881,6 +1035,13 @@ function installIpc(): void {
     return inFlightConversation
       ? { sessionId: inFlightConversation.id, events: liveEvents }
       : undefined;
+  });
+  /* The same catch-up, for a diagram/table/chart already drawn rather than a
+     turn still running: a panel that opens after the fact -- reopening a
+     conversation that drew a figure earlier -- gets it back instead of an
+     empty tab. */
+  ipcMain.handle("myra:session-artifacts", (_e, id: string) => {
+    return sessionArtifacts.get(String(id)) ?? [];
   });
   ipcMain.handle("myra:rename-session", async (_e, id: unknown, title: unknown) => {
     const wanted = String(id);
@@ -904,6 +1065,7 @@ function installIpc(): void {
     await deleteSession(String(id));
     await deleteSessionAttachments(String(id)).catch(() => {});
     if (session_?.id === id) session_ = undefined;
+    sessionArtifacts.delete(String(id));
   });
   ipcMain.handle("myra:delete-all-sessions", async () => {
     /* Every conversation the rail's list actually shows, which is every one
@@ -914,6 +1076,9 @@ function installIpc(): void {
     await deleteAllSessions(filed);
     await deleteAllAttachments(filed).catch(() => {});
     session_ = undefined;
+    for (const id of [...sessionArtifacts.keys()]) {
+      if (!filed.has(id)) sessionArtifacts.delete(id);
+    }
   });
 
   ipcMain.handle("myra:get-settings", () => config.current);
@@ -1624,6 +1789,58 @@ function installIpc(): void {
     readRunSource(String(id), Number(n)),
   );
   /** Reveal a run's directory, so the raw files are one click away. */
+  /**
+   * Draw this run's own PRISMA flow diagram.
+   *
+   * Every number in it is already on disk -- each stage writes its output there
+   * and that file is the stage's done-marker -- so this reads them rather than
+   * asking a model to produce a diagram whose counts it would be inventing.
+   *
+   * Announced down the same channel `create_diagram` uses, so a figure drawn
+   * from a run and one drawn in conversation are the same artifact with the
+   * same export buttons.
+   */
+  ipcMain.handle("myra:research-prisma", async (_e, id: unknown) => {
+    try {
+      const runId = String(id ?? "");
+      const run = await ResearchRun.open(runId, researchRoot());
+      // Six reads, none depending on another's result -- only the early-return
+      // check below depends on two of their lengths, which is a post-processing
+      // step, not a reason to serialise the reads themselves.
+      const [candidates, snowballRaw, screenedA, screenedB, sourcesRaw, question] = await Promise.all([
+        run.readJsonl<{ dedupeKey?: string }>("candidates.jsonl"),
+        run.readJsonl<{ dedupeKey?: string }>("snowball.jsonl"),
+        run.readJsonl<{ include?: boolean; keep?: boolean }>("screened.jsonl"),
+        run.readJsonl<{ include?: boolean; keep?: boolean }>("screened-snowball.jsonl"),
+        run.sources(),
+        run.readJson<{ question?: string }>("question.json"),
+      ]);
+      const screened = [...screenedA, ...screenedB].map((d) => ({ include: d.include === true || d.keep === true }));
+      if (!candidates.length && !snowballRaw.length) {
+        return { ok: false, error: "This run has no search results to draw a flow diagram from." };
+      }
+      /* undefined, not an empty array, for a stage that never ran -- readJsonl
+         cannot tell "missing file" from "empty file" apart, but the stage's own
+         output file existing can. See prismaCounts's own header for why this
+         distinction is the whole point. */
+      const snowball = run.isDone("snowball") ? snowballRaw : undefined;
+      const sources = run.isDone("retrieve") ? sourcesRaw : undefined;
+      /* A record with no dedupe key stands for itself rather than collapsing
+         with every other keyless one -- the same guard `counts()` makes. Always
+         computed from the raw arrays: de-duplication counts what was found,
+         whether or not the snowball stage counts as "run" for the figure. */
+      const distinct = new Set(
+        [...candidates, ...snowballRaw].map((c, i) => c.dedupeKey ?? `__${i}`),
+      ).size;
+      const counts = prismaCounts({ candidates, snowball, screened, sources, distinct });
+      const title = question?.question ? `PRISMA — ${question.question.slice(0, 60)}` : "PRISMA flow diagram";
+      send("myra:diagram", { id: `prisma-${runId}`, title, prisma: figureFromCounts(counts, title) });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle("myra:research-reveal", async (_e, id: string) => {
     const run = await ResearchRun.open(String(id));
     await shell.openPath(run.dir);
@@ -1715,6 +1932,154 @@ function installIpc(): void {
    */
   ipcMain.handle("myra:copy", (_e, text: unknown) => {
     clipboard.writeText(String(text ?? ""));
+  });
+
+  /**
+   * Save a figure -- from create_diagram, create_table or create_chart --
+   * into the documents folder, one helper for all three.
+   *
+   * Written here rather than in the window for the reason nothing else in
+   * this app writes from the window either: a blob download would depend on
+   * the request filter not matching `blob:`, which is a thing that happens
+   * to be true rather than a thing that is guaranteed. The renderer hands
+   * over bytes and main decides where they land -- inside the documents
+   * jail, beside the documents a draft would have written.
+   *
+   * `fileName` rather than `slugName`: this is a document a person goes
+   * looking for later in an ordinary file manager, the same reasoning
+   * `fileName`'s own doc comment gives, not an id that only ever has to be
+   * unique.
+   *
+   * A PNG arrives base64 because only the window has a canvas to rasterise
+   * with; SVG and PGFPlots/LaTeX source arrive as the text they already are.
+   */
+  async function saveFigure(
+    name: unknown, ext: "svg" | "png" | "tex", data: unknown, fallback: string,
+  ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+    const safe = fileName(String(name ?? fallback), fallback);
+    try {
+      const dir = documentsDir();
+      await makeOwnDir(dir);
+      /* Through the jail like every other path, although this one is built
+         here: `resolveInJail` is what the rule says, not what the caller
+         happens to have constructed. */
+      const abs = await resolveInJail(dir, `${safe}.${ext}`);
+      const body = String(data ?? "");
+      await writeFile(
+        abs,
+        ext === "png" ? Buffer.from(body.replace(/^data:image\/png;base64,/, ""), "base64") : body,
+        { mode: 0o600 },
+      );
+      return { ok: true, path: abs };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  ipcMain.handle(
+    "myra:diagram-save",
+    async (_e, name: unknown, format: unknown, data: unknown) => {
+      const kind = String(format ?? "svg") === "png" ? "png" : "svg";
+      return saveFigure(name, kind, data, "diagram");
+    },
+  );
+
+  /**
+   * The figure itself on the clipboard, so it pastes into Word or a slide.
+   *
+   * `writeText` with the SVG source would paste the markup as a wall of text.
+   * An image on the clipboard is what "copy this figure" means everywhere else.
+   */
+  ipcMain.handle("myra:diagram-copy-image", (_e, dataUrl: unknown) => {
+    const image = nativeImage.createFromDataURL(String(dataUrl ?? ""));
+    if (image.isEmpty()) return { ok: false, error: "The figure could not be rasterised." };
+    clipboard.writeImage(image);
+    return { ok: true };
+  });
+
+  /**
+   * Reopen a drawn PRISMA figure's form and redraw it in place.
+   *
+   * The variant is already decided -- it is the figure on screen -- so this
+   * skips straight to the form, prefilled from what is already there and
+   * carrying no "guessed" marker: these are the user's own confirmed numbers,
+   * not a model's reading of the conversation. Answering resends on the SAME
+   * id, which is what makes `arrive()` in useArtifacts replace the panel
+   * entry in place rather than opening a second tab for one figure.
+   */
+  ipcMain.handle(
+    "myra:prisma-edit",
+    async (_e, id: unknown, title: unknown, figure: unknown) => {
+      /* App.tsx holds exactly one prompt on screen. Firing a second one here
+         while, say, a research run's own scoping question is up would
+         silently displace it -- orphaning that promise until the next
+         navigation resolves it via cancelAll(). */
+      if (pending.size > 0) {
+        return { ok: false, error: "MyRA is already asking about something else." };
+      }
+      const fig = figure as PrismaFigure;
+      const fields = figureFormFields(fig.variant, { counts: fig.counts ?? {}, items: fig.items ?? {} }, false);
+      const answer = await prompt({
+        method: "form",
+        title: "Edit the figure's numbers",
+        message: "A blank field draws no box for it; type 0 to show zero.",
+        fields,
+      });
+      if (answer === undefined) return { ok: false, error: "Cancelled." };
+      let answers: Record<string, string>;
+      try {
+        const parsed = JSON.parse(answer) as unknown;
+        answers = parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+      } catch {
+        return { ok: false, error: "Cancelled." };
+      }
+      const next = figureFromFormAnswers(fig.variant, String(title ?? fig.title ?? "PRISMA flow diagram"), answers);
+      if (figureIsBlank(next)) return { ok: false, error: "Every field was left blank." };
+      send("myra:diagram", { id: String(id ?? ""), title: next.title, prisma: next });
+      return { ok: true };
+    },
+  );
+
+  /**
+   * Save a table's LaTeX into the documents folder -- always `.tex`, since
+   * that is the one format this button produces text for. Word goes through
+   * the clipboard instead (below), never through this path.
+   */
+  ipcMain.handle("myra:table-save", async (_e, name: unknown, data: unknown) => {
+    return saveFigure(name, "tex", data, "table");
+  });
+
+  /**
+   * A table on the clipboard as a real, editable table -- the `text/html`
+   * flavour is what Word, Google Docs and Sheets each paste as an actual
+   * table rather than as a wall of pipes and dashes. `text/plain` rides
+   * alongside as TSV, for whatever the receiving cell does not accept HTML
+   * into. Both flavours have to be written in the same call: `clipboard.write`
+   * replaces the whole clipboard, so writing them separately would leave only
+   * the second one behind.
+   */
+  ipcMain.handle("myra:table-copy-word", (_e, html: unknown, text: unknown) => {
+    clipboard.write({ html: String(html ?? ""), text: String(text ?? "") });
+    return { ok: true };
+  });
+
+  /**
+   * Save a figure the conversation charted -- SVG, PNG or PGFPlots source,
+   * chosen by the caller's own extension. The same helper as
+   * `myra:diagram-save`, and deliberately so: a figure is a figure whether
+   * it came from Mermaid or from a pasted table.
+   */
+  ipcMain.handle("myra:chart-save", async (_e, name: unknown, format: unknown, data: unknown) => {
+    const ext = String(format ?? "svg") === "png" ? "png" : String(format ?? "svg") === "tex" ? "tex" : "svg";
+    return saveFigure(name, ext, data, "chart");
+  });
+
+  /** The figure itself on the clipboard -- same reasoning as `myra:diagram-copy-image`. */
+  ipcMain.handle("myra:chart-copy-image", (_e, dataUrl: unknown) => {
+    const image = nativeImage.createFromDataURL(String(dataUrl ?? ""));
+    if (image.isEmpty()) return { ok: false, error: "The figure could not be rasterised." };
+    clipboard.writeImage(image);
+    return { ok: true };
   });
 
   ipcMain.handle("myra:get-research", () => readResearchConfig());
@@ -1918,7 +2283,10 @@ async function main(): Promise<void> {
 
   await tightenExistingContent();
 
-  for (const def of [...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS, ...TASK_TOOL_DEFS]) {
+  for (const def of [
+    ...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS, ...TASK_TOOL_DEFS,
+    ...DIAGRAM_TOOL_DEFS, ...TABLE_TOOL_DEFS, ...PRISMA_TOOL_DEFS, ...CHART_TOOL_DEFS,
+  ]) {
     registry.register(def);
   }
 
@@ -2012,6 +2380,37 @@ async function main(): Promise<void> {
    * read once at startup, which is already wrong when the user loads a
    * different model -- a bug worth not copying into new code.
    */
+  /*
+   * The PRISMA figure's own two questions, then the form -- the research
+   * pipeline's own dialogs again, for the reason setDraftHost below shares
+   * them too: "MyRA is asking me something and will produce work once I
+   * answer" is one experience across every feature that does this.
+   */
+  setPrismaHost({
+    ui: {
+      choose: (choice) =>
+        prompt({
+          method: "choice",
+          title: choice.title,
+          ...(choice.message ? { message: choice.message } : {}),
+          options: choice.options,
+          ...(choice.required ? { required: true } : {}),
+        }),
+      form: async (title, message, fields) => {
+        const answer = await prompt({ method: "form", title, ...(message ? { message } : {}), fields });
+        if (answer === undefined) return undefined;
+        try {
+          const parsed = JSON.parse(answer) as unknown;
+          return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+        } catch {
+          // The dialog sends JSON; anything else means it was dismissed in a
+          // way that produced text. Treat it as "nothing filled in".
+          return {};
+        }
+      },
+    },
+  });
+
   setDraftHost({
     /* The model that will answer, not the last one loaded: `activeModel` can
        name a model that was loaded for another job entirely, and this string
@@ -2025,6 +2424,54 @@ async function main(): Promise<void> {
      after each section, so this fires repeatedly for one file with `final`
      false until the last one. */
   setDocumentWatcher((doc) => send("myra:document", doc));
+  /* The same push the artifact panel already listens for documents on:
+     a diagram is work the conversation produced, and belongs beside it.
+     Tagged with the conversation whose turn is actually running -- not
+     whatever the renderer happens to be looking at right now, which
+     `emit`'s own tag a few lines above already gets right for chat events --
+     and buffered so a panel that opens after the fact (reopening this
+     conversation later) can still show it. */
+  setDiagramWatcher((diagram) => {
+    const sid = inFlightConversation?.id;
+    bufferArtifact(sid, { kind: "diagram", value: diagram });
+    send("myra:diagram", sid ? { ...diagram, sessionId: sid } : diagram);
+  });
+  /* Same push, for a table -- see tools/table.ts's header for why it carries
+     the parsed DataTable and never a string the panel would have to trust. */
+  setTableWatcher((table) => {
+    const sid = inFlightConversation?.id;
+    bufferArtifact(sid, { kind: "table", value: table });
+    send("myra:table", sid ? { ...table, sessionId: sid } : table);
+  });
+  /* Same push, for a chart -- carries the pure ChartData tools/chart.ts
+     computed, never a string either. */
+  setChartWatcher((chart) => {
+    const sid = inFlightConversation?.id;
+    bufferArtifact(sid, { kind: "chart", value: chart });
+    send("myra:chart", sid ? { ...chart, sessionId: sid } : chart);
+  });
+  /* Resolves a data_id to the pasted text it names, for create_table and
+     create_chart -- read fresh from disk on every call, never cached here,
+     for the same reason imageResolver re-reads every turn. The display name
+     is not stored beside the text on disk -- it is already sitting in this
+     conversation's own messages, the same place imageResolver finds an
+     image's mime type from.
+     Resolved against `inFlightConversation`, the conversation this tool call's
+     own turn is running in -- never `currentSession()`, which is merely
+     whatever the renderer is looking at and can change mid-turn the moment
+     the user switches conversations, the exact hazard `inFlightConversation`
+     exists to avoid (see its own comment above). Falling back to
+     `currentSession()` only covers a call with no turn in flight at all,
+     which the test suite's own direct handler calls rely on. */
+  setDataHost(async (id): Promise<DataSource | undefined> => {
+    const conversation = inFlightConversation ?? currentSession();
+    const text = await readDataText(conversation.id, id);
+    if (text === undefined) return undefined;
+    const known = conversation.messages_
+      .flatMap((m) => m.attachments ?? [])
+      .find((a) => a.kind === "data" && a.id === id);
+    return { name: known?.name ?? id, text };
+  });
 
   await runtime.load();
 

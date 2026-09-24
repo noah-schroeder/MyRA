@@ -25,6 +25,7 @@ import type { RuntimeManager } from "./manager.ts";
 import { browseHuggingFace, repoCard, repoDetail } from "./hfClient.ts";
 import { listedId, type BrowseSort } from "../../core/runtime/hfBrowse.ts";
 import { prepareCard } from "../../core/runtime/modelCard.ts";
+import { checkImageModel } from "../../core/runtime/imageModel.ts";
 import { deleteModel } from "./modelDelete.ts";
 import { Downloads } from "../downloads.ts";
 import { pollForModel } from "../../core/downloads/download.ts";
@@ -540,6 +541,35 @@ export function installRuntimeIpc(
     else downloads.dismissSettled();
     return { ok: true };
   });
+
+  /**
+   * Add a diffusion model by naming its parts, for one the catalogue lacks.
+   *
+   * The escape hatch for the one kind of model registry search cannot offer --
+   * see `browsable` in hfBrowse.ts. Registering and downloading are separate
+   * here on purpose: this writes the definition, and the transfer that follows
+   * is the ordinary `myra:registry-pull` by name with no checkpoint, which is
+   * what makes the daemon fetch every role and gives the new model the same
+   * progress, pause and cancel as any other.
+   */
+  ipcMain.handle(
+    "myra:register-image-model",
+    async (_e, name: string, parts: Record<string, string>, source: RegistrySource) => {
+      const chosen = readSource(source);
+      if (!isEnabled(chosen)) return refuse(chosen);
+      const checked = checkImageModel({ name: String(name ?? ""), parts: parts ?? {} });
+      if (!checked.ok) return { ok: false, field: checked.field, error: checked.error };
+      try {
+        await runtime.ensureLemonade();
+        await runtime.api.registerModel(
+          checked.record.modelName, checked.record.checkpoints, checked.record.recipe, chosen,
+        );
+        return { ok: true, name: checked.record.modelName };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
 
   /* ---------------------------------------------- per-model load options -- */
 

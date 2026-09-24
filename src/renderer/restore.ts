@@ -29,8 +29,8 @@ export interface StoredMessage {
   tool_call_id?: string;
   name?: string;
   meta?: MessageStats;
-  /** Image references on a user message. Never the bytes -- see core/llm/attach.ts. */
-  attachments?: { kind: "image" | "document"; name: string }[];
+  /** Image and data references on a user message. Never the bytes -- see core/llm/attach.ts. */
+  attachments?: { kind: "image" | "document" | "data"; name: string }[];
 }
 
 export interface Restored {

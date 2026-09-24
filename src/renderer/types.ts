@@ -1,3 +1,7 @@
+import type { DataTable } from "../core/tabular/table.ts";
+import type { ChartData } from "../core/charts/layout.ts";
+import type { ChartSpec } from "../core/charts/spec.ts";
+import type { PrismaFigure } from "../core/prisma/spec.ts";
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
 import type { Provider } from "../core/providers.ts";
 import type { ModelPrice } from "../core/pricing.ts";
@@ -61,7 +65,7 @@ export interface UserItem {
   kind: "user";
   text: string;
   /** What was attached, for the sent bubble -- name and kind only, never the bytes or the extracted text. */
-  attachments?: { kind: "image" | "document"; name: string }[];
+  attachments?: { kind: "image" | "document" | "data"; name: string }[];
 }
 
 /**
@@ -447,6 +451,79 @@ export interface DocumentUpdate {
 }
 
 /** State of an in-flight dictation. */
+/**
+ * A figure `create_diagram` or `create_prisma_diagram` drew, or one read off a
+ * research run.
+ *
+ * Mirrors DiagramUpdate in core/agent/tools/diagram.ts by hand, for the same
+ * reason DocumentUpdate above is mirrored: the renderer does not import core's
+ * agent modules. `prisma` itself is not mirrored, the way `TableUpdate.table`
+ * below is not: it is pure computation, no different from core/diagrams/* that
+ * DiagramView.tsx already reads from directly, and hand-copying it would be
+ * one more place for a field to drift out of sync with spec.ts.
+ *
+ * Exactly one of `source`/`prisma` is ever set -- a Mermaid-drawn diagram
+ * carries the first, a PRISMA figure the second, and DiagramView.tsx branches
+ * on which one arrived.
+ */
+export interface DiagramUpdate {
+  id: string;
+  title: string;
+  /** Mermaid flowchart source, re-rendered here rather than shipped as an image. */
+  source?: string | undefined;
+  /** A PRISMA 2020 figure, placed directly rather than parsed from Mermaid. */
+  prisma?: PrismaFigure | undefined;
+  /** The conversation this was drawn in, stamped on by main when it is pushed
+   *  -- not part of the core type, which knows nothing about sessions; see
+   *  AgentEvent.sessionId for the identical shape on chat events. */
+  sessionId?: string;
+}
+
+/**
+ * A table `create_table` built.
+ *
+ * Mirrors TableUpdate in core/agent/tools/table.ts by hand, for the same
+ * reason DiagramUpdate above is -- the renderer does not import core's agent
+ * modules. `table` itself is the real `DataTable`, imported directly: that
+ * type is pure computation (core/tabular/*, no different from
+ * core/diagrams/* that DiagramView.tsx already reads from directly), and
+ * hand-mirroring it a second time would be one more place for `Cell`'s
+ * text/value split to drift out of sync with what parse.ts actually produces.
+ */
+export interface TableUpdate {
+  id: string;
+  title: string;
+  table: DataTable;
+  notes: string[];
+  style: "booktabs" | "siunitx";
+  /** The conversation this was built in, stamped on by main when it is
+   *  pushed -- see DiagramUpdate.sessionId. */
+  sessionId?: string;
+}
+
+/**
+ * A figure `create_chart` built. Mirrors ChartUpdate in
+ * core/agent/tools/chart.ts by hand, for the same reason as above -- with
+ * `data` and `spec` imported directly for the same reason `table` is.
+ */
+export interface ChartUpdate {
+  id: string;
+  title: string;
+  data: ChartData;
+  spec: ChartSpec;
+  /** The conversation this was drawn in, stamped on by main when it is
+   *  pushed -- see DiagramUpdate.sessionId. */
+  sessionId?: string;
+}
+
+/** One already-drawn diagram/table/chart, as `myra:session-artifacts` returns
+ *  it for a panel that mounts after the turn that made it -- the artifact
+ *  equivalent of what `liveTurn`'s `events` gives a chat view catching up. */
+export type ArtifactRecord =
+  | { kind: "diagram"; value: DiagramUpdate }
+  | { kind: "table"; value: TableUpdate }
+  | { kind: "chart"; value: ChartUpdate };
+
 export interface DictationState {
   phase: "idle" | "recording" | "transcribing";
   elapsedMs: number;
@@ -469,7 +546,7 @@ export interface DictationState {
 export interface PromptRequest {
   id: string;
   /** v1's `method`, kept under its old name so the dialog reads the same. */
-  method: "input" | "editor" | "confirm" | "choice" | "models";
+  method: "input" | "editor" | "confirm" | "choice" | "models" | "form";
   title: string;
   message?: string;
   prefill?: string;
@@ -484,6 +561,26 @@ export interface PromptRequest {
   slots?: { key: string; label: string; hint: string }[];
   /** models: what each slot is set to now. */
   current?: Record<string, string>;
+  /** form: every field to show, already grouped and ordered by the caller. */
+  fields?: PromptField[];
+}
+
+/**
+ * One field of a `form` prompt -- generic, so this dialog stays reusable the
+ * way `choice` and `models` already are. `create_prisma_diagram` is the first
+ * caller and the only one that knows the word "PRISMA"; nothing here does.
+ */
+export interface PromptField {
+  key: string;
+  label: string;
+  hint?: string;
+  /** A section heading, shown once above the first field carrying it. */
+  group: string;
+  /** A textarea for a variable-length list, rather than one line per number. */
+  kind?: "list";
+  value?: string;
+  /** Offered from a source the user has not yet confirmed -- shown and marked. */
+  guessed?: boolean;
 }
 
 export type { Download } from "../core/downloads/download.ts";
@@ -504,7 +601,8 @@ export interface ActiveRun {
  */
 export type PendingAttachment =
   | { kind: "image"; id: string; name: string; mime: string; bytes: number; canSee: boolean; warning?: string }
-  | { kind: "document"; name: string; words: number; tokens: number; text: string };
+  | { kind: "document"; name: string; words: number; tokens: number; text: string }
+  | { kind: "data"; id: string; name: string; rows: number; columns: string[] };
 
 export type ChatAttachResult =
   | ({ ok: true } & PendingAttachment)
@@ -519,6 +617,37 @@ export interface MyRAApi {
   chatAttachRemove(id: string): Promise<void>;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   onDocument(cb: (doc: DocumentUpdate) => void): () => void;
+  /** A figure the conversation drew; mirrors DiagramUpdate in tools/diagram.ts. */
+  onDiagram(cb: (diagram: DiagramUpdate) => void): () => void;
+  /** Writes the figure into the documents folder and answers with its path. */
+  diagramSave(
+    name: string,
+    format: "svg" | "png",
+    data: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Puts the rasterised figure on the clipboard, so it pastes as a picture. */
+  diagramCopyImage(dataUrl: string): Promise<{ ok: boolean; error?: string }>;
+  /** Reopens a drawn PRISMA figure's form, prefilled, and redraws it in place. */
+  prismaEdit(id: string, title: string, figure: PrismaFigure): Promise<{ ok: boolean; error?: string }>;
+  /** A table `create_table` built; mirrors TableUpdate in tools/table.ts. */
+  onTable(cb: (table: TableUpdate) => void): () => void;
+  /** Writes the table's LaTeX into the documents folder and answers with its path. */
+  tableSave(name: string, data: string): Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Puts the table on the clipboard as a real, editable table -- the HTML
+   *  flavour Word and Sheets paste as one, with TSV riding alongside for
+   *  whatever does not accept it. */
+  tableCopyWord(html: string, text: string): Promise<{ ok: boolean; error?: string }>;
+  /** A figure `create_chart` built; mirrors ChartUpdate in tools/chart.ts. */
+  onChart(cb: (chart: ChartUpdate) => void): () => void;
+  /** Writes the figure into the documents folder (SVG, PNG or PGFPlots
+   *  source, by extension) and answers with its path. */
+  chartSave(
+    name: string,
+    format: "svg" | "png" | "tex",
+    data: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Puts the rasterised figure on the clipboard, so it pastes as a picture. */
+  chartCopyImage(dataUrl: string): Promise<{ ok: boolean; error?: string }>;
   revealDocument(path: string): Promise<void>;
 
   newSession(): Promise<string>;
@@ -529,6 +658,9 @@ export interface MyRAApi {
    *  has said so far -- so opening it mid-turn can resume instead of showing
    *  a conversation that looks stalled. */
   liveTurn(): Promise<{ sessionId: string; events: AgentEvent[] } | undefined>;
+  /** Every diagram/table/chart this conversation already produced, for a
+   *  panel that mounts after they were drawn. */
+  sessionArtifacts(id: string): Promise<ArtifactRecord[]>;
   deleteSession(id: string): Promise<void>;
   deleteAllSessions(): Promise<void>;
 
@@ -666,6 +798,8 @@ export interface MyRAApi {
   researchRun(id: string): Promise<RunDetail>;
   researchSource(id: string, n: number): Promise<RunSource | undefined>;
   researchReveal(id: string): Promise<void>;
+  /** Draws this run's PRISMA flow diagram from the counts already on disk. */
+  researchPrisma(id: string): Promise<{ ok: boolean; error?: string }>;
   researchFootprint(
     id: string,
   ): Promise<{ ok: boolean; error?: string; footprint?: RunFootprint }>;
@@ -861,6 +995,19 @@ export interface MyRAApi {
     checkpoint: string,
     source: RegistrySource,
   ): Promise<{ ok: boolean; error?: string; variants?: RepoVariants }>;
+  /**
+   * Add a diffusion model by naming its parts.
+   *
+   * Registers the definition only; the download that follows is `registryPull`
+   * with an empty checkpoint, the same call the Recommended list makes. `field`
+   * comes back on a rejection so the dialog can point at the input that is
+   * wrong rather than at all four.
+   */
+  registerImageModel(
+    name: string,
+    parts: Record<string, string>,
+    source: RegistrySource,
+  ): Promise<{ ok: boolean; error?: string; field?: string; name?: string }>;
   registryPull(
     name: string,
     /** Empty for a model the daemon already has in its own catalogue. */

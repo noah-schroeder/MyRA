@@ -12,7 +12,7 @@ import { describe, it } from "node:test";
 import {
   apiBase, EMBEDDABLE_SHA256, embeddableAsset, embeddableSha256, embeddableUrl, LEMONADE_VERSION,
   lemondArgs, lemondName,
-  chatModelOf, chatModelToReload, mergeConfig, openAiBase, parseHealth, pinnedConfig,
+  chatModelOf, chatModelToReload, isChatEngine, mergeConfig, openAiBase, parseHealth, pinnedConfig,
 } from "../src/core/runtime/lemonade.ts";
 import { executableName } from "../src/main/runtime/download.ts";
 
@@ -233,6 +233,28 @@ describe("which loaded model a conversation goes to", () => {
   });
 });
 
+describe("isChatEngine", () => {
+  it("falls back to the hardcoded recipe list when no labels are given", () => {
+    assert.equal(isChatEngine("llamacpp"), true);
+    assert.equal(isChatEngine("whispercpp"), false);
+    assert.equal(isChatEngine("sd-cpp"), false);
+    assert.equal(isChatEngine(undefined), true, "no recipe at all is not treated as non-chat");
+  });
+
+  it("prefers labels over the recipe list once the caller has a catalogue entry", () => {
+    /* A recipe this file's own Set has never heard of -- a future engine, or
+       one simply not added yet -- is exactly the case a hardcoded list gets
+       wrong by construction. Labels come from the same catalogue entry a
+       caller already has in hand, so it should never need to fall back to
+       guessing from the recipe name at all. */
+    assert.equal(isChatEngine("a-future-engine", ["image"]), false);
+    assert.equal(isChatEngine("a-future-engine", ["chat"]), true);
+    // Labels win even when they'd disagree with the recipe list's own answer.
+    assert.equal(isChatEngine("llamacpp", ["image"]), false);
+    assert.equal(isChatEngine("sd-cpp", ["chat"]), true);
+  });
+});
+
 describe("putting the chat model back when something took it away", () => {
   const chat = { id: "Qwen3-8B", recipe: "llamacpp", type: "llm", ready: true };
   const base = { useForChat: true, ready: true, resolved: undefined, activeModel: "Qwen3-8B" };
@@ -267,6 +289,23 @@ describe("putting the chat model back when something took it away", () => {
     assert.equal(chatModelToReload({ ...base, activeModel: "Whisper-Large-v3-Turbo",
       recipe: "whispercpp" }), undefined);
     assert.equal(chatModelToReload({ ...base, recipe: "llamacpp" }), "Qwen3-8B");
+  });
+
+  it("prefers the catalogue's own labels over the hardcoded recipe list when both are given", () => {
+    /* A recipe NON_CHAT_RECIPES has never heard of -- a future engine, or one
+       simply not added to that list yet -- is exactly the case the hardcoded
+       Set cannot get right on its own; labels, from the same catalogue entry
+       manager.ts already has in hand, decide it instead. */
+    assert.equal(
+      chatModelToReload({ ...base, recipe: "a-future-engine", labels: ["image"] }),
+      undefined,
+      "labelled as image, not chat, whatever the recipe is called",
+    );
+    assert.equal(
+      chatModelToReload({ ...base, recipe: "a-future-engine", labels: ["chat"] }),
+      "Qwen3-8B",
+      "labelled chat, so it reloads even though the recipe is unrecognised",
+    );
   });
 
   it("stays out of it when the local backend is not the one answering", () => {

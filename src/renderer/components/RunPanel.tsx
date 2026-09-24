@@ -152,6 +152,24 @@ export function RunPanel({
                   Open folder
                 </button>
               ) : null}
+              {/* Drawn from this run's own stage files rather than written by a
+                  model: every number in a PRISMA diagram is a claim a reviewer
+                  checks, and the run counted them already. It opens beside the
+                  conversation with the rest of what this session produced. */}
+              {selected ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNote(undefined);
+                    void window.myra.researchPrisma(selected).then((r) => {
+                      setNote(r.ok ? "PRISMA diagram drawn — it is beside the conversation."
+                                   : r.error ?? "That run could not be drawn.");
+                    });
+                  }}
+                >
+                  PRISMA diagram
+                </button>
+              ) : null}
               {selected ? (
                 <button
                   type="button"

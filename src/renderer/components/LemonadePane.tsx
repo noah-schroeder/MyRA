@@ -41,6 +41,7 @@ import { CURATED_CHAT } from "../../core/runtime/curatedChat.ts";
 import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
 import { pulledId } from "../../core/runtime/hfBrowse.ts";
+import { IMAGE_PART_ROLES, IMAGE_PART_WORDS } from "../../core/runtime/imageModel.ts";
 import {
   checkpointFor, ENABLED_SOURCES, explainRegistryError, recommendVariant, REGISTRY_HOST,
   REGISTRY_LABEL, registryRepoUrl, type RegistrySource, type RepoVariants,
@@ -78,7 +79,7 @@ const ENGINE_LABELS: Record<string, string> = {
   onnxruntime: "ONNX Runtime",
   acestep: "Music generation",
   thinksound: "Sound effects",
-  thenoise: "Audio models",
+  thenoise: "Image generation",
   openmoss: "Speech models",
   trellis: "3D generation",
   ds4: "Depth estimation",
@@ -96,6 +97,7 @@ const ENGINE_IMPL: Record<string, string> = {
   "ryzenai-llm": "Ryzen AI, NPU",
   acestep: "ACE-Step",
   thinksound: "ThinkSound",
+  thenoise: "TheNoise",
   openmoss: "OpenMOSS",
   trellis: "TRELLIS",
 };
@@ -658,6 +660,35 @@ export function LemonadePane({
    * `deletePrompt`, which is the same function the main process's behaviour is
    * keyed to.
    */
+  /**
+   * Download a catalogue row, registering it first when it is one of MyRA's.
+   *
+   * Upstream's own rows need no registration: the daemon already holds an
+   * entry under that name and resolves every part of it itself, which is why
+   * the checkpoint sent is empty. MyRA's additions are the same pull with one
+   * step in front of it, and it is the same `registerImageModel` the manual
+   * form calls -- one path, so a model added to `MYRA_CATALOG` cannot download
+   * differently from one typed in by hand.
+   */
+  const addAndDownload = useCallback(
+    async (entry: CatalogEntry): Promise<void> => {
+      setPullError(undefined);
+      let name = entry.id;
+      if (entry.checkpoints) {
+        const reg = await window.myra.registerImageModel(entry.id, entry.checkpoints, entry.source);
+        if (!reg.ok) {
+          setPullError(reg.error ?? "Could not add this model.");
+          return;
+        }
+        name = reg.name ?? entry.id;
+      }
+      await download(entry.source, { name, checkpoint: "", recipe: entry.recipe });
+    },
+    // `download` reads no state of its own beyond the setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const removeModel = useCallback(
     async (id: string): Promise<void> => {
       setDeleting(undefined);
@@ -1491,11 +1522,13 @@ export function LemonadePane({
                                  resolvable repository (`repo` above is
                                  undefined) has nothing MyRA could have asked
                                  the registry about in the first place. */
-                              void download(m.source, {
-                                name: m.id,
-                                checkpoint: "",
-                                recipe: m.recipe,
-                              });
+                              /* A row MyRA supplies rather than the daemon
+                                 has to be registered before it can be pulled
+                                 by name -- the daemon resolves a name from
+                                 its own catalogue, and has never heard of this
+                                 one. `checkpoints` travelling on the entry is
+                                 what makes that possible; see MYRA_CATALOG. */
+                              void addAndDownload(m);
                             }}
                           >
                             {action === "load"
@@ -1535,6 +1568,10 @@ export function LemonadePane({
                       : `${blockedCount} more need hardware this machine does not have — show them anyway`}
                   </button>
                 ) : null}
+
+                {/* Only under the image group, because it is the only kind
+                    whose models cannot be searched for -- see `browsable`. */}
+                {active?.id === "image" ? <AddImageModel /> : null}
               </>
             ) : null}
 
@@ -1732,6 +1769,116 @@ function DeleteConfirm({
         </button>
       </div>
     </li>
+  );
+}
+
+/**
+ * Adding a diffusion model by naming its three parts.
+ *
+ * The escape hatch under the image group, and the only way to get a model the
+ * catalogue does not carry: registry search cannot offer one, because which
+ * text encoder and VAE a diffusion model needs is not written anywhere on the
+ * registry -- see `browsable` in hfBrowse.ts.
+ *
+ * Two fields are optional and that is the point: left blank, this registers an
+ * all-in-one checkpoint the way SD-Turbo is one; filled in, it registers the
+ * three-part shape FLUX.2 and Qwen-Image need. One form rather than two, for
+ * the reason a paper and a section are one record.
+ *
+ * Registering is not downloading. This writes the definition and then starts
+ * the ordinary pull by name, which is what gives a hand-added model the same
+ * progress, pause and cancel as a catalogue one, and what makes the daemon
+ * fetch every part rather than only the first.
+ */
+function AddImageModel(): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [parts, setParts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [bad, setBad] = useState<{ field?: string; error: string } | undefined>();
+  const [added, setAdded] = useState<string | undefined>();
+
+  const submit = async (): Promise<void> => {
+    setBusy(true);
+    setBad(undefined);
+    setAdded(undefined);
+    const res = await window.myra.registerImageModel(name, parts, "huggingface");
+    if (!res.ok) {
+      setBad({ ...(res.field ? { field: res.field } : {}), error: res.error ?? "Could not add it." });
+      setBusy(false);
+      return;
+    }
+    /* Empty checkpoint: the daemon now holds an entry under this name and
+       resolves every part of it itself. The same call the Recommended list
+       makes -- see `myra:registry-pull`. */
+    const pull = await window.myra.registryPull(res.name ?? "", "", "huggingface", "sd-cpp", false);
+    setBusy(false);
+    if (!pull.ok) {
+      setBad({ error: pull.error ?? "Added, but the download did not start." });
+      return;
+    }
+    setAdded(res.name ?? "");
+    setName("");
+    setParts({});
+  };
+
+  if (!open) {
+    return (
+      <button type="button" className="lem-hidden" onClick={() => setOpen(true)}>
+        Add an image model the list does not carry
+      </button>
+    );
+  }
+
+  return (
+    <div className="lem-addimg">
+      <h4 className="lem-addimg-h">Add an image model</h4>
+      <p className="lem-addimg-note">
+        A diffusion model is usually three files, and which three go together is not
+        recorded on Hugging Face — so they are named here instead. Leave the last two
+        blank for an all-in-one checkpoint.
+      </p>
+
+      <label className="lem-addimg-row">
+        <span className="lem-addimg-label">Name</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Flux.2 Klein 9B"
+          aria-invalid={bad?.field === "name"}
+        />
+      </label>
+
+      {IMAGE_PART_ROLES.map((role) => (
+        <label key={role} className="lem-addimg-row">
+          <span className="lem-addimg-label">{IMAGE_PART_WORDS[role].label}</span>
+          <input
+            value={parts[role] ?? ""}
+            onChange={(e) => setParts({ ...parts, [role]: e.target.value })}
+            placeholder="org/repo:file.safetensors"
+            aria-invalid={bad?.field === role}
+          />
+          <span className="lem-addimg-hint">{IMAGE_PART_WORDS[role].hint}</span>
+        </label>
+      ))}
+
+      {bad ? <p className="lem-addimg-bad">{bad.error}</p> : null}
+      {added ? (
+        <p className="lem-addimg-ok">
+          Added {added}, and the download has started — it is in the transfers list above,
+          where it can be paused or cancelled.
+        </p>
+      ) : null}
+
+      <div className="lem-addimg-acts">
+        <button type="button" className="lem-act get" disabled={busy} onClick={() => void submit()}>
+          {busy ? "Adding\u2026" : "Add and download"}
+        </button>
+        <button type="button" className="lem-act" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -23,6 +23,10 @@ import { RESEARCH_TOOL_DEFS } from "../src/core/agent/tools/research.ts";
 import { DOCUMENT_TOOL_DEFS } from "../src/core/agent/tools/documents.ts";
 import { LIBRARY_TOOL_DEFS } from "../src/core/agent/tools/library.ts";
 import { TASK_TOOL_DEFS } from "../src/core/agent/tools/tasks.ts";
+import { DIAGRAM_TOOL_DEFS } from "../src/core/agent/tools/diagram.ts";
+import { TABLE_TOOL_DEFS } from "../src/core/agent/tools/table.ts";
+import { PRISMA_TOOL_DEFS } from "../src/core/agent/tools/prisma.ts";
+import { CHART_TOOL_DEFS } from "../src/core/agent/tools/chart.ts";
 import { RISK_CLASSES } from "../src/core/policy.ts";
 
 const DOC = "docs/threat-model.md";
@@ -32,6 +36,10 @@ const REGISTERED = [
   ...DOCUMENT_TOOL_DEFS,
   ...LIBRARY_TOOL_DEFS,
   ...TASK_TOOL_DEFS,
+  ...DIAGRAM_TOOL_DEFS,
+  ...TABLE_TOOL_DEFS,
+  ...PRISMA_TOOL_DEFS,
+  ...CHART_TOOL_DEFS,
 ].map((t) => [t.name, t.risk] as [string, string]);
 
 /** The `| \`name\` | \`risk\` |` rows, in order. */
@@ -71,7 +79,8 @@ test("no tool array is registered that this test does not know about", () => {
   const registered = new Set([...main.matchAll(/\b([A-Z_]+_TOOL_DEFS)\b/g)].map((m) => m[1]!));
   assert.deepEqual(
     [...registered].sort(),
-    ["DOCUMENT_TOOL_DEFS", "LIBRARY_TOOL_DEFS", "RESEARCH_TOOL_DEFS", "TASK_TOOL_DEFS"],
+    ["CHART_TOOL_DEFS", "DIAGRAM_TOOL_DEFS", "DOCUMENT_TOOL_DEFS", "LIBRARY_TOOL_DEFS", "PRISMA_TOOL_DEFS",
+      "RESEARCH_TOOL_DEFS", "TABLE_TOOL_DEFS", "TASK_TOOL_DEFS"],
     "A tool array was added to installIpc. Import it here and add its rows to " + DOC,
   );
 });

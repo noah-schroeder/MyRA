@@ -33,6 +33,9 @@ export function UiDialog({
   if (request.method === "models") {
     return <ModelsDialog request={request} onAnswer={onAnswer} />;
   }
+  if (request.method === "form") {
+    return <FormDialog request={request} onAnswer={onAnswer} />;
+  }
 
   /*
    * A confirm is not an input with two buttons.
@@ -421,5 +424,103 @@ function EmbedSelect({
         </span>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Every number (or list) a figure needs, grouped into sections and shown at
+ * once -- the difference between a decision and eighteen separate dialogs.
+ *
+ * Generic on purpose: `create_prisma_diagram` is the only caller today, and
+ * nothing here knows the word "PRISMA". The fields, their grouping and their
+ * wording all come from the request, the same separation `choice` already
+ * keeps between this dialog and whichever tool asked the question.
+ *
+ * A guessed value is marked and clears its mark the moment it is touched --
+ * offered from a model reading the conversation, not yet the user's own
+ * answer, and a mark that outlived an edit would call something the user just
+ * typed a guess.
+ */
+function FormDialog({
+  request,
+  onAnswer,
+}: {
+  request: PromptRequest;
+  onAnswer: (id: string, answer: string | undefined) => void;
+}) {
+  const fields = request.fields ?? [];
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [guessed, setGuessed] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setValues(Object.fromEntries(fields.map((f) => [f.key, f.value ?? ""])));
+    setGuessed(new Set(fields.filter((f) => f.guessed && f.value).map((f) => f.key)));
+    // Re-run only when a different form arrives, not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.id]);
+
+  const change = (key: string, value: string): void => {
+    setValues((v) => ({ ...v, [key]: value }));
+    setGuessed((g) => {
+      if (!g.has(key)) return g;
+      const next = new Set(g);
+      next.delete(key);
+      return next;
+    });
+  };
+
+  // Sections in the order their first field appears -- the caller already put
+  // the template's own order into the field list.
+  const groups: string[] = [];
+  for (const f of fields) if (!groups.includes(f.group)) groups.push(f.group);
+
+  return (
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label={request.title}>
+      <div className="dialog dialog-wide dialog-form">
+        <h2 className="dialog-title">{request.title}</h2>
+        {request.message ? <p className="dialog-message">{request.message}</p> : null}
+
+        {groups.map((group) => (
+          <fieldset className="form-section" key={group}>
+            <legend className="form-section-title">{group}</legend>
+            {fields
+              .filter((f) => f.group === group)
+              .map((f) => (
+                <label key={f.key} className="field">
+                  <span className="field-label">{f.label}</span>
+                  {f.kind === "list" ? (
+                    <textarea
+                      className="dialog-input form-list"
+                      rows={3}
+                      value={values[f.key] ?? ""}
+                      onChange={(e) => change(f.key, e.target.value)}
+                    />
+                  ) : (
+                    <input
+                      className="dialog-input"
+                      inputMode="numeric"
+                      value={values[f.key] ?? ""}
+                      onChange={(e) => change(f.key, e.target.value)}
+                    />
+                  )}
+                  {f.hint ? <span className="role-hint">{f.hint}</span> : null}
+                  {guessed.has(f.key) ? (
+                    <span className="form-guessed">From what you said — check it.</span>
+                  ) : null}
+                </label>
+              ))}
+          </fieldset>
+        ))}
+
+        <div className="dialog-actions">
+          <button type="button" className="ghost" onClick={() => onAnswer(request.id, undefined)}>
+            Cancel
+          </button>
+          <button type="button" className="primary" onClick={() => onAnswer(request.id, JSON.stringify(values))}>
+            Use these
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

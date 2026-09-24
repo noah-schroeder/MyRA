@@ -36,7 +36,7 @@ import { CapabilityIcons } from "./modelBits.tsx";
 import { ModelCard } from "./ModelCard.tsx";
 
 import {
-  age, applyLocalFilter, compact, describeDownloads, describeFiltered, KINDS, kindById,
+  age, applyLocalFilter, browsableKinds, compact, describeDownloads, describeFiltered, kindById,
   loadable, LOADABLE_WORDS, MIN_DOWNLOADS, ggufIsMeaningful, PUBLISHERS, publisherNote,
   recipeFor, SORTS, splitPublishers, UPLOADED_WITHIN,
   type BrowseSort, type HfModel, type LocalFilter, type Publisher,
@@ -359,7 +359,7 @@ export function RegistrySearch({
         */}
       <div className="reg-browse">
         <div className="reg-kinds" role="tablist" aria-label="Kind of model">
-          {KINDS.map((k) => (
+          {browsableKinds().map((k) => (
             <button
               key={k.id}
               type="button"

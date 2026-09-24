@@ -1383,7 +1383,12 @@ body:has(.artifact-grip:active) { user-select: none; }
 }
 
 
-.turn { max-width: 74ch; }
+/* Was `max-width: 74ch` alone -- a fixed character count that never changed
+   whether the window was 900px or 2400px wide, which is why a message read as
+   the same width no matter how the app was resized. This tracks the thread's
+   own width instead, capped so a line of prose does not get too wide to read
+   comfortably on a large window. */
+.turn { width: 100%; max-width: 860px; align-self: center; }
 
 /* The user's own words are a quotation of the request, not a chat bubble:
    a rule in the margin reads as "you said this" without the toy styling. */
@@ -1480,7 +1485,16 @@ body:has(.artifact-grip:active) { user-select: none; }
   width: 100%;
   resize: none;
   min-height: 26px;
-  max-height: 40vh;
+  /* Grows to fit what is typed, up to ten lines -- measured in `lh` off the
+     field's own line-height rather than a guessed pixel figure, so it still
+     holds at ten lines if the font size ever changes -- then scrolls
+     internally instead of growing the composer indefinitely. Electron's
+     bundled Chromium supports `field-sizing` (since Chrome 123) and `lh`
+     units (since Chrome 120), so this replaced a JS effect that measured
+     `scrollHeight` and set an inline height by hand on every keystroke. */
+  field-sizing: content;
+  max-height: 10lh;
+  overflow-y: auto;
   padding: 2px 4px;
   line-height: 1.55;
   font-family: var(--sans);
@@ -1502,6 +1516,34 @@ body:has(.artifact-grip:active) { user-select: none; }
   color: var(--text-faint);
   margin: 0;
 }
+
+/*
+ * Expanded: the composer takes the height the thread gives up.
+ *
+ * `.thread` is the sibling that normally holds `flex: 1` in this column, so
+ * shrinking it to nothing (`.thread-collapsed`, set alongside this class)
+ * is what hands the composer the whole column's height rather than the few
+ * extra pixels a taller footer would claim on its own.
+ */
+.composer.expanded {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.composer.expanded .composer-card { flex: 1 1 auto; min-height: 0; }
+.composer.expanded .composer-input-row { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+/* The row switches to `stretch` above so the textarea can fill it; the attach
+   button is not meant to stretch into a tall sliver, so it opts back out. */
+.composer.expanded .composer-input-row > .mic { align-self: flex-start; }
+.composer.expanded .input {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+.thread-collapsed { flex: 0 0 0; min-height: 0; overflow: hidden; padding-top: 0; padding-bottom: 0; }
 
 /* One round button, so send keeps its shape whether it sends or stops and the
    control does not resize under the cursor mid-turn. */
@@ -2043,6 +2085,19 @@ body:has(.artifact-grip:active) { user-select: none; }
   border-left: 2px solid var(--amber); padding-left: 9px; margin-top: 4px;
 }
 
+/* Every number a figure needs, at once. A plain <fieldset> is reset to
+   nothing so its only visible shape is the gap between sections. */
+.dialog-form { gap: 20px; }
+.form-section { display: flex; flex-direction: column; gap: 12px; border: 0; margin: 0; padding: 0; }
+.form-section-title {
+  padding: 0; font-size: 11.5px; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.form-list { min-height: 60px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+/* Offered from what the model read in the conversation, not yet the user's
+   own answer -- cleared the moment the field is edited (see FormDialog). */
+.form-guessed { font-size: 11px; color: var(--accent); margin-top: 2px; }
+
 .settings { width: min(860px, 100%); height: 660px; max-height: 100%; flex-direction: row; position: relative; }
 .settings-head {
   display: flex; flex-direction: column; align-items: stretch;
@@ -2149,6 +2204,13 @@ p.warning { margin: 0; font-size: 12.5px; }
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 55%, var(--border));
   background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+/* Expanded is a layout choice, not a recording in progress -- the accent
+   rather than `.mic.active`'s red, which means "this is listening". */
+.mic.expand.active {
+  color: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-wash);
 }
 
 /* ==========================================================================
@@ -4268,6 +4330,40 @@ p.warning { margin: 0; font-size: 12.5px; }
 }
 .lem-hidden:hover { color: var(--text); border-color: var(--border-hover); }
 .lem-hidden:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
+
+/*
+ * Adding a diffusion model by naming its parts.
+ *
+ * Boxed rather than inline because it is four inputs where the rest of this
+ * pane is one-click rows, and an unboxed form of that size reads as part of
+ * the model list above it. Fields are stacked rather than side by side: three
+ * of them hold `org/repo:path/to/file.safetensors`, which is long enough that
+ * a two-column layout would truncate exactly the part being checked.
+ */
+.lem-addimg {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 10px; padding: 14px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.lem-addimg-h { margin: 0; font-size: 12.5px; }
+.lem-addimg-note { margin: 0; font-size: 11.5px; color: var(--text-dim); max-width: 62ch; }
+.lem-addimg-row { display: flex; flex-direction: column; gap: 3px; }
+.lem-addimg-label { font-size: 11.5px; color: var(--text-dim); }
+.lem-addimg-row input {
+  font: inherit; font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text);
+}
+.lem-addimg-row input:focus-visible { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
+/* The field the daemon or the check objected to, named rather than only
+   coloured -- `checkImageModel` returns which one for exactly this. */
+.lem-addimg-row input[aria-invalid="true"] { border-color: var(--red); }
+.lem-addimg-hint { font-size: 11px; color: var(--text-dim); }
+.lem-addimg-bad { margin: 0; font-size: 11.5px; color: var(--red); max-width: 62ch; }
+.lem-addimg-ok { margin: 0; font-size: 11.5px; color: var(--text-dim); max-width: 62ch; }
+.lem-addimg-acts { display: flex; gap: 8px; }
 .lem-mode.on .lem-mode-sub { color: var(--text-dim); }
 
 .reg { display: flex; flex-direction: column; gap: 14px; }
@@ -6098,3 +6194,96 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
   cursor: pointer;
 }
 .task-delete:hover { color: var(--text); background: var(--bg-float); }
+
+
+/*
+ * A figure in the artifact panel.
+ *
+ * Colours are CSS rather than attributes on the elements, so the drawing
+ * follows the app's theme on screen while `toSvg` exports it light -- the two
+ * are the same geometry and deliberately not the same palette, because a figure
+ * exported in dark mode arrives in a manuscript as white text on white.
+ *
+ * The canvas scrolls rather than scaling to fit. A flowchart shrunk to the
+ * width of a side panel is a picture of a flowchart with unreadable labels,
+ * and the labels are the entire reason this is not a diffusion model.
+ */
+.dg { display: flex; flex-direction: column; gap: 10px; }
+.dg-canvas {
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.dg-svg { display: block; }
+.dg-node { fill: var(--bg-float); stroke: var(--border-hover); stroke-width: 1.5; }
+/* A PRISMA phase band or column heading -- its only second fill, on screen
+   too. --border rather than --bg-raised: the latter is identical to
+   --dg-node's own --bg-float in light mode, so a "tinted" box would not be. */
+.dg-node.dg-tint { fill: var(--border); }
+.dg-node-bars { stroke: var(--border-hover); stroke-width: 1.5; }
+.dg-text { fill: var(--text); font-size: 13px; }
+.dg-edge { stroke: var(--text-faint); }
+.dg-arrow { fill: var(--text-faint); }
+.dg-elabel { fill: var(--text-dim); font-size: 12px; }
+/* Opaque, so a label sitting on its own connector stays readable. */
+.dg-elabel-bg { fill: var(--bg-raised); }
+.dg-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dg-said { font-size: 11.5px; color: var(--text-dim); }
+.dg-broken { display: flex; flex-direction: column; gap: 8px; }
+.dg-broken-why { margin: 0; font-size: 12px; color: var(--red); }
+
+/*
+ * A table in the artifact panel.
+ *
+ * Reuses `.md-table`, the same class Markdown.tsx's own GFM tables render
+ * with: a table `create_table` built and a table the model happened to write
+ * in prose are the same kind of thing on screen, and a second stylesheet for
+ * one of them would be a reason for the two to drift apart looking like they
+ * belong to different apps.
+ */
+.tb { display: flex; flex-direction: column; gap: 10px; }
+.tb-canvas {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.tb-canvas .md-table { margin: 0; }
+.tb-unit { color: var(--text-faint); font-weight: 400; }
+/* A cell present in an otherwise-numeric column but not a plain number --
+   "12.3*", "<0.001" -- underlined rather than coloured, since a footnoted
+   result is not an error to draw attention to, only a fact worth knowing
+   before asking for a chart or a statistic that touches it. */
+.tb-unparsed { text-decoration: underline dotted var(--text-faint); text-underline-offset: 3px; }
+.tb-notes {
+  margin: 0; padding-left: 18px;
+  font-size: 11.5px; color: var(--text-dim);
+  display: flex; flex-direction: column; gap: 3px;
+}
+
+/*
+ * A chart in the artifact panel.
+ *
+ * Colours are CSS on screen and `PAPER_THEME` on export -- the same split
+ * `.dg` above makes for a diagram, and for the same reason: a figure bound
+ * for a manuscript must not arrive as light marks on a transparent
+ * background because the app happened to be in dark mode.
+ */
+.ch { display: flex; flex-direction: column; gap: 10px; }
+.ch-canvas {
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.ch-svg { display: block; }
+.ch-title { fill: var(--text); font-size: 14px; font-weight: 600; text-anchor: middle; }
+.ch-grid { stroke: var(--border); stroke-width: 1; }
+.ch-tick { fill: var(--text-dim); font-size: 11px; }
+.ch-frame { fill: none; stroke: var(--border-hover); stroke-width: 1.5; }
+.ch-axis-label { fill: var(--text); font-size: 12px; }
+.ch-fit { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.ch-fit-label { fill: var(--text-dim); font-size: 11px; }
+.ch-box { fill: var(--accent-wash); stroke: var(--border-hover); stroke-width: 1.3; }
+.ch-median { stroke: var(--border-hover); stroke-width: 2; }

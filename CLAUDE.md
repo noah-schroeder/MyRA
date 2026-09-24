@@ -213,6 +213,95 @@ and deleting is exactly the path that has to be tested. A store joins by satisfy
 `KindStore` — `list`, `remove`, `payload` — which is the only thing a project may assume
 about one.
 
+### Diagrams
+
+A figure for a paper, drawn by a language model rather than a diffusion one —
+because a diagram's whole content is exact text, precise arrows and reproducible
+geometry, which is the one thing diffusion cannot do. `create_diagram`
+([tools/diagram.ts](src/core/agent/tools/diagram.ts)) takes Mermaid flowchart
+syntax and is `safe`: nothing it does touches a disk, and a file appears only
+when a person presses Export.
+
+**Mermaid is parsed, never run.** The package is 118 MB across 23 dependency
+families against an app whose entire runtime dependency list is `katex` and
+`marked`, and it renders by generating an HTML string — which
+[Markdown.tsx](src/renderer/components/Markdown.tsx) already refuses in its
+opening paragraph, since diagram source is model output and a model quotes the
+open web. So [mermaid.ts](src/core/diagrams/mermaid.ts) reads the flowchart
+subset, [layout.ts](src/core/diagrams/layout.ts) places it and
+[svg.ts](src/core/diagrams/svg.ts) turns it into paths. Every label becomes the
+text of a `<text>` node and can be nothing else. The model still writes Mermaid
+because every model writes Mermaid; a schema MyRA invented is one a 2.6B
+declines to follow, which is the failure `documents/draft.ts` exists to prevent.
+
+**A tool rather than a code fence, and the repair loop is free.**
+`ToolResult.content` is what the model reads, so a parse error returned from the
+tool *is* the retry — the agent loop already re-calls a failed tool. What is not
+drawable is refused by name (`sequenceDiagram`, subgraphs) rather than
+half-drawn, because that message is what the model acts on.
+
+**One geometry, two consumers, two palettes.** The renderer maps `nodePath`/
+`edgePath` onto React elements and colours them from CSS so the figure follows
+the app's theme; `toSvg` writes the same strings into a file using
+`PAPER_THEME`, which is always light — a figure exported in dark mode arrives in
+a manuscript as white text on white. Arrowheads are drawn triangles, not
+`<marker>` defs, because a marker is referenced by id and a thread holds several
+diagrams. Text is **estimated, not measured** (0.58em per character): nothing
+here has a DOM, so boxes are padded rather than fitted.
+
+**PRISMA 2020, not the figure MyRA drew before.**
+[prisma/spec.ts](src/core/prisma/spec.ts) is the box model — every box and row
+the four official templates define, captions verbatim, one list read by both
+the form that asks for the numbers and the layout that draws them, the way
+[databases.ts](src/core/research/databases.ts) is the single list of the four
+databases. The predecessor emitted 2009 wording ("Records identified through
+database searching", "Full-text sources retrieved and assessed") that the 2020
+statement replaced outright — a reviewer reads this figure against the
+template they know, so the words mattered more here than anywhere else in the
+diagram code. The old rule is now the spec's own: **a count nobody measured is
+left out, never a box reading zero** — a blank field omits its row, a typed 0
+draws `(n = 0)`, and a box whose rows are all blank is not built at all.
+
+**A second placer, because `layoutDiagram` cannot draw this.**
+[prisma/layout.ts](src/core/prisma/layout.ts) builds a `Layout` by hand —
+pinned columns, a side box hung at its parent's own vertical centre, phase
+bands turned a quarter turn down the left edge, left-aligned lists inside a
+box — none of which the general layered placer has any way to express. It is
+still a `Layout`, though, which is the point: `toSvg`, `DiagramView.tsx`, Save
+SVG/PNG and Copy figure all work on a PRISMA figure with no code of their own,
+because [diagrams/layout.ts](src/core/diagrams/layout.ts) and
+[svg.ts](src/core/diagrams/svg.ts) gained exactly one optional `box: BoxStyle`
+field (corner radius, an inset for left-aligned text, a tint, a text turn)
+that `layoutDiagram` never sets — a model-drawn diagram is the same bytes it
+was before PRISMA existed, which is what pins `test/diagramSvg.test.ts`'s
+byte-identity test.
+
+**The tool asks, twice, then shows a form — never a model's arithmetic.**
+`create_prisma_diagram` ([tools/prisma.ts](src/core/agent/tools/prisma.ts)) is
+`safe` for the reason `create_diagram` is, and shares the research pipeline's
+own dialogs (`setPrismaHost`, mirroring `setResearchHost`) for the reason the
+paper drafter already does: "MyRA is asking me something and will produce work
+once I answer" is one experience. Two choice questions settle which of the
+four templates applies (new or updated review; databases only or also other
+methods), then one form shows every field the chosen template needs, grouped
+by phase. A model may pass counts it read in the conversation, but every one
+reaches the form **marked as a guess, not drawn** — this figure is what an
+editor checks a review against, and a hallucinated count sitting in a filled
+field is easy to accept without reading. Cancelling any step is a returned
+refusal rather than a thrown error, `deep_research`'s own reasoning for its
+once-per-turn refusal; drawing, refusing and giving up after a blank form all
+set the turn's `doneThisTurn` flag, because a cancel means "not now", not "ask
+again".
+
+**The Runs-page button draws the same figure a run's own numbers support.**
+[research/prisma.ts](src/core/research/prisma.ts)'s `figureFromCounts` maps a
+run's measured `PrismaCounts` onto the 2020 field names — `registers`,
+`automation`, exclusion reasons and `sought`/`notRetrieved` stay blank because
+nothing in the pipeline measures them, and **Edit numbers** on the drawn
+figure is where a reviewer adds what the run alone cannot supply, reopening
+the same form prefilled with what is already there and redrawing on the same
+id in place.
+
 ### The paper drafter
 
 Ported in substance from Braindump5000, which was tuned against real use before it got

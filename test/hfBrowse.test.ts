@@ -13,6 +13,7 @@ import { test } from "node:test";
 
 import {
   age,
+  browsableKinds,
   browseParams,
   compact,
   describeDownloads,
@@ -148,28 +149,51 @@ test("original weights are named as the wrong format rather than as a failure", 
   assert.equal(loadable(model({ hasGguf: false }), "llamacpp", INSTALLED), "wrong-format");
 });
 
-test("a diffusion model needs an engine rather than being impossible", () => {
-  /* It used to read "cannot run", which was wrong: a pull declaring sd-cpp
-     downloads stabilityai/sd-turbo fine, and the engine is one click away
-     under Settings → Runtime. */
-  assert.equal(loadable(model(), "sd-cpp", INSTALLED), "needs-engine");
+test("a speech model needs an engine rather than being impossible", () => {
+  /* It used to read "cannot run", which was wrong: the engine is one click
+     away under Settings → Runtime. */
   assert.equal(loadable(model(), "kokoro", INSTALLED), "needs-engine");
   assert.equal(loadable(model(), "whispercpp", INSTALLED), "needs-engine");
 });
 
-test("once its engine is installed a diffusion model is ready", () => {
-  assert.equal(loadable(model(), "sd-cpp", new Set(["llamacpp", "sd-cpp"])), "ready");
+test("once its engine is installed a speech model is ready", () => {
+  assert.equal(loadable(model(), "whispercpp", new Set(["llamacpp", "whispercpp"])), "ready");
 });
 
 test("the format test applies only to llama.cpp, which is the one reading GGUF", () => {
-  // sd-cpp reads safetensors, so "no gguf tag" says nothing about it.
+  // whisper.cpp reads ggml `.bin`, so "no gguf tag" says nothing about it.
   const weights = model({ hasGguf: false });
-  assert.equal(loadable(weights, "sd-cpp", new Set(["sd-cpp"])), "ready");
+  assert.equal(loadable(weights, "whispercpp", new Set(["whispercpp"])), "ready");
 });
 
 test("with no engine list yet, a row is not accused of needing anything", () => {
   // Before system-info arrives, claiming an engine is missing would be a guess.
-  assert.equal(loadable(model(), "sd-cpp"), "ready");
+  assert.equal(loadable(model(), "whispercpp"), "ready");
+});
+
+/*
+ * A diffusion model is the one kind search does not offer, whatever is
+ * installed.
+ *
+ * Not a judgement about the engine or the format: sd-cpp may be installed and
+ * the repository may hold a perfectly good safetensors, and the download still
+ * cannot work, because the text encoder and VAE it needs are in repositories
+ * nothing here names. Asserted against both engines and both engine states so
+ * that "install sd-cpp and it becomes downloadable" cannot creep back.
+ */
+test("a diffusion model is curated-only however the machine is set up", () => {
+  for (const recipe of ["sd-cpp", "thenoise"]) {
+    assert.equal(loadable(model(), recipe, INSTALLED), "curated-only");
+    assert.equal(loadable(model(), recipe, new Set(["llamacpp", recipe])), "curated-only");
+    assert.equal(loadable(model({ hasGguf: false }), recipe), "curated-only");
+  }
+});
+
+test("the image kind is not offered as a search tab", () => {
+  assert.ok(KINDS.some((k) => k.id === "image"), "the kind itself still exists");
+  assert.ok(!browsableKinds().some((k) => k.id === "image"));
+  // Everything else still is, so this narrowed one thing rather than the list.
+  assert.equal(browsableKinds().length, KINDS.length - 1);
 });
 
 /* ------------------------------------------------------------ wording -- */
