@@ -35,7 +35,19 @@ async function sourceFiles(dir: string): Promise<string[]> {
 }
 
 /** `"https://api.github.com/…"` and `` `https://${x}` `` alike -- quote first. */
-const URL_LITERAL = /["'`]https?:\/\/([A-Za-z0-9.-]+)/g;
+const URL_LITERAL = /["'`](https?:\/\/([A-Za-z0-9.-]+)[^"'`\s]*)/g;
+
+/**
+ * URLs that name something rather than address it.
+ *
+ * An XML namespace is an identifier defined by a specification, never
+ * dereferenced -- `toSvg` writes `xmlns="http://www.w3.org/2000/svg"` into a
+ * file, and a reader that fetched it would be a broken reader. Declaring it in
+ * DESTINATIONS would put "w3.org" on the page listing what leaves this machine,
+ * which is a false claim in the direction that matters. Matched in full rather
+ * than by host, so an actual request to w3.org would still fail this test.
+ */
+const NOT_ADDRESSES = new Set(["http://www.w3.org/2000/svg"]);
 
 /**
  * Comments out, before anything is matched.
@@ -54,8 +66,9 @@ test("every host the source can reach is declared", async () => {
 
   for (const file of await sourceFiles(SRC)) {
     const text = stripComments(await readFile(file, "utf8"));
-    for (const [, host] of text.matchAll(URL_LITERAL)) {
+    for (const [, url, host] of text.matchAll(URL_LITERAL)) {
       if (!host || isLocalHost(host)) continue;
+      if (url && NOT_ADDRESSES.has(url)) continue;
       if (describes(host)) continue;
       undeclared.set(host, file.slice(SRC.length));
     }

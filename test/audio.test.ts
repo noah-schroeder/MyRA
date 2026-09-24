@@ -208,6 +208,24 @@ describe("a speech model must not become the chat model", () => {
     assert.ok(!isChatEngine("whispercpp"));
     assert.ok(!isChatEngine("kokoro"));
   });
+
+  test("the engines that make pictures, audio and 3D are not chat engines", () => {
+    /*
+     * `thenoise` is why this exists. It runs seven image models in Lemonade's
+     * catalogue and was missing from the list, so `startOnLaunch` would have
+     * loaded one as the model a conversation goes to -- the same failure the
+     * comment there describes for speech models, which is how that gate is
+     * known to be recipe-only rather than covered by the daemon's `type`.
+     *
+     * Every recipe here is one whose catalogue models carry no chat label at
+     * all. `ds4` is deliberately not among them: its models are labelled
+     * `chat`, whatever else the engine can do.
+     */
+    for (const recipe of ["thenoise", "acestep", "thinksound", "trellis", "sd-cpp"]) {
+      assert.ok(!isChatEngine(recipe), `${recipe} should not be a chat engine`);
+    }
+    assert.ok(isChatEngine("ds4"));
+  });
 });
 
 /* --------------------------------------------------------------- speakable */

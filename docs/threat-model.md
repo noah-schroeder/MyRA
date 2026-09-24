@@ -49,6 +49,10 @@ complete list.
 | `create_task` | `write` |
 | `list_tasks` | `safe` |
 | `complete_task` | `write` |
+| `create_diagram` | `safe` |
+| `create_table` | `safe` |
+| `create_prisma_diagram` | `safe` |
+| `create_chart` | `safe` |
 
 *Machine-checked.* `test/threatModel.test.ts` parses this table and compares it
 to the registry, so a tool added without a row here fails `npm test`.
