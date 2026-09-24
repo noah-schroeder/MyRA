@@ -15,6 +15,7 @@ import { ConfigStore, type EndpointSettings } from "../config.ts";
 import { splitThinking, type DeltaKind } from "./thinking.ts";
 import type { MessageStats } from "./speed.ts";
 import { expandImages, type Attachment, type ContentPart } from "./attach.ts";
+import type { TurnProgress } from "./progress.ts";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -155,6 +156,15 @@ export function buildRequest(opts: {
    * async read this cannot await.
    */
   resolveImage?: (attachmentId: string) => string | undefined;
+  /**
+   * Ask llama.cpp to report how far it has read the prompt.
+   *
+   * Only ever set by a caller that knows the endpoint is the bundled runtime:
+   * llama.cpp ignores a field it does not know, but a hosted API may refuse the
+   * whole request over one -- the reason `timings_per_token` is never sent.
+   * Meaningless without streaming, so it rides only on a streamed request.
+   */
+  promptProgress?: boolean;
 }): ChatRequest {
   const { temperature: tuned, ...otherSampling } = opts.sampling ?? {};
   return {
@@ -181,6 +191,7 @@ export function buildRequest(opts: {
      * streaming, so it is only sent then.
      */
     ...(opts.stream ? { stream_options: { include_usage: true } } : {}),
+    ...(opts.stream && opts.promptProgress ? { return_progress: true } : {}),
     // Omitted entirely when there are none: some OpenAI-compatible servers
     // reject an empty `tools` array rather than treating it as "no tools".
     ...(opts.tools?.length ? { tools: opts.tools, tool_choice: "auto" as const } : {}),
@@ -207,6 +218,14 @@ export interface ChatOptions {
   extra?: Record<string, unknown>;
   /** See `buildRequest`'s field of the same name. */
   resolveImage?: (attachmentId: string) => string | undefined;
+  /** See `buildRequest`'s field of the same name. */
+  promptProgress?: boolean;
+  /**
+   * How far along the call is, while it runs: the prompt being read (when the
+   * server says) and the reply arriving. Only a streamed call can report
+   * either, so it is only called when `onDelta` is supplied too.
+   */
+  onProgress?: (progress: TurnProgress) => void;
 }
 
 export interface ChatUsage {
@@ -334,6 +353,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
           ...(opts.sampling ? { sampling: opts.sampling } : {}),
           ...(opts.extra ? { extra: opts.extra } : {}),
           ...(opts.resolveImage ? { resolveImage: opts.resolveImage } : {}),
+          ...(opts.promptProgress ? { promptProgress: true } : {}),
         }),
       ),
       signal,
@@ -389,7 +409,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   let result: ChatResult;
   try {
     result = streaming
-      ? await readStream(res, opts.onDelta!, deadline.touch)
+      ? await readStream(res, opts.onDelta!, deadline.touch, opts.onProgress)
       : await readWhole(res);
   } catch (err) {
     // The user pressing stop is not a failure to describe; let it through as it is.
@@ -564,6 +584,8 @@ async function readStream(
   onDelta: (d: string, kind: DeltaKind) => void,
   /** Called on every frame that arrives, to rearm the idle deadline. */
   onProgress: () => void = () => {},
+  /** How far along the call is, for the window. See `ChatOptions.onProgress`. */
+  report?: (progress: TurnProgress) => void,
 ): Promise<ChatResult> {
   if (!res.body) throw new LlmError("The LLM endpoint returned no response body.");
   const reader = res.body.getReader();
@@ -582,6 +604,21 @@ async function readStream(
   };
   let promptMs: number | undefined;
   let predictedMs: number | undefined;
+  /* Frames that carried any piece of the reply -- prose, reasoning or a tool
+     call's arguments, the last of which shows nothing on screen at all while
+     it is written. Reported at most four times a second: a frame per token is
+     already an IPC message per token for the text itself, and a counter does
+     not need to be any fresher than a person can read it. */
+  let tokens = 0;
+  let reportedAt = 0;
+  const countFrame = (): void => {
+    tokens++;
+    const now = Date.now();
+    if (report && now - reportedAt >= 250) {
+      reportedAt = now;
+      report({ phase: "writing", tokens });
+    }
+  };
   /* Deltas go through the splitter rather than straight out, so a model that
      writes its thinking inline is treated the same as one that puts it in its
      own field -- and the tag never reaches the transcript. */
@@ -630,6 +667,8 @@ async function readStream(
           usage?: unknown;
           /** llama.cpp's own performance numbers, sent unasked on the final frame. */
           timings?: unknown;
+          /** llama.cpp reading the prompt, once per batch -- only when asked with `return_progress`. */
+          prompt_progress?: { total?: unknown; cache?: unknown; processed?: unknown };
           error?: { message?: string };
         };
         try {
@@ -649,11 +688,22 @@ async function readStream(
           if (t?.promptMs !== undefined) promptMs = t.promptMs;
           if (t?.predictedMs !== undefined) predictedMs = t.predictedMs;
         }
+        const pp = parsed.prompt_progress;
+        if (pp && report) {
+          const total = Number(pp.total);
+          const processed = Number(pp.processed);
+          const cache = Number(pp.cache ?? 0);
+          if (Number.isFinite(total) && Number.isFinite(processed) && total > 0) {
+            report({ phase: "prompt", total, processed, cache: Number.isFinite(cache) ? cache : 0 });
+          }
+        }
         const choice = parsed.choices?.[0];
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         // A server that states the reasoning separately needs no splitting:
         // it is already labelled, and it never appears in `content`.
         const thought = statedReasoning(choice?.delta);
+        const deltaText = choice?.delta?.content;
+        if (thought || (typeof deltaText === "string" && deltaText) || choice?.delta?.tool_calls?.length) countFrame();
         if (thought) {
           markFirst();
           reasoning += thought;
@@ -731,6 +781,18 @@ export interface SubagentOptions {
   /** Overrides the configured endpoint. Tests use this; the app does not. */
   endpoint?: EndpointSettings;
   apiKey?: string;
+  /**
+   * Request fields this endpoint needs -- the reasoning switch, in practice.
+   *
+   * Absent for every research stage, which is what they have always sent. The
+   * project setup chat passes the conversation's own, because it exists to
+   * show the model thinking and a template switch left off shows nothing.
+   */
+  extra?: Record<string, unknown>;
+  /** See `ChatOptions.promptProgress`. */
+  promptProgress?: boolean;
+  /** See `ChatOptions.onProgress`. Needs `onDelta` too, since only a stream reports. */
+  onStreamProgress?: (progress: TurnProgress) => void;
 }
 
 export type SubagentUsage = ChatUsage;
@@ -910,6 +972,9 @@ export async function runSubagent(opts: SubagentOptions): Promise<SubagentResult
            draft.ts has branched on `kind === "thinking"` since it was written
            and could never once have taken it. */
         ...(opts.onDelta ? { onDelta: opts.onDelta } : {}),
+        ...(opts.extra ? { extra: opts.extra } : {}),
+        ...(opts.promptProgress ? { promptProgress: true } : {}),
+        ...(opts.onStreamProgress ? { onProgress: opts.onStreamProgress } : {}),
       });
       return {
         text: result.text,

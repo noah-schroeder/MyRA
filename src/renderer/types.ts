@@ -2,6 +2,7 @@ import type { DataTable } from "../core/tabular/table.ts";
 import type { ChartData } from "../core/charts/layout.ts";
 import type { ChartSpec } from "../core/charts/spec.ts";
 import type { PrismaFigure } from "../core/prisma/spec.ts";
+import type { TurnProgress } from "../core/llm/progress.ts";
 import type { CatalogEntry } from "../core/runtime/catalog.ts";
 import type { Provider } from "../core/providers.ts";
 import type { ModelPrice } from "../core/pricing.ts";
@@ -430,7 +431,7 @@ export interface WhisperSnapshot {
 export interface AgentEvent {
   type:
     | "text" | "tool_start" | "tool_update" | "tool_end" | "tool_error"
-    | "compacted" | "notice" | "done" | "error" | "stats";
+    | "compacted" | "notice" | "done" | "error" | "stats" | "progress";
   text?: string;
   /** For text: "thinking" is the model's reasoning, anything else is the answer. */
   kind?: "text" | "thinking";
@@ -443,6 +444,8 @@ export interface AgentEvent {
   detail?: unknown;
   /** For "stats": how fast the reply that just finished was. One per model call. */
   stats?: MessageStats;
+  /** For "progress": how far along the model call in flight is. Never stored or replayed. */
+  progress?: TurnProgress;
   /** The conversation this event belongs to, so a renderer looking at a
    *  different one can tell it is not for them. */
   sessionId?: string;

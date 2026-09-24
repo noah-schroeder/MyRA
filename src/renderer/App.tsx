@@ -40,6 +40,8 @@ import { PaperDrafter } from "./components/PaperDrafter.tsx";
 import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { NewProjectDialog } from "./components/NewProjectDialog.tsx";
+import { TurnStatus } from "./components/TurnStatus.tsx";
+import { describeProgress } from "../core/llm/progress.ts";
 import { TasksPage } from "./components/TasksPage.tsx";
 import { ImagePicker } from "./components/ImagePicker.tsx";
 import { restoreThread, type StoredMessage } from "./restore.ts";
@@ -66,7 +68,9 @@ const PAGE_FOR: Record<MemberKind, Page> = {
 };
 
 export function App() {
-  const { items, busy, usage, error, sources, send, abort, reset, resume, dismissError } = useAgent();
+  const {
+    items, busy, usage, error, sources, progress: turnProgress, send, abort, reset, resume, dismissError,
+  } = useAgent();
   const [settings, setSettings] = useState<Settings | undefined>();
   const [showSettings, setShowSettings] = useState(false);
   /* Which tab Settings opens on, when something sent you there for a reason. */
@@ -833,7 +837,7 @@ export function App() {
         {busy && page !== "chat" ? (
           <WorkingBar
             stage={activeRun?.stage ?? stage}
-            note={activeRun?.note ?? progress}
+            note={activeRun?.note ?? progress ?? (turnProgress ? describeProgress(turnProgress.value) : undefined)}
             onOpen={toChat}
             onStop={abort}
           />
@@ -1119,6 +1123,10 @@ export function App() {
           {/* Above the scroll anchor, so the view follows it: a card added
               below the anchor is a card the thread scrolls away from. */}
           {busy && stage ? <ResearchProgress stage={stage} note={progress} /> : null}
+          {/* Everything else a turn does -- reading the prompt, writing, a tool
+              -- says so here, so a slow local model is visibly slow rather than
+              indistinguishable from a stuck one. */}
+          {busy && !stage && turnProgress ? <TurnStatus progress={turnProgress} /> : null}
           <div ref={bottom} />
         </div>
 

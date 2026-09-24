@@ -675,6 +675,19 @@ stored assistant message as `meta`, which is how it survives reopening a convers
 `buildRequest` strips it before anything reaches the wire, because a field the server does not
 expect is a reason some of them refuse the whole request.
 
+**And how far along it is, while it runs.** Between Send and the first word there was
+nothing on screen, and on a local model that gap is the prompt being read — a minute on a
+long conversation, identical to a wedged server. `chat()` now reports progress
+([progress.ts](src/core/llm/progress.ts), no imports so the renderer shares it): a
+`prompt_progress` frame per batch when the server sends one, then a count of reply frames,
+throttled to four a second. `return_progress` is asked for **only on the bundled runtime**
+(`EndpointResolution.promptProgress`), measured against llama-server b10375 and through
+lemond 11.8.0 — `processed` includes the cache, so the bar measures the uncached share —
+and never of anything else, for the `timings_per_token` reason above. The loop emits
+`"progress"` before every model call, since after a tool the prompt is read again; main
+never stores it for replay. The window's `TurnStatus` always shows a moving clock, and a
+bar only when a server reported a figure.
+
 ### Files dropped into the chat
 
 An image or a document, dropped straight into the composer — OCR and "chat with this paper"

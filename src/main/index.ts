@@ -527,6 +527,15 @@ type EndpointResolution = {
    * in anywhere else would be a bug, however helpful it looks.
    */
   persona?: string;
+  /**
+   * Whether this endpoint is the bundled runtime, and so may be asked to
+   * report how far it has read the prompt (`return_progress`).
+   *
+   * Measured: llama-server b10375 answers with `prompt_progress` frames, and
+   * lemond 11.8.0 passes the field through. Never set for anything else -- a
+   * hosted API may refuse a whole request over a field it does not know.
+   */
+  promptProgress?: boolean;
 };
 let resolveEndpoint: () => Promise<EndpointResolution> = () => {
   throw new Error("The app is still starting up.");
@@ -689,7 +698,10 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      applied to whatever conversation happened to be on screen, which is how
      one conversation's reply could bleed into another's. */
   const emit = (event: ChatEvent): void => {
-    liveEvents.push(event);
+    /* Progress is not replayed: it says "still working" only while it is, and
+       a token counter ticking four times a second would make the replay list
+       for a long reply mostly counter. The next one arrives within a second. */
+    if (event.type !== "progress") liveEvents.push(event);
     send("myra:agent-event", { ...event, sessionId: conversation.id });
   };
   /* One deep research run per turn. The model is otherwise free to call the
@@ -699,6 +711,10 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
   beginResearchTurn();
   // Same rule, same reason, for the PRISMA figure's own dialogs.
   beginPrismaTurn();
+  /* Before anything that can take time -- resolving the endpoint may load a
+     model, which on a large one is minutes -- so the window has something to
+     say from the moment Send is pressed. */
+  emit({ type: "progress", progress: { phase: "waiting" } });
 
   try {
     if (runsSetup) {
@@ -728,7 +744,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      * every one of those went and left the actual conversation, the one thing
      * the picker is above, still answering from whatever was resident.
      */
-    const { endpoint, apiKey, sampling, extra, persona } = await resolveEndpoint();
+    const { endpoint, apiKey, sampling, extra, persona, promptProgress } = await resolveEndpoint();
     const managed = runtime.chatEndpoint();
     /*
      * How big the window actually is, when that is knowable.
@@ -773,6 +789,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       approve,
       onEvent: emit,
       ...(limit ? { contextLimit: limit } : {}),
+      ...(promptProgress ? { promptProgress: true } : {}),
       contextUsed: conversation.contextTokens ?? 0,
       ...(conversation.compaction ? { compaction: conversation.compaction } : {}),
       /*
@@ -2798,6 +2815,7 @@ async function main(): Promise<void> {
         sampling: await samplingFor(model, true),
         persona: personaFor(model),
         ...localReasoningExtra(model),
+        promptProgress: true,
       };
     }
     /*
