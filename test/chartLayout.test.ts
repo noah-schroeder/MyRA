@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { layoutChart, type ChartData } from "../src/core/charts/layout.ts";
+import { CANVAS_H, CANVAS_W, chartSizeFor, layoutChart, type ChartData } from "../src/core/charts/layout.ts";
 
 function within(v: number, lo: number, hi: number, msg: string): void {
   assert.ok(v >= lo - 1e-6 && v <= hi + 1e-6, `${msg}: ${v} not within [${lo}, ${hi}]`);
@@ -202,4 +202,100 @@ test("every mark sits inside the reported width and height", () => {
     assert.ok(bar.x >= 0 && bar.x + bar.w <= layout.width + 1e-6);
     assert.ok(Math.min(bar.yTop, bar.yBottom) >= 0 && Math.max(bar.yTop, bar.yBottom) <= layout.height + 1e-6);
   }
+});
+
+/**
+ * A chart's own size -- the artifact panel's "redraw to fit" behaviour, added
+ * beside the fixed 640x420 canvas every test above still exercises by
+ * leaving `size` out entirely.
+ */
+
+test("with no size given, the canvas is exactly the fixed 640x420 it always was", () => {
+  const data: ChartData = { kind: "line", series: [{ name: "s", points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] }] };
+  const layout = layoutChart(data);
+  assert.equal(layout.width, CANVAS_W);
+  assert.equal(layout.height, CANVAS_H);
+  assert.equal(CANVAS_W, 640);
+  assert.equal(CANVAS_H, 420);
+});
+
+test("a given size is honoured exactly", () => {
+  const data: ChartData = { kind: "line", series: [{ name: "s", points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] }] };
+  const layout = layoutChart(data, { size: { width: 900, height: 500 } });
+  assert.equal(layout.width, 900);
+  assert.equal(layout.height, 500);
+});
+
+for (const size of [
+  { width: 320, height: 240 },
+  { width: 640, height: 420 },
+  { width: 624, height: 864 }, // a portrait Letter page
+  { width: 864, height: 624 }, // a landscape Letter page
+]) {
+  test(`every mark sits inside a ${size.width}x${size.height} chart`, () => {
+    const data: ChartData = {
+      kind: "bar", stacked: false, categories: ["A", "B", "C", "D"],
+      series: [
+        { name: "First", points: [{ x: 0, y: 5, error: 1 }, { x: 1, y: -3 }, { x: 2, y: 9 }, { x: 3, y: 2 }] },
+        { name: "Second", points: [{ x: 0, y: 4 }, { x: 1, y: 1 }, { x: 2, y: 6 }, { x: 3, y: -1 }] },
+      ],
+    };
+    const layout = layoutChart(data, { size, title: "A title", xLabel: "X", yLabel: "Y" });
+    assert.equal(layout.width, size.width);
+    assert.equal(layout.height, size.height);
+    for (const bar of layout.bars!) {
+      assert.ok(bar.x >= 0 && bar.x + bar.w <= layout.width + 1e-6);
+      assert.ok(Math.min(bar.yTop, bar.yBottom) >= 0 && Math.max(bar.yTop, bar.yBottom) <= layout.height + 1e-6);
+    }
+  });
+}
+
+test("a narrow multi-series chart puts its legend below the plot, inside the reported height", () => {
+  const data: ChartData = {
+    kind: "line",
+    series: [
+      { name: "Alpha", points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] },
+      { name: "Beta", points: [{ x: 0, y: 3 }, { x: 1, y: 1 }] },
+      { name: "Gamma", points: [{ x: 0, y: 2 }, { x: 1, y: 4 }] },
+    ],
+  };
+  const layout = layoutChart(data, { size: { width: 350, height: 300 } });
+  assert.equal(layout.legend.length, 3);
+  for (const entry of layout.legend) {
+    // Below the plot, not off to its right.
+    assert.ok(entry.y > layout.plot.y + layout.plot.h);
+    assert.ok(entry.y <= layout.height + 1e-6);
+    assert.ok(entry.x >= layout.plot.x - 1e-6);
+  }
+});
+
+test("a wide multi-series chart keeps its legend in the right margin, as before", () => {
+  const data: ChartData = {
+    kind: "line",
+    series: [
+      { name: "Alpha", points: [{ x: 0, y: 1 }, { x: 1, y: 2 }] },
+      { name: "Beta", points: [{ x: 0, y: 3 }, { x: 1, y: 1 }] },
+    ],
+  };
+  const layout = layoutChart(data, { size: { width: 640, height: 420 } });
+  for (const entry of layout.legend) {
+    assert.ok(entry.x > layout.plot.x + layout.plot.w);
+  }
+});
+
+test("chartSizeFor floors both dimensions so a tiny panel never collapses the text", () => {
+  const size = chartSizeFor({ width: 10, height: 10 });
+  assert.ok(size.width >= 300);
+  assert.ok(size.height >= 200);
+});
+
+test("chartSizeFor caps height relative to width, so a tall narrow panel gets no sliver", () => {
+  const size = chartSizeFor({ width: 320, height: 2000 });
+  assert.ok(size.height <= size.width * 0.8 + 1e-6);
+});
+
+test("chartSizeFor passes through a reasonable size unchanged, only rounded", () => {
+  const size = chartSizeFor({ width: 500.4, height: 380.6 });
+  assert.equal(size.width, 500);
+  assert.equal(size.height, 381);
 });

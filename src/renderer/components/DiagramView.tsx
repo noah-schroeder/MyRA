@@ -1,13 +1,16 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 
-import { parseMermaid } from "../../core/diagrams/mermaid.ts";
-import { layoutDiagram, type PlacedNode } from "../../core/diagrams/layout.ts";
+import { drawDiagram } from "../../core/diagrams/draw.ts";
+import type { Layout, PlacedNode } from "../../core/diagrams/layout.ts";
 import {
-  arrowHead, dashFor, edgePath, lineY, nodePath, strokeFor, subroutineBars, textAnchorAt, textTurn, toSvg,
+  arrowHead, dashFor, edgePath, hasShadow, lineY, nodePath, strokeFor, subroutineBars, textAnchorAt, textTurn,
+  toSvg,
 } from "../../core/diagrams/svg.ts";
-import { prismaLayout } from "../../core/prisma/layout.ts";
+import { fitWithin, PNG_SCALE_PAGE, PNG_SCALE_STANDARD, PX_PER_IN, type ExportSize } from "../../core/figures/exportSize.ts";
 import type { DiagramUpdate } from "../types.ts";
 import { useSaid } from "./useSaid.ts";
+import { svgToPng } from "./rasterise.ts";
+import { ExportSizeSelect, pageBoxForExport, useExportSize } from "./ExportSize.tsx";
 
 /**
  * A figure, drawn from its source every time it is shown -- Mermaid parsed and
@@ -27,45 +30,58 @@ import { useSaid } from "./useSaid.ts";
  * Colours come from CSS so the figure follows the app's theme on screen, while
  * export uses `PAPER_THEME` and is always light -- a figure goes into a
  * manuscript, and one exported in dark mode arrives as white text on white.
+ *
+ * On screen a diagram's own size is never touched by the export choice: the
+ * canvas scrolls rather than shrinking it, because a flowchart's labels are
+ * its entire content. Export alone offers the natural size, a portrait page
+ * or a landscape page -- a PRISMA figure is conventionally a full portrait
+ * page and a flowchart a landscape one, and "whatever fits the panel" answers
+ * neither. See ExportSize.tsx.
  */
 export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
   const [said, say] = useSaid();
+  const [exportSize, setExportSize] = useExportSize(diagram.prisma ? "prisma" : "diagram");
+  /* A conversation can hold several diagrams, so a literal filter id would
+     collide the moment two are on screen at once -- the same reason svg.ts
+     draws arrowheads as triangles instead of `<marker>` refs. */
+  const shadowId = useId();
 
-  const drawn = useMemo(() => {
-    if (diagram.prisma) return { layout: prismaLayout(diagram.prisma) } as const;
-    const parsed = parseMermaid(diagram.source ?? "");
-    if (!parsed.ok) return { error: `Line ${parsed.line}: ${parsed.error}` } as const;
-    return { layout: layoutDiagram(parsed.diagram) } as const;
-  }, [diagram.source, diagram.prisma]);
+  const drawn = useMemo(
+    () => drawDiagram(diagram),
+    [diagram.source, diagram.prisma],
+  );
+
+  /** "Standard" writes no physical size at all -- the file's pixel size IS
+   *  its size, exactly as before this existed. A page size scales the
+   *  diagram's own geometry (never redrawn, unlike a chart's) to fit inside
+   *  the page's text block, via `fitWithin`, and upscales a small diagram to
+   *  fill the page rather than leaving it stranded in a corner. */
+  const exportPhysical = (layout: Layout): { widthIn: number; heightIn: number } | undefined => {
+    const box = pageBoxForExport(exportSize);
+    if (!box) return undefined;
+    const scale = fitWithin(layout.width, layout.height, box);
+    return { widthIn: (layout.width * scale) / PX_PER_IN, heightIn: (layout.height * scale) / PX_PER_IN };
+  };
 
   /* Rasterised from the exported SVG rather than from what is on screen: the
      two must be the same picture, and the on-screen one carries the app's
-     theme. Two-times scale, because a figure lands in a document at print
-     resolution and a 1x PNG of a 500px diagram looks soft next to the text. */
+     theme. */
   const toPng = async (): Promise<string | undefined> => {
     if (!("layout" in drawn)) return undefined;
     const { layout } = drawn;
-    const svg = toSvg(layout);
-    const url = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-    const image = new Image();
-    const loaded = new Promise<boolean>((resolve) => {
-      image.onload = () => resolve(true);
-      image.onerror = () => resolve(false);
-    });
-    image.src = url;
-    if (!(await loaded)) return undefined;
-    const canvas = document.createElement("canvas");
-    canvas.width = layout.width * 2;
-    canvas.height = layout.height * 2;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/png");
+    const physical = exportPhysical(layout);
+    const svg = toSvg(layout, undefined, physical);
+    /* Two-times scale at the natural size, because a figure lands in a
+       document at print resolution and a 1x PNG looks soft next to the
+       text; 300dpi at a page size, since that size is meant to print. */
+    const scale = physical ? PNG_SCALE_PAGE : PNG_SCALE_STANDARD;
+    return svgToPng(svg, layout.width * scale, layout.height * scale);
   };
 
   const saveSvg = async (): Promise<void> => {
     if (!("layout" in drawn)) return;
-    const res = await window.myra.diagramSave(diagram.title, "svg", toSvg(drawn.layout));
+    const physical = exportPhysical(drawn.layout);
+    const res = await window.myra.diagramSave(diagram.title, "svg", toSvg(drawn.layout, undefined, physical));
     say(res.ok ? "Saved to Documents" : res.error ?? "Could not save it");
   };
 
@@ -125,6 +141,11 @@ export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
           aria-label={diagram.title}
           className="dg-svg"
         >
+          <defs>
+            <filter id={shadowId} x="-30%" y="-30%" width="160%" height="160%">
+              <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="var(--dg-shadow)" />
+            </filter>
+          </defs>
           {layout.edges.map((e, i) => {
             const head = arrowHead(e);
             const dash = dashFor(e.style);
@@ -167,7 +188,15 @@ export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
             ));
             return (
               <g key={n.id}>
-                <path d={nodePath(n)} className={n.box?.tint ? "dg-node dg-tint" : "dg-node"} />
+                <path
+                  d={nodePath(n)}
+                  className={
+                    n.box?.category !== undefined
+                      ? `dg-node dg-cat-${n.box.category}`
+                      : n.box?.tint ? "dg-node dg-tint" : "dg-node"
+                  }
+                  filter={hasShadow(n) ? `url(#${shadowId})` : undefined}
+                />
                 {bars ? <path d={bars} className="dg-node-bars" fill="none" /> : null}
                 {turn ? <g transform={turn}>{texts}</g> : texts}
               </g>
@@ -177,6 +206,11 @@ export function DiagramView({ diagram }: { diagram: DiagramUpdate }) {
       </div>
 
       <div className="dg-acts">
+        <ExportSizeSelect
+          value={exportSize}
+          onChange={(v: ExportSize) => setExportSize(v)}
+          standardLabel="Natural size"
+        />
         {/* SVG first: it is the vector one, and the one a journal asks for. */}
         <button type="button" className="artifact-open" onClick={() => void saveSvg()}>
           Save SVG

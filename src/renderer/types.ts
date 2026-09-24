@@ -110,6 +110,14 @@ export interface ToolItem {
    * everything has stopped.
    */
   status: "running" | "ok" | "error" | "stopped";
+  /**
+   * The structured payload a diagram/chart tool's `ToolResult.detail` carried,
+   * never shown as text -- `ToolCard.tsx` reads it to find the artifact it
+   * drew, so an inline thumbnail can be shown beside the card. Unset for
+   * every other tool, and for a card rebuilt from a reopened conversation
+   * (`detail` is not persisted -- see restore.ts).
+   */
+  detail?: unknown;
 }
 
 /**
@@ -430,6 +438,9 @@ export interface AgentEvent {
   tool?: string;
   params?: Record<string, unknown>;
   result?: string;
+  /** For "tool_end": the tool's own `ToolResult.detail`, when it set one.
+   *  Never shown to the model -- see ToolItem.detail for what reads it. */
+  detail?: unknown;
   /** For "stats": how fast the reply that just finished was. One per model call. */
   stats?: MessageStats;
   /** The conversation this event belongs to, so a renderer looking at a

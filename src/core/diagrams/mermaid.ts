@@ -34,6 +34,10 @@ export interface DiagramNode {
   id: string;
   label: string;
   shape: NodeShape;
+  /** A grouping key from `class`/`:::`, never a colour -- MyRA owns the
+   *  palette that eventually paints it, the same reason `classDef`'s own
+   *  colours are read nowhere in this file. */
+  category?: string | undefined;
 }
 
 export type EdgeStyle = "solid" | "dotted" | "thick";
@@ -135,7 +139,28 @@ const EDGE_OPS: { re: RegExp; style: EdgeStyle; arrow: boolean }[] = [
  */
 const ID = /^[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)*/;
 
-interface NodeRef { id: string; label?: string | undefined; shape?: NodeShape | undefined; }
+interface NodeRef {
+  id: string;
+  label?: string | undefined;
+  shape?: NodeShape | undefined;
+  category?: string | undefined;
+}
+
+/**
+ * `id:::categoryName`, Mermaid's terser alternative to a `class` statement and
+ * the one a model reaches for first. Tried after a node (and its bracket
+ * label, if any) is otherwise fully read, so it also has to be tried when
+ * there was no bracket at all -- `A:::blue` is as valid as `A[Label]:::blue`.
+ * Left unhandled, the leading `:` fell through to the edge-operator reader
+ * and failed with "Expected an arrow after A".
+ */
+const CATEGORY_SUFFIX = /^:::([A-Za-z_][\w-]*)/;
+
+function readCategorySuffix(text: string, ref: NodeRef, at: number): { ref: NodeRef; next: number } {
+  const m = CATEGORY_SUFFIX.exec(text.slice(at));
+  if (!m) return { ref, next: at };
+  return { ref: { ...ref, category: m[1]! }, next: at + m[0]!.length };
+}
 
 /** Read one node reference, with its bracket label when it carries one. */
 function readNode(text: string, at: number): { ref: NodeRef; next: number } | undefined {
@@ -154,13 +179,13 @@ function readNode(text: string, at: number): { ref: NodeRef; next: number } | un
       const end = text.indexOf('"', from + 1);
       if (end < 0) return undefined;
       if (!text.startsWith(close, end + 1)) return undefined;
-      return { ref: { id, label: text.slice(from + 1, end), shape }, next: end + 1 + close.length };
+      return readCategorySuffix(text, { id, label: text.slice(from + 1, end), shape }, end + 1 + close.length);
     }
     const end = text.indexOf(close, from);
     if (end < 0) return undefined;
-    return { ref: { id, label: text.slice(from, end).trim(), shape }, next: end + close.length };
+    return readCategorySuffix(text, { id, label: text.slice(from, end).trim(), shape }, end + close.length);
   }
-  return { ref: { id }, next: pos };
+  return readCategorySuffix(text, { id }, pos);
 }
 
 /**
@@ -188,6 +213,10 @@ function splitStatements(line: string): string[] {
   return parts;
 }
 
+/** `class A,B,C categoryName` -- a category is a grouping key, never a colour;
+ *  see `CATEGORY_SUFFIX` above for the terser `:::categoryName` form. */
+const CLASS_STATEMENT = /^class\s+([\w.-]+(?:\s*,\s*[\w.-]+)*)\s+([A-Za-z_][\w-]*)\s*;?$/;
+
 export function parseMermaid(source: string): ParseResult {
   const raw = source.split(/\r?\n/);
   const nodes = new Map<string, DiagramNode>();
@@ -197,14 +226,21 @@ export function parseMermaid(source: string): ParseResult {
   const remember = (ref: NodeRef): void => {
     const existing = nodes.get(ref.id);
     if (!existing) {
-      nodes.set(ref.id, { id: ref.id, label: ref.label ?? ref.id, shape: ref.shape ?? "rect" });
+      nodes.set(ref.id, {
+        id: ref.id, label: ref.label ?? ref.id, shape: ref.shape ?? "rect",
+        ...(ref.category !== undefined ? { category: ref.category } : {}),
+      });
       return;
     }
     /* A node may be introduced bare and given its label later -- `A --> B` then
        `B[Screened]` -- so a later mention that carries one wins over the id
-       standing in for it. */
+       standing in for it. A category works the same way: `class A,B blue`
+       commonly comes after the nodes it names, but `A:::blue --> B[Label]`
+       gives the category first, so whichever arrives is kept until a later
+       mention overwrites it. */
     if (ref.label !== undefined) existing.label = ref.label;
     if (ref.shape !== undefined) existing.shape = ref.shape;
+    if (ref.category !== undefined) existing.category = ref.category;
   };
 
   for (let i = 0; i < raw.length; i++) {
@@ -254,7 +290,26 @@ export function parseMermaid(source: string): ParseResult {
           "grouping as its own nodes joined by dotted edges (`-.->`).",
       };
     }
-    if (/^(end|classDef|class|style|linkStyle|click)\b/.test(line)) continue;
+    if (/^(end|classDef|style|linkStyle|click)\b/.test(line)) continue;
+    if (/^class\b/.test(line)) {
+      /* `classDef`'s own colours are never read -- only which nodes share a
+         category matters, so `class` is the one discarded directive that is
+         now actually parsed. A line that does not match the `class <ids>
+         <name>` shape is still swallowed rather than reported: every other
+         directive on this line has always been ignored silently, and an
+         unrecognised spelling of this one should fail the same quiet way
+         rather than surface as a parse error over a feature the model was
+         never asked to use carefully. */
+      const m = CLASS_STATEMENT.exec(line);
+      if (m) {
+        const category = m[2]!;
+        for (const id of m[1]!.split(",")) {
+          const trimmed = id.trim();
+          if (trimmed) remember({ id: trimmed, category });
+        }
+      }
+      continue;
+    }
 
     for (const part of splitStatements(line)) {
       if (!part.trim()) continue;

@@ -1060,7 +1060,14 @@ export function App() {
               );
             }
             if (item.kind === "tool") {
-              return <ToolCard key={item.id} item={item} />;
+              return (
+                <ToolCard
+                  key={item.id}
+                  item={item}
+                  artifacts={documents.items}
+                  onOpenArtifact={(key) => { documents.setActive(key); documents.setOpen(true); }}
+                />
+              );
             }
             if (item.kind === "notice") {
               return (

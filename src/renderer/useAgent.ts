@@ -149,7 +149,10 @@ export function useAgent() {
         setItems((prev) =>
           prev.map((i) =>
             i.kind === "tool" && i.toolCallId === event.toolCallId
-              ? { ...i, status: "ok" as const, output: event.result ?? "" }
+              ? {
+                  ...i, status: "ok" as const, output: event.result ?? "",
+                  ...(event.detail !== undefined ? { detail: event.detail } : {}),
+                }
               : i,
           ),
         );

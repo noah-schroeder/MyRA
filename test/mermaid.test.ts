@@ -115,15 +115,48 @@ test("an id may hold a hyphen, and an arrow may have no spaces around it", () =>
   assert.equal(ok("flowchart TD\n A==>B").edges[0]?.style, "thick");
 });
 
-test("comments and styling directives are skipped, not parsed", () => {
+test("comments and colour directives are skipped, not parsed", () => {
+  // classDef's own hex is never read -- MyRA owns the palette a category is
+  // eventually painted with -- so only classDef/style/linkStyle/click stay
+  // no-ops. `class` itself is asserted separately below: it now groups nodes.
   const d = ok(`flowchart TD
     %% this is a comment
     A --> B
     classDef big fill:#f00
-    class A big
-    style B stroke:#000`);
+    style B stroke:#000
+    linkStyle 0 stroke:#000
+    click A "https://example.com"`);
   assert.equal(d.nodes.length, 2);
   assert.equal(d.edges.length, 1);
+  assert.equal(d.nodes[0]?.category, undefined);
+});
+
+test("a `class` statement groups the nodes it names", () => {
+  const d = ok("flowchart TD\n A --> B --> C\n class A,B warm");
+  assert.equal(d.nodes.find((n) => n.id === "A")?.category, "warm");
+  assert.equal(d.nodes.find((n) => n.id === "B")?.category, "warm");
+  assert.equal(d.nodes.find((n) => n.id === "C")?.category, undefined);
+});
+
+test("the `:::name` shorthand groups a node inline, with or without a bracket label", () => {
+  const bracketed = ok("flowchart TD\n A[Screen]:::warm --> B[Done]");
+  assert.equal(bracketed.nodes.find((n) => n.id === "A")?.category, "warm");
+  const bare = ok("flowchart TD\n A:::warm --> B[Done]");
+  assert.equal(bare.nodes.find((n) => n.id === "A")?.category, "warm");
+});
+
+test("a category from `:::` or `class` survives whichever order the node is otherwise built in", () => {
+  // class before the node is declared...
+  const before = ok("flowchart TD\n class B warm\n A --> B[Screened]");
+  assert.equal(before.nodes.find((n) => n.id === "B")?.category, "warm");
+  // ...and a later class statement overwrites an earlier `:::` category.
+  const overwritten = ok("flowchart TD\n A:::cool --> B\n class A warm");
+  assert.equal(overwritten.nodes.find((n) => n.id === "A")?.category, "warm");
+});
+
+test("a malformed `class` line is swallowed quietly, like the other directives beside it", () => {
+  const d = ok("flowchart TD\n A --> B\n class");
+  assert.equal(d.nodes.find((n) => n.id === "A")?.category, undefined);
 });
 
 test("semicolons separate statements on one line", () => {

@@ -11,7 +11,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import { parseMermaid } from "../src/core/diagrams/mermaid.ts";
-import { layoutDiagram, rankNodes, wrapLabel, type PlacedNode } from "../src/core/diagrams/layout.ts";
+import {
+  assignCategoryColors, CATEGORY_PALETTE_SIZE, layoutDiagram, rankNodes, wrapLabel, type PlacedNode,
+} from "../src/core/diagrams/layout.ts";
 
 function laid(src: string) {
   const parsed = parseMermaid(src);
@@ -120,4 +122,30 @@ test("a diamond is given room for text its slanted sides would clip", () => {
   const l = laid("flowchart TD\n A[Screened] --> B{Screened}");
   assert.ok(at(l, "B").w > at(l, "A").w);
   assert.ok(at(l, "B").h > at(l, "A").h);
+});
+
+test("categories are assigned palette slots in first-appearance order", () => {
+  const d = (parseMermaid(
+    "flowchart TD\n A:::warm --> B:::cool --> C:::warm",
+  ) as { ok: true; diagram: never }).diagram;
+  const { colorOf, overflow } = assignCategoryColors(d);
+  assert.equal(colorOf.get("warm"), 0);
+  assert.equal(colorOf.get("cool"), 1);
+  assert.deepEqual(overflow, []);
+});
+
+test("a category beyond the palette cap is reported, never recycled onto another one", () => {
+  const names = Array.from({ length: CATEGORY_PALETTE_SIZE + 2 }, (_, i) => `cat${i}`);
+  const src = `flowchart TD\n${names.map((n, i) => ` N${i}:::${n}`).join("\n")}`;
+  const d = (parseMermaid(src) as { ok: true; diagram: never }).diagram;
+  const { colorOf, overflow } = assignCategoryColors(d);
+  assert.equal(colorOf.size, CATEGORY_PALETTE_SIZE);
+  assert.deepEqual(overflow, names.slice(CATEGORY_PALETTE_SIZE));
+  assert.deepEqual(new Set(colorOf.values()), new Set([0, 1, 2, 3, 4, 5]));
+});
+
+test("layoutDiagram sets box.category for a grouped node and leaves an ungrouped one untouched", () => {
+  const l = laid("flowchart TD\n A:::warm --> B");
+  assert.equal(at(l, "A").box?.category, 0);
+  assert.equal(at(l, "B").box, undefined);
 });

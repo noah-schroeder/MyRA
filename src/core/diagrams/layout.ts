@@ -40,10 +40,14 @@ const MARGIN = 20;
 /**
  * How a box is drawn, when the default is wrong for it.
  *
- * Only a hand-built figure sets this -- `layoutDiagram` never does, so a
- * model-drawn diagram is the same bytes it was before this existed. Nothing in
- * svg.ts or DiagramView.tsx learns the word "PRISMA"; this is presentational
- * and diagram-agnostic, the same shape `subroutineBars` already has.
+ * A hand-built figure sets most of this -- `layoutDiagram` places every
+ * ordinary flowchart's boxes with no `radius`/`inset`/`tint`/`turn` of their
+ * own, so a model-drawn diagram is the same bytes it was before this existed.
+ * `category` is the one field `layoutDiagram` itself populates, from a
+ * Mermaid `class`/`:::` grouping -- see `assignCategoryColors` below. Nothing
+ * in svg.ts or DiagramView.tsx learns the word "PRISMA"; this is
+ * presentational and diagram-agnostic, the same shape `subroutineBars`
+ * already has.
  */
 export interface BoxStyle {
   /** Corner radius. 0 is a published PRISMA figure's square corner. */
@@ -54,6 +58,10 @@ export interface BoxStyle {
   tint?: boolean | undefined;
   /** Degrees to turn the text about the box's own centre. -90 for a band. */
   turn?: number | undefined;
+  /** Index into `theme.categoryFill`, from `assignCategoryColors`. This file
+   *  has no DOM or CSS to read, so it carries an index rather than a colour --
+   *  as theme-agnostic as the boolean `tint` above. */
+  category?: number | undefined;
 }
 
 export interface PlacedNode {
@@ -158,6 +166,34 @@ export function rankNodes(diagram: Diagram): Map<string, number> {
   return out;
 }
 
+/** As many categories as a hand-picked, contrast-checked palette holds --
+ *  raising it means adding and verifying another colour in svg.ts and
+ *  styles.css, not just a bigger number here. Close to what a reader can
+ *  tell apart in one figure anyway. */
+export const CATEGORY_PALETTE_SIZE = 6;
+
+/**
+ * Turn a diagram's `class`/`:::` groupings into palette slots.
+ *
+ * Assigned in first-appearance order so the same source always paints the
+ * same way. A category beyond the cap gets no slot at all rather than
+ * reusing one already spoken for -- recycling a colour would claim two
+ * unrelated groupings are the same category, which reads worse than leaving
+ * the extra ones undecorated.
+ */
+export function assignCategoryColors(
+  diagram: Diagram,
+): { colorOf: Map<string, number>; overflow: string[] } {
+  const colorOf = new Map<string, number>();
+  const overflow: string[] = [];
+  for (const n of diagram.nodes) {
+    if (n.category === undefined || colorOf.has(n.category) || overflow.includes(n.category)) continue;
+    if (colorOf.size < CATEGORY_PALETTE_SIZE) colorOf.set(n.category, colorOf.size);
+    else overflow.push(n.category);
+  }
+  return { colorOf, overflow };
+}
+
 /** Place a parsed diagram. Coordinates are final, origin top-left. */
 export function layoutDiagram(diagram: Diagram): Layout {
   const ranks = rankNodes(diagram);
@@ -216,6 +252,8 @@ export function layoutDiagram(diagram: Diagram): Layout {
   }
   const widest = Math.max(0, ...rankSpan.values());
 
+  const { colorOf } = assignCategoryColors(diagram);
+
   const placed = new Map<string, PlacedNode>();
   let along = MARGIN;
   const reverse = diagram.direction === "BT" || diagram.direction === "RL";
@@ -225,9 +263,11 @@ export function layoutDiagram(diagram: Diagram): Layout {
     let across = MARGIN + (widest - (rankSpan.get(r) ?? 0)) / 2;
     for (const n of row) {
       const s = sized.get(n.id)!;
+      const category = n.category !== undefined ? colorOf.get(n.category) : undefined;
       const node: PlacedNode = horizontal
         ? { id: n.id, lines: s.lines, shape: n.shape, x: along, y: across, w: s.w, h: s.h }
         : { id: n.id, lines: s.lines, shape: n.shape, x: across, y: along, w: s.w, h: s.h };
+      if (category !== undefined) node.box = { category };
       placed.set(n.id, node);
       across += (horizontal ? s.h : s.w) + SIBLING_GAP;
     }

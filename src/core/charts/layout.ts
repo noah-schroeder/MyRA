@@ -25,8 +25,21 @@ const AXIS_TITLE_GAP = 22;
 const TICK_LABEL_GAP = 18;
 const TITLE_GAP = 24;
 const LEGEND_ROW = 18;
-const CANVAS_W = 640;
-const CANVAS_H = 420;
+/** The figure's size with no `size` option given -- "standard" export, and
+ *  every existing test and caller that predates the artifact panel drawing
+ *  a chart at its own size. */
+export const CANVAS_W = 640;
+export const CANVAS_H = 420;
+/** Below this width a legend in the 120px right margin would take a third of
+ *  the plot -- see layoutFrame's own comment on where it moves instead. */
+const LEGEND_NARROW = 480;
+/** How wide the panel has to be measured at minimum, so a chart never
+ *  collapses into unreadable text -- see chartSizeFor. */
+const MIN_CHART_W = 300;
+const MIN_CHART_H = 200;
+/** A tall, narrow panel gets a chart capped at 4:5 rather than a sliver
+ *  stretched down the whole column. */
+const MAX_H_RATIO = 0.8;
 
 export interface DataPoint {
   x: number;
@@ -116,6 +129,17 @@ export interface HistBar {
 export interface Tick { pos: number; label: string; }
 export interface CategoryTick { pos: number; label: string; }
 
+/** A legend entry's own device position -- placed once, here, rather than
+ *  recomputed by both the renderer and svg.ts from a bare name/colorIndex
+ *  list, which is exactly how the two drifted apart before ChartLayout
+ *  carried positions of its own. */
+export interface PlacedLegendEntry { name: string; colorIndex: number; x: number; y: number; }
+
+/** The figure size a caller measured off its own panel, fed back into
+ *  `layoutChart` so the plot redraws at that size instead of the fixed
+ *  canvas. See chartSizeFor for how one is built from raw available space. */
+export interface ChartSize { width: number; height: number; }
+
 export interface ChartLayout {
   kind: ChartKind;
   width: number;
@@ -129,7 +153,7 @@ export interface ChartLayout {
   title?: string | undefined;
   xLabel?: string | undefined;
   yLabel?: string | undefined;
-  legend: { name: string; colorIndex: number }[];
+  legend: PlacedLegendEntry[];
   series?: PlottedSeries[] | undefined;
   fit?: FitLine | undefined;
   bars?: PlottedBar[] | undefined;
@@ -157,6 +181,31 @@ interface Frame {
   plot: { x: number; y: number; w: number; h: number };
   width: number;
   height: number;
+  legend: PlacedLegendEntry[];
+}
+
+/** A named legend entry's own printed width -- swatch, gap, text, trailing
+ *  gap -- used to decide how many fit on one row below the plot. */
+function legendItemWidth(name: string): number {
+  return 20 + textWidth(name) + 8;
+}
+
+/** Greedily wraps legend entries into rows no wider than `availWidth`, never
+ *  leaving a row empty and always making progress even when a single entry
+ *  alone is wider than the row -- see the `x > 0` guard. */
+function packLegend<T extends { name: string }>(items: T[], availWidth: number): T[][] {
+  const rows: T[][] = [[]];
+  let x = 0;
+  for (const item of items) {
+    const w = legendItemWidth(item.name);
+    if (x + w > availWidth && x > 0) {
+      rows.push([]);
+      x = 0;
+    }
+    rows[rows.length - 1]!.push(item);
+    x += w;
+  }
+  return rows;
 }
 
 function layoutFrame(opts: {
@@ -164,16 +213,62 @@ function layoutFrame(opts: {
   xLabel?: string | undefined;
   yLabel?: string | undefined;
   yTickWidth: number;
-  legendRows: number;
+  legendNames: { name: string; colorIndex: number }[];
+  size?: ChartSize | undefined;
 }): Frame {
+  const width = opts.size?.width ?? CANVAS_W;
+  const height = opts.size?.height ?? CANVAS_H;
+  const hasLegend = opts.legendNames.length > 0;
+  // A legend in the 120px right margin works at the standard 640px canvas
+  // width; below LEGEND_NARROW it would take a third of the plot, so it
+  // drops under the x-axis instead -- see this module's header.
+  const legendOnRight = hasLegend && width >= LEGEND_NARROW;
+  const legendBelow = hasLegend && !legendOnRight;
+
   const left = MARGIN + opts.yTickWidth + (opts.yLabel ? AXIS_TITLE_GAP : 0) + 8;
   const top = MARGIN + (opts.title ? TITLE_GAP : 0);
-  const bottom = MARGIN + TICK_LABEL_GAP + (opts.xLabel ? AXIS_TITLE_GAP : 0);
-  const right = MARGIN + (opts.legendRows ? 120 : 0);
-  const width = CANVAS_W;
-  const height = CANVAS_H + opts.legendRows * 0; // legend sits inside the right margin, not below
-  const plot = { x: left, y: top, w: width - left - right, h: height - top - bottom };
-  return { plot, width, height };
+  const right = MARGIN + (legendOnRight ? 120 : 0);
+  const plotX = left;
+  const plotW = width - left - right;
+
+  // Row-wrapping only needs plotW, which nothing below depends on -- so the
+  // row count is known before `bottom`, which needs it, is computed.
+  const legendRows = legendBelow ? packLegend(opts.legendNames, plotW) : [];
+
+  const bottom = MARGIN + TICK_LABEL_GAP + (opts.xLabel ? AXIS_TITLE_GAP : 0) + legendRows.length * LEGEND_ROW;
+  const plotY = top;
+  const plotH = height - top - bottom;
+  const plot = { x: plotX, y: plotY, w: plotW, h: plotH };
+
+  let legend: PlacedLegendEntry[] = [];
+  if (legendOnRight) {
+    const lx = plot.x + plot.w + 14;
+    legend = opts.legendNames.map((entry, i) => ({ ...entry, x: lx, y: plot.y + 8 + i * 18 }));
+  } else if (legendBelow) {
+    const baseY = plot.y + plot.h + TICK_LABEL_GAP + (opts.xLabel ? AXIS_TITLE_GAP : 0) + LEGEND_ROW * 0.7;
+    legend = legendRows.flatMap((row, r) => {
+      let x = plot.x;
+      return row.map((entry) => {
+        const placed = { ...entry, x, y: baseY + r * LEGEND_ROW };
+        x += legendItemWidth(entry.name);
+        return placed;
+      });
+    });
+  }
+
+  return { plot, width, height, legend };
+}
+
+/**
+ * Turns the raw space a panel measured for its chart into a size
+ * `layoutChart` will draw at -- floored so text never collapses below
+ * readable, and height-capped relative to width so a tall narrow panel gets
+ * a chart bounded at 4:5 rather than a sliver stretched down the column.
+ */
+export function chartSizeFor(avail: { width: number; height: number }): ChartSize {
+  const width = Math.max(MIN_CHART_W, Math.round(avail.width));
+  const height = Math.max(MIN_CHART_H, Math.min(Math.round(avail.height), Math.round(width * MAX_H_RATIO)));
+  return { width, height };
 }
 
 const CATEGORY_GAP = 0.3; // fraction of a category's slot left as whitespace between categories
@@ -192,6 +287,9 @@ export function layoutChart(data: ChartData, opts: {
   title?: string | undefined;
   xLabel?: string | undefined;
   yLabel?: string | undefined;
+  /** The figure's own drawn size -- omitted for the fixed 640x420 canvas
+   *  every existing caller and test still gets by default. */
+  size?: ChartSize | undefined;
 } = {}): ChartLayout {
   const names = seriesNames(data);
   const legend = names.length > 1 ? names.map((name, i) => ({ name, colorIndex: i })) : [];
@@ -204,7 +302,7 @@ export function layoutChart(data: ChartData, opts: {
     const xScale = niceScale(Math.min(...allX), Math.max(...allX));
     const yScale = niceScale(Math.min(...allY), Math.max(...allY));
     const frame = layoutFrame({
-      ...opts, yTickWidth: yTickLabelWidth(yScale), legendRows: legend.length,
+      ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: legend,
     });
 
     const series: PlottedSeries[] = data.series.map((s, i) => ({
@@ -240,7 +338,7 @@ export function layoutChart(data: ChartData, opts: {
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.xLabel ? { xLabel: opts.xLabel } : {}),
       ...(opts.yLabel ? { yLabel: opts.yLabel } : {}),
-      legend, series, ...(fit ? { fit } : {}),
+      legend: frame.legend, series, ...(fit ? { fit } : {}),
     };
   }
 
@@ -261,7 +359,7 @@ export function layoutChart(data: ChartData, opts: {
       Math.min(0, ...perCategoryMins, ...errorExtent),
       Math.max(0, ...perCategoryTotals, ...errorExtent),
     );
-    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendRows: legend.length });
+    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: legend });
 
     const n = data.categories.length;
     const slotW = frame.plot.w / Math.max(1, n);
@@ -309,7 +407,7 @@ export function layoutChart(data: ChartData, opts: {
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.xLabel ? { xLabel: opts.xLabel } : {}),
       ...(opts.yLabel ? { yLabel: opts.yLabel } : {}),
-      legend, bars,
+      legend: frame.legend, bars,
     };
   }
 
@@ -317,7 +415,7 @@ export function layoutChart(data: ChartData, opts: {
     const built = data.groups.map((g) => boxOf(g));
     const allY = built.flatMap((b) => [b.whiskerLo, b.whiskerHi, ...b.outliers]);
     const yScale = niceScale(Math.min(...allY), Math.max(...allY));
-    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendRows: 0 });
+    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: [] });
 
     const n = data.groups.length;
     const slotW = frame.plot.w / Math.max(1, n);
@@ -350,7 +448,7 @@ export function layoutChart(data: ChartData, opts: {
   // histogram
   const bins = histBins(data.values);
   const yScale = niceScale(0, Math.max(1, ...bins.map((b) => b.count)));
-  const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendRows: 0 });
+  const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: [] });
   const xMin = bins[0]!.lo;
   const xMax = bins[bins.length - 1]!.hi;
   const xOf = (v: number): number => frame.plot.x + ((v - xMin) / (xMax - xMin || 1)) * frame.plot.w;

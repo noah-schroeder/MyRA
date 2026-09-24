@@ -377,6 +377,33 @@ figure is where a reviewer adds what the run alone cannot supply, reopening
 the same form prefilled with what is already there and redrawing on the same
 id in place.
 
+**A chart redraws to fit; a diagram scrolls — because only one of them has no
+geometry to protect.** The artifact panel used to draw every chart at a fixed
+640×420 regardless of how wide the panel was, so it spilled past the panel's
+own bottom edge at the default width. A diagram's canvas deliberately
+scrolls rather than shrinking, because its labels are its entire content —
+but a chart's axes, ticks and marks are all recomputed from the data at
+whatever size they are asked to fill, so there is nothing lost by asking for
+a different size. `ChartView.tsx` measures its own canvas box with a
+`ResizeObserver` and feeds that through `chartSizeFor` into `layoutChart`'s
+new `size` option every time it changes; below 480px wide, a multi-series
+legend moves under the plot instead of taking a third of it in the right
+margin (`layoutChart` in [layout.ts](src/core/charts/layout.ts)). Export asks
+a different question from what fits the panel, so it is a separate, explicit
+choice: standard (the figure's own natural size), a portrait page or a
+landscape page — a PRISMA figure is conventionally a full portrait page and a
+flowchart a landscape one — remembered per figure kind in
+[ExportSize.tsx](src/renderer/components/ExportSize.tsx). A page means the
+*text block*, inside 1-inch margins, and which paper it is drawn on follows
+the account's own locale rather than a setting nobody would think to look
+for ([exportSize.ts](src/core/figures/exportSize.ts)). Both `toChartSvg` and
+`toSvg` take an optional physical size and, when given one, write the outer
+`width`/`height` in inches while the `viewBox` stays in layout pixels — so
+the file inserts into a document at that physical size with no transform of
+its own, and omitting it (every existing caller) leaves the output exactly
+what it always was, which is what keeps `test/diagramSvg.test.ts`'s
+byte-identity test pinned.
+
 ### The paper drafter
 
 Ported in substance from Braindump5000, which was tuned against real use before it got

@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { runTurn, parseArguments, DEFAULT_MAX_STEPS } from "../src/core/agent/loop.ts";
+import { runTurn, parseArguments, DEFAULT_MAX_STEPS, type AgentEvent } from "../src/core/agent/loop.ts";
 import { ToolRegistry, type ToolDef } from "../src/core/agent/registry.ts";
 
 /** A stub chat endpoint that replies with a scripted sequence. */
@@ -191,6 +191,94 @@ test("a model that will not stop is stopped, and told so", async () => {
 
 test("the default step budget is finite", () => {
   assert.ok(DEFAULT_MAX_STEPS > 0 && DEFAULT_MAX_STEPS <= 50);
+});
+
+/**
+ * `onEvent` is what wires `chat()`'s `onDelta`, which switches it from
+ * reading a whole JSON body (what `withServer` above serves) to the real
+ * SSE frame-by-frame reader -- so a test that passes `onEvent` needs an
+ * actual `text/event-stream` server, not `withServer`'s plain JSON.
+ */
+async function withSseServer<T>(
+  turns: string[][],
+  body: (endpoint: { baseUrl: string; envVar: string; timeoutMs: number }) => Promise<T>,
+): Promise<T> {
+  let turn = 0;
+  const server: Server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      for (const frame of turns[Math.min(turn++, turns.length - 1)] ?? []) res.write(frame);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const { port } = server.address() as AddressInfo;
+  try {
+    return await body({ baseUrl: `http://127.0.0.1:${port}/v1`, envVar: "K", timeoutMs: 5_000 });
+  } finally {
+    await new Promise<void>((done) => server.close(() => done()));
+  }
+}
+
+const sseFrame = (payload: unknown): string => `data: ${JSON.stringify(payload)}\n\n`;
+
+function sseCallsTurn(name: string, args: unknown, id = "c1"): string[] {
+  return [
+    sseFrame({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] }),
+    sseFrame({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
+  ];
+}
+
+function sseSaysTurn(text: string): string[] {
+  return [
+    sseFrame({ choices: [{ delta: { content: text } }] }),
+    sseFrame({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+  ];
+}
+
+test("a tool's ToolResult.detail rides the tool_end event, for the UI rather than the model", async () => {
+  const registry = new ToolRegistry();
+  registry.register({
+    name: "draw",
+    description: "draw",
+    risk: "safe",
+    parameters: { type: "object", properties: {} },
+    handler: async () => ({ content: "Drew it.", detail: { id: "diagram-1" } }),
+  });
+  const events: AgentEvent[] = [];
+
+  await withSseServer([sseCallsTurn("draw", {}), sseSaysTurn("done")], async (endpoint) => {
+    await runTurn({
+      registry, endpoint,
+      messages: [{ role: "user", content: "draw something" }],
+      onEvent: (e) => events.push(e),
+    });
+  });
+
+  const toolEnd = events.find((e) => e.type === "tool_end");
+  assert.deepEqual(toolEnd?.detail, { id: "diagram-1" });
+  // The model-facing text is untouched by detail's presence.
+  assert.equal(toolEnd?.result, "Drew it.");
+});
+
+test("a tool with no detail leaves tool_end's detail unset, not present-and-undefined", async () => {
+  const registry = new ToolRegistry();
+  registry.register(echoTool([]));
+  const events: AgentEvent[] = [];
+
+  await withSseServer([sseCallsTurn("echo", { text: "hi" }), sseSaysTurn("done")], async (endpoint) => {
+    await runTurn({
+      registry, endpoint,
+      messages: [{ role: "user", content: "use echo" }],
+      onEvent: (e) => events.push(e),
+    });
+  });
+
+  const toolEnd = events.find((e) => e.type === "tool_end");
+  assert.equal("detail" in (toolEnd ?? {}), false);
 });
 
 test("usage is summed across every step of the turn", async () => {
