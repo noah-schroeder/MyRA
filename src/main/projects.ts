@@ -253,7 +253,7 @@ export function installProjectIpc(deps: ProjectDeps): void {
   };
 
   /* Every write, wherever it came from. The ones that matter most are not from
-     the window: a conversation files itself when its first turn finishes. */
+     the window: a conversation files itself as its first message is sent. */
   setProjectsWatcher(() => void publish());
 
   ipcMain.handle("myra:project-list", async () => ({ ok: true, projects: await summaries() }));

@@ -276,7 +276,28 @@ nothing here ever overwrites what a person wrote or approved.
 [work.ts](src/main/work.ts)'s lease and a resident-model check both gate the automatic
 pass — a local model MyRA is not already holding must never be loaded just to write a
 note, the exact reload `resolveLlm`'s own header warns against; a hosted choice has no
-such card to spare and is always allowed to run.
+such card to spare and is always allowed to run, and so does the user's own endpoint,
+which has nothing to load (`runtime.wouldLoadForChat()` is the question, not "is a local
+model resident"). A pass that saves anything says so in the conversation it read, as a
+notice: one that wrote notes where nobody was looking was indistinguishable from one that
+never ran.
+
+**`remember` is the third door, and it goes through the same grounding.** The idle pass
+is right for what nobody pointed at and wrong for "remember that we're using grounded
+theory", which someone says expecting to see it kept now. So the model has a tool
+([tools/memory.ts](src/core/agent/tools/memory.ts)) whose note is saved only when its
+`quote` passes `groundProposals` — injection can reach the tool and cannot get past it.
+It is offered only in a project that has a memory file and `auto` on (a simple folder must
+not become a research project because a model called a tool in it), and `addAuto` appends
+without moving the conversation's `seen` watermark. Beside it, each turn in a project has a
+**Remember** button that saves the message, or the part of it selected, as a `"you"` note:
+the person's own action, so it is reviewed in the dialog rather than grounded.
+
+**The setup chat streams, so its reasoning shows.** Each of its model calls is JSON nobody
+reads, which on a local model meant minutes with nothing on screen. `runProjectSetup` takes
+a `SetupOutput` — `say` for the narrative the conversation keeps, `think` for reasoning
+that is shown and never kept, `progress` for the status row — and passes the chat turn's own
+reasoning switch (`extra`) to `runSubagent`, which otherwise sends none.
 
 **A separate file, in a subdirectory, never a project's own record.**
 [memoryStore.ts](src/main/memoryStore.ts) keeps `projects/memory/<id>.json` beside

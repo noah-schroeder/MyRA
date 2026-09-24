@@ -1174,6 +1174,14 @@ body:has(.artifact-grip:active) { user-select: none; }
 /* A user turn is a bubble the button would otherwise sit inside. */
 .turn.user .turn-copy { top: -8px; right: -4px; }
 
+/* A note, not a document: sized to its text rather than to half the window,
+   and in the reading font, since it is prose somebody will read back. */
+.dialog-editor.remember-text { min-height: 0; font-family: inherit; font-size: 13px; }
+
+/* Remember sits just left of Copy, which is at most "Copied" wide. */
+.turn-remember { right: 62px; }
+.turn.user .turn-remember { right: 58px; }
+
 .artifact-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Below this the three columns stop fitting: the thread is squeezed to nothing

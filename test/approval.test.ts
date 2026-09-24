@@ -18,6 +18,7 @@ import { DOCUMENT_TOOL_DEFS } from "../src/core/agent/tools/documents.ts";
 import { RESEARCH_TOOL_DEFS } from "../src/core/agent/tools/research.ts";
 import { LIBRARY_TOOL_DEFS } from "../src/core/agent/tools/library.ts";
 import { TASK_TOOL_DEFS } from "../src/core/agent/tools/tasks.ts";
+import { MEMORY_TOOL_DEFS } from "../src/core/agent/tools/memory.ts";
 import { DIAGRAM_TOOL_DEFS } from "../src/core/agent/tools/diagram.ts";
 import { TABLE_TOOL_DEFS } from "../src/core/agent/tools/table.ts";
 import { PRISMA_TOOL_DEFS } from "../src/core/agent/tools/prisma.ts";
@@ -160,6 +161,7 @@ test("no tool declares a floor class, because the UI has no typed confirm", () =
     ...DIAGRAM_TOOL_DEFS,
     ...TABLE_TOOL_DEFS,
     ...PRISMA_TOOL_DEFS,
+    ...MEMORY_TOOL_DEFS,
   ];
   assert.ok(all.length >= 12, "the registry should still have its tools");
   const floors = all.filter((t) => FLOOR_CLASSES.includes(t.risk)).map((t) => t.name);
@@ -180,6 +182,7 @@ test("every tool declares a risk class the policy knows about", () => {
     ...DIAGRAM_TOOL_DEFS,
     ...TABLE_TOOL_DEFS,
     ...PRISMA_TOOL_DEFS,
+    ...MEMORY_TOOL_DEFS,
   ];
   for (const tool of all) {
     assert.ok(

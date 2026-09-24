@@ -44,6 +44,7 @@ import {
 import { parse } from "../core/tabular/parse.ts";
 import { rowCount } from "../core/tabular/table.ts";
 import { setTaskHost, TASK_TOOL_DEFS } from "../core/agent/tools/tasks.ts";
+import { MEMORY_TOOL_DEFS, setMemoryToolHost } from "../core/agent/tools/memory.ts";
 import {
   libraryCollections, librarySearch, libraryRoute, libraryStatus,
 } from "./runtime/zoteroLibrary.ts";
@@ -111,8 +112,8 @@ import { defaultStores, installProjectIpc } from "./projects.ts";
 import { fileInActiveProject, filedRefs, readAll as readAllProjects } from "./projectStore.ts";
 import { ownerOf, type Project } from "../core/projects/project.ts";
 import { installMemoryIpc, runProjectSetup, scheduleAutoUpdate, SETUP_GREETING } from "./projectMemory.ts";
-import { readMemory } from "./memoryStore.ts";
-import type { ProjectMemory } from "../core/projects/memory.ts";
+import { hasMemory, readMemory, writeMemory } from "./memoryStore.ts";
+import { addAuto, type ProjectMemory } from "../core/projects/memory.ts";
 import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -553,13 +554,22 @@ let resolveEndpoint: () => Promise<EndpointResolution> = () => {
 let jobs: Jobs | undefined;
 
 /**
+ * The project and transcript the `remember` tool may write from, for the turn
+ * in flight -- or nothing, which is also what keeps the tool off the list.
+ *
+ * Set only for a conversation in a project that keeps notes and lets them grow
+ * on their own; see core/agent/tools/memory.ts for why each condition is there.
+ */
+let rememberTurn: { projectId: string; sessionId: string; messages: ChatMessage[] } | undefined;
+
+/**
  * Which project this conversation belongs to, if any.
  *
- * The project that already owns it wins; a brand-new conversation has no
- * owner yet -- it is filed only after its first turn finishes, in
- * `handleSend`'s own `finally` block -- so the active project stands in for
- * it, the same fallback `fileInActiveProject` uses to decide where a turn's
- * conversation, image or run will land.
+ * The project that already owns it wins; a brand-new conversation may not
+ * have one yet -- `handleSend` files it as its first message is sent, without
+ * waiting for the write -- so the active project stands in for it, the same
+ * fallback `fileInActiveProject` uses to decide where a turn's conversation,
+ * image or run will land.
  */
 async function projectForSession(sessionId: string): Promise<Project | undefined> {
   const projects = await readAllProjects();
@@ -679,6 +689,20 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      before the greeting (setup's own, unshifted below) can change the count. */
   const isFirstMessage = conversation.messages_.length === 1;
   if (isFirstMessage) conversation.title = titleFrom(conversation.messages_);
+  /*
+   * Saved and filed now, as well as when the turn ends.
+   *
+   * Filing waited for the turn to finish, because a conversation has no file
+   * until it is saved -- and a research project's setup turn runs for minutes
+   * across several dialogs. For all of that time the rail showed the project
+   * twice, once in Projects and once as an empty "Nothing in this project yet"
+   * list under its name, beside the very conversation that belonged in it: a
+   * blank second folder, as far as anyone looking could tell. With the user's
+   * message in it, the conversation is real enough to save and to file.
+   */
+  conversation.messages = conversation.messages_.length;
+  await saveSession(conversation).catch(() => {});
+  void fileInActiveProject(config, "chat", conversation.id);
 
   const project = await projectForSession(conversation.id);
   const memory = project ? await readMemory(project.id) : undefined;
@@ -687,6 +711,13 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      later message in the same project is an ordinary turn, project block and
      all -- see the `else` branch below. */
   const runsSetup = Boolean(project && memory?.setup === "pending" && isFirstMessage);
+  /* Identity, not a flag: a turn that was aborted by this one reaches its own
+     `finally` after this line runs, and must not clear what this turn set. */
+  const turnMemory =
+    project && memory && memory.auto && !runsSetup && (await hasMemory(project.id))
+      ? { projectId: project.id, sessionId: conversation.id, messages: conversation.messages_ }
+      : undefined;
+  rememberTurn = turnMemory;
 
   inFlight?.abort();
   inFlight = new AbortController();
@@ -726,12 +757,21 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
        */
       conversation.messages_.unshift({ role: "assistant", content: SETUP_GREETING });
       let narrative = "";
-      const say = (delta: string): void => {
-        narrative += delta;
-        emit({ type: "text", text: delta });
-      };
-      await runProjectSetup(project!.id, text, say, inFlight.signal);
+      await runProjectSetup(project!.id, text, {
+        say: (delta) => {
+          narrative += delta;
+          emit({ type: "text", text: delta });
+        },
+        /* Shown, never kept: `narrative` is what the conversation stores, and
+           reasoning stays out of it the way it stays out of every turn. */
+        think: (delta) => emit({ type: "text", text: delta, kind: "thinking" }),
+        progress: (progress) => emit({ type: "progress", progress }),
+      }, inFlight.signal);
       if (narrative.trim()) conversation.messages_.push({ role: "assistant", content: narrative });
+      /* The window reads "setup pending" once, when the project is opened, and
+         went on believing it -- hiding the notes button and greeting every new
+         conversation as a setup chat -- until another project was chosen. */
+      send("myra:project-memory-changed", { projectId: project!.id });
       emit({ type: "done", result: JSON.stringify({}) });
     } else {
     /*
@@ -780,7 +820,15 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
            branching on `runsSetup`, so a project just set up on this very
            turn is still empty here -- correct, since its notes did not exist
            before this message arrived either. */
-        ...(project && memory ? { project: { name: project.name, memory, ...(limit ? { contextTokens: limit } : {}) } } : {}),
+        ...(project && memory
+          ? {
+              project: {
+                name: project.name, memory,
+                ...(limit ? { contextTokens: limit } : {}),
+                ...(turnMemory ? { remembers: true } : {}),
+              },
+            }
+          : {}),
       }),
       ...(apiKey ? { apiKey } : {}),
       ...(Object.keys(sampling ?? {}).length ? { sampling: sampling! } : {}),
@@ -833,13 +881,13 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
     conversation.messages = conversation.messages_.length;
     await saveSession(conversation).catch(() => {});
     /*
-     * Filed here rather than when the session id was minted.
+     * Filed again here, never when the session id was minted.
      *
      * A conversation with no messages has no file on disk, so a project filing
      * one at creation held a member that the next read -- correctly -- pruned
-     * as deleted. This is the first moment the conversation exists as anything
-     * a project could contain. Repeating on every turn is free: adding a member
-     * that is already there changes nothing and writes nothing.
+     * as deleted. The turn's start already filed it once it had a message;
+     * repeating is free, since adding a member that is already there changes
+     * nothing and writes nothing.
      */
     void fileInActiveProject(config, "chat", conversation.id);
     /* Restarted on every turn in a project, setup included -- a quiet
@@ -848,6 +896,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
        finished. See projectMemory.ts's own header for why this is not read
        until the conversation has actually gone idle. */
     if (project) scheduleAutoUpdate(project.id, conversation);
+    if (rememberTurn === turnMemory) rememberTurn = undefined;
     inFlight = undefined;
     inFlightConversation = undefined;
     liveEvents = [];
@@ -2375,7 +2424,7 @@ async function main(): Promise<void> {
 
   for (const def of [
     ...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS, ...TASK_TOOL_DEFS,
-    ...DIAGRAM_TOOL_DEFS, ...TABLE_TOOL_DEFS, ...PRISMA_TOOL_DEFS, ...CHART_TOOL_DEFS,
+    ...DIAGRAM_TOOL_DEFS, ...TABLE_TOOL_DEFS, ...PRISMA_TOOL_DEFS, ...CHART_TOOL_DEFS, ...MEMORY_TOOL_DEFS,
   ]) {
     registry.register(def);
   }
@@ -2392,6 +2441,20 @@ async function main(): Promise<void> {
      header for why that makes the write tools `write` rather than
      `system_of_record`. */
   setTaskHost(taskHost({ config, send }));
+  /* `remember` reads the turn's own project and transcript, set by handleSend
+     for the length of one turn. Saving goes through addAuto, so it only ever
+     appends, and tells the project page the way the idle pass does. */
+  setMemoryToolHost({
+    current: () => rememberTurn,
+    save: async (projectId, sessionId, items) => {
+      const before = await readMemory(projectId);
+      const after = addAuto(before, items, sessionId);
+      if (after === before) return 0;
+      await writeMemory(projectId, after);
+      send("myra:project-memory-changed", { projectId });
+      return after.items.length - before.items.length;
+    },
+  });
 
   setResearchHost({
     fallbackModel: config.current.llm.model ?? "",
@@ -2987,7 +3050,12 @@ async function main(): Promise<void> {
      */
     modelReady: () => {
       if (providerFor(config.current.providers, config.current.llm.model ?? "")) return true;
-      return Boolean(runtime.chatModel());
+      if (runtime.chatModel()) return true;
+      /* Nothing of ours is resident. That is still "ready" when there is
+         nothing to load -- chat goes to the user's own endpoint -- and it was
+         read as "never", so on such a setup the automatic pass could not run
+         at all. What must not happen is reloading the chosen local model. */
+      return !runtime.wouldLoadForChat() && Boolean(config.current.llm.baseUrl.trim());
     },
   });
 

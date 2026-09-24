@@ -82,7 +82,7 @@ function pathFor(id: string): string {
  *
  * The same shape `setDocumentWatcher` uses, and for the same reason: the writes
  * that matter most here do not come from the window at all. A conversation
- * files itself when its first turn finishes, deep in the agent loop, and
+ * files itself as its first message is sent, from the main process, and
  * without this the rail went on showing a project one item light until
  * something else happened to refresh it.
  */

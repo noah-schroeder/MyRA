@@ -206,6 +206,24 @@ export function mergeAuto(
   upTo: number,
   now = new Date(),
 ): ProjectMemory {
+  const added = addAuto(memory, proposed, sessionId, now);
+  return { ...added, seen: { ...memory.seen, [sessionId]: upTo } };
+}
+
+/**
+ * Grounded items appended as `"auto"`, deduplicated, and nothing else moved.
+ *
+ * What the `remember` tool writes through: a model saving one note mid-turn
+ * has read nothing past it, so unlike `mergeAuto` it must leave the
+ * conversation's watermark where it was -- moving it would let the idle pass
+ * skip everything said after this one note.
+ */
+export function addAuto(
+  memory: ProjectMemory,
+  proposed: readonly NewItem[],
+  sessionId: string,
+  now = new Date(),
+): ProjectMemory {
   const at = now.toISOString();
   const items = [...memory.items];
   for (const p of proposed) {
@@ -215,7 +233,7 @@ export function mergeAuto(
     if (dup) continue;
     items.push({ id: randomId(), slot: p.slot, text, source: "auto", from: sessionId, at });
   }
-  return { ...memory, items, seen: { ...memory.seen, [sessionId]: upTo } };
+  return items.length === memory.items.length ? memory : { ...memory, items };
 }
 
 /* ------------------------------------------------------------------ *
