@@ -24,13 +24,14 @@ import { ChartView } from "./ChartView.tsx";
  * impossible to hold at once.
  */
 /**
- * One thing this conversation produced, of the three kinds it can produce.
+ * One thing this conversation produced, of the four kinds it can produce.
  *
- * A document, a figure and a table share the panel because they are the same
- * claim on the screen -- work you read against the conversation that made it
- * -- and differ only in what fills the body and what the footer offers. Keyed
- * rather than identified by path, because a diagram or a table has no path:
- * each is held in the conversation until somebody exports it.
+ * A document, a diagram, a table and a chart share the panel because they are
+ * the same claim on the screen -- work you read against the conversation that
+ * made it -- and differ only in what fills the body and what the footer
+ * offers. Keyed rather than identified by path, because a diagram, table or
+ * chart has no path: each is held in the conversation until somebody exports
+ * it.
  */
 export type Artifact =
   | { kind: "doc"; key: string; name: string; doc: DocumentUpdate }
@@ -56,34 +57,57 @@ export function ArtifactPanel({
   const doc = item?.kind === "doc" ? item.doc : undefined;
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  /* Which item the effect below last ran for, so it can tell "the active tab
+   *  just changed" apart from "the same document grew" -- both look like a
+   *  dependency change from the effect's own point of view. */
+  const lastKey = useRef<string | undefined>(undefined);
 
   /*
-   * Follow the writing, unless the reader has scrolled up.
+   * Follow the writing, unless the reader has scrolled up -- but only within
+   * the SAME tab. Switching tabs -- to any of the four kinds, not only
+   * between two documents -- always opens at the top and resumes following,
+   * rather than carrying over the previous tab's scroll position or its
+   * pinned state.
    *
-   * A draft grows a section at a time, and a panel that stayed at the top would
-   * show the introduction for eight minutes while the rest arrived below the
-   * fold. One that always jumped to the bottom would be worse: it would yank
-   * the paragraph you were reading out from under you every time a section
-   * landed. So it follows only while you are already at the bottom.
+   * Keyed on `doc?.markdown` alone, this depended on a value that is
+   * `undefined` for the three non-document kinds: switching between two of
+   * them never re-ran it at all, and switching from a document tab to one of
+   * them re-ran it only because the dependency happened to change from a
+   * string to `undefined`, immediately scrolling whatever had just been
+   * drawn to its own bottom. Keying on the active item's own key as well
+   * separates a genuine tab switch from a document growing while it stays
+   * open, which is what "still writing" means: a draft grows a section at a
+   * time, and a panel that stayed at the top would show the introduction for
+   * eight minutes while the rest arrived below the fold; one that always
+   * jumped to the bottom would be worse, yanking the paragraph being read out
+   * from under the reader every time a section landed. So it follows only
+   * while already at the bottom of the tab it is already showing.
    */
   useEffect(() => {
     const el = body.current;
-    if (!el || !pinned.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [doc?.markdown]);
+    if (!el) return;
+    const switched = lastKey.current !== item?.key;
+    lastKey.current = item?.key;
+    if (switched) {
+      el.scrollTop = 0;
+      pinned.current = true;
+      return;
+    }
+    if (pinned.current) el.scrollTop = el.scrollHeight;
+  }, [item?.key, doc?.markdown]);
 
   if (!item) return null;
 
   const words = doc && doc.markdown.trim() ? doc.markdown.trim().split(/\s+/).length : 0;
 
   return (
-    <aside className="artifact" aria-label="Documents written in this conversation">
+    <aside className="artifact" aria-label="Documents and figures written in this conversation">
       <ResizeHandle onResize={onResize} />
       <header className="artifact-head">
         <div className="artifact-title" title={item.kind === "doc" ? item.doc.path : item.name}>
           {item.name}
         </div>
-        <button type="button" className="artifact-x" onClick={onClose} aria-label="Hide documents">
+        <button type="button" className="artifact-x" onClick={onClose} aria-label="Hide documents and figures">
           ×
         </button>
       </header>
@@ -192,7 +216,7 @@ function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
     <div
       className="artifact-grip"
       role="separator"
-      aria-label="Resize the document panel"
+      aria-label="Resize the documents and figures panel"
       aria-orientation="vertical"
       tabIndex={0}
       onPointerDown={(e) => {

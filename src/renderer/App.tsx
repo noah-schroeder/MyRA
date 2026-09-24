@@ -103,7 +103,6 @@ export function App() {
      pushing the send row off-screen; the expand button hands the whole app's
      height to it instead, for a message too long to compose in ten lines. */
   const [composerExpanded, setComposerExpanded] = useState(false);
-  const composerInput = useRef<HTMLTextAreaElement>(null);
   /* Held only until Send: main already has an image's bytes on disk and a
      document's text extracted by the time one of these exists, so this is a
      reference and a chip's worth of display, never the file itself. */
@@ -371,26 +370,6 @@ export function App() {
 
   const typed = lookup ? queryDraft : draft;
   const setTyped = lookup ? setQueryDraft : setDraft;
-
-  /*
-   * The textarea's own height tracks what is typed, capped at ten lines --
-   * measured off its own line-height rather than a guessed pixel figure, so
-   * it still holds at ten lines if the font size ever changes. Past the cap
-   * it scrolls internally instead of growing the composer indefinitely.
-   * Expanded mode hands sizing to CSS flex instead: clearing the inline
-   * height here is what lets `.composer.expanded .input` actually fill it.
-   */
-  useEffect(() => {
-    const el = composerInput.current;
-    if (!el) return;
-    if (composerExpanded) {
-      el.style.height = "";
-      return;
-    }
-    el.style.height = "auto";
-    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 21;
-    el.style.height = `${Math.min(el.scrollHeight, lineHeight * 10)}px`;
-  }, [typed, composerExpanded, lookup]);
 
   // Lookup's results panel holds the same `flex: 1` row the expanded composer
   // grows into, so a composer left expanded from chat would fight it for space.
@@ -1185,7 +1164,6 @@ export function App() {
                 </>
               )}
               <textarea
-                ref={composerInput}
                 className="input"
                 placeholder={
                   lookup
