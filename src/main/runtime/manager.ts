@@ -22,6 +22,7 @@ import {
   CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE,
 } from "../../core/paths.ts";
 import { enabledOnly, parseCatalog, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import { mergeCatalog } from "../../core/runtime/extraCatalog.ts";
 import {
   pinKey, withoutPin, withPin, type EnginePins,
 } from "../../core/runtime/enginePins.ts";
@@ -602,7 +603,18 @@ export class RuntimeManager {
     if (!binary) return [];
     try {
       const path = join(dirname(binary), "resources", "server_models.json");
-      return enabledOnly(parseCatalog(JSON.parse(await readFile(path, "utf8"))));
+      /* MyRA's own additions last, and only where upstream has no entry of
+         that name -- see `mergeCatalog`. enabledOnly runs LAST, after the
+         merge, not before it: its own guarantee is that the renderer never
+         receives a disabled registry's entries, and an extra entry appended
+         after the filter would reach the renderer unfiltered regardless of
+         its own source -- dormant today, since MyRA's one addition is
+         huggingface, but the ordering is what actually holds the guarantee,
+         not which entries currently exist. Inside the try because a
+         catalogue MyRA cannot read is one the daemon cannot read either, and
+         offering three hand-written rows beside an empty list would
+         misrepresent what is wrong. */
+      return enabledOnly(mergeCatalog(parseCatalog(JSON.parse(await readFile(path, "utf8")))));
     } catch {
       // A catalogue we cannot read is an empty one; the daemon still works and
       // anything already installed still lists through /models.
@@ -953,15 +965,16 @@ export class RuntimeManager {
     if (this.chatModel()) return undefined;
 
     const chosen = this.#config.activeModel;
-    const recipe = chosen
-      ? (await this.catalog().catch(() => [])).find((e) => e.id === chosen)?.recipe
+    const entry = chosen
+      ? (await this.catalog().catch(() => [])).find((e) => e.id === chosen)
       : undefined;
     const wanted = chatModelToReload({
       useForChat: this.#config.useForChat,
       ready: this.#lemonade.status.state === "ready",
       resolved: this.chatModel(),
       ...(chosen ? { activeModel: chosen } : {}),
-      ...(recipe ? { recipe } : {}),
+      ...(entry?.recipe ? { recipe: entry.recipe } : {}),
+      ...(entry?.labels ? { labels: entry.labels } : {}),
     });
     if (!wanted) return undefined;
 
@@ -1110,8 +1123,8 @@ export class RuntimeManager {
        can still name one, and loading it at every launch would hold a
        transcription model open for a conversation it cannot answer. The
        catalogue knows what each model is without starting anything. */
-    const recipe = (await this.catalog().catch(() => [])).find((e) => e.id === wanted)?.recipe;
-    if (recipe && !isChatEngine(recipe)) {
+    const entry = (await this.catalog().catch(() => [])).find((e) => e.id === wanted);
+    if (entry && !isChatEngine(entry.recipe, entry.labels)) {
       await this.update({ activeModel: undefined });
       return;
     }

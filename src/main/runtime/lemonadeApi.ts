@@ -222,9 +222,32 @@ export class LemonadeApi {
     return parseDownloads(await this.#call<unknown>("/downloads", {}, 10_000));
   }
 
-  /** Register a model without downloading it, for files already on disk. */
-  async registerModel(modelName: string, checkpoint: string, recipe = "llamacpp"): Promise<void> {
-    await this.#post("/models/register", { model_name: modelName, checkpoint, recipe });
+  /**
+   * Register a model definition without downloading it.
+   *
+   * `checkpoints` rather than a single `checkpoint` because that is the shape a
+   * diffusion model needs -- `{main, text_encoder, vae}` -- and the daemon
+   * normalises the singular form into it anyway, reporting both on every model
+   * it lists. Sending the plural for all of them means one path here instead of
+   * one that works for image models and one that does not.
+   *
+   * Registering is not downloading: the entry appears with `downloaded: false`
+   * until every role is on disk, and the pull that follows is the ordinary one
+   * by name. See `core/runtime/imageModel.ts` for the rules the daemon enforces
+   * on what goes in here.
+   */
+  async registerModel(
+    modelName: string,
+    checkpoints: Record<string, string>,
+    recipe = "llamacpp",
+    source?: RegistrySource | undefined,
+  ): Promise<void> {
+    await this.#post("/models/register", {
+      model_name: modelName,
+      checkpoints,
+      recipe,
+      ...(source ? { registry_source: source } : {}),
+    });
   }
 
   /**

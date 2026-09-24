@@ -62,6 +62,20 @@ export interface CatalogEntry {
    * model depending on which tab you arrived from.
    */
   checkpoint?: string | undefined;
+  /**
+   * Every part of a model that has more than one, by role.
+   *
+   * A diffusion model is `{main, text_encoder, vae}` and an all-in-one
+   * checkpoint is `{main}`; upstream writes the second as a bare `checkpoint`
+   * and the daemon normalises both into this shape on everything it lists, so
+   * this is the general form and `checkpoint` is the special case kept for
+   * `repoOf`.
+   *
+   * Load-bearing for MyRA's own additions rather than decoration: a row the
+   * daemon has never heard of cannot be pulled by name until its definition is
+   * registered, and this is the definition. See `MYRA_CATALOG`.
+   */
+  checkpoints?: Record<string, string> | undefined;
 }
 
 /**
@@ -94,6 +108,35 @@ export const LABEL_GROUPS: { id: string; title: string; labels: string[] }[] = [
   { id: "embedding", title: "Search and embeddings", labels: ["embedding", "reranking"] },
 ];
 
+/**
+ * Whether a catalogue entry's own labels mark it as a chat model.
+ *
+ * The general mechanism for a caller that has the full entry in hand, rather
+ * than only its recipe -- see lemonade.ts's `isChatEngine`, which falls back
+ * to a hardcoded recipe list only when a caller has nothing else.
+ */
+export function hasChatLabel(labels: readonly string[]): boolean {
+  const chat = LABEL_GROUPS.find((g) => g.id === "chat")!.labels;
+  return labels.some((l) => chat.includes(l));
+}
+
+/**
+ * The `checkpoints` object, and the `checkpoint` it implies.
+ *
+ * Returns both fields so a split entry is not left with an empty `checkpoint`:
+ * `repoOf` reads that one, and a row with no repository behind it cannot open
+ * its own model card.
+ */
+function readCheckpoints(raw: unknown): Partial<CatalogEntry> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const parts: Record<string, string> = {};
+  for (const [role, value] of Object.entries(raw as Obj)) {
+    if (typeof value === "string" && value) parts[role] = value;
+  }
+  if (!parts["main"]) return {};
+  return { checkpoints: parts, checkpoint: parts["main"] };
+}
+
 export function parseCatalog(raw: unknown): CatalogEntry[] {
   if (!raw || typeof raw !== "object") return [];
   const out: CatalogEntry[] = [];
@@ -115,6 +158,10 @@ export function parseCatalog(raw: unknown): CatalogEntry[] {
       ...(typeof entry["checkpoint"] === "string" && entry["checkpoint"]
         ? { checkpoint: entry["checkpoint"] }
         : {}),
+      /* The plural form, which is what a split model carries and what the
+         singular one means. `main` stands in for `checkpoint` when upstream
+         wrote only the plural, so `repoOf` keeps working for both. */
+      ...(readCheckpoints(entry["checkpoints"])),
       ...(typeof size === "number" && size > 0
         ? { sizeBytes: Math.round(size * 1024 ** 3) }
         : {}),

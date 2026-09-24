@@ -223,6 +223,12 @@ export function ModelCard({
     () => (variants ? recommendVariant(variants.variants, quantRank, tier) : undefined),
     [variants, tier],
   );
+
+  /* The same test `loadable` makes, by recipe rather than by repository: what
+     decides this is which engine would run the model, not anything about the
+     files, so a diffusion repository that happens to hold one loadable-looking
+     file is treated the same as one that holds thirty. */
+  const curatedOnly = recipe === "sd-cpp" || recipe === "thenoise";
   /*
    * Whether the recommendation is one this machine could actually run.
    *
@@ -386,7 +392,56 @@ export function ModelCard({
         </dl>
       ) : null}
 
-      {choices.length ? (
+      {/*
+        * A diffusion model is not assembled from a repository listing.
+        *
+        * Its text encoder and VAE usually live in other repositories, and
+        * nothing here says which -- so every file the picker could offer would
+        * download gigabytes that `sd-server` then refuses in about 40 ms. The
+        * card still opens, because the repository is worth reading about; what
+        * it does not do is offer the download. See `loadable`'s
+        * `curated-only`, which puts the same fact on the search row.
+        */}
+      {curatedOnly ? (
+        <div className="card-versions">
+          <h4 className="card-h">
+            File
+            <span className="card-h-note">
+              Image models are downloaded from the Recommended list, not from here.
+            </span>
+          </h4>
+          {/*
+            * Two different reasons the picker below is not offered, and the
+            * copy has to say which one this is. `labels` only ever arrives
+            * from MyRA's own curated catalogue (see CardTarget's own doc
+            * comment) -- so its presence here means this repository's
+            * assembly IS on record, just not usable through this repository
+            * page's own single-file picker. Saying "the registry does not
+            * record which ones go together" about a model MyRA's own
+            * Recommended list already knows how to assemble was a dead end
+            * with self-contradicting copy: a model surfaced by that very
+            * list, opened from it, hit the same wall as an arbitrary search
+            * hit with a genuinely unknown assembly.
+            */}
+          <p className="card-none">
+            {labels ? (
+              <>
+                This model’s assembly — its text encoder and VAE alongside the main
+                checkpoint — is already known. Find it in Lemonade’s Recommended list to
+                download all three parts as one step.
+              </>
+            ) : (
+              <>
+                A diffusion model needs a text encoder and a VAE beside it, usually from other
+                repositories, and the registry does not record which ones go together.
+                Lemonade’s Recommended list carries that mapping and fetches all three parts
+                as one download. If this model is not on it, “Add an image model” below the
+                Recommended list takes the three addresses directly.
+              </>
+            )}
+          </p>
+        </div>
+      ) : choices.length ? (
         <div className="card-versions">
           <h4 className="card-h">
             {variants ? "Version" : "File"}

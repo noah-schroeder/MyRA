@@ -81,6 +81,13 @@ export interface ModelKind {
   hint: string;
   /** Whether MyRA can load this kind once downloaded. */
   runnable: boolean;
+  /**
+   * Whether the registry can usefully be searched for it. Absent means yes.
+   *
+   * Separate from `runnable`: MyRA runs diffusion models perfectly well, it
+   * just cannot assemble one out of a repository listing.
+   */
+  browsable?: boolean | undefined;
 }
 
 export const KINDS: ModelKind[] = [
@@ -125,6 +132,24 @@ export const KINDS: ModelKind[] = [
     tasks: ["text-to-image", "image-to-image"],
     hint: "Diffusion models. Lemonade runs these through Stable Diffusion rather than llama.cpp.",
     runnable: true,
+    /*
+     * Not a tab, because searching for one here cannot work.
+     *
+     * A modern diffusion model is three files -- the diffusion model, a text
+     * encoder and a VAE -- and nothing on the registry says which three go
+     * together: FLUX.2-klein-9B's encoder is a Qwen3-8B in an unrelated
+     * repository. Measured on the twenty most-downloaded `text-to-image`
+     * repositories, essentially none offer a single file that loads on its
+     * own: most are diffusers-format directories, and one holds 1,416 LoRAs
+     * that would have been listed as though each were a model. Every one of
+     * those downloads ends in `sd-server` exiting 1 in about 40 ms, which
+     * reaches the user as "failed to start or become ready".
+     *
+     * That mapping exists only in Lemonade's own catalogue, which is where
+     * this kind is served from instead -- see the Recommended list, and
+     * `myra:register-image-model` for adding one it does not carry.
+     */
+    browsable: false,
   },
   {
     id: "embedding",
@@ -137,6 +162,17 @@ export const KINDS: ModelKind[] = [
 
 export function kindById(id: string): ModelKind {
   return KINDS.find((k) => k.id === id) ?? KINDS[0]!;
+}
+
+/**
+ * The kinds offered as tabs, which is every kind but the curated ones.
+ *
+ * A filter rather than a shorter `KINDS`, because `kindById` and `recipeFor`
+ * still have to resolve the kind an image model IS -- it is only the browsing
+ * of it that cannot work.
+ */
+export function browsableKinds(): ModelKind[] {
+  return KINDS.filter((k) => k.browsable !== false);
 }
 
 /** How results are ordered. `trendingScore` is the registry's own "hot now". */
@@ -296,12 +332,15 @@ export function parseModels(raw: unknown): HfModel[] {
 /**
  * What MyRA can do with a repository, said plainly on the row.
  *
- * Three states, and the middle one is the useful addition. A diffusion model
- * is not unloadable -- it needs `sd-cpp`, which this machine can install in a
- * click. Saying "cannot run" about something one button away from running is
- * the kind of inaccuracy that makes people give up on a feature that works.
+ * Four states, and the two middle ones are the useful ones. A model whose
+ * engine is missing is not unloadable -- the engine is one click away under
+ * Settings → Runtime, and saying "cannot run" about that is the kind of
+ * inaccuracy that makes people give up on a feature that works. A diffusion
+ * model is the opposite case and needs its own word: the engine may be
+ * installed and the row still cannot be downloaded from here, because the
+ * repository is one part of a model whose other parts nothing here names.
  */
-export type Loadable = "ready" | "needs-engine" | "wrong-format";
+export type Loadable = "ready" | "needs-engine" | "wrong-format" | "curated-only";
 
 export function loadable(
   model: HfModel,
@@ -309,6 +348,12 @@ export function loadable(
   /** Which engines have a backend installed. Absent means "not known yet". */
   engines?: ReadonlySet<string>,
 ): Loadable {
+  /* Before anything else: a diffusion model is not one file, and which three
+     files it needs is not written down anywhere on the registry. The
+     "Everything" tab still returns these -- they are real models and hiding
+     them would be its own lie -- so the row says where they do come from
+     rather than offering a download that cannot load. See `browsable`. */
+  if (recipe === "sd-cpp" || recipe === "thenoise") return "curated-only";
   /* Format first: llama.cpp reads GGUF and the original weights beside it are
      not a build it can load, whatever engine is present. The other engines
      read their own formats, so this test only applies to llamacpp. */
@@ -329,6 +374,15 @@ export const LOADABLE_WORDS: Record<Loadable, { short: string; tone: string; why
     why:
       "MyRA can download this, but the engine that runs it is not installed yet. " +
       "Install it under Settings → Runtime and it will load.",
+  },
+  "curated-only": {
+    short: "Curated list",
+    tone: "dim",
+    why:
+      "Image models are picked from the Recommended list rather than searched for. A " +
+      "diffusion model needs a text encoder and a VAE alongside it, usually from other " +
+      "repositories, and nothing here says which — so this repository on its own would " +
+      "download several gigabytes that cannot load.",
   },
   "wrong-format": {
     short: "Not GGUF",
