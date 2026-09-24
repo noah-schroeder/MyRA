@@ -106,12 +106,12 @@ import { installPaperIpc } from "./papers.ts";
 import { installReviewIpc } from "./review.ts";
 import { installTaskIpc, taskHost } from "./tasks.ts";
 import { startReminders } from "./reminders.ts";
-import { createJobs, type Jobs } from "./work.ts";
+import { createJobs } from "./work.ts";
 import { factsFor, setAllowOffload, setIgnoreSuggested, suggestedFor } from "./runtime/modelFacts.ts";
 import { defaultStores, installProjectIpc } from "./projects.ts";
 import { fileInActiveProject, filedRefs, readAll as readAllProjects } from "./projectStore.ts";
 import { ownerOf, type Project } from "../core/projects/project.ts";
-import { installMemoryIpc, runProjectSetup, scheduleAutoUpdate, SETUP_GREETING } from "./projectMemory.ts";
+import { installMemoryIpc, notedNotice, notesBeforeReply, runProjectSetup, SETUP_GREETING } from "./projectMemory.ts";
 import { hasMemory, readMemory, writeMemory } from "./memoryStore.ts";
 import { addAuto, type ProjectMemory } from "../core/projects/memory.ts";
 import { explainModelFailure } from "./models.ts";
@@ -543,17 +543,6 @@ let resolveEndpoint: () => Promise<EndpointResolution> = () => {
 };
 
 /**
- * The lease on long work, shared with the paper drafter and the reviewer.
- *
- * A local const inside `main()` until now, which was fine for everything that
- * only ever ran after `main()` had returned it -- but the automatic memory
- * updater needs to ask "is something else using the model right now" from a
- * timer that outlives any one call, the same reason `resolveEndpoint` above
- * is a reassigned module-level binding rather than a local one.
- */
-let jobs: Jobs | undefined;
-
-/**
  * The project and transcript the `remember` tool may write from, for the turn
  * in flight -- or nothing, which is also what keeps the tool off the list.
  *
@@ -803,6 +792,28 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
 
     const resolveImage = await imageResolver(conversation.id, conversation.messages_);
 
+    /*
+     * The project's notes, brought up to date before the reply is written.
+     *
+     * Code runs this, not the model's discretion -- the `remember` tool alone
+     * left "let's go with X" to a model that was free not to call it, and a
+     * small one usually did not. After the endpoint is resolved, so the model
+     * asked is the one about to answer rather than one loaded for a note. A
+     * pass that fails costs the turn nothing: the watermark stays where it
+     * was, and the next turn's pass reads the same stretch again.
+     */
+    let notes = memory;
+    if (turnMemory) {
+      emit({ type: "progress", progress: { phase: "noting" } });
+      const pass = await notesBeforeReply(turnMemory.projectId, conversation, inFlight.signal).catch(
+        () => undefined,
+      );
+      if (pass) {
+        notes = pass.memory;
+        if (pass.added.length) emit({ type: "notice", text: notedNotice(pass.added) });
+      }
+    }
+
     const result = await runTurn({
       registry,
       endpoint,
@@ -816,14 +827,14 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
         mode: readResearchConfig().mode,
         spoken: config.current.audio.speechToSpeech,
         /* The ONE place a project's memory is read -- see systemPrompt's own
-           note on why nowhere else may. `memory` is read once, above, before
-           branching on `runsSetup`, so a project just set up on this very
-           turn is still empty here -- correct, since its notes did not exist
-           before this message arrived either. */
-        ...(project && memory
+           note on why nowhere else may. `notes` is what was read before
+           branching on `runsSetup`, plus whatever this turn's own pass just
+           saved -- so the reply to "let's go with X" is written knowing X is
+           noted. */
+        ...(project && notes
           ? {
               project: {
-                name: project.name, memory,
+                name: project.name, memory: notes,
                 ...(limit ? { contextTokens: limit } : {}),
                 ...(turnMemory ? { remembers: true } : {}),
               },
@@ -890,12 +901,6 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      * nothing and writes nothing.
      */
     void fileInActiveProject(config, "chat", conversation.id);
-    /* Restarted on every turn in a project, setup included -- a quiet
-       stretch of conversation is what the automatic pass waits for, and
-       "quiet" only means anything measured from the turn that just
-       finished. See projectMemory.ts's own header for why this is not read
-       until the conversation has actually gone idle. */
-    if (project) scheduleAutoUpdate(project.id, conversation);
     if (rememberTurn === turnMemory) rememberTurn = undefined;
     inFlight = undefined;
     inFlightConversation = undefined;
@@ -2443,7 +2448,7 @@ async function main(): Promise<void> {
   setTaskHost(taskHost({ config, send }));
   /* `remember` reads the turn's own project and transcript, set by handleSend
      for the length of one turn. Saving goes through addAuto, so it only ever
-     appends, and tells the project page the way the idle pass does. */
+     appends, and tells the project page the way the automatic pass does. */
   setMemoryToolHost({
     current: () => rememberTurn,
     save: async (projectId, sessionId, items) => {
@@ -2983,12 +2988,12 @@ async function main(): Promise<void> {
    * out-of-memory meetings avoids by transcribing serially. A chat turn is
    * deliberately outside it -- somebody is waiting for that one.
    */
-  jobs = createJobs(send);
+  const jobs = createJobs(send);
   /* The snapshot a page asks for when it mounts. Without it, coming back to a
      review that is four minutes into its second reviewer shows an empty page
      until the reviewer after that begins -- which is the whole complaint
      `myra:research-active` still has. */
-  ipcMain.handle("myra:work-state", () => jobs?.current() ?? null);
+  ipcMain.handle("myra:work-state", () => jobs.current() ?? null);
   installActiveRunQuestion();
 
   installPaperIpc({
@@ -3039,23 +3044,6 @@ async function main(): Promise<void> {
           return {};
         }
       },
-    },
-    busy: () => inFlight !== undefined || jobs?.current() !== undefined,
-    /*
-     * Whether calling the resolver right now would load a LOCAL model that is
-     * not already resident -- never a question for a hosted choice, which has
-     * no card to spare and nothing this app would be reloading. The same
-     * check the reviewer's own context-fit callback makes a few lines above,
-     * for the same reason.
-     */
-    modelReady: () => {
-      if (providerFor(config.current.providers, config.current.llm.model ?? "")) return true;
-      if (runtime.chatModel()) return true;
-      /* Nothing of ours is resident. That is still "ready" when there is
-         nothing to load -- chat goes to the user's own endpoint -- and it was
-         read as "never", so on such a setup the automatic pass could not run
-         at all. What must not happen is reloading the chosen local model. */
-      return !runtime.wouldLoadForChat() && Boolean(config.current.llm.baseUrl.trim());
     },
   });
 

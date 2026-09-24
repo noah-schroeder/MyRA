@@ -12,7 +12,9 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { buildUpdatePrompt, groundProposals, parseProposals, type Proposal } from "../src/core/projects/memoryUpdate.ts";
+import {
+  buildUpdatePrompt, groundProposals, notePass, parseProposals, type Proposal,
+} from "../src/core/projects/memoryUpdate.ts";
 import { newMemory } from "../src/core/projects/memory.ts";
 import type { ChatMessage } from "../src/core/llm/chat.ts";
 
@@ -171,16 +173,31 @@ describe("what reaches the prompt", () => {
     assert.doesNotMatch(prompt, /secret internal tool payload/);
   });
 
-  it("reads from one message before the watermark onward, and no further back", () => {
+  it("looks back to the assistant reply before the watermark, and no further", () => {
     const messages = [
       user("ancient, well before the watermark"),
-      user("one message back -- the confirmation lookback"),
+      assistant("one message back -- the proposal a new message may confirm"),
       user("new message, not yet seen"),
     ];
     const prompt = buildUpdatePrompt(newMemory(), messages, 2);
     assert.match(prompt, /new message, not yet seen/);
     assert.match(prompt, /one message back/);
     assert.doesNotMatch(prompt, /ancient, well before the watermark/);
+  });
+
+  it("never looks back to a user message the last pass already read", () => {
+    // The pass runs before every reply, so the watermark sits just after the
+    // user's message. Showing that message again invited the same decision
+    // back in new words -- a duplicate exact-text dedupe cannot catch.
+    const messages = [
+      user("let's go with UTAUT"),
+      assistant("Good choice. UTAUT gives you four constructs."),
+      user("And we'll survey ward nurses."),
+    ];
+    const prompt = buildUpdatePrompt(newMemory(), messages, 1);
+    assert.doesNotMatch(prompt, /let's go with UTAUT/);
+    assert.match(prompt, /four constructs/);
+    assert.match(prompt, /survey ward nurses/);
   });
 });
 
@@ -189,15 +206,97 @@ describe("parseProposals", () => {
     const reply = JSON.stringify({
       proposals: [{ slot: "aims", text: "x", quote: "y", confirmation: "" }],
     });
-    assert.equal(parseProposals(reply).length, 1);
+    assert.equal(parseProposals(reply)?.length, 1);
   });
 
   it("drops a proposal missing its quote -- nothing to ground it against", () => {
     const reply = JSON.stringify({ proposals: [{ slot: "aims", text: "x", quote: "" }] });
-    assert.equal(parseProposals(reply).length, 0);
+    assert.deepEqual(parseProposals(reply), []);
   });
 
-  it("returns nothing from malformed JSON rather than throwing", () => {
-    assert.deepEqual(parseProposals("not json"), []);
+  it("tells an unreadable reply apart from an empty one, rather than throwing", () => {
+    assert.equal(parseProposals("not json"), undefined);
+    assert.deepEqual(parseProposals(JSON.stringify({ proposals: [] })), []);
+  });
+});
+
+describe("notePass: the pass before every reply", () => {
+  /** The exchange that was reported: options offered, one picked in four words. */
+  const offered = [
+    user("What framework should I use to study how nurses adopt the new EHR?"),
+    assistant(
+      "Three options fit:\n\n1. **Diffusion of Innovations** -- how adoption spreads.\n" +
+        "2. **UTAUT** -- predicts intention to use.\n3. **Normalization Process Theory**.\n\nWhich fits best?",
+    ),
+    user("let's go with UTAUT"),
+  ];
+  const reply = (proposals: unknown[]) => async () => JSON.stringify({ proposals });
+
+  it("saves \"let's go with X\" on the turn it is said, grounded in the user's own words", async () => {
+    const pass = await notePass(
+      newMemory(),
+      offered,
+      "s1",
+      reply([{ slot: "theory", text: "The project uses UTAUT.", quote: "let's go with UTAUT" }]),
+    );
+    assert.equal(pass?.added.length, 1);
+    assert.equal(pass?.added[0]?.slot, "theory");
+    assert.equal(pass?.added[0]?.source, "auto");
+    assert.equal(pass?.memory.seen["s1"], offered.length);
+  });
+
+  it("saves it through the confirmed route too: the offer, then the user's yes", async () => {
+    const pass = await notePass(
+      newMemory(),
+      offered,
+      "s1",
+      reply([
+        {
+          slot: "theory",
+          text: "The project uses UTAUT.",
+          quote: "UTAUT -- predicts intention to use.",
+          confirmation: "let's go with UTAUT",
+        },
+      ]),
+    );
+    assert.equal(pass?.added.length, 1);
+  });
+
+  it("drops what the user never said, and still finishes the pass", async () => {
+    const pass = await notePass(
+      newMemory(),
+      offered,
+      "s1",
+      reply([{ slot: "theory", text: "Uses NPT.", quote: "we will use normalization process theory" }]),
+    );
+    assert.equal(pass?.added.length, 0);
+    assert.equal(pass?.memory.seen["s1"], offered.length);
+  });
+
+  it("leaves the watermark alone when the reply could not be read", async () => {
+    // A model that wrote prose, or spent the whole reply thinking, has not
+    // said "nothing here" -- the next turn's pass must read this stretch again.
+    const pass = await notePass(newMemory(), offered, "s1", async () => "I think UTAUT is a great choice!");
+    assert.equal(pass, undefined);
+  });
+
+  it("does not ask at all when nothing new has been said", async () => {
+    let asked = false;
+    const memory = { ...newMemory(), seen: { s1: offered.length } };
+    const pass = await notePass(memory, offered, "s1", async () => {
+      asked = true;
+      return "{}";
+    });
+    assert.equal(pass, undefined);
+    assert.equal(asked, false);
+  });
+
+  it("lets a failing model call propagate, so the caller decides it costs the turn nothing", async () => {
+    await assert.rejects(
+      notePass(newMemory(), offered, "s1", async () => {
+        throw new Error("server went away");
+      }),
+      /server went away/,
+    );
   });
 });

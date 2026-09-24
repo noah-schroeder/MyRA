@@ -1,11 +1,12 @@
 /**
  * Growing a project's memory: the setup chat, the "update from this chat"
- * button, and the background pass that does the same thing on its own.
+ * button, and the pass every turn runs before its reply to do the same thing
+ * on its own.
  *
  * The IPC wiring belongs here for the reason [projects.ts](./projects.ts)'s
  * does: nothing in [core/projects/](../core/projects/memory.ts) may import
  * `electron`, so the part that reads Settings, resolves a model and pops a
- * dialog lives in main. `runProjectSetup` and `runAutoUpdate` still import
+ * dialog lives in main. `runProjectSetup` and `notesBeforeReply` still import
  * only pure functions from core -- `runSubagent` and the dialog callbacks are
  * the only side effects either one performs.
  */
@@ -18,14 +19,16 @@ import { runSubagent } from "../core/llm/chat.ts";
 import type { TurnProgress } from "../core/llm/progress.ts";
 import type { Choice } from "../core/research/questions.ts";
 import {
-  addItems, editItem, fieldsToItems, itemsToFields, markSetupDone, mergeAuto, removeItem, setAuto,
+  addItems, editItem, fieldsToItems, itemsToFields, markSetupDone, removeItem, setAuto,
   type MemoryFormField, type MemorySlot, type NewItem, type ProjectMemory,
 } from "../core/projects/memory.ts";
 import {
   buildOffersPrompt, buildTaskQuestionsPrompt, buildTaskResultPrompt, FIXED_TASKS, parseOffers,
   parseTaskQuestions, parseTaskResult, SETUP_GREETING, type AnsweredQuestion, type Task,
 } from "../core/projects/intake.ts";
-import { buildUpdatePrompt, groundProposals, parseProposals } from "../core/projects/memoryUpdate.ts";
+import {
+  buildUpdatePrompt, groundProposals, notePass, parseProposals, type NotePass,
+} from "../core/projects/memoryUpdate.ts";
 import { readMemory, writeMemory } from "./memoryStore.ts";
 
 /* ------------------------------------------------------------------ *
@@ -57,12 +60,6 @@ export interface MemoryDeps {
   /** The conversation "update from this chat" reads -- always whichever one is open. */
   currentSession: () => Session;
   ui: MemoryUi;
-  /** A chat turn or a long job (paper, review) is already using the model. */
-  busy: () => boolean;
-  /** Whether calling `llm()` right now would need to load a LOCAL model that
-   *  is not already resident. True for a hosted choice unconditionally --
-   *  there is no card to spare there. */
-  modelReady: () => boolean;
 }
 
 let deps: MemoryDeps | undefined;
@@ -98,7 +95,12 @@ export interface SetupOutput {
  * JSON itself is never shown -- only `text` is parsed, and it is parsed, not
  * printed.
  */
-async function ask(prompt: string, signal?: AbortSignal, live?: SetupOutput): Promise<string> {
+async function ask(
+  prompt: string,
+  signal?: AbortSignal,
+  live?: SetupOutput,
+  opts: { reasoning?: boolean } = {},
+): Promise<string> {
   const { llm } = host();
   live?.progress({ phase: "waiting" });
   const resolved = await llm();
@@ -108,13 +110,13 @@ async function ask(prompt: string, signal?: AbortSignal, live?: SetupOutput): Pr
     endpoint: resolved.endpoint,
     ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
     ...(signal ? { signal } : {}),
+    ...((live || opts.reasoning) && resolved.extra ? { extra: resolved.extra } : {}),
     ...(live
       ? {
           onDelta: (delta: string, kind: "text" | "thinking") => {
             if (kind === "thinking") live.think(delta);
           },
           onStreamProgress: live.progress,
-          ...(resolved.extra ? { extra: resolved.extra } : {}),
           ...(resolved.promptProgress ? { promptProgress: true } : {}),
         }
       : {}),
@@ -281,72 +283,53 @@ async function runTask(
  * ------------------------------------------------------------------ */
 
 /**
- * A quiet stretch, not a fixed clock -- restarted on every turn, so the pass
- * only ever runs after the conversation has actually gone idle.
+ * The automatic pass, run by the chat turn itself before the model replies.
+ *
+ * It used to wait for ninety seconds of quiet, which made "let's go with X"
+ * look ignored: the person who had just settled something checked the notes,
+ * found nothing, and kept talking -- and every message restarted the wait.
+ * Before the reply, the note exists by the time the answer does, and the reply
+ * is written with it already in the project block.
+ *
+ * Only ever called for a turn `handleSend` has already cleared to write notes
+ * -- a research project, automatic notes on, not the setup chat -- which is
+ * also what keeps it from creating a memory file for a simple folder: the old
+ * timer read a missing file as an empty memory with `auto` on and wrote it
+ * back, turning the folder into a research project behind its owner's back.
+ *
+ * No resident-model check is needed any more: the turn has already resolved
+ * the chat endpoint, so the model this asks is the one answering anyway. And
+ * the cost to the reply is one short request, not a re-read of the whole
+ * conversation -- the bundled llama-server (b10375) keeps a host-memory prompt
+ * cache (`--cache-ram`, 8192 MiB by default), so the conversation's cached
+ * prompt displaced by this request is restored for the reply, not recomputed.
+ *
+ * Reasoning follows the chat turn's own switch (`extra`), which is what makes
+ * this fast for someone who turned thinking off -- without it, a template that
+ * thinks by default would think here too.
  */
-const AUTO_DELAY_MS = 90_000;
-
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
-
-/** Called at the end of every turn in a project. Debounced per conversation. */
-export function scheduleAutoUpdate(projectId: string, session: Session): void {
-  const existing = timers.get(session.id);
-  if (existing) clearTimeout(existing);
-  timers.set(
-    session.id,
-    setTimeout(() => {
-      timers.delete(session.id);
-      void runAutoUpdate(projectId, session);
-    }, AUTO_DELAY_MS),
+export async function notesBeforeReply(
+  projectId: string,
+  session: Session,
+  signal: AbortSignal,
+): Promise<NotePass | undefined> {
+  const memory = await readMemory(projectId);
+  if (!memory.auto) return undefined;
+  const pass = await notePass(memory, session.messages_, session.id, (prompt) =>
+    ask(prompt, signal, undefined, { reasoning: true }),
   );
+  if (!pass) return undefined;
+  await writeMemory(projectId, pass.memory);
+  if (pass.added.length) host().send("myra:project-memory-changed", { projectId });
+  return pass;
 }
 
-async function runAutoUpdate(projectId: string, session: Session): Promise<void> {
-  const d = host();
-  /* Something else is using the model right now -- try again after the same
-     quiet delay rather than dropping the pass; a long research run must not
-     silently cost this conversation its next update. */
-  if (d.busy()) {
-    scheduleAutoUpdate(projectId, session);
-    return;
-  }
-  /* Never for the sake of this. A local model MyRA is not already holding
-     for the user must not be loaded just to write a note -- see the module
-     header. The next real turn re-arms this timer regardless. */
-  if (!d.modelReady()) return;
-
-  const memory = await readMemory(projectId);
-  if (!memory.auto) return;
-  const since = memory.seen[session.id] ?? 0;
-  if (since >= session.messages_.length) return;
-
-  let grounded: NewItem[];
-  try {
-    const text = await ask(buildUpdatePrompt(memory, session.messages_, since));
-    grounded = groundProposals(parseProposals(text), session.messages_);
-  } catch {
-    // Left un-advanced on purpose: a transient failure is retried on the next
-    // quiet stretch rather than quietly marked as though nothing was missed.
-    return;
-  }
-
-  const merged = mergeAuto(memory, grounded, session.id, session.messages_.length);
-  await writeMemory(projectId, merged);
-  const added = merged.items.slice(memory.items.length);
-  if (added.length) {
-    d.send("myra:project-memory-changed", { projectId });
-    /* Said in the conversation it came from. A pass that saved notes where
-       nobody was looking was indistinguishable from one that never ran --
-       which is how this feature came to be reported as not working. The
-       window shows it only if that conversation is the one on screen. */
-    d.send("myra:agent-event", {
-      type: "notice",
-      sessionId: session.id,
-      text:
-        `Added to this project's notes: ${added.map((it) => `“${it.text}”`).join("; ")} — ` +
-        `edit or remove ${added.length === 1 ? "it" : "them"} from the project page.`,
-    });
-  }
+/** The line a turn shows when its pass saved something -- said where it happened. */
+export function notedNotice(added: readonly { text: string }[]): string {
+  return (
+    `Added to this project's notes: ${added.map((it) => `“${it.text}”`).join("; ")} — ` +
+    `edit or remove ${added.length === 1 ? "it" : "them"} from the project page.`
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -406,10 +389,10 @@ export function installMemoryIpc(installed: MemoryDeps): void {
   });
 
   /**
-   * "Update project memory from this chat": the same grounding pass the
-   * background timer runs, but on demand and with a review dialog instead of
-   * an unattended save -- the two share `groundProposals` and differ only in
-   * who presses the button that turns a grounded item into a kept one.
+   * "Update project memory from this chat": the same grounding pass every
+   * turn runs before its reply, but on demand and with a review dialog instead
+   * of an unattended save -- the two share `groundProposals` and differ only
+   * in who presses the button that turns a grounded item into a kept one.
    */
   ipcMain.handle("myra:project-memory-update", async (_e, id: unknown) => {
     const projectId = String(id ?? "");
@@ -417,12 +400,15 @@ export function installMemoryIpc(installed: MemoryDeps): void {
     let memory = await readMemory(projectId);
     const since = memory.seen[session.id] ?? 0;
 
-    let grounded: NewItem[] = [];
+    let grounded: NewItem[];
     try {
-      const text = await ask(buildUpdatePrompt(memory, session.messages_, since));
-      grounded = groundProposals(parseProposals(text), session.messages_);
+      const proposals = parseProposals(await ask(buildUpdatePrompt(memory, session.messages_, since)));
+      /* Unreadable is not "nothing found": the stretch stays unread, so the
+         next turn's own pass still looks at it. */
+      if (!proposals) return { ok: true, added: 0, memory };
+      grounded = groundProposals(proposals, session.messages_);
     } catch {
-      grounded = [];
+      return { ok: true, added: 0, memory };
     }
     // The watermark moves whether or not anything was found or kept -- a
     // pass that found nothing is a finished pass, the same rule the deep

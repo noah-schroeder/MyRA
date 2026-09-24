@@ -23,7 +23,9 @@ export type TurnProgress =
   /** A tool the model asked for is running. Drawn by the window from its own tool events. */
   | { phase: "tool"; tool: string }
   /** A dialog is open and nothing moves until it is answered -- not a model that is slow. */
-  | { phase: "asking" };
+  | { phase: "asking" }
+  /** Before the reply, in a project that keeps notes: reading the new message for anything to note. */
+  | { phase: "noting" };
 
 /**
  * The share of the NEW work done, 0 to 1.
@@ -60,6 +62,8 @@ export function describeProgress(p: TurnProgress): string {
       return `Running ${p.tool}`;
     case "asking":
       return "Waiting for your answer";
+    case "noting":
+      return "Checking for anything to add to the project's notes";
   }
 }
 

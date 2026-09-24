@@ -1,13 +1,15 @@
 /**
  * `remember`: the model writing one note into its research project's memory.
  *
- * The background pass ([main/projectMemory.ts](../../../main/projectMemory.ts))
- * waits for a conversation to go quiet for ninety seconds and then reads it
- * back, which is right for picking things up nobody pointed at -- and wrong for
- * "remember that we're using grounded theory", which a user says expecting it
- * to be kept now, in this reply, where they can see it happen.
+ * The automatic pass ([main/projectMemory.ts](../../../main/projectMemory.ts))
+ * runs before every reply and is what reliably catches "let's go with X" --
+ * code runs it, so no model can decline to. This tool is the second chance:
+ * an explicit "remember that…" the pass judged not worth a note, caught by the
+ * model answering it. The prompt tells it the pass has already run, because a
+ * model saving the same decision again in new words is a duplicate the
+ * exact-text dedupe cannot see.
  *
- * **The grounding is the background pass's own, not a second opinion.** A
+ * **The grounding is the automatic pass's own, not a second opinion.** A
  * note is kept only when its `quote` is something the user wrote, or something
  * the assistant proposed that the user's very next message agreed to --
  * `groundProposals` decides, over the same untrusted-stripped lines. That is
@@ -56,9 +58,10 @@ export const rememberTool: ToolDef = {
   description:
     "Save one note to the notes of the research project this conversation belongs to, so every " +
     "later conversation in the project starts out knowing it. Use it when the user asks you to " +
-    "remember something, or when they settle something lasting about the project: a research " +
-    "question, an aim, a guiding theory, a method, a decision, an open question, or useful " +
-    "background. Not for small talk, and not for a one-off request about this reply. `note` is one " +
+    "remember something lasting about the project -- a research question, an aim, a guiding " +
+    "theory, a method, a decision, an open question, or useful background -- that is not in its " +
+    "notes yet. What the user settles is noted automatically before you reply, so never save the " +
+    "same thing again. Not for small talk, and not for a one-off request about this reply. `note` is one " +
     "sentence in your own words. `quote` is the user's own words the note rests on, copied " +
     "exactly from one of their messages -- a note whose quote the user did not write is refused. " +
     "If the note is something YOU suggested and the user agreed to, `quote` is your suggestion " +

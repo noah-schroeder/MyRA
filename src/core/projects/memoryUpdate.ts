@@ -35,24 +35,35 @@
 import { parseJsonReply, type ChatMessage } from "../llm/chat.ts";
 import { verifyQuote } from "../meetings/transcript.ts";
 import {
-  conversationLines, isMemorySlot, MEMORY_SLOTS, SLOT_LABELS,
-  type GroundingLine, type NewItem, type ProjectMemory,
+  conversationLines, isMemorySlot, mergeAuto, MEMORY_SLOTS, SLOT_LABELS,
+  type GroundingLine, type MemoryItem, type NewItem, type ProjectMemory,
 } from "./memory.ts";
 
 /**
- * The prompt reads from one message before the watermark, not from it --
- * a single message of lookback, so an assistant proposal the user is about
- * to confirm is still in view even though it was "already seen" the last
- * time this ran (nothing was extracted from it then, because nothing had
- * confirmed it yet).
+ * Everything from the watermark on, plus the assistant reply just before it
+ * when there is one -- the proposal a user's new message may be confirming
+ * was "already seen" the last time this ran, but nothing could be extracted
+ * from it then, because nothing had confirmed it yet.
+ *
+ * Only an assistant line is looked back to. The pass now runs before every
+ * reply, so the watermark sits just after a user message that has already
+ * been read; showing it again invited the same decision back under new
+ * wording, which `addAuto`'s exact-text dedupe cannot catch.
  */
+function linesSince(messages: readonly ChatMessage[], since: number): GroundingLine[] {
+  const lines = conversationLines(messages);
+  const first = lines.findIndex((l) => l.at >= since);
+  if (first === -1) return [];
+  const before = lines[first - 1];
+  return lines.slice(before?.speaker === "assistant" ? first - 1 : first);
+}
+
 export function buildUpdatePrompt(
   memory: ProjectMemory,
   messages: readonly ChatMessage[],
   since: number,
 ): string {
-  const from = Math.max(0, since - 1);
-  const lines = conversationLines(messages).filter((l) => l.at >= from);
+  const lines = linesSince(messages, since);
   const known = memory.items.length
     ? `Already noted about this project:\n${memory.items.map((i) => `- (${SLOT_LABELS[i.slot]}) ${i.text}`).join("\n")}\n\n`
     : "";
@@ -92,12 +103,19 @@ interface RawUpdate {
   proposals?: unknown;
 }
 
-export function parseProposals(reply: string): Proposal[] {
+/**
+ * `undefined` when the reply held no readable JSON at all, which is not the
+ * same answer as an empty list: a model that wrote prose, or spent its whole
+ * reply reasoning, has not read the conversation and said "nothing here".
+ * Treating the two alike moved the watermark past a decision nobody had
+ * actually looked at, and the one message of lookback never reached it again.
+ */
+export function parseProposals(reply: string): Proposal[] | undefined {
   let raw: RawUpdate;
   try {
     raw = parseJsonReply<RawUpdate>(reply, "project memory update");
   } catch {
-    return [];
+    return undefined;
   }
   const out: Proposal[] = [];
   for (const entry of Array.isArray(raw.proposals) ? raw.proposals : []) {
@@ -156,4 +174,43 @@ export function groundProposals(proposals: readonly Proposal[], messages: readon
 function nextLine(lines: readonly GroundingLine[], after: GroundingLine): GroundingLine | undefined {
   const idx = lines.indexOf(after);
   return idx === -1 ? undefined : lines[idx + 1];
+}
+
+export interface NotePass {
+  /** What to write back: the grounded items appended, the watermark moved. */
+  memory: ProjectMemory;
+  /** The items that were new. Empty is a finished pass that found nothing. */
+  added: MemoryItem[];
+}
+
+/**
+ * One pass over what was said since the last one: ask, parse, ground, merge.
+ *
+ * Run by main at the start of every turn in a project that keeps notes, before
+ * the reply -- "let's go with X" is saved while the answer to it is being
+ * written, not after the conversation has gone quiet. `ask` is the one model
+ * call, injected so this whole decision is testable with no model and no disk.
+ *
+ * `undefined` means leave the memory exactly as it was: nothing new to read,
+ * or a reply that could not be read. The second case in particular must not
+ * move the watermark -- the next turn's pass reads the same stretch again.
+ * A throwing `ask` propagates; main decides that a failed pass never fails
+ * the turn it runs in.
+ */
+export async function notePass(
+  memory: ProjectMemory,
+  messages: readonly ChatMessage[],
+  sessionId: string,
+  ask: (prompt: string) => Promise<string>,
+  now = new Date(),
+): Promise<NotePass | undefined> {
+  const since = memory.seen[sessionId] ?? 0;
+  if (since >= messages.length) return undefined;
+  if (!linesSince(messages, since).some((l) => l.speaker === "user")) return undefined;
+
+  const proposals = parseProposals(await ask(buildUpdatePrompt(memory, messages, since)));
+  if (!proposals) return undefined;
+
+  const merged = mergeAuto(memory, groundProposals(proposals, messages), sessionId, messages.length, now);
+  return { memory: merged, added: merged.items.slice(memory.items.length) };
 }

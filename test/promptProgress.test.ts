@@ -121,6 +121,7 @@ describe("saying it", () => {
 
   it("describes each phase in words, and never prints a count it does not have", () => {
     assert.equal(describeProgress({ phase: "waiting" }), "Waiting for the model");
+    assert.match(describeProgress({ phase: "noting" }), /project's notes/);
     // Digit grouping follows the machine's locale, so the separator is left open.
     assert.match(
       describeProgress({ phase: "prompt", total: 3000, cache: 1000, processed: 2024 }),

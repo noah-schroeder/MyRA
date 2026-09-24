@@ -148,6 +148,8 @@ describe("a project's memory", () => {
   it("says when to use remember, even before there are notes, but only where the tool exists", () => {
     const project = { name: "P", memory: newMemory(), remembers: true };
     assert.match(systemPrompt({ mode: "assistant", project }), /save it with the remember tool/);
+    // And says the pass before the reply has already run, so it does not save twice.
+    assert.match(systemPrompt({ mode: "assistant", project }), /added to its notes automatically before you reply/);
     // At "off" there are no tools at all, so naming one would be a lie.
     assert.doesNotMatch(systemPrompt({ mode: "off", project }), /remember tool/);
     // And main not offering it this turn means no mention either.

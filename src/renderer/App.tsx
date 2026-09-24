@@ -41,6 +41,7 @@ import { PeerReview } from "./components/PeerReview.tsx";
 import { ProjectsPage } from "./components/ProjectsPage.tsx";
 import { NewProjectDialog } from "./components/NewProjectDialog.tsx";
 import { RememberDialog } from "./components/RememberDialog.tsx";
+import { SelectionRemember } from "./components/SelectionRemember.tsx";
 import { TurnStatus } from "./components/TurnStatus.tsx";
 import { describeProgress } from "../core/llm/progress.ts";
 import { TasksPage } from "./components/TasksPage.tsx";
@@ -227,6 +228,13 @@ export function App() {
     rememberingId.current = id;
     setRemembering({ text: selectionAtPress.current || whole.trim() });
   };
+  /* The same dialog from the button beside a highlight -- the id is the
+     turn's, so its own Remember button is the one that says "Noted". */
+  const rememberSelection = (text: string, id: string): void => {
+    rememberingId.current = id;
+    setRemembering({ text });
+  };
+  const threadRef = useRef<HTMLDivElement>(null);
   const saveRemembered = async (slot: MemorySlot, text: string): Promise<void> => {
     setRemembering(undefined);
     if (!activeProject) return;
@@ -1064,6 +1072,7 @@ export function App() {
         ) : null}
 
         <div
+          ref={threadRef}
           className={composerExpanded ? "thread thread-collapsed" : "thread"}
           hidden={page !== "chat" || lookup}
         >
@@ -1092,7 +1101,7 @@ export function App() {
           {items.map((item) => {
             if (item.kind === "user") {
               return (
-                <article key={item.id} className="turn user">
+                <article key={item.id} className="turn user" data-item-id={item.id}>
                   {item.attachments?.length ? (
                     <div className="turn-attachments">
                       {item.attachments.map((a, i) => (
@@ -1132,7 +1141,7 @@ export function App() {
               );
             }
             return (
-              <article key={item.id} className="turn assistant">
+              <article key={item.id} className="turn assistant" data-item-id={item.id}>
                 {item.blocks.map((block, i) =>
                   block.kind === "thinking" ? (
                     <Reasoning key={i} text={block.text} streaming={item.streaming ?? false} />
@@ -1595,6 +1604,11 @@ export function App() {
         />
       ) : null}
       {prompt ? <UiDialog request={prompt} onAnswer={answer} /> : null}
+      <SelectionRemember
+        thread={threadRef}
+        enabled={Boolean(activeProject) && !pendingProjectSetup && !remembering && page === "chat" && !lookup}
+        onRemember={rememberSelection}
+      />
       {remembering ? (
         <RememberDialog
           projectName={projectName || "this project"}

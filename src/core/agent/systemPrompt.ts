@@ -134,15 +134,18 @@ export function systemPrompt(opts: {
         ]
       : [];
   /* Its own line, and present even while the notes are empty -- the first
-     thing worth remembering arrives in a project with nothing noted yet. A
-     tool description alone is something a small model reads and then never
-     calls; saying when to use it here is what makes it get used. */
+     thing worth remembering arrives in a project with nothing noted yet.
+     Main runs a grounded pass before every reply wherever the tool is offered,
+     so what the user settles is already in the notes by now; told so, because
+     a model left to save it again writes the same decision twice in new words,
+     which exact-text dedupe cannot catch. */
   const remember =
     opts.project?.remembers && actsLocally(mode)
       ? [
-          "When the user asks you to remember something about this project, or settles something",
-          "lasting about it -- a research question, an aim, a guiding theory, a method, a decision --",
-          "save it with the remember tool, quoting their own words.",
+          "What the user settles about this project -- a research question, an aim, a guiding",
+          "theory, a method, a decision -- is added to its notes automatically before you reply, so",
+          "do not save that again. When the user asks you to remember something that is not in the",
+          "notes yet, save it with the remember tool, quoting their own words.",
         ]
       : [];
 
