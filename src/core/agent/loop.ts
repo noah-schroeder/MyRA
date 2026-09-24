@@ -49,6 +49,15 @@ export interface AgentEvent {
   params?: Record<string, unknown>;
   result?: string;
   /**
+   * For `"tool_end"`: the tool's own `ToolResult.detail`, when it set one.
+   *
+   * Never shown to the model -- that promise is `ToolResult.detail`'s own,
+   * restated here because this is the field that carries it out of the loop.
+   * A consumer that only wants `result` (the model-facing text) is
+   * unaffected by this being unset.
+   */
+  detail?: unknown;
+  /**
    * For `"stats"`: how fast the reply that just finished was.
    *
    * One per `chat()` call, not one per turn -- a turn that calls a tool closes
@@ -365,7 +374,10 @@ export async function runTurn(opts: AgentTurnOptions): Promise<AgentTurnResult> 
           onUpdate: (note: string) =>
             opts.onEvent?.({ type: "tool_update", tool: name, toolCallId: call.id, text: note }),
         });
-        opts.onEvent?.({ type: "tool_end", tool: name, toolCallId: call.id, result: result.content });
+        opts.onEvent?.({
+          type: "tool_end", tool: name, toolCallId: call.id, result: result.content,
+          ...(result.detail !== undefined ? { detail: result.detail } : {}),
+        });
         produced.push(toolMessage(call, result.content));
       } catch (err) {
         // Every failure goes back to the model as a result, including an

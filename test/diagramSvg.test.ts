@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 import { parseMermaid } from "../src/core/diagrams/mermaid.ts";
 import { layoutDiagram } from "../src/core/diagrams/layout.ts";
-import { arrowHead, dashFor, toSvg, xmlEscape, PAPER_THEME } from "../src/core/diagrams/svg.ts";
+import { arrowHead, dashFor, hasShadow, nodePath, toSvg, xmlEscape, PAPER_THEME } from "../src/core/diagrams/svg.ts";
 
 function svgOf(src: string): string {
   const parsed = parseMermaid(src);
@@ -75,4 +75,53 @@ test("a model's diagram draws exactly as it did before boxes had a style", () =>
   const svg = svgOf("flowchart TD\n A[One] --> B[Two]");
   assert.ok(!svg.includes("<g transform="), "no node is rotated");
   assert.match(svg, /<text x="[\d.]+" y="[\d.]+" text-anchor="middle" fill="#/, "every label stays centred");
+});
+
+test("an ordinary node gets a soft shadow", () => {
+  const svg = svgOf("flowchart TD\n A[One] --> B[Two]");
+  assert.ok(svg.includes(`filter="url(#dg-shadow)"`));
+  assert.ok(svg.includes("<feDropShadow"));
+});
+
+test("a categorized node gets a distinct fill, and an uncategorized sibling is untouched", () => {
+  const parsed = parseMermaid("flowchart TD\n A:::warm --> B");
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.error);
+  const layout = layoutDiagram(parsed.diagram);
+  const a = layout.nodes.find((n) => n.id === "A")!;
+  const b = layout.nodes.find((n) => n.id === "B")!;
+  assert.equal(a.box?.category, 0);
+  assert.equal(b.box, undefined);
+  const svg = toSvg(layout);
+  assert.ok(svg.includes(`<path d="${nodePath(a)}" fill="${PAPER_THEME.categoryFill[0]}"`));
+  assert.ok(svg.includes(`<path d="${nodePath(b)}" fill="${PAPER_THEME.nodeFill}"`));
+  assert.notEqual(PAPER_THEME.categoryFill[0], PAPER_THEME.nodeFill);
+  assert.notEqual(PAPER_THEME.categoryFill[0], PAPER_THEME.tintFill);
+});
+
+test("a template box with radius 0 opts out of the shadow along with the rounding", () => {
+  const layout = layoutDiagram(
+    (parseMermaid("flowchart TD\n A[One] --> B[Two]") as { ok: true; diagram: never }).diagram,
+  );
+  const squared = { ...layout.nodes[0]!, box: { radius: 0 } };
+  const rounded = layout.nodes[1]!;
+  assert.equal(hasShadow(squared), false);
+  assert.equal(hasShadow(rounded), true);
+});
+
+test("with no physical size, the output is exactly what it always was: pixels twice over", () => {
+  const parsed = parseMermaid("flowchart TD\n A[One] --> B[Two]");
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.error);
+  const layout = layoutDiagram(parsed.diagram);
+  const svg = toSvg(layout);
+  assert.match(svg, new RegExp(`width="${layout.width}" height="${layout.height}"`));
+  assert.match(svg, new RegExp(`viewBox="0 0 ${layout.width} ${layout.height}"`));
+});
+
+test("a physical size is written in inches on the outer element, while the viewBox keeps the layout's own pixels", () => {
+  const parsed = parseMermaid("flowchart TD\n A[One] --> B[Two]");
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.error);
+  const layout = layoutDiagram(parsed.diagram);
+  const svg = toSvg(layout, undefined, { widthIn: 9, heightIn: 6.5 });
+  assert.match(svg, /width="9in" height="6\.5in"/);
+  assert.match(svg, new RegExp(`viewBox="0 0 ${layout.width} ${layout.height}"`));
 });

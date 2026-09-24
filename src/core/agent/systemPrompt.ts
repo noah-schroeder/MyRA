@@ -16,6 +16,7 @@
 import { readsDocuments, readsLibrary, searches, type ResearchMode } from "../research/ladder.ts";
 import { spokenGuidance } from "./spokenPrompt.ts";
 import { todayLine } from "./datePrompt.ts";
+import { renderMemory, type ProjectMemory } from "../projects/memory.ts";
 
 /**
  * Who MyRA is, before anybody changes it.
@@ -89,6 +90,17 @@ export function systemPrompt(opts: {
   mode: ResearchMode;
   /** Whether the answer will be spoken rather than read. */
   spoken?: boolean | undefined;
+  /**
+   * The project this conversation belongs to, when it belongs to one.
+   *
+   * The ONE place a project's memory is read -- the same rule the persona
+   * follows, for the same reason: a research pipeline stage, the reviewer or
+   * a meeting reading a project's notes could have them rewrite a PRISMA
+   * checklist or a review's house rules exactly the way an unwary custom
+   * persona could, and nothing downstream of this function is built to guard
+   * against that.
+   */
+  project?: { name: string; memory: ProjectMemory; contextTokens?: number } | undefined;
   /** Injectable so this stays a pure function of its inputs and a test does
    *  not depend on the day it happens to run. Main passes nothing, so every
    *  turn gets the real clock -- which is also what makes a conversation left
@@ -97,6 +109,23 @@ export function systemPrompt(opts: {
 }): string {
   const mode = opts.mode;
   const tools = readsDocuments(mode) ? ["", ...TOOL_DISCIPLINE] : [];
+
+  const rendered = opts.project ? renderMemory(opts.project.memory, opts.project.contextTokens) : undefined;
+  /* Empty when the memory has nothing in it yet -- a project just created has
+     no notes, and a block that said so in as many words would be the first
+     thing the model reads on every single turn for no benefit. */
+  const project =
+    opts.project && rendered && rendered.text
+      ? [
+          `You are working inside the user's project "${opts.project.name}". Their notes on it, kept`,
+          `across conversations in this project:`,
+          "",
+          rendered.text,
+          "",
+          "Use this as background, not as something to recite back. If the user says something that",
+          "contradicts it now, the user is right -- these are notes from earlier, not a fixed brief.",
+        ]
+      : [];
 
   /*
    * One branch per rung, because the facts are independent and a model told the
@@ -154,6 +183,7 @@ export function systemPrompt(opts: {
        -- that block is last because it changes what a good ANSWER is, and
        this only ever supplies a number. */
     "", ...todayLine(opts.now),
+    ...(project.length ? ["", ...project] : []),
     ...tools, "", ...SYSTEM_PROMPT,
     ...(closing.length ? ["", ...closing] : []),
     ...(spoken.length ? ["", ...spoken] : []),

@@ -102,3 +102,16 @@ test("the model is told not to repeat the source in its reply", async () => {
   const res = await run({ source: "flowchart TD\n A --> B" });
   assert.match(res.content, /Do not repeat the diagram source/);
 });
+
+test("a diagram within the category cap gets no overflow note", async () => {
+  const res = await run({ source: "flowchart TD\n A:::warm --> B:::cool" });
+  assert.doesNotMatch(res.content, /categories are shown in colour/);
+});
+
+test("a diagram past the category cap tells the model which names were dropped, not just that some were", async () => {
+  const names = Array.from({ length: 8 }, (_, i) => `cat${i}`);
+  const source = `flowchart TD\n${names.map((n, i) => ` N${i}:::${n}`).join("\n")}`;
+  const res = await run({ source });
+  assert.match(res.content, /Only the first 6 categories are shown in colour/);
+  assert.match(res.content, /"cat6", "cat7"/);
+});

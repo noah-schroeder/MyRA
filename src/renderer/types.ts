@@ -28,6 +28,8 @@ import type { Task, TaskSummary } from "../core/tasks/task.ts";
 export type { Task, TaskSummary } from "../core/tasks/task.ts";
 import type { Member, MemberKind, Project, ProjectSummary } from "../core/projects/project.ts";
 export type { Member, MemberKind, Project, ProjectSummary } from "../core/projects/project.ts";
+import type { MemoryItem, MemorySlot, ProjectMemory } from "../core/projects/memory.ts";
+export type { MemoryItem, MemorySlot, ProjectMemory } from "../core/projects/memory.ts";
 import type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
 export type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
 import type { DraftRequest } from "../core/papers/prompt.ts";
@@ -108,6 +110,14 @@ export interface ToolItem {
    * everything has stopped.
    */
   status: "running" | "ok" | "error" | "stopped";
+  /**
+   * The structured payload a diagram/chart tool's `ToolResult.detail` carried,
+   * never shown as text -- `ToolCard.tsx` reads it to find the artifact it
+   * drew, so an inline thumbnail can be shown beside the card. Unset for
+   * every other tool, and for a card rebuilt from a reopened conversation
+   * (`detail` is not persisted -- see restore.ts).
+   */
+  detail?: unknown;
 }
 
 /**
@@ -428,6 +438,9 @@ export interface AgentEvent {
   tool?: string;
   params?: Record<string, unknown>;
   result?: string;
+  /** For "tool_end": the tool's own `ToolResult.detail`, when it set one.
+   *  Never shown to the model -- see ToolItem.detail for what reads it. */
+  detail?: unknown;
   /** For "stats": how fast the reply that just finished was. One per model call. */
   stats?: MessageStats;
   /** The conversation this event belongs to, so a renderer looking at a
@@ -1044,7 +1057,8 @@ export interface MyRAApi {
   onApiLog(cb: (entries: RequestRecord[]) => void): () => void;
   /* ---- projects ---- */
   projectList(): Promise<{ ok: boolean; projects: ProjectSummary[] }>;
-  projectCreate(name: string): Promise<{ ok: boolean; project?: Project }>;
+  /** `research` starts the project's memory "pending" -- the setup chat runs on its first message. */
+  projectCreate(name: string, research?: boolean): Promise<{ ok: boolean; project?: Project }>;
   projectRename(id: string, name: string): Promise<{ ok: boolean; error?: string }>;
   projectOpen(id: string): Promise<{ ok: boolean; error?: string; detail?: ProjectDetail }>;
   /** Everything in every store, each row naming the project it is already in. */
@@ -1074,6 +1088,17 @@ export interface MyRAApi {
   }>;
   projectReveal(path: string): Promise<{ ok: boolean }>;
   onProjects(cb: (projects: ProjectSummary[]) => void): () => void;
+
+  /* ---- project memory ---- */
+  projectMemory(id: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  projectMemoryStartSetup(id: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  projectMemoryAdd(id: string, slot: MemorySlot, text: string): Promise<{ ok: boolean; memory?: ProjectMemory; error?: string }>;
+  projectMemoryEdit(id: string, itemId: string, text: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  projectMemoryRemove(id: string, itemId: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  projectMemorySetAuto(id: string, auto: boolean): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  /** Reads the currently open conversation, shows a review dialog, saves what is approved. */
+  projectMemoryUpdate(id: string): Promise<{ ok: boolean; added: number; memory: ProjectMemory }>;
+  onProjectMemoryChanged(cb: (payload: { projectId: string }) => void): () => void;
 
   /* ---- paper drafter ---- */
   paperList(): Promise<{ ok: boolean; papers: PaperSummary[] }>;

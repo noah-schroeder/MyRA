@@ -27,6 +27,8 @@ import {
   type Member, type MemberKind, type ProjectSummary,
 } from "../core/projects/project.ts";
 import { exportPlan, fileName, renderSession, type ExportItem } from "../core/projects/render.ts";
+import { newMemory, renderMemoryMarkdown } from "../core/projects/memory.ts";
+import { deleteMemory, readMemory, writeMemory } from "./memoryStore.ts";
 import {
   deleteProject, readAll, readAllPruned, readProject, setProjectsWatcher, writeProject,
   type ItemRow, type ProjectDetail, type ProjectStores,
@@ -256,8 +258,13 @@ export function installProjectIpc(deps: ProjectDeps): void {
 
   ipcMain.handle("myra:project-list", async () => ({ ok: true, projects: await summaries() }));
 
-  ipcMain.handle("myra:project-create", async (_e, name: unknown) => {
+  ipcMain.handle("myra:project-create", async (_e, name: unknown, research: unknown) => {
     const project = await writeProject(newProject({ name: String(name ?? "") }));
+    /* A research project starts its memory "pending" -- the one flag
+       everything else in this feature reads. handleSend runs the setup chat
+       the moment the first message in a new conversation filed here lands;
+       nothing else is asked of the project record itself. */
+    if (research === true) await writeMemory(project.id, newMemory({ setup: "pending" }));
     await publish();
     return { ok: true, project };
   });
@@ -385,6 +392,9 @@ export function installProjectIpc(deps: ProjectDeps): void {
     const project = await readProject(String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
     const report = await deleteProject(project, stores, { contents: contents === true });
+    // The memory belongs to the project record, not to any of the five
+    // stores `deleteProject` already asked -- nothing else would ever remove it.
+    await deleteMemory(project.id);
     /* Whatever it was working in is gone, so it is not working in it any more.
        A stale active project would file the next conversation into nothing. */
     if (config.current.activeProject === project.id) await config.update({ activeProject: "" });
@@ -421,6 +431,12 @@ export function installProjectIpc(deps: ProjectDeps): void {
 
     const root = join(config.current.workspaceRoot, fileName(project.name, "project"));
     const { ops, counts } = exportPlan(project, items);
+    const memoryText = renderMemoryMarkdown(await readMemory(project.id));
+    /* Inserted before the LAST op, which `exportPlan` always ends on
+       project.md -- the done-marker rule render.ts documents: a crash
+       halfway must never leave an index claiming a file that was never
+       written, so project.md stays the final write. */
+    if (memoryText) ops.splice(ops.length - 1, 0, { op: "write", path: "memory.md", text: memoryText });
     await makePrivateDir(root);
 
     for (const op of ops) {

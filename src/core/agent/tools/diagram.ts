@@ -26,7 +26,7 @@
  */
 
 import type { ToolDef, ToolResult } from "../registry.ts";
-import { layoutDiagram } from "../../diagrams/layout.ts";
+import { assignCategoryColors, layoutDiagram } from "../../diagrams/layout.ts";
 import { parseMermaid } from "../../diagrams/mermaid.ts";
 import type { PrismaFigure } from "../../prisma/spec.ts";
 import { makeIdCounter, makeWatcher } from "./artifactWatch.ts";
@@ -89,10 +89,12 @@ export const createDiagramTool: ToolDef = {
     "figure they can export. Give the diagram in Mermaid flowchart syntax, starting with " +
     "`flowchart TD` (top-down) or `flowchart LR` (left-right). Nodes are `id[Label]`, " +
     "`id{Decision}`, `id([Rounded])`; arrows are `-->`, `---`, `-.->` and `==>`, with an " +
-    "optional label as `-->|text|`. Only flowcharts are supported: sequence, class, gantt and " +
-    "state diagrams are not, and subgraphs are not. Prefer this over describing a diagram in " +
-    "prose or writing a Mermaid code block, and call it again with corrected source if it " +
-    "returns an error.",
+    "optional label as `-->|text|`. To colour-code related steps, group nodes into up to 6 " +
+    "named categories with `id:::categoryName` or a `class idA,idB categoryName` line -- the " +
+    "category name is only a grouping key, the actual colours are chosen for you. Only " +
+    "flowcharts are supported: sequence, class, gantt and state diagrams are not, and " +
+    "subgraphs are not. Prefer this over describing a diagram in prose or writing a Mermaid " +
+    "code block, and call it again with corrected source if it returns an error.",
   risk: "safe",
   parameters: {
     type: "object",
@@ -135,6 +137,10 @@ export const createDiagramTool: ToolDef = {
        cannot be placed fails as a tool result too, where the model can react,
        instead of as an empty panel. */
     const layout = layoutDiagram(parsed.diagram);
+    /* A second, cheap pass over the same groupings layoutDiagram already
+       resolved -- run separately so a soft "some categories were dropped"
+       note stays a concern of the tool's reply text, not of the layout. */
+    const { overflow } = assignCategoryColors(parsed.diagram);
 
     const id = nextDiagramId();
     announceDiagram({ id, title, source });
@@ -145,7 +151,11 @@ export const createDiagramTool: ToolDef = {
         `${layout.nodes.length === 1 ? "node" : "nodes"} and ${layout.edges.length} ` +
         `${layout.edges.length === 1 ? "edge" : "edges"}. It is shown to the user beside the ` +
         "conversation, where they can export it as SVG or PNG. Do not repeat the diagram " +
-        "source in your reply; say what it shows.",
+        "source in your reply; say what it shows." +
+        (overflow.length
+          ? ` Only the first 6 categories are shown in colour; "${overflow.join('", "')}" ` +
+            `${overflow.length === 1 ? "uses" : "use"} the default look.`
+          : ""),
       detail: { id, title, source },
     };
   },

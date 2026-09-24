@@ -1,13 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { layoutChart, type ChartLayout } from "../../core/charts/layout.ts";
+import { CANVAS_H, CANVAS_W, chartSizeFor, layoutChart, type ChartLayout, type ChartSize } from "../../core/charts/layout.ts";
 import {
   barRect, boxRect, errorBarPath, frameRect, gridLineY, histRect, markerPath, medianLine,
   seriesLinePath, toChartSvg, whiskerPath,
 } from "../../core/charts/svg.ts";
 import { pgfplotsOf } from "../../core/charts/pgfplots.ts";
+import { PNG_SCALE_PAGE, PNG_SCALE_STANDARD, type ExportSize } from "../../core/figures/exportSize.ts";
 import type { ChartUpdate } from "../types.ts";
 import { useSaid } from "./useSaid.ts";
+import { svgToPng } from "./rasterise.ts";
+import { ExportSizeSelect, pageBoxForExport, useExportSize } from "./ExportSize.tsx";
 
 const SCREEN_PALETTE = [
   "var(--chart-1, #0072b2)", "var(--chart-2, #d55e00)", "var(--chart-3, #009e73)",
@@ -16,6 +19,10 @@ const SCREEN_PALETTE = [
 function screenColor(i: number): string {
   return SCREEN_PALETTE[i % SCREEN_PALETTE.length]!;
 }
+
+/** Before the canvas has been measured -- the first paint only, corrected by
+ *  the ResizeObserver below on the same frame it fires. */
+const INITIAL_SIZE: ChartSize = { width: 360, height: 280 };
 
 /**
  * A figure `create_chart` built, drawn from its `ChartData` every time it is
@@ -27,40 +34,72 @@ function screenColor(i: number): string {
  * the same path-building functions `toChartSvg` uses for the exported file
  * -- never a string parsed into markup -- so the on-screen figure and the
  * exported one are guaranteed to be the same geometry.
+ *
+ * On screen the chart redraws at the canvas's own measured size, unlike a
+ * diagram, which scrolls: a diagram's labels are its entire content and
+ * shrinking them defeats the point, but a chart has no fixed geometry to
+ * preserve -- its axes, ticks and marks are all recomputed from the data at
+ * whatever size they are asked to fill, so there is nothing lost by asking
+ * for a different size. Export answers a different question from what fits
+ * the panel, so it is a separate, explicit choice -- see ExportSize.tsx.
  */
 export function ChartView({ chart: item }: { chart: ChartUpdate }) {
   const [said, say] = useSaid();
+  const [exportSize, setExportSize] = useExportSize("chart");
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [avail, setAvail] = useState<ChartSize>(INITIAL_SIZE);
 
-  const layout: ChartLayout = useMemo(
-    () => layoutChart(item.data, {
+  /* Redraws the chart to fill the canvas box whenever it changes size --
+     dragging the artifact panel's edge, or resizing the window -- rather
+     than leaving the fixed-size figure to overflow it. Set only when the
+     rounded size actually changes, so this cannot loop against its own
+     layout pass. */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      const size = chartSizeFor({ width: box.width, height: box.height });
+      setAvail((prev) => (prev.width === size.width && prev.height === size.height ? prev : size));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const chartOpts = useMemo(
+    () => ({
       ...(item.spec.title ? { title: item.spec.title } : {}),
       ...(item.spec.xLabel ? { xLabel: item.spec.xLabel } : (item.spec.x ? { xLabel: item.spec.x } : {})),
       ...(item.spec.yLabel ? { yLabel: item.spec.yLabel } : {}),
     }),
-    [item.data, item.spec],
+    [item.spec],
   );
 
+  const layout: ChartLayout = useMemo(
+    () => layoutChart(item.data, { ...chartOpts, size: avail }),
+    [item.data, chartOpts, avail],
+  );
+
+  /** The export figure is laid out separately from the on-screen one, at
+   *  whichever of the three sizes the picker holds -- never at `avail`,
+   *  which is an artifact of how wide the panel happens to be right now. */
+  const exportLayout = (): { layout: ChartLayout; physical?: { widthIn: number; heightIn: number } } => {
+    const box = pageBoxForExport(exportSize);
+    const built = layoutChart(item.data, { ...chartOpts, ...(box ? { size: { width: box.width, height: box.height } } : {}) });
+    return { layout: built, ...(box ? { physical: { widthIn: box.widthIn, heightIn: box.heightIn } } : {}) };
+  };
+
   const toPng = async (): Promise<string | undefined> => {
-    const svg = toChartSvg(layout);
-    const url = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-    const image = new Image();
-    const loaded = new Promise<boolean>((resolve) => {
-      image.onload = () => resolve(true);
-      image.onerror = () => resolve(false);
-    });
-    image.src = url;
-    if (!(await loaded)) return undefined;
-    const canvas = document.createElement("canvas");
-    canvas.width = layout.width * 2;
-    canvas.height = layout.height * 2;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/png");
+    const { layout: built, physical } = exportLayout();
+    const svg = toChartSvg(built, undefined, physical);
+    const scale = physical ? PNG_SCALE_PAGE : PNG_SCALE_STANDARD;
+    return svgToPng(svg, built.width * scale, built.height * scale);
   };
 
   const saveSvg = async (): Promise<void> => {
-    const res = await window.myra.chartSave(item.title, "svg", toChartSvg(layout));
+    const { layout: built, physical } = exportLayout();
+    const res = await window.myra.chartSave(item.title, "svg", toChartSvg(built, undefined, physical));
     say(res.ok ? "Saved to Documents" : res.error ?? "Could not save it");
   };
 
@@ -97,7 +136,7 @@ export function ChartView({ chart: item }: { chart: ChartUpdate }) {
 
   return (
     <div className="ch">
-      <div className="ch-canvas">
+      <div className="ch-canvas" ref={canvasRef}>
         <svg
           viewBox={`0 0 ${layout.width} ${layout.height}`}
           width={layout.width}
@@ -196,20 +235,21 @@ export function ChartView({ chart: item }: { chart: ChartUpdate }) {
             return <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} fill={screenColor(0)} />;
           })}
 
-          {layout.legend.map((entry, i) => {
-            const lx = layout.plot.x + layout.plot.w + 14;
-            const ly = layout.plot.y + 8 + i * 18;
-            return (
-              <g key={entry.name}>
-                <rect x={lx} y={ly - 8} width={10} height={10} fill={screenColor(entry.colorIndex)} />
-                <text x={lx + 14} y={ly + 1} className="ch-tick">{entry.name}</text>
-              </g>
-            );
-          })}
+          {layout.legend.map((entry) => (
+            <g key={entry.name}>
+              <rect x={entry.x} y={entry.y - 8} width={10} height={10} fill={screenColor(entry.colorIndex)} />
+              <text x={entry.x + 14} y={entry.y + 1} className="ch-tick">{entry.name}</text>
+            </g>
+          ))}
         </svg>
       </div>
 
       <div className="dg-acts">
+        <ExportSizeSelect
+          value={exportSize}
+          onChange={(v: ExportSize) => setExportSize(v)}
+          standardLabel={`${CANVAS_W} × ${CANVAS_H}`}
+        />
         <button type="button" className="artifact-open" onClick={() => void saveSvg()}>Save SVG</button>
         <button type="button" className="artifact-open" onClick={() => void savePng()}>Save PNG</button>
         <button type="button" className="artifact-open" onClick={() => void copyImage()}>Copy figure</button>

@@ -61,3 +61,19 @@ test("a fit line's own label, built from computed numbers, is still escaped like
   const svg = toChartSvg(layoutChart(data));
   assert.match(svg, /R²/);
 });
+
+test("with no physical size, the output is exactly what it always was: pixels twice over", () => {
+  const data: ChartData = { kind: "line", series: [{ name: "s", points: [{ x: 0, y: 1 }] }] };
+  const layout = layoutChart(data);
+  const svg = toChartSvg(layout);
+  assert.match(svg, new RegExp(`width="${layout.width}" height="${layout.height}"`));
+  assert.match(svg, new RegExp(`viewBox="0 0 ${layout.width} ${layout.height}"`));
+});
+
+test("a physical size is written in inches on the outer element, while the viewBox stays in pixels", () => {
+  const data: ChartData = { kind: "line", series: [{ name: "s", points: [{ x: 0, y: 1 }] }] };
+  const layout = layoutChart(data, { size: { width: 864, height: 624 } });
+  const svg = toChartSvg(layout, undefined, { widthIn: 9, heightIn: 6.5 });
+  assert.match(svg, /width="9in" height="6\.5in"/);
+  assert.match(svg, /viewBox="0 0 864 624"/);
+});

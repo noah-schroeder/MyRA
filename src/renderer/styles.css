@@ -25,6 +25,8 @@
   --lift:      inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --shadow-md: 0 4px 16px -8px rgba(0, 0, 0, 0.8);
   --shadow-lg: 0 24px 64px -16px rgba(0, 0, 0, 0.75);
+  /* The drop-shadow under a diagram's rounded (non-template) boxes. */
+  --dg-shadow: rgba(0, 0, 0, 0.55);
 
   --border:        #26262e;
   --border-strong: #34343e;
@@ -46,6 +48,10 @@
   --green:  #86bd88;
   --amber:  #dcab4e;
   --red:    #e08279;
+  /* Two more hues, for a diagram's category colours only -- the four above
+     cover every other badge/border/pill in the app and stay that way. */
+  --purple: #b09ddb;
+  --teal:   #7cc4c0;
 
   --radius: 8px;
   --radius-sm: 6px;
@@ -83,6 +89,7 @@
   --lift:      0 1px 2px rgba(60, 48, 30, 0.05);
   --shadow-md: 0 4px 14px -6px rgba(60, 48, 30, 0.18);
   --shadow-lg: 0 24px 56px -18px rgba(60, 48, 30, 0.28);
+  --dg-shadow: rgba(60, 48, 30, 0.22);
 
   --border:        #e5dfd4;
   --border-strong: #d5cdbe;
@@ -105,6 +112,8 @@
   --green:  #3f7d43;
   --amber:  #91650a;
   --red:    #b0453a;
+  --purple: #6a4fa0;
+  --teal:   #2a7d78;
 
   --scrim: rgba(46, 38, 26, 0.34);
 }
@@ -5703,6 +5712,42 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
 }
 .project-warn { margin: 0 0 10px; font-size: 12.5px; color: var(--red); }
 
+/* --------------------------------------------------------- project memory */
+
+.memory-section { margin-bottom: 4px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.memory-auto {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--text-dim); cursor: pointer;
+}
+.memory-auto input { accent-color: var(--accent); }
+.memory-group { margin-top: 10px; }
+.memory-group-head {
+  margin: 0 0 4px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-faint);
+}
+.memory-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.memory-row {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 7px 10px; border-radius: var(--radius-sm);
+  background: var(--bg-raised); border: 1px solid var(--border);
+}
+.memory-row:focus-within { border-color: var(--border-hover); }
+.memory-input {
+  flex: 1; resize: none; font: inherit; font-size: 12.5px; line-height: 1.5;
+  color: var(--text); background: none; border: none; padding: 0;
+  field-sizing: content;
+}
+.memory-input:focus { outline: none; }
+.memory-badge {
+  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px;
+  padding: 1px 7px; margin-top: 1px;
+}
+.memory-add-btn { align-self: flex-start; margin-top: 10px; }
+.memory-add { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.memory-add .dialog-input { flex: 1; }
+.memory-tokens { margin: 10px 0 0; font-size: 11px; color: var(--text-faint); }
+
 /* --------------------------------------------------------- the picker */
 
 .picker-body {
@@ -6221,6 +6266,15 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
    too. --border rather than --bg-raised: the latter is identical to
    --dg-node's own --bg-float in light mode, so a "tinted" box would not be. */
 .dg-node.dg-tint { fill: var(--border); }
+/* A model's `class`/`:::` grouping, never the model's own colour -- these six
+   hues are MyRA's, mixed lightly into the node's own fill so `.dg-text`'s one
+   `--text` stays legible over every one without a per-category text colour. */
+.dg-node.dg-cat-0 { fill: color-mix(in srgb, var(--blue) 25%, var(--bg-float)); }
+.dg-node.dg-cat-1 { fill: color-mix(in srgb, var(--green) 25%, var(--bg-float)); }
+.dg-node.dg-cat-2 { fill: color-mix(in srgb, var(--amber) 25%, var(--bg-float)); }
+.dg-node.dg-cat-3 { fill: color-mix(in srgb, var(--red) 25%, var(--bg-float)); }
+.dg-node.dg-cat-4 { fill: color-mix(in srgb, var(--purple) 25%, var(--bg-float)); }
+.dg-node.dg-cat-5 { fill: color-mix(in srgb, var(--teal) 25%, var(--bg-float)); }
 .dg-node-bars { stroke: var(--border-hover); stroke-width: 1.5; }
 .dg-text { fill: var(--text); font-size: 13px; }
 .dg-edge { stroke: var(--text-faint); }
@@ -6230,8 +6284,27 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
 .dg-elabel-bg { fill: var(--bg-raised); }
 .dg-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .dg-said { font-size: 11.5px; color: var(--text-dim); }
+/* The export-size picker -- a chart, a flowchart and a PRISMA figure share
+   this control, so it is styled once here rather than per figure kind. */
+.fig-size {
+  font: inherit; font-size: 11.5px;
+  padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-float);
+  color: var(--text-dim); cursor: pointer;
+}
+.fig-size:hover { color: var(--text); border-color: var(--border-hover); }
 .dg-broken { display: flex; flex-direction: column; gap: 8px; }
 .dg-broken-why { margin: 0; font-size: 12px; color: var(--red); }
+
+/* A diagram's inline preview, next to the tool card that drew it -- see
+   DiagramThumbnail.tsx. A plain button so the click target is keyboard-
+   reachable for free, reset to look like the figure itself. */
+.dg-thumb {
+  display: block; margin-top: 8px; padding: 6px; line-height: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-raised); cursor: pointer;
+}
+.dg-thumb:hover { border-color: var(--border-hover); }
 
 /*
  * A table in the artifact panel.
@@ -6269,10 +6342,19 @@ button.paper-btn:disabled { opacity: 0.45; cursor: default; }
  * `.dg` above makes for a diagram, and for the same reason: a figure bound
  * for a manuscript must not arrive as light marks on a transparent
  * background because the app happened to be in dark mode.
+ *
+ * Unlike `.dg-canvas`, this fills the panel and does not scroll: a chart has
+ * no fixed geometry to protect the way a diagram's labels are, so
+ * ChartView.tsx redraws it at whatever size this box measures out to
+ * (chartSizeFor) instead of leaving a fixed-size figure to spill past the
+ * panel's own bottom edge. `min-height: 0` on both is what lets a flex child
+ * shrink to the space actually available instead of growing to fit content
+ * that has not been laid out yet.
  */
-.ch { display: flex; flex-direction: column; gap: 10px; }
+.ch { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
 .ch-canvas {
-  overflow: auto;
+  flex: 1 1 auto; min-height: 0; min-width: 0;
+  overflow: hidden;
   padding: 8px;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg-raised);

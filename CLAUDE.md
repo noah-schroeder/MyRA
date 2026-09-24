@@ -213,6 +213,81 @@ and deleting is exactly the path that has to be tested. A store joins by satisfy
 `KindStore` — `list`, `remove`, `payload` — which is the only thing a project may assume
 about one.
 
+### Project memory
+
+Optional, and separate from the index above: a research project can carry notes —
+research questions, aims, guiding theory, methods, decisions, open questions, context —
+that every conversation filed to it can read, so the second conversation about a project
+does not start by re-explaining the first. Creating a project offers a choice, "Simple
+folder" or "Research project"; a simple folder can opt in later from its own page,
+because having a memory file at all is what marks a project as research, not a flag fixed
+at creation.
+
+**A research project's first message runs a fixed wizard, not a free chat.** The same
+"code runs it, not the model" discipline `documents/draft.ts` states for a reason:
+`runProjectSetup` ([main/projectMemory.ts](src/main/projectMemory.ts)) shows a canned
+greeting ([greeting.ts](src/core/projects/greeting.ts)), extracts what the description
+already stated, offers help brainstorming research questions, guiding theories, scope,
+methods or key literature, asks Socratic questions about whichever the user picks — the
+[scope.ts](src/core/research/scope.ts) pattern of generated questions with 2–4 options,
+"Other" and skip, reused here for the same reason it works there — and shows every
+candidate note in a review form before saving anything. `SETUP_GREETING` lives in its own
+zero-import file rather than in [intake.ts](src/core/projects/intake.ts) alongside the
+rest of the wizard's prompts, because `intake.ts` reaches `core/llm/chat.ts` and, through
+it, `node:fs/promises` — fine for main, fatal the moment the renderer needs the same
+greeting before a message exists to ask main for it.
+
+**Only the chat turn reads a project's memory**, the same rule the persona follows and
+for the same reason: a research pipeline stage, the reviewer or a meeting reading a
+project's notes could have them rewrite a PRISMA checklist or a review's house rules the
+way an unwary custom persona could, and nothing downstream is built to guard against
+that. `systemPrompt()` takes an optional `project` and renders its notes in one block,
+never touched by `persona`.
+
+**The memory is never capped for size; the prompt is, and only by a share of the actual
+window.** [memory.ts](src/core/projects/memory.ts)'s `renderMemory` reads
+`runtime.chatEndpoint()?.contextTokens` the same figure the context meter and compaction
+already read. Past a quarter of it, the project page warns; past half, whole fields are
+left out in priority order — questions and aims survive longest, context first — with
+storage itself untouched, because a memory that fills the window fails every turn in the
+project rather than costing one degraded reply. An unknown window (a hosted endpoint)
+caps nothing, the same stance `needsCompaction` already takes.
+
+**An automatic write has to be grounded in the user's own words.** The meeting notes
+rule — every extracted item is looked up in the transcript before it is trusted — applied
+to a conversation instead of a recording: [memoryUpdate.ts](src/core/projects/memoryUpdate.ts)
+takes the model's candidate items and keeps only the ones `verifyQuote`
+([transcript.ts](src/core/meetings/transcript.ts)) actually finds, two ways. **Stated**:
+the quote is something the user wrote. **Confirmed**: the quote is something the
+assistant proposed, and the very next message from the user agrees to it — code checks
+the position, the model only judges whether the reply was a yes. `<<<UNTRUSTED
+CONTENT>>>` blocks are stripped from every message first, so a fetched page or a dropped
+document cannot plant a "memory" of its own; it can only reach memory by first reaching
+an assistant reply that the user then actually confirmed. There is no third, unreviewed
+pile — an item is grounded and kept, or it is dropped.
+
+**The background pass and the button share the grounding, not the trust.** A quiet
+conversation restarts a 90-second timer every turn; once it fires, `runAutoUpdate` grounds
+and saves automatically, source `"auto"`. "Update project notes from this chat" runs the
+identical extraction but shows a review form first, saving what is approved as `"you"` —
+the same reviewed-versus-unattended split setup's own items (`"setup"`) already draw. An
+automatic write can only add: editing an `"auto"` item turns it into a `"you"` item, and
+nothing here ever overwrites what a person wrote or approved.
+[work.ts](src/main/work.ts)'s lease and a resident-model check both gate the automatic
+pass — a local model MyRA is not already holding must never be loaded just to write a
+note, the exact reload `resolveLlm`'s own header warns against; a hosted choice has no
+such card to spare and is always allowed to run.
+
+**A separate file, in a subdirectory, never a project's own record.**
+[memoryStore.ts](src/main/memoryStore.ts) keeps `projects/memory/<id>.json` beside
+`projects/<id>.json` rather than as a field on it: `fileInActiveProject` rewrites a
+project's own record after every turn, so a memory edit landing at the same moment could
+lose that race against it; and the subdirectory keeps a memory file from being read back
+as a project by `readAll`'s own `*.json` sweep of `projects/`. Deleting a project deletes
+its memory; exporting one writes `memory.md` if there are any notes, using
+`renderMemoryMarkdown` — full and uncapped, because that is read by a person, not sent to
+a model, and the half-window rule has nothing to do with a document.
+
 ### Diagrams
 
 A figure for a paper, drawn by a language model rather than a diffusion one —
@@ -301,6 +376,33 @@ nothing in the pipeline measures them, and **Edit numbers** on the drawn
 figure is where a reviewer adds what the run alone cannot supply, reopening
 the same form prefilled with what is already there and redrawing on the same
 id in place.
+
+**A chart redraws to fit; a diagram scrolls — because only one of them has no
+geometry to protect.** The artifact panel used to draw every chart at a fixed
+640×420 regardless of how wide the panel was, so it spilled past the panel's
+own bottom edge at the default width. A diagram's canvas deliberately
+scrolls rather than shrinking, because its labels are its entire content —
+but a chart's axes, ticks and marks are all recomputed from the data at
+whatever size they are asked to fill, so there is nothing lost by asking for
+a different size. `ChartView.tsx` measures its own canvas box with a
+`ResizeObserver` and feeds that through `chartSizeFor` into `layoutChart`'s
+new `size` option every time it changes; below 480px wide, a multi-series
+legend moves under the plot instead of taking a third of it in the right
+margin (`layoutChart` in [layout.ts](src/core/charts/layout.ts)). Export asks
+a different question from what fits the panel, so it is a separate, explicit
+choice: standard (the figure's own natural size), a portrait page or a
+landscape page — a PRISMA figure is conventionally a full portrait page and a
+flowchart a landscape one — remembered per figure kind in
+[ExportSize.tsx](src/renderer/components/ExportSize.tsx). A page means the
+*text block*, inside 1-inch margins, and which paper it is drawn on follows
+the account's own locale rather than a setting nobody would think to look
+for ([exportSize.ts](src/core/figures/exportSize.ts)). Both `toChartSvg` and
+`toSvg` take an optional physical size and, when given one, write the outer
+`width`/`height` in inches while the `viewBox` stays in layout pixels — so
+the file inserts into a document at that physical size with no transform of
+its own, and omitting it (every existing caller) leaves the output exactly
+what it always was, which is what keeps `test/diagramSvg.test.ts`'s
+byte-identity test pinned.
 
 ### The paper drafter
 
@@ -776,12 +878,12 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `myra:*` — 176 of them, registered in
-[main/index.ts](src/main/index.ts)'s `installIpc` and in the nine `install*Ipc` modules it
-calls (meetings, dictation, audio, images, papers, projects, runtime, api, review), and exposed
-one-by-one in the preload. Adding a capability means touching all three layers plus
-`src/renderer/types.ts`, and at that scale a channel wired in only three of the four is a
-`window.myra` call that is `undefined` at runtime.
+IPC channels are all `myra:*` — 183 of them, registered in
+[main/index.ts](src/main/index.ts)'s `installIpc` and in the `install*Ipc` modules it
+calls (meetings, dictation, audio, images, papers, projects, project memory, runtime, api,
+review, tasks), and exposed one-by-one in the preload. Adding a capability means touching all
+three layers plus `src/renderer/types.ts`, and at that scale a channel wired in only three of
+the four is a `window.myra` call that is `undefined` at runtime.
 
 Directories MyRA creates are `0700` and files `0600` (`makePrivateDir` / `makeOwnDir` in
 paths.ts) — transcripts and drafts must not be readable by another local account. A

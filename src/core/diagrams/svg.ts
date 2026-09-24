@@ -27,6 +27,14 @@ export interface DiagramTheme {
   edge: string;
   edgeLabel: string;
   edgeLabelBg: string;
+  /** The drop-shadow under a rounded (non-template) box. A full CSS colour,
+   *  alpha included, so it is one attribute rather than a colour plus an
+   *  opacity that could drift apart. */
+  shadowColor: string;
+  /** Indexed by `BoxStyle.category`. Length `CATEGORY_PALETTE_SIZE` --
+   *  MyRA's own palette, never a colour a model's `classDef` wrote, so every
+   *  category reads as legibly on export as it does on screen. */
+  categoryFill: string[];
 }
 
 /**
@@ -45,17 +53,38 @@ export const PAPER_THEME: DiagramTheme = {
   edge: "#4a4f58",
   edgeLabel: "#33373f",
   edgeLabelBg: "#ffffff",
+  shadowColor: "rgba(20, 22, 26, 0.18)",
+  /* A 20% mix of the app's own semantic hues into nodeFill, in the same
+     blue/green/amber/red order those tokens already appear in styles.css,
+     plus purple/teal for the two slots beyond them. Every one clears 12.5:1
+     against `text` below -- picked for legibility, not merely checked after
+     the fact. */
+  categoryFill: ["#cddae7", "#d1ded4", "#e1d9c8", "#e7d3d2", "#d9d5e6", "#ccdede"],
 };
 
 const round = (n: number): number => Math.round(n * 100) / 100;
+
+/** Absent means this: every model-drawn box, since `layoutDiagram` never sets
+ *  `box.radius` itself (only a hand-built figure like PRISMA does, always to
+ *  0 for its template's square corners). Raising this is therefore safe for
+ *  every diagram that isn't PRISMA, with no new field to gate it. */
+const DEFAULT_RADIUS = 10;
+
+/** A template box asking for square corners (PRISMA's `radius: 0`) opts out
+ *  of the shadow along with the rounding -- a figure cut from an official
+ *  Word template must not gain either. */
+export function hasShadow(n: PlacedNode): boolean {
+  return (n.box?.radius ?? DEFAULT_RADIUS) > 0;
+}
 
 /** The outline of one node, as an SVG path. */
 export function nodePath(n: PlacedNode): string {
   const { x, y, w, h } = n;
   /* The PRISMA template's boxes are square-cornered, and a figure with rounded
      corners beside one cut from the official Word template reads as a
-     different diagram. Absent means 6, so every model-drawn box is untouched. */
-  const r = n.box?.radius ?? 6;
+     different diagram. Absent means DEFAULT_RADIUS, so every model-drawn box
+     gets the same soft corner. */
+  const r = n.box?.radius ?? DEFAULT_RADIUS;
   const shape: NodeShape = n.shape;
   switch (shape) {
     case "diamond":
@@ -190,15 +219,36 @@ export function xmlEscape(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 }
 
-/** A standalone SVG file, ready to drop into a manuscript. */
-export function toSvg(layout: Layout, theme: DiagramTheme = PAPER_THEME): string {
+/** A standalone SVG file, ready to drop into a manuscript.
+ *
+ * `physical`, when given, writes the outer `width`/`height` in inches while
+ * the `viewBox` stays in layout pixels, so a page-sized export inserts at
+ * that physical size with no transform of its own. Omitted, the output is
+ * exactly what it always was -- which is what pins this function's output in
+ * `test/diagramSvg.test.ts`. */
+export function toSvg(
+  layout: Layout,
+  theme: DiagramTheme = PAPER_THEME,
+  physical?: { widthIn: number; heightIn: number },
+): string {
   const parts: string[] = [];
+  const outerW = physical ? `${physical.widthIn}in` : `${layout.width}`;
+  const outerH = physical ? `${physical.heightIn}in` : `${layout.height}`;
   parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${outerW}" height="${outerH}" ` +
     `viewBox="0 0 ${layout.width} ${layout.height}" font-family="system-ui, -apple-system, ` +
     `'Segoe UI', sans-serif" font-size="${FONT_SIZE}">`,
   );
   parts.push(`<rect width="${layout.width}" height="${layout.height}" fill="${theme.background}"/>`);
+  /* A literal id is safe here and only here: this string is one standalone
+     file per export, never two documents sharing a DOM the way several
+     diagrams can inside one conversation (see the arrowhead comment above on
+     why an id-referencing marker is avoided on screen). */
+  parts.push(
+    `<defs><filter id="dg-shadow" x="-30%" y="-30%" width="160%" height="160%">` +
+    `<feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="${theme.shadowColor}"/>` +
+    "</filter></defs>",
+  );
 
   for (const e of layout.edges) {
     const dash = dashFor(e.style);
@@ -222,8 +272,14 @@ export function toSvg(layout: Layout, theme: DiagramTheme = PAPER_THEME): string
   }
 
   for (const n of layout.nodes) {
-    const fill = n.box?.tint ? theme.tintFill : theme.nodeFill;
-    parts.push(`<path d="${nodePath(n)}" fill="${fill}" stroke="${theme.nodeStroke}" stroke-width="1.5"/>`);
+    const fill =
+      n.box?.category !== undefined
+        ? theme.categoryFill[n.box.category] ?? theme.nodeFill
+        : n.box?.tint ? theme.tintFill : theme.nodeFill;
+    const filter = hasShadow(n) ? ` filter="url(#dg-shadow)"` : "";
+    parts.push(
+      `<path d="${nodePath(n)}" fill="${fill}" stroke="${theme.nodeStroke}" stroke-width="1.5"${filter}/>`,
+    );
     const bars = subroutineBars(n);
     if (bars) parts.push(`<path d="${bars}" stroke="${theme.nodeStroke}" stroke-width="1.5" fill="none"/>`);
     const turn = textTurn(n);

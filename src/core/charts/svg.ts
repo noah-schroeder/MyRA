@@ -110,11 +110,23 @@ export function medianLine(box: PlottedBox): string {
   return `M ${round(box.x - box.w / 2)} ${round(box.median)} L ${round(box.x + box.w / 2)} ${round(box.median)}`;
 }
 
-/** A standalone SVG file, ready to drop into a manuscript. */
-export function toChartSvg(layout: ChartLayout, theme: ChartTheme = PAPER_THEME): string {
+/** A standalone SVG file, ready to drop into a manuscript.
+ *
+ * `physical`, when given, writes the outer `width`/`height` in inches while
+ * the `viewBox` stays in layout pixels -- so a document that inserts the file
+ * places it at that physical size with no transform of its own. Omitted, the
+ * output is exactly what it always was: the on-screen pixel size twice over,
+ * which is what pins this function's byte-for-byte output in chartSvg.test.ts. */
+export function toChartSvg(
+  layout: ChartLayout,
+  theme: ChartTheme = PAPER_THEME,
+  physical?: { widthIn: number; heightIn: number },
+): string {
   const parts: string[] = [];
+  const outerW = physical ? `${physical.widthIn}in` : `${layout.width}`;
+  const outerH = physical ? `${physical.heightIn}in` : `${layout.height}`;
   parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${outerW}" height="${outerH}" ` +
     `viewBox="0 0 ${layout.width} ${layout.height}" font-family="system-ui, -apple-system, ` +
     `'Segoe UI', sans-serif" font-size="${FONT_SIZE}">`,
   );
@@ -215,11 +227,15 @@ export function toChartSvg(layout: ChartLayout, theme: ChartTheme = PAPER_THEME)
     parts.push(`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${theme.palette[0]}"/>`);
   }
 
-  layout.legend.forEach((entry, i) => {
-    const lx = layout.plot.x + layout.plot.w + 14;
-    const ly = layout.plot.y + 8 + i * 18;
-    parts.push(`<rect x="${lx}" y="${ly - 8}" width="10" height="10" fill="${colorFor(theme, entry.colorIndex)}"/>`);
-    parts.push(`<text x="${lx + 14}" y="${ly + 1}" fill="${theme.text}" font-size="${FONT_SIZE - 1}">${xmlEscape(entry.name)}</text>`);
+  layout.legend.forEach((entry) => {
+    parts.push(
+      `<rect x="${round(entry.x)}" y="${round(entry.y - 8)}" width="10" height="10" ` +
+      `fill="${colorFor(theme, entry.colorIndex)}"/>`,
+    );
+    parts.push(
+      `<text x="${round(entry.x + 14)}" y="${round(entry.y + 1)}" fill="${theme.text}" ` +
+      `font-size="${FONT_SIZE - 1}">${xmlEscape(entry.name)}</text>`,
+    );
   });
 
   parts.push("</svg>");
