@@ -70,7 +70,7 @@ export interface MemoryItem {
 export interface ProjectMemory {
   /** Whether the project's setup chat has run. A simple folder starts "done" with nothing in it. */
   setup: "pending" | "done";
-  /** Whether an idle conversation may add to this memory on its own. On by default for a research project. */
+  /** Whether a conversation may add to this memory on its own, before each reply. On by default for a research project. */
   auto: boolean;
   items: MemoryItem[];
   /**
@@ -215,7 +215,7 @@ export function mergeAuto(
  *
  * What the `remember` tool writes through: a model saving one note mid-turn
  * has read nothing past it, so unlike `mergeAuto` it must leave the
- * conversation's watermark where it was -- moving it would let the idle pass
+ * conversation's watermark where it was -- moving it would let the automatic pass
  * skip everything said after this one note.
  */
 export function addAuto(

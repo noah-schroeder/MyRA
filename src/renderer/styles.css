@@ -1187,6 +1187,23 @@ body:has(.artifact-grip:active) { user-select: none; }
 .turn-remember { right: 62px; }
 .turn.user .turn-remember { right: 58px; }
 
+/* Beside a highlight in the thread. Fixed, because it is placed from the
+   selection's own viewport rectangle; under the dialogs (50), which clear the
+   highlight as they open anyway. */
+.selection-remember {
+  position: fixed; z-index: 30;
+  transform: translate(-50%, -100%);
+  font: inherit; font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-float); color: var(--text);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+.selection-remember.below { transform: translate(-50%, 0); }
+.selection-remember:hover,
+.selection-remember:focus-visible { border-color: var(--accent); }
+
 .artifact-chip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Below this the three columns stop fitting: the thread is squeezed to nothing

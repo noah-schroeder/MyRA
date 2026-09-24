@@ -266,32 +266,50 @@ document cannot plant a "memory" of its own; it can only reach memory by first r
 an assistant reply that the user then actually confirmed. There is no third, unreviewed
 pile — an item is grounded and kept, or it is dropped.
 
-**The background pass and the button share the grounding, not the trust.** A quiet
-conversation restarts a 90-second timer every turn; once it fires, `runAutoUpdate` grounds
-and saves automatically, source `"auto"`. "Update project notes from this chat" runs the
-identical extraction but shows a review form first, saving what is approved as `"you"` —
-the same reviewed-versus-unattended split setup's own items (`"setup"`) already draw. An
-automatic write can only add: editing an `"auto"` item turns it into a `"you"` item, and
-nothing here ever overwrites what a person wrote or approved.
-[work.ts](src/main/work.ts)'s lease and a resident-model check both gate the automatic
-pass — a local model MyRA is not already holding must never be loaded just to write a
-note, the exact reload `resolveLlm`'s own header warns against; a hosted choice has no
-such card to spare and is always allowed to run, and so does the user's own endpoint,
-which has nothing to load (`runtime.wouldLoadForChat()` is the question, not "is a local
-model resident"). A pass that saves anything says so in the conversation it read, as a
-notice: one that wrote notes where nobody was looking was indistinguishable from one that
-never ran.
+**The automatic pass runs before every reply, and code runs it.** "Let's go with X" is
+saved on the turn it is said: `handleSend` calls `notesBeforeReply`
+([main/projectMemory.ts](src/main/projectMemory.ts)) after the endpoint is resolved and
+before `runTurn`, so the reply is written with the note already in the project block and a
+notice under the user's message says what was kept. It used to wait for ninety seconds of
+quiet, which made a decision look ignored — the person checked, found nothing, kept
+talking, and every message restarted the wait. The decision itself is
+[memoryUpdate.ts](src/core/projects/memoryUpdate.ts)'s `notePass` (ask, parse, ground,
+merge), pure so it is tested with no model. Three rules hold it up. It runs only for a turn
+already cleared to write notes — a research project with `auto` on, not the setup chat —
+because `readMemory` reads a missing file as an empty memory with `auto` on, and the old
+timer wrote that back, turning a simple folder into a research project. **An unreadable
+reply is not "nothing found"**: `parseProposals` returns `undefined` for a reply with no
+JSON (a model that wrote prose, or spent its reply thinking), and the watermark stays put
+so the next turn reads the same stretch — treating the two alike skipped a decision for
+good. And a failed pass costs the turn nothing. Its cost to the reply is one short request,
+not a re-read of the conversation: the bundled llama-server keeps a host-memory prompt
+cache (`--cache-ram`, 8192 MiB by default, measured on b10375), so the conversation's
+cached prompt the pass displaces is restored, not recomputed. Reasoning follows the chat
+turn's own switch (`extra`), so someone who turned thinking off is not waiting on it here.
+The lookback is to the **assistant** reply before the watermark and never to a user
+message already read — showing that again invited the same decision back in new words,
+which `addAuto`'s exact-text dedupe cannot catch.
 
-**`remember` is the third door, and it goes through the same grounding.** The idle pass
-is right for what nobody pointed at and wrong for "remember that we're using grounded
-theory", which someone says expecting to see it kept now. So the model has a tool
-([tools/memory.ts](src/core/agent/tools/memory.ts)) whose note is saved only when its
-`quote` passes `groundProposals` — injection can reach the tool and cannot get past it.
-It is offered only in a project that has a memory file and `auto` on (a simple folder must
-not become a research project because a model called a tool in it), and `addAuto` appends
-without moving the conversation's `seen` watermark. Beside it, each turn in a project has a
-**Remember** button that saves the message, or the part of it selected, as a `"you"` note:
-the person's own action, so it is reviewed in the dialog rather than grounded.
+**The pass and the button share the grounding, not the trust.** The pass saves unattended,
+source `"auto"`; "Update project notes from this chat" runs the identical extraction but
+shows a review form first, saving what is approved as `"you"` — the same
+reviewed-versus-unattended split setup's own items (`"setup"`) already draw. An automatic
+write can only add: editing an `"auto"` item turns it into a `"you"` item, and nothing here
+ever overwrites what a person wrote or approved.
+
+**`remember` is the second chance, and it goes through the same grounding.** An explicit
+"remember that…" the pass judged not worth a note can still be caught by the model
+answering it ([tools/memory.ts](src/core/agent/tools/memory.ts)), whose note is saved only
+when its `quote` passes `groundProposals` — injection can reach the tool and cannot get
+past it. The system prompt says the pass has already run, so the model does not save the
+same decision twice. It is offered only in a project that has a memory file and `auto` on
+(a simple folder must not become a research project because a model called a tool in it),
+and `addAuto` appends without moving the conversation's `seen` watermark. Beside it, a
+**Remember** button appears next to any text highlighted inside one message
+([SelectionRemember.tsx](src/renderer/components/SelectionRemember.tsx)) — a note is rarely
+a whole reply, and the per-turn button that honoured a selection was invisible until
+hovered, so nobody found it. Both save as `"you"`: the person's own action, reviewed in the
+dialog rather than grounded.
 
 **The setup chat streams, so its reasoning shows.** Each of its model calls is JSON nobody
 reads, which on a local model meant minutes with nothing on screen. `runProjectSetup` takes

@@ -932,19 +932,6 @@ export class RuntimeManager {
   }
 
   /**
-   * Whether asking for the chat endpoint right now would load the chosen
-   * model -- the question background work asks before it may run at all.
-   *
-   * The cheap half of `ensureChatModel`'s own conditions, without the
-   * catalogue read: a chosen model the catalogue would turn out not to reload
-   * reads as "would load" here, which only ever makes a background pass wait.
-   */
-  wouldLoadForChat(): boolean {
-    if (!this.#config.useForChat || this.#lemonade.status.state !== "ready") return false;
-    return !this.chatModel() && Boolean(this.#config.activeModel?.trim());
-  }
-
-  /**
    * Put the chosen chat model back if something took it away.
    *
    * Nothing loaded a model because a message was sent, and several things
