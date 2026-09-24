@@ -1536,6 +1536,7 @@ export function App() {
           active={documents.active}
           onSelect={documents.setActive}
           onClose={() => documents.setOpen(false)}
+          onRestyle={documents.restyle}
         />
       ) : null}
 

@@ -28,6 +28,7 @@
 import type { ToolDef, ToolResult } from "../registry.ts";
 import { assignCategoryColors, layoutDiagram } from "../../diagrams/layout.ts";
 import { parseMermaid } from "../../diagrams/mermaid.ts";
+import { DIAGRAM_STYLES, parseDiagramStyle, STYLE_LABELS, type DiagramStyleName } from "../../diagrams/styles.ts";
 import type { PrismaFigure } from "../../prisma/spec.ts";
 import { makeIdCounter, makeWatcher } from "./artifactWatch.ts";
 
@@ -49,6 +50,9 @@ export interface DiagramUpdate {
   source?: string | undefined;
   /** A PRISMA 2020 figure, placed directly rather than parsed from Mermaid. */
   prisma?: PrismaFigure | undefined;
+  /** The look the model asked for. Absent means whatever the panel's own menu
+   *  was last set to -- and the menu can always change it. Never on PRISMA. */
+  style?: DiagramStyleName | undefined;
 }
 
 const diagramWatcher = makeWatcher<DiagramUpdate>();
@@ -90,8 +94,18 @@ export const createDiagramTool: ToolDef = {
     "`flowchart TD` (top-down) or `flowchart LR` (left-right). Nodes are `id[Label]`, " +
     "`id{Decision}`, `id([Rounded])`; arrows are `-->`, `---`, `-.->` and `==>`, with an " +
     "optional label as `-->|text|`. To colour-code related steps, group nodes into up to 6 " +
-    "named categories with `id:::categoryName` or a `class idA,idB categoryName` line -- the " +
-    "category name is only a grouping key, the actual colours are chosen for you. Only " +
+    "named categories with `id:::categoryName` or a `class idA,idB categoryName` line; with " +
+    "nothing else, MyRA picks a legible colour for each category. When the user asks for " +
+    "particular colours, set them: `classDef categoryName fill:#cde4ff,stroke:#1f5fa8,color:#10233d` " +
+    "colours every node in that category, `style id fill:#ffe0b2` colours one node, and " +
+    "`linkStyle 0 stroke:#c62828,stroke-width:2px` colours an edge (edges are numbered from 0 in " +
+    "the order written; `linkStyle default` colours them all). Colours are hex codes, rgb(), or CSS " +
+    "colour names; the text colour is chosen for contrast when you do not give one. To recolour a " +
+    "diagram already drawn, call this again with the same nodes and the new colour lines. " +
+    "Set `style` only when the user asks for a look: \"poster\" for a poster or slides (bold, " +
+    "large, rounded), \"journal\" for a manuscript (thin lines, Helvetica, print-safe colours), " +
+    "\"monochrome\" for black-and-white print; leave it out otherwise, and the user can change it " +
+    "from the figure. Only " +
     "flowcharts are supported: sequence, class, gantt and state diagrams are not, and " +
     "subgraphs are not. Prefer this over describing a diagram in prose or writing a Mermaid " +
     "code block, and call it again with corrected source if it returns an error.",
@@ -107,6 +121,11 @@ export const createDiagramTool: ToolDef = {
         type: "string",
         description: "The diagram, in Mermaid flowchart syntax",
       },
+      style: {
+        type: "string",
+        enum: [...DIAGRAM_STYLES],
+        description: "The look, only when the user asked for one: poster, journal, monochrome or standard",
+      },
     },
     required: ["source"],
     additionalProperties: false,
@@ -116,6 +135,9 @@ export const createDiagramTool: ToolDef = {
     const title = typeof params["title"] === "string" && params["title"].trim()
       ? params["title"].trim()
       : "Diagram";
+    /* An unknown style is dropped rather than refused: the diagram is what was
+       asked for, and the figure's own menu can still set the look. */
+    const style = parseDiagramStyle(params["style"]);
 
     if (!source.trim()) {
       return { content: "No diagram source was given. Pass `source` as Mermaid flowchart syntax." };
@@ -143,20 +165,25 @@ export const createDiagramTool: ToolDef = {
     const { overflow } = assignCategoryColors(parsed.diagram);
 
     const id = nextDiagramId();
-    announceDiagram({ id, title, source });
+    announceDiagram({ id, title, source, ...(style ? { style } : {}) });
 
     return {
       content:
         `Drew "${title}": ${layout.nodes.length} ` +
         `${layout.nodes.length === 1 ? "node" : "nodes"} and ${layout.edges.length} ` +
-        `${layout.edges.length === 1 ? "edge" : "edges"}. It is shown to the user beside the ` +
+        `${layout.edges.length === 1 ? "edge" : "edges"}` +
+        (style && style !== "standard" ? ` in the ${STYLE_LABELS[style]} style` : "") +
+        `. It is shown to the user beside the ` +
         "conversation, where they can export it as SVG or PNG. Do not repeat the diagram " +
         "source in your reply; say what it shows." +
         (overflow.length
           ? ` Only the first 6 categories are shown in colour; "${overflow.join('", "')}" ` +
             `${overflow.length === 1 ? "uses" : "use"} the default look.`
-          : ""),
-      detail: { id, title, source },
+          : "") +
+        /* Drawn anyway, and said: a colour that did not parse is a detail the
+           model can fix on its next call, not a reason to show nothing. */
+        (parsed.warnings?.length ? `\n\nNot everything was applied:\n${parsed.warnings.map((w) => `- ${w}`).join("\n")}` : ""),
+      detail: { id, title, source, ...(style ? { style } : {}) },
     };
   },
 };

@@ -149,3 +149,14 @@ test("layoutDiagram sets box.category for a grouped node and leaves an ungrouped
   assert.equal(at(l, "A").box?.category, 0);
   assert.equal(at(l, "B").box, undefined);
 });
+
+test("a poster layout of the same source is roomier, and only a named look is carried", async () => {
+  const { LOOKS } = await import("../src/core/diagrams/styles.ts");
+  const parsed = parseMermaid("flowchart TD\n A[Search databases] --> B[Screen titles] --> C[Include]");
+  assert.ok(parsed.ok);
+  const standard = layoutDiagram(parsed.diagram);
+  const poster = layoutDiagram(parsed.diagram, LOOKS.poster);
+  assert.ok(poster.width > standard.width && poster.height > standard.height);
+  assert.equal("look" in standard, false);
+  assert.equal(poster.look?.name, "poster");
+});

@@ -336,6 +336,34 @@ tool *is* the retry — the agent loop already re-calls a failed tool. What is n
 drawable is refused by name (`sequenceDiagram`, subgraphs) rather than
 half-drawn, because that message is what the model acts on.
 
+**Colours are read, but only as colours.** `classDef`, `style` and `linkStyle`
+are how a model does what a user means by "make the screening steps green", so
+they are parsed — every value through [colors.ts](src/core/diagrams/colors.ts),
+which returns `#rrggbb` from a hex code, `rgb()` or a CSS colour name and
+nothing otherwise, so no string a model wrote reaches an SVG attribute. A value
+that is not a colour is dropped and named in the tool's reply rather than
+failing the diagram. A fill with no stated text colour gets near-black or white,
+whichever has the better contrast; explicit colours beat the theme and the
+category palette on screen and on export alike, and a filled category takes no
+palette slot. A diagram that names no colour is byte-for-byte what it was.
+
+**Looks are presets, not a theme editor.** [styles.ts](src/core/diagrams/styles.ts)
+defines four — Standard, Journal (Helvetica/Arial, thin rules, Okabe–Ito tints, no
+shadows), Poster (semibold, roomy, rounded boxes and elbows, heavier arrows, a stroke
+per category) and Monochrome (Journal's geometry in greys, every chosen colour mapped to
+the grey of the same lightness) — because a researcher should get a finished look by
+picking a word, not by tuning a dozen sliders into something that is none of them. A
+look has two halves: geometry (`Look`), which `layoutDiagram` takes because type size and
+padding change where boxes go, and a palette (`DiagramTheme`), which only paints. Standard
+places no `look` on its `Layout` and draws exactly what it always did, on screen from CSS
+and on export from `PAPER_THEME`; a named look is drawn on screen in its export colours on
+a white ground (WYSIWYG — a poster previewed in dark mode previews something else), both
+through one shared [DiagramSvg.tsx](src/renderer/components/DiagramSvg.tsx) and the same
+`nodeColors`/`edgeColors` the exporter uses. The model may name a look (`create_diagram`'s
+`style`) when asked; the figure's Style menu always wins, rewrites that figure's style, and
+is remembered for figures drawn without one. PRISMA figures take no look: their appearance
+is the official template.
+
 **One geometry, two consumers, two palettes.** The renderer maps `nodePath`/
 `edgePath` onto React elements and colours them from CSS so the figure follows
 the app's theme; `toSvg` writes the same strings into a file using
