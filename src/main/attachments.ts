@@ -1,10 +1,13 @@
 /**
- * Where a dropped image's bytes live.
+ * Where a dropped image's or a pasted table's bytes live.
  *
- * Only images: a document's text is extracted once and inlined into the
- * message (see main/index.ts and core/llm/attach.ts's header for why), so
- * there is nothing left of it to store. An image cannot be inlined as text,
- * so its bytes go here and the message keeps only the reference.
+ * Images and data, never documents: a document's text is extracted once and
+ * inlined into the message (see main/index.ts and core/llm/attach.ts's header
+ * for why), so there is nothing left of it to store. An image cannot be
+ * inlined as text, so its bytes go here and the message keeps only the
+ * reference -- and a pasted table is kept the same way on purpose, so the
+ * model never sees the numbers as text in its own context, only a tool result
+ * computed from them.
  *
  * Never inline in the session JSON. `listSessions()` (core/sessions.ts) opens
  * *every* session file just to read its title, so a handful of inlined photos
@@ -87,6 +90,15 @@ async function filesByPrefix(sessionId: string): Promise<Map<string, string>> {
   return out;
 }
 
+/** An attachment id resolved to its path on disk, or undefined when it is not
+ *  there -- the shared first step every reader and `deleteAttachment` below
+ *  need, so a change to how `filesByPrefix` disambiguates a collision has to
+ *  be verified against one call site instead of several independent copies. */
+async function resolveAttachmentPath(sessionId: string, id: string): Promise<string | undefined> {
+  const files = await filesByPrefix(sessionId);
+  return files.get(assertAttachmentId(id));
+}
+
 /**
  * An image's bytes, as a `data:` URI -- or nothing, when the file is not
  * there. Missing is not an error here: a reference to a deleted conversation's
@@ -99,8 +111,7 @@ export async function readImageDataUri(
   mime: string,
 ): Promise<string | undefined> {
   try {
-    const files = await filesByPrefix(sessionId);
-    const path = files.get(assertAttachmentId(id));
+    const path = await resolveAttachmentPath(sessionId, id);
     if (!path) return undefined;
     const bytes = await readFile(path);
     return `data:${mime};base64,${bytes.toString("base64")}`;
@@ -111,9 +122,57 @@ export async function readImageDataUri(
 
 /** Remove one attachment -- the composer's own × on a chip, before it is ever sent. */
 export async function deleteAttachment(sessionId: string, id: string): Promise<void> {
-  const files = await filesByPrefix(sessionId);
-  const path = files.get(assertAttachmentId(id));
+  const path = await resolveAttachmentPath(sessionId, id);
   if (path) await rm(path, { force: true });
+}
+
+/** 8 MB: generous for a pasted table -- a spreadsheet's worth of text is a
+ *  few hundred kB at most -- and small enough that a paste gone wrong (someone
+ *  pasting an entire codebase) fails immediately rather than filling a
+ *  session's attachment directory. */
+const MAX_DATA_BYTES = 8 * 1024 * 1024;
+
+export interface SavedData {
+  id: string;
+  bytes: number;
+}
+
+/**
+ * Write a pasted or dropped table's text, verbatim.
+ *
+ * `.txt` regardless of the source's own extension (`.csv`, `.tsv`, or
+ * nothing, for a paste): nothing here interprets the bytes, so nothing here
+ * needs to remember which delimiter they used -- `core/tabular/parse.ts`
+ * re-derives that itself, every time, from the text alone.
+ */
+export async function saveDataAttachment(sessionId: string, text: string): Promise<SavedData> {
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > MAX_DATA_BYTES) {
+    throw new Error(`That table is too large (${Math.round(bytes / 1024)} kB).`);
+  }
+  const dir = sessionDir(sessionId);
+  await makeOwnDir(dir);
+  const id = attachmentId();
+  const path = join(dir, `${id}.txt`);
+  await writeFile(path, text, { mode: OWNER_ONLY_FILE, encoding: "utf8" });
+  return { id, bytes };
+}
+
+/**
+ * A data attachment's text back -- read fresh every time a tool asks for it,
+ * for the same reason `readImageDataUri` is: there is no "already seen this"
+ * to cache against in a stateless HTTP API, and a handful of small local
+ * files costs nothing to re-read. Missing is not an error, for the same
+ * reason it is not one there either.
+ */
+export async function readDataText(sessionId: string, id: string): Promise<string | undefined> {
+  try {
+    const path = await resolveAttachmentPath(sessionId, id);
+    if (!path) return undefined;
+    return await readFile(path, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 /** Every attachment a conversation ever held, removed with it. */

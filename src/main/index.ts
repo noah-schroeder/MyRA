@@ -66,6 +66,7 @@ import {
   cachedLocalDialects, forgetReasoning, hostedCapability, localCapability,
 } from "./llm/reasoning.ts";
 import { setPdfRenderer, engines, documentsDir, setWorkspaceRoot } from "../core/documents/office.ts";
+import { fileName } from "../core/projects/render.ts";
 import { setDeviceResolver, type AudioSource } from "../core/meetings/capture.ts";
 import type { ChatMessage } from "../core/llm/chat.ts";
 import { composeMessageContent, type Attachment } from "../core/llm/attach.ts";
@@ -895,14 +896,38 @@ function installIpc(): void {
         };
       }
       try {
+        const columns = parsed.table.columns.map((c) => c.name);
+        const rows = rowCount(parsed.table);
+        /* The same guard the document branch below makes, against the same
+           shape-summary line handleSend actually builds and sends -- before
+           anything is written to disk, the same order that branch checks
+           in. A table with very many or very long column headers can blow a
+           small model's context with no upfront error otherwise; unlike a
+           document, nothing here would even be over the byte-size cap
+           saveDataAttachment enforces, since this line's length tracks
+           column count and header length, not row count. */
+        const summary =
+          `[data 0000000000000000: "${fileName}" -- ${columns.length} columns (${columns.join(", ")}), ` +
+          `${rows} rows]`;
+        const tokens = estimateTokens([{ role: "user", content: summary }]);
+        const limit = runtime.chatEndpoint()?.contextTokens;
+        if (limit && tokens + REPLY_TOKENS > limit) {
+          return {
+            ok: false,
+            error:
+              `${fileName}'s column list alone is ${tokens.toLocaleString()} tokens and this model ` +
+              `holds ${limit.toLocaleString()}. Raise the context window in the model's settings, or ` +
+              "paste fewer columns.",
+          };
+        }
         const saved = await saveDataAttachment(currentSession().id, text);
         return {
           ok: true,
           kind: "data" as const,
           id: saved.id,
           name: fileName,
-          rows: rowCount(parsed.table),
-          columns: parsed.table.columns.map((c) => c.name),
+          rows,
+          columns,
         };
       } catch (err) {
         return { ok: false, error: (err as Error).message || "That table could not be read." };
@@ -1910,40 +1935,52 @@ function installIpc(): void {
   });
 
   /**
-   * Save a figure the conversation drew, into the documents folder.
+   * Save a figure -- from create_diagram, create_table or create_chart --
+   * into the documents folder, one helper for all three.
    *
-   * Written here rather than in the window for the reason nothing else in this
-   * app writes from the window either: a blob download would depend on the
-   * request filter not matching `blob:`, which is a thing that happens to be
-   * true rather than a thing that is guaranteed. The renderer hands over bytes
-   * and main decides where they land -- inside the documents jail, beside the
-   * documents a draft would have written.
+   * Written here rather than in the window for the reason nothing else in
+   * this app writes from the window either: a blob download would depend on
+   * the request filter not matching `blob:`, which is a thing that happens
+   * to be true rather than a thing that is guaranteed. The renderer hands
+   * over bytes and main decides where they land -- inside the documents
+   * jail, beside the documents a draft would have written.
    *
-   * The PNG arrives base64 because only the window has a canvas to rasterise
-   * with; the SVG arrives as the text it already is.
+   * `fileName` rather than `slugName`: this is a document a person goes
+   * looking for later in an ordinary file manager, the same reasoning
+   * `fileName`'s own doc comment gives, not an id that only ever has to be
+   * unique.
+   *
+   * A PNG arrives base64 because only the window has a canvas to rasterise
+   * with; SVG and PGFPlots/LaTeX source arrive as the text they already are.
    */
+  async function saveFigure(
+    name: unknown, ext: "svg" | "png" | "tex", data: unknown, fallback: string,
+  ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+    const safe = fileName(String(name ?? fallback), fallback);
+    try {
+      const dir = documentsDir();
+      await makeOwnDir(dir);
+      /* Through the jail like every other path, although this one is built
+         here: `resolveInJail` is what the rule says, not what the caller
+         happens to have constructed. */
+      const abs = await resolveInJail(dir, `${safe}.${ext}`);
+      const body = String(data ?? "");
+      await writeFile(
+        abs,
+        ext === "png" ? Buffer.from(body.replace(/^data:image\/png;base64,/, ""), "base64") : body,
+        { mode: 0o600 },
+      );
+      return { ok: true, path: abs };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
   ipcMain.handle(
     "myra:diagram-save",
     async (_e, name: unknown, format: unknown, data: unknown) => {
       const kind = String(format ?? "svg") === "png" ? "png" : "svg";
-      const safe = String(name ?? "diagram").replace(/[^\w .-]+/g, "-").replace(/^[-.]+/, "").slice(0, 80);
-      try {
-        const dir = documentsDir();
-        await makeOwnDir(dir);
-        /* Through the jail like every other path, although this one is built
-           here: `resolveInJail` is what the rule says, not what the caller
-           happens to have constructed. */
-        const abs = await resolveInJail(dir, `${safe || "diagram"}.${kind}`);
-        const body = String(data ?? "");
-        await writeFile(
-          abs,
-          kind === "png" ? Buffer.from(body.replace(/^data:image\/png;base64,/, ""), "base64") : body,
-          { mode: 0o600 },
-        );
-        return { ok: true, path: abs };
-      } catch (err) {
-        return { ok: false, error: (err as Error).message };
-      }
+      return saveFigure(name, kind, data, "diagram");
     },
   );
 
@@ -2009,16 +2046,7 @@ function installIpc(): void {
    * the clipboard instead (below), never through this path.
    */
   ipcMain.handle("myra:table-save", async (_e, name: unknown, data: unknown) => {
-    const safe = String(name ?? "table").replace(/[^\w .-]+/g, "-").replace(/^[-.]+/, "").slice(0, 80);
-    try {
-      const dir = documentsDir();
-      await makeOwnDir(dir);
-      const abs = await resolveInJail(dir, `${safe || "table"}.tex`);
-      await writeFile(abs, String(data ?? ""), { mode: 0o600 });
-      return { ok: true, path: abs };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
+    return saveFigure(name, "tex", data, "table");
   });
 
   /**
@@ -2037,27 +2065,13 @@ function installIpc(): void {
 
   /**
    * Save a figure the conversation charted -- SVG, PNG or PGFPlots source,
-   * chosen by the caller's own extension. The same jail and ownership rule
-   * as `myra:diagram-save`, and deliberately the same shape: a figure is a
-   * figure whether it came from Mermaid or from a pasted table.
+   * chosen by the caller's own extension. The same helper as
+   * `myra:diagram-save`, and deliberately so: a figure is a figure whether
+   * it came from Mermaid or from a pasted table.
    */
   ipcMain.handle("myra:chart-save", async (_e, name: unknown, format: unknown, data: unknown) => {
     const ext = String(format ?? "svg") === "png" ? "png" : String(format ?? "svg") === "tex" ? "tex" : "svg";
-    const safe = String(name ?? "chart").replace(/[^\w .-]+/g, "-").replace(/^[-.]+/, "").slice(0, 80);
-    try {
-      const dir = documentsDir();
-      await makeOwnDir(dir);
-      const abs = await resolveInJail(dir, `${safe || "chart"}.${ext}`);
-      const body = String(data ?? "");
-      await writeFile(
-        abs,
-        ext === "png" ? Buffer.from(body.replace(/^data:image\/png;base64,/, ""), "base64") : body,
-        { mode: 0o600 },
-      );
-      return { ok: true, path: abs };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
+    return saveFigure(name, ext, data, "chart");
   });
 
   /** The figure itself on the clipboard -- same reasoning as `myra:diagram-copy-image`. */
