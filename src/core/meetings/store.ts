@@ -39,6 +39,13 @@ export const TRANSCRIPT_FILE = "transcript.json";
 export const TRANSCRIPT_MD = "transcript.md";
 export const NOTES_MD = "notes.md";
 export const ACTIONS_FILE = "actions.json";
+/**
+ * Every verified item the notes run extracted -- decisions, questions, risks
+ * and updates as well as actions -- so a meeting filed to a research project
+ * can offer them to its notes. `notes.md` has them only as prose, and reading
+ * prose back into items is the reconstruction the grounding exists to avoid.
+ */
+export const ITEMS_FILE = "items.json";
 
 /** An action item as notes.ts extracted and verified it, plus whether it has
  *  already become a MyRA task. `taskId` is the done-marker: once set, the
@@ -83,6 +90,8 @@ export interface MeetingSummary {
   audioBytes: number;
   transcribed: boolean;
   noted: boolean;
+  /** Whether the notes run saved its items (`items.json`) -- runs before it did saved only prose. */
+  itemized: boolean;
   state: MeetingState;
 }
 
@@ -138,6 +147,22 @@ export async function readNotes(dir: string): Promise<string | undefined> {
  *  show no action panel, not a reason to hide the whole meeting. */
 export async function readActions(dir: string): Promise<ActionRecord[]> {
   return (await readJson<ActionRecord[]>(join(dir, ACTIONS_FILE))) ?? [];
+}
+
+export async function readItems(dir: string): Promise<VerifiedItem[] | undefined> {
+  const raw = await readJson<unknown>(join(dir, ITEMS_FILE));
+  if (!Array.isArray(raw)) return undefined;
+  return raw.filter((it): it is VerifiedItem => {
+    const row = it as Record<string, unknown>;
+    return Boolean(row) && typeof row["title"] === "string" && typeof row["type"] === "string" && typeof row["quote"] === "string";
+  });
+}
+
+export async function writeItems(dir: string, items: VerifiedItem[]): Promise<void> {
+  await writeFile(join(dir, ITEMS_FILE), JSON.stringify(items, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: OWNER_ONLY_FILE,
+  });
 }
 
 export async function writeActions(dir: string, items: ActionRecord[]): Promise<void> {
@@ -198,6 +223,7 @@ export async function listMeetings(root: string): Promise<MeetingSummary[]> {
       audioBytes: bytes,
       transcribed: (await readTranscript(dir)) !== undefined,
       noted: (await readNotes(dir)) !== undefined,
+      itemized: (await readItems(dir)) !== undefined,
       state,
     });
   }

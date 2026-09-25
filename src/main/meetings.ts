@@ -23,14 +23,18 @@ import {
   noteMeeting, renderTranscript, transcribeMeeting, type RunProgress,
 } from "../core/meetings/meetingRun.ts";
 import {
-  deleteMeeting, filingRoot, listMeetings, readActions, readRecord, readState, readTranscript,
-  writeActions, writeState, writeTranscript, NOTES_MD, TRANSCRIPT_MD, type ActionRecord,
+  deleteMeeting, filingRoot, listMeetings, readActions, readItems, readRecord, readState, readTranscript,
+  writeActions, writeItems, writeState, writeTranscript, NOTES_MD, TRANSCRIPT_MD, type ActionRecord,
 } from "../core/meetings/store.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import { newTask } from "../core/tasks/task.ts";
 import { localZone, normaliseDay } from "../core/time.ts";
 import { createAndSave } from "./tasks.ts";
 import { revealInside } from "./reveal.ts";
+import { ownerOf } from "../core/projects/project.ts";
+import { readAll as readAllProjects } from "./projectStore.ts";
+import { hasMemory } from "./memoryStore.ts";
+import { meetingToNotes } from "./projectMemory.ts";
 
 export interface MeetingDeps {
   config: ConfigStore;
@@ -293,6 +297,7 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       // but its checkbox here resets, since the old taskId no longer points
       // at anything in the new extraction.
       await writeActions(dir, result.actions);
+      await writeItems(dir, result.notes.items);
       await writeState(dir, {
         notedAt: new Date().toISOString(),
         notesModel: label,
@@ -423,6 +428,44 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     } catch {
       return undefined;
     }
+  });
+
+  /**
+   * Which meetings sit in a research project -- a project with notes -- so the
+   * page offers "Add to project notes" only where there are notes to add to.
+   * Keyed by directory name, the ref a meeting member is stored under.
+   */
+  ipcMain.handle("myra:meeting-research-projects", async () => {
+    const out: Record<string, { projectId: string; name: string }> = {};
+    for (const project of await readAllProjects()) {
+      if (!(await hasMemory(project.id))) continue;
+      for (const m of project.members) {
+        if (m.kind === "meeting") out[m.ref] = { projectId: project.id, name: project.name };
+      }
+    }
+    return out;
+  });
+
+  /* A meeting's decisions, questions and risks, offered to the notes of the
+     research project it is filed in -- through the review form, saved as the
+     person's own once approved. */
+  ipcMain.handle("myra:meeting-to-project-notes", async (_e, dir: string) => {
+    let meeting: string;
+    try {
+      meeting = meetingDir(dir);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    const ref = basename(meeting);
+    const owner = ownerOf(await readAllProjects(), { kind: "meeting", ref });
+    if (!owner || !(await hasMemory(owner.id))) {
+      return { ok: false, error: "This meeting is not in a research project, so there are no notes to add to." };
+    }
+    const items = await readItems(meeting);
+    if (!items) return { ok: false, error: "These notes were taken before MyRA kept their items. Take notes again to add them — the recording is not transcribed twice." };
+    const record = await readRecord(meeting);
+    const result = await meetingToNotes(owner.id, record?.title || "this meeting", ref, items);
+    return { ok: true, ...result, projectId: owner.id };
   });
 
   ipcMain.handle("myra:meeting-actions", async (_e, dir: string) => {

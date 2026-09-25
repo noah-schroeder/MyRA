@@ -242,6 +242,12 @@ export function inCollectionsSql(keys: string[]): string {
   `;
 }
 
+/** Items by their Zotero keys, in the personal library -- how a key a model names is looked up. */
+export function idsByKeySql(keys: string[]): string {
+  const marks = keys.map(() => "?").join(", ");
+  return `SELECT itemID FROM items WHERE key IN (${marks}) AND libraryID = ${USER_LIBRARY}`;
+}
+
 export function fieldsSql(ids: number[]): string {
   const marks = ids.map(() => "?").join(", ");
   return `

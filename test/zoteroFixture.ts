@@ -70,6 +70,18 @@ export interface FakeItem {
   note?: string;
   trashed?: boolean;
   collections?: string[];
+  /** Child attachments, as Zotero stores them: an item of its own plus an itemAttachments row. */
+  attachments?: FakeAttachment[];
+}
+
+export interface FakeAttachment {
+  key: string;
+  /** 0 imported_file, 1 imported_url, 2 linked_file, 3 linked_url. */
+  linkMode: number;
+  /** `storage:name.pdf`, an absolute path, or `attachments:relative.pdf`. */
+  path: string;
+  contentType?: string;
+  trashed?: boolean;
 }
 
 export interface FakeCollection {
@@ -199,6 +211,27 @@ export function buildLibrary(
       item.note,
       "note",
     );
+  });
+
+  /* Attachments last, for the same reason: they hang from items that must
+     already have ids. */
+  let attachmentId = noteId;
+  items.forEach((item, index) => {
+    for (const a of item.attachments ?? []) {
+      attachmentId += 1;
+      db.prepare("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?)").run(
+        attachmentId,
+        TYPES.indexOf("attachment") + 1,
+        a.key,
+        item.library ?? 1,
+        "2020-01-01 00:00:00",
+        "2024-01-01 00:00:00",
+      );
+      db.prepare(
+        "INSERT INTO itemAttachments (itemID, parentItemID, linkMode, contentType, path) VALUES (?, ?, ?, ?, ?)",
+      ).run(attachmentId, index + 1, a.linkMode, a.contentType ?? "application/pdf", a.path);
+      if (a.trashed) db.prepare("INSERT INTO deletedItems (itemID) VALUES (?)").run(attachmentId);
+    }
   });
 
   db.close();

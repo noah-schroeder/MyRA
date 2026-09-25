@@ -67,6 +67,9 @@ const PAGE_FOR: Record<MemberKind, Page> = {
   paper: "papers",
   review: "review",
   image: "images",
+  /* Never navigated to: an uploaded paper opens in the system's own viewer --
+     see openItem -- and has no page of its own to go to. */
+  source: "projects",
 };
 
 export function App() {
@@ -144,6 +147,8 @@ export function App() {
      "go to the Papers page" is no longer the same thing as "open this paper". */
   const [openPaper, setOpenPaper] = useState<string | undefined>();
   const [openReview, setOpenReview] = useState<string | undefined>();
+  /* A meeting by directory name, opened from a project note that came from it. */
+  const [openMeeting, setOpenMeeting] = useState<string | undefined>();
   const [openRun, setOpenRun] = useState<string | undefined>();
   /** The long job that is not a chat turn, so the rail can show it anywhere. */
   const [job, setJob] = useState<JobSnapshot | null>(null);
@@ -465,6 +470,26 @@ export function App() {
     bottom.current?.scrollIntoView({ behavior: switched ? "auto" : "smooth", block: "end" });
   }, [items.length, sessionId]);
 
+  /*
+   * Opened from a project note: the turn its quote was found in, not the
+   * bottom. Declared after the effect above so it runs after it, in the same
+   * commit -- the other way round, the bottom scroll would win. The nearest
+   * turn at or before the message stands in when that exact one is not drawn
+   * (a tool call's own message has no bubble).
+   */
+  const [focusMsg, setFocusMsg] = useState<number | undefined>();
+  useEffect(() => {
+    if (focusMsg === undefined) return;
+    const turns = [...document.querySelectorAll<HTMLElement>("[data-msg]")];
+    const target = turns.filter((el) => Number(el.dataset["msg"]) <= focusMsg).pop() ?? turns[0];
+    setFocusMsg(undefined);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "auto", block: "center" });
+    target.classList.add("turn-focus");
+    const timer = setTimeout(() => target.classList.remove("turn-focus"), 2400);
+    return () => clearTimeout(timer);
+  }, [focusMsg, items]);
+
   useEffect(() => {
     if (!busy) setSessionsKey((k) => k + 1);
   }, [busy]);
@@ -563,7 +588,7 @@ export function App() {
     setAttachError(undefined);
   };
 
-  const openSession = async (id: string): Promise<void> => {
+  const openSession = async (id: string, focus?: number): Promise<void> => {
     const messages = (await window.myra.openSession(id)) as StoredMessage[];
     setSessionId(id);
     clearPendingAttachments();
@@ -589,6 +614,7 @@ export function App() {
        here would just be cleared by the reset that followed. */
     const artifacts = await window.myra.sessionArtifacts(id);
     if (artifacts.length) documents.replay(id, artifacts);
+    if (focus !== undefined) setFocusMsg(focus);
   };
 
   const newSession = async (): Promise<void> => {
@@ -608,13 +634,23 @@ export function App() {
    * between a list of your work and a list of links to places your work might
    * be. Each page takes the id as a prop and shows that record when it changes.
    */
-  const openItem = useCallback((kind: MemberKind, ref: string): void => {
+  const openItem = useCallback((kind: MemberKind, ref: string, at?: { msg?: number }): void => {
+    if (kind === "source") {
+      void window.myra.sourceOpen(ref);
+      return;
+    }
     if (kind === "chat") {
-      void openSession(ref);
+      /* Back to the chat page too: opened from a project note, the project
+         page is what is on screen, and loading the conversation behind it
+         would look like nothing happened. */
+      setLookup(false);
+      setPage("chat");
+      void openSession(ref, at?.msg);
       return;
     }
     if (kind === "paper") setOpenPaper(ref);
     if (kind === "review") setOpenReview(ref);
+    if (kind === "meeting") setOpenMeeting(ref);
     if (kind === "run") setOpenRun(ref);
     setLookup(false);
     setPage(PAGE_FOR[kind]);
@@ -746,7 +782,12 @@ export function App() {
             label="Meetings"
             active={page === "meetings"}
             tour="rail-meetings"
-            onClick={() => setPage((p) => (p === "meetings" ? "chat" : "meetings"))}
+            onClick={() => {
+              /* Plain navigation, the drafter's rule: a meeting opened earlier
+                 from a project note must not reopen itself here. */
+              setOpenMeeting(undefined);
+              setPage((p) => (p === "meetings" ? "chat" : "meetings"));
+            }}
           />
           {/* Beside Meetings rather than beside Models: both of these are
               things you make, and the two below describe the machine that
@@ -1004,6 +1045,7 @@ export function App() {
             onSettingsChange={setSettings}
             onOpenSettings={() => setShowSettings(true)}
             onClose={toChat}
+            {...(openMeeting ? { openId: openMeeting } : {})}
           />
         ) : null}
         {page === "images" && settings ? (
@@ -1024,6 +1066,7 @@ export function App() {
             onClose={toChat}
             dictation={dictation}
             sink={dictationSink}
+            projectId={activeProject || undefined}
             {...(openPaper ? { openId: openPaper } : {})}
           />
         ) : null}
@@ -1101,7 +1144,12 @@ export function App() {
           {items.map((item) => {
             if (item.kind === "user") {
               return (
-                <article key={item.id} className="turn user" data-item-id={item.id}>
+                <article
+                  key={item.id}
+                  className="turn user"
+                  data-item-id={item.id}
+                  {...(item.msg !== undefined ? { "data-msg": item.msg } : {})}
+                >
                   {item.attachments?.length ? (
                     <div className="turn-attachments">
                       {item.attachments.map((a, i) => (
@@ -1141,7 +1189,12 @@ export function App() {
               );
             }
             return (
-              <article key={item.id} className="turn assistant" data-item-id={item.id}>
+              <article
+                key={item.id}
+                className="turn assistant"
+                data-item-id={item.id}
+                {...(item.msg !== undefined ? { "data-msg": item.msg } : {})}
+              >
                 {item.blocks.map((block, i) =>
                   block.kind === "thinking" ? (
                     <Reasoning key={i} text={block.text} streaming={item.streaming ?? false} />
@@ -1392,6 +1445,8 @@ export function App() {
                    it shows belongs to whatever is answering, so it has to be
                    re-asked when that changes. */
                 trailing={<ReasoningBar model={settings?.llm.model} />}
+                projectScope={projects.find((p) => p.id === activeProject)}
+                onOpenProject={activeProject ? () => void chooseProject(activeProject) : undefined}
               />
               <span className="composer-spacer" />
 

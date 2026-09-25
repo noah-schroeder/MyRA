@@ -205,3 +205,22 @@ describe("a project's memory", () => {
     assert.match(tight, /Does X predict Y\?/);
   });
 });
+
+describe("a project's papers", () => {
+  const memory = newMemory();
+  it("are named when there are some, so the model searches them instead of answering from memory", () => {
+    const text = systemPrompt({
+      mode: "assistant",
+      project: { name: "Thesis", memory, papers: { uploads: 3, collections: ["EHR adoption"] } },
+    });
+    assert.match(text, /3 uploaded, and the Zotero collection "EHR adoption"/);
+    assert.match(text, /project_papers/);
+  });
+
+  it("are not mentioned with no papers, or where there are no tools", () => {
+    const none = systemPrompt({ mode: "assistant", project: { name: "T", memory, papers: { uploads: 0, collections: [] } } });
+    assert.doesNotMatch(none, /project_papers/);
+    const off = systemPrompt({ mode: "off", project: { name: "T", memory, papers: { uploads: 2, collections: [] } } });
+    assert.doesNotMatch(off, /project_papers/);
+  });
+});

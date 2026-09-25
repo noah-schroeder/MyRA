@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Meetings
-nav_order: 6
+nav_order: 7
 ---
 
 # Meetings
@@ -41,3 +41,11 @@ You can give per-meeting instructions for the notes — "this is a supervision
 meeting, keep the methodological objections in full" — from the meeting's
 own **Note instructions** tab, which overrides the default prompt in
 Settings just for that one meeting.
+
+## Feeding a meeting into a project's notes
+
+A meeting filed to a [research project](projects.html#research-project-notes)
+offers **Add to project notes…**, which pulls out the decisions, questions,
+and risks the transcript actually supports and shows them for you to review
+before anything is saved — the same claim-checking the report itself
+applies, not the model's summary of what it thinks happened.

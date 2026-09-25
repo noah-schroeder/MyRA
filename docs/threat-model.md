@@ -1,7 +1,7 @@
 ---
 layout: default
 title: "Threat model: what contains the agent"
-nav_order: 15
+nav_order: 18
 ---
 
 # Threat model: what contains the agent
@@ -54,6 +54,8 @@ complete list.
 | `create_prisma_diagram` | `safe` |
 | `create_chart` | `safe` |
 | `remember` | `write` |
+| `project_papers` | `safe` |
+| `read_paper` | `safe` |
 
 *Machine-checked.* `test/threatModel.test.ts` parses this table and compares it
 to the registry, so a tool added without a row here fails `npm test`.
@@ -90,6 +92,19 @@ jail's tests are the ones that matter.
   addresses **after** resolving them, which covers the cloud metadata endpoint
   and DNS rebinding at resolve time. Pinned by `test/guard.test.ts`.
 - The Zotero library, read-only, and never the live SQLite file.
+- The papers of the conversation's own project, read-only, through
+  `project_papers` and `read_paper`: the ones uploaded to it (under
+  `sourcesRoot`, addressed by an asserted id that must be one of the project's
+  members) and the PDFs of the items in its linked Zotero collections. The
+  model names an item key, never a path. A file in Zotero's storage is read
+  through `resolveInJail` against `<data dir>/storage`; a **linked** file is
+  read only at the path Zotero's database records for an item in scope, and
+  only if it resolves to a regular `.pdf` — an allowlist rather than a jail,
+  decided explicitly because linked attachments (ZotMoov, a synced
+  "Zotero Attachments" folder) are how many libraries keep their PDFs. Every
+  line of paper text reaches the model inside an UNTRUSTED CONTENT block,
+  indented so a paper's own reference list cannot pass for a source. Pinned by
+  `test/zoteroPdfs.test.ts` and `test/paperTools.test.ts`.
 
 ## What the agent cannot reach
 

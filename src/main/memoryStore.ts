@@ -57,6 +57,56 @@ export async function readMemory(id: string): Promise<ProjectMemory> {
 }
 
 /**
+ * One read-modify-write of a project's memory at a time, keyed by project id.
+ *
+ * The project record needed exactly this lock (`withProjectsLock` in
+ * projectStore.ts) for exactly this race, and this file grew just as many
+ * concurrent writers: the automatic pass runs before every reply, and the
+ * project page's own add/edit/remove/supersede/resolve/reopen/suggestion
+ * buttons can all fire while one is in flight. Unlocked, the later of two
+ * writes drops the other's change, silently. Keyed per project rather than
+ * one global chain like the project lock: nothing here ever touches two
+ * projects' memory in one call the way moving a member between projects
+ * touches two project records, so a slow pass on one project must not stall
+ * a click on another's page.
+ */
+const chains = new Map<string, Promise<unknown>>();
+
+/**
+ * Exported for the one caller that needs the lock held across something
+ * slower than a read-modify-write -- the automatic pass's one model call,
+ * bounded by the turn's own abort signal rather than a person's dialog, so
+ * holding the lock across it cannot stall on someone walking away. Every
+ * other caller wants `updateMemory` instead.
+ */
+export function withMemoryLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const chain = chains.get(id) ?? Promise.resolve();
+  const run = chain.then(fn, fn);
+  chains.set(id, run.catch(() => undefined));
+  return run;
+}
+
+/**
+ * Change one project's memory under its lock, reading it fresh first.
+ *
+ * `fn` returning the same object writes nothing, the convention
+ * `updateProject` already follows. `fn` itself must be fast and synchronous
+ * with its input -- anything slow (a model call, a dialog) belongs OUTSIDE
+ * this call, using whatever memory was on hand to decide what to ask; only
+ * the fold-in at the end needs the fresh read this gives it.
+ */
+export function updateMemory(
+  id: string,
+  fn: (memory: ProjectMemory) => ProjectMemory,
+): Promise<ProjectMemory> {
+  return withMemoryLock(id, async () => {
+    const memory = await readMemory(id);
+    const next = fn(memory);
+    return next === memory ? memory : writeMemory(id, next);
+  });
+}
+
+/**
  * Whether this project keeps notes at all.
  *
  * `readMemory` cannot say: it reads a missing file as an empty, settled

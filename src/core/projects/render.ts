@@ -54,6 +54,7 @@ const FOLDERS: Record<Member["kind"], string> = {
   paper: "papers",
   review: "reviews",
   image: "images",
+  source: "full texts",
 };
 
 const HEADINGS: Record<Member["kind"], string> = {
@@ -63,10 +64,11 @@ const HEADINGS: Record<Member["kind"], string> = {
   paper: "Papers",
   review: "Peer reviews",
   image: "Images",
+  source: "Full texts",
 };
 
 /** Order the index reads in: what you made, then what went into making it. */
-const ORDER: Member["kind"][] = ["paper", "review", "run", "meeting", "chat", "image"];
+const ORDER: Member["kind"][] = ["paper", "review", "run", "source", "meeting", "chat", "image"];
 
 /**
  * A title as a filename: readable, and safe on every platform we ship to.
@@ -176,7 +178,7 @@ export function exportPlan(
       }
 
       if (item.files?.length) {
-        if (kind === "image") {
+        if (kind === "image" || kind === "source") {
           /* Flat, and named for the picture rather than foldered: an images
              folder somebody opens should show thumbnails, not a row of
              directories to click into. */
@@ -185,8 +187,8 @@ export function exportPlan(
             const ext = dot > 0 ? file.name.slice(dot) : "";
             const path = `${folder}/${uniqueIn(used, `${base}${ext}`)}`;
             ops.push({ op: "copyFile", path, from: file.from });
-            lines.push(`- [${item.title}](${path})${dated}`);
-            imageNotes.push(`## ${item.title}`, "", item.note || "(no prompt recorded)", "");
+            lines.push(`- [${item.title}](${path})${dated}${kind === "source" && item.note ? ` · ${item.note}` : ""}`);
+            if (kind === "image") imageNotes.push(`## ${item.title}`, "", item.note || "(no prompt recorded)", "");
           }
           continue;
         }

@@ -22,16 +22,17 @@ import { ipcMain, shell } from "electron";
 import type { ConfigStore } from "../core/config.ts";
 import { makePrivateDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import {
-  addMembers, byNewest, countsOf, MEMBER_KINDS, newProject, ownerOf, perProjectLimit,
+  byNewest, cleanCollections, countsOf, MEMBER_KINDS, setCollections, newProject, ownerOf, perProjectLimit,
   removeMembers, summaryOf,
   type Member, type MemberKind, type ProjectSummary,
 } from "../core/projects/project.ts";
 import { exportPlan, fileName, renderSession, type ExportItem } from "../core/projects/render.ts";
-import { newMemory, renderMemoryMarkdown } from "../core/projects/memory.ts";
+import { newMemory, renderDecisionLog, renderMemoryMarkdown, type MemoryItem } from "../core/projects/memory.ts";
 import { deleteMemory, readMemory, writeMemory } from "./memoryStore.ts";
+import { dropProjectPapers } from "./projectPapers.ts";
 import {
-  deleteProject, readAll, readAllPruned, readProject, setProjectsWatcher, writeProject,
-  type ItemRow, type ProjectDetail, type ProjectStores,
+  deleteProject, fileInProject, readAllPruned, readProject, recordVisit, setProjectsWatcher, updateProject,
+  writeProject, type ItemRow, type ProjectDetail, type ProjectStores,
 } from "./projectStore.ts";
 
 import { assertSessionId, deleteSession, listSessions, loadSession } from "../core/sessions.ts";
@@ -43,6 +44,8 @@ import { assemble, assertPaperId } from "../core/papers/paper.ts";
 import { deletePaper, listPapers, readPaperRecord } from "./papers.ts";
 import { deleteReview, listReviews, readReviewRecord } from "./review.ts";
 import { assertReviewId } from "../core/review/record.ts";
+import { assertSourceId } from "../core/sources/source.ts";
+import { listSources, readSource, removeSource, sourceFile } from "../core/sources/store.ts";
 import { deleteImage, listImages, recordFor } from "./images.ts";
 import { assertImageId } from "../core/images/store.ts";
 import { revealInside } from "./reveal.ts";
@@ -212,6 +215,32 @@ export function defaultStores(config: ConfigStore): ProjectStores {
         }
       },
     },
+
+    /* A paper somebody uploaded into a project. Exported as the file itself,
+       named for its title, the way an image is -- a folder of papers somebody
+       opens should show papers, not directories to click into. */
+    source: {
+      assertRef: assertSourceId,
+      list: async () =>
+        (await listSources(config.current.sourcesRoot)).map((p) => ({
+          ref: p.id,
+          title: p.title,
+          at: p.addedAt,
+          note: [p.authors, p.year].filter(Boolean).join(" · ") || p.originalName,
+        })),
+      remove: (ref) => removeSource(config.current.sourcesRoot, ref),
+      payload: async (ref) => {
+        const source = await readSource(config.current.sourcesRoot, ref);
+        return source
+          ? {
+              title: source.title,
+              at: source.addedAt,
+              note: [source.authors, source.year].filter(Boolean).join(" · "),
+              files: [{ name: source.file, from: sourceFile(config.current.sourcesRoot, source) }],
+            }
+          : {};
+      },
+    },
   };
 }
 
@@ -270,10 +299,11 @@ export function installProjectIpc(deps: ProjectDeps): void {
   });
 
   ipcMain.handle("myra:project-rename", async (_e, id: unknown, name: unknown) => {
-    const project = await readProject(String(id));
+    const project = await updateProject(String(id), (p) => {
+      const next = String(name ?? "").trim() || p.name;
+      return next === p.name ? p : { ...p, name: next, updatedAt: new Date().toISOString() };
+    });
     if (!project) return { ok: false, error: "That project could not be read." };
-    const next = String(name ?? "").trim() || project.name;
-    await writeProject({ ...project, name: next, updatedAt: new Date().toISOString() });
     await publish();
     return { ok: true };
   });
@@ -286,7 +316,10 @@ export function installProjectIpc(deps: ProjectDeps): void {
    * that named a meeting differently from the Meetings page would be two
    * records of one thing.
    */
-  ipcMain.handle("myra:project-open", async (_e, id: unknown) => {
+  /* `visit` is the page's first load of this project, as opposed to the
+     reloads after every remove and add: only that one counts as having been
+     here, or the resume card's "since" would be a few seconds ago. */
+  ipcMain.handle("myra:project-open", async (_e, id: unknown, visit: unknown) => {
     const projects = await readAllPruned(stores);
     const project = projects.find((p) => p.id === String(id));
     if (!project) return { ok: false, error: "That project could not be read." };
@@ -304,7 +337,8 @@ export function installProjectIpc(deps: ProjectDeps): void {
       const row = rows[m.kind].get(m.ref);
       return row ? [{ ...row, kind: m.kind }] : [];
     });
-    return { ok: true, detail: { project, items } satisfies ProjectDetail };
+    const since = visit === true ? await recordVisit(project.id) : undefined;
+    return { ok: true, detail: { project, items, ...(since ? { since } : {}) } satisfies ProjectDetail };
   });
 
   /** Everything in every store, with the project it is already in named. */
@@ -367,23 +401,24 @@ export function installProjectIpc(deps: ProjectDeps): void {
   ipcMain.handle("myra:project-add", async (_e, id: unknown, members: unknown) => {
     const wanted = asMembers(members, stores);
     if (!wanted.length) return { ok: true };
-    const projects = await readAll();
-    const target = projects.find((p) => p.id === String(id));
-    if (!target) return { ok: false, error: "That project could not be read." };
-    /* Every project is rewritten, not just the target: membership is exclusive,
-       so moving something in is an edit to whichever project it was in. */
-    const next = addMembers(projects, target.id, wanted);
-    for (const [i, project] of next.entries()) {
-      if (project !== projects[i]) await writeProject(project);
-    }
+    if (!(await fileInProject(String(id), wanted))) return { ok: false, error: "That project could not be read." };
     await publish();
     return { ok: true };
   });
 
-  ipcMain.handle("myra:project-remove", async (_e, id: unknown, members: unknown) => {
-    const project = await readProject(String(id));
+  /* The Zotero collections this project reads from. Through the lock, since
+     they live on the record that every turn's filing write also rewrites. */
+  ipcMain.handle("myra:project-set-collections", async (_e, id: unknown, collections: unknown) => {
+    const project = await updateProject(String(id), (p) => setCollections(p, cleanCollections(collections)));
     if (!project) return { ok: false, error: "That project could not be read." };
-    await writeProject(removeMembers(project, asMembers(members, stores)));
+    await publish();
+    return { ok: true, project };
+  });
+
+  ipcMain.handle("myra:project-remove", async (_e, id: unknown, members: unknown) => {
+    const wanted = asMembers(members, stores);
+    const project = await updateProject(String(id), (p) => removeMembers(p, wanted));
+    if (!project) return { ok: false, error: "That project could not be read." };
     await publish();
     return { ok: true };
   });
@@ -395,6 +430,9 @@ export function installProjectIpc(deps: ProjectDeps): void {
     // The memory belongs to the project record, not to any of the five
     // stores `deleteProject` already asked -- nothing else would ever remove it.
     await deleteMemory(project.id);
+    // Same reason: its cached PaperIndex (an in-memory SQLite handle) is kept
+    // outside any of the five stores too, and nothing else would close it.
+    dropProjectPapers(project.id);
     /* Whatever it was working in is gone, so it is not working in it any more.
        A stale active project would file the next conversation into nothing. */
     if (config.current.activeProject === project.id) await config.update({ activeProject: "" });
@@ -409,6 +447,33 @@ export function installProjectIpc(deps: ProjectDeps): void {
     const ok = !wanted || (await readProject(wanted)) !== undefined;
     return { ok: true, settings: await config.update({ activeProject: ok ? wanted : "" }) };
   });
+
+  /**
+   * "in “Kickoff chat”", for the decision log: every conversation and meeting,
+   * not only this project's -- a note outlives its conversation being moved,
+   * and the log should still say where it came from.
+   */
+  const originNamer = async (): Promise<(item: MemoryItem) => string | undefined> => {
+    const titles = new Map<string, string>();
+    for (const kind of ["chat", "meeting"] as const) {
+      try {
+        for (const row of await stores[kind].list()) titles.set(`${kind}:${row.ref}`, row.title);
+      } catch {
+        /* Unnamed rather than missing: the log still says a conversation. */
+      }
+    }
+    return (item) => {
+      if (item.meeting) {
+        const title = titles.get(`meeting:${item.meeting}`);
+        return `in the meeting ${title ? `“${title}”` : item.meeting}${item.meetingAt ? ` at ${item.meetingAt}` : ""}`;
+      }
+      if (item.from) {
+        const title = titles.get(`chat:${item.from}`);
+        return title ? `in “${title}”` : "in a conversation since deleted";
+      }
+      return undefined;
+    };
+  };
 
   ipcMain.handle("myra:project-export", async (_e, id: unknown) => {
     const projects = await readAllPruned(stores);
@@ -431,12 +496,17 @@ export function installProjectIpc(deps: ProjectDeps): void {
 
     const root = join(config.current.workspaceRoot, fileName(project.name, "project"));
     const { ops, counts } = exportPlan(project, items);
-    const memoryText = renderMemoryMarkdown(await readMemory(project.id));
+    const memory = await readMemory(project.id);
+    const memoryText = renderMemoryMarkdown(memory);
+    const logText = renderDecisionLog(memory, await originNamer());
     /* Inserted before the LAST op, which `exportPlan` always ends on
        project.md -- the done-marker rule render.ts documents: a crash
        halfway must never leave an index claiming a file that was never
        written, so project.md stays the final write. */
-    if (memoryText) ops.splice(ops.length - 1, 0, { op: "write", path: "memory.md", text: memoryText });
+    const extra: typeof ops = [];
+    if (memoryText) extra.push({ op: "write", path: "memory.md", text: memoryText });
+    if (logText) extra.push({ op: "write", path: "decision-log.md", text: logText });
+    ops.splice(ops.length - 1, 0, ...extra);
     await makePrivateDir(root);
 
     for (const op of ops) {

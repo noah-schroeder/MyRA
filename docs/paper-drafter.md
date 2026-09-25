@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Paper drafter
-nav_order: 8
+nav_order: 9
 ---
 
 # Paper drafter
@@ -30,6 +30,14 @@ anything citation-shaped shows up anyway, it's flagged rather than quietly
 removed. Citations come from [Research](research.html) or your own editing
 afterward; mixing that job into drafting is exactly how a model ends up
 inventing a source that sounds plausible.
+
+## Starting from a project's notes
+
+Drafting inside a [research project](projects.html#research-project-notes)
+with notes of its own adds a **+ From project notes** button, which copies
+your settled questions, aims, theory, methods, and decisions — never key
+literature, since the drafter forbids citations — straight into the
+instructions box, where the preview shows exactly what went in.
 
 ## What's sent, and when
 

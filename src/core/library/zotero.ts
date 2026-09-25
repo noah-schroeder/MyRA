@@ -215,6 +215,57 @@ export function descendantKeys(collections: ZoteroCollection[], root: string): s
   return out;
 }
 
+/** What several chosen collections come to, against the library as it is now. */
+export interface ResolvedCollections {
+  /** Every key to search: each chosen collection and everything below it, once each. */
+  keys: string[];
+  /** The chosen collections Zotero still has, under their CURRENT names. */
+  found: ZoteroCollection[];
+  /** The chosen ones it does not -- deleted, or in another profile -- by the name they were saved under. */
+  missing: { key: string; name: string }[];
+  /** Whether the union hit the fan-out cap and some collections went unsearched. */
+  truncated: boolean;
+}
+
+/**
+ * A project's collections, as one search scope.
+ *
+ * Each subtree is walked the way a single collection's is, and the union is
+ * held to the SAME cap: a project linked to three collections must not quietly
+ * fan out to three times the requests one collection is allowed. A missing key
+ * is reported by name rather than failing the lot, because two of three still
+ * being there is a search worth running -- and the reply says what was not.
+ */
+export function resolveCollections(
+  all: ZoteroCollection[],
+  wanted: readonly { key: string; name: string }[],
+): ResolvedCollections {
+  const byKey = new Map(all.map((c) => [c.key, c]));
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  const found: ZoteroCollection[] = [];
+  const missing: { key: string; name: string }[] = [];
+  let truncated = false;
+  for (const w of wanted) {
+    const c = byKey.get(w.key);
+    if (!c) {
+      missing.push(w);
+      continue;
+    }
+    found.push(c);
+    for (const key of descendantKeys(all, w.key)) {
+      if (seen.has(key)) continue;
+      if (keys.length >= MAX_FANOUT) {
+        truncated = true;
+        break;
+      }
+      seen.add(key);
+      keys.push(key);
+    }
+  }
+  return { keys, found, missing, truncated };
+}
+
 export function collectionsPath(): string {
   return `/api/${ZOTERO_PREFIX}/collections`;
 }
@@ -381,24 +432,38 @@ export function linkFor(item: LibraryItem): string {
   return /^https?:\/\//i.test(item.url) ? item.url : "";
 }
 
+/**
+ * Where a scoped search looked and why, when it was a project's collections
+ * rather than the one chosen in the research bar -- the reply names the
+ * reason, because "only this was searched" is what the model must pass on.
+ */
+export interface ScopeWording {
+  /** "the Zotero collections linked to this project: A, B". */
+  where: string;
+  /** "because they are linked to this project". */
+  why: string;
+}
+
+/** Whether each item has a PDF MyRA can read, by Zotero key -- absent when that could not be checked. */
+export type FullTextFlags = ReadonlyMap<string, "readable" | "none">;
+
 export function formatItems(
   items: LibraryItem[],
   query: string,
   scope = "",
   /** Citation numbers, in order, for the items that have a link. */
   numbers: number[] = [],
+  opts: { wording?: ScopeWording | undefined; fullText?: FullTextFlags | undefined } = {},
 ): string {
   /* Where the search looked, said in both branches. A scoped search that finds
      nothing and an unscoped one that finds nothing are different facts, and the
      model cannot tell them apart unless the empty answer says which it was. */
-  const where = scope ? `the Zotero collection ${JSON.stringify(scope)}` : "the Zotero library";
+  const where = opts.wording?.where ?? (scope ? `the Zotero collection ${JSON.stringify(scope)}` : "the Zotero library");
+  const why = opts.wording?.why ?? "because the user chose it in the research bar";
   if (items.length === 0) {
     return (
       `Nothing in ${where} matches ${JSON.stringify(query)}.` +
-      (scope
-        ? " Only that collection was searched, because the user chose it in the research bar; " +
-          "the rest of their library was not looked at."
-        : "")
+      (scope ? ` Only that was searched, ${why}; the rest of their library was not looked at.` : "")
     );
   }
   /* The same shape web_search prints, because that shape is what the app reads
@@ -433,6 +498,14 @@ export function formatItems(
       link ? `    ${link}` : "",
       `    Zotero key ${item.key}${item.doi ? ` · DOI ${item.doi}` : ""}`,
       `    ${abstract}`,
+      /* Said per item, so the next step is obvious: an abstract that looks
+         relevant, and a full text one call away. Absent when nobody could
+         check, rather than guessed. */
+      opts.fullText?.get(item.key) === "readable"
+        ? `    Full text: a PDF is attached — read it with read_paper("${item.key}")`
+        : opts.fullText?.get(item.key) === "none"
+          ? "    Full text: no readable PDF attached in Zotero"
+          : "",
       item.tags.length ? `    Tags: ${item.tags.join(", ")}` : "",
     ]
       .filter(Boolean)

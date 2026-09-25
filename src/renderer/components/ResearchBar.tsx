@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { exactly, searches } from "../../core/research/ladder.ts";
+import { exactly, readsLibrary, searches } from "../../core/research/ladder.ts";
 import { DATABASES, DEFAULT_DATABASES, databaseLabel } from "../../core/research/databases.ts";
 import type { CollectionNode, ResearchConfig, ResearchMode } from "../types.ts";
 
@@ -89,10 +89,15 @@ export function ResearchBar({
   onLookup,
   onLeaveLookup,
   trailing,
+  projectScope,
+  onOpenProject,
 }: {
   lookup: boolean;
   onLookup: () => void;
   onLeaveLookup: () => void;
+  /** The active project's linked Zotero collections, which a library search in it is held to. */
+  projectScope?: { collections?: { key: string; name: string }[] | undefined } | undefined;
+  onOpenProject?: (() => void) | undefined;
   /**
    * Another control to sit in the same row as the rings.
    *
@@ -187,7 +192,28 @@ export function ResearchBar({
         * So the SCOPE now belongs to the rung as well, not just its control:
         * see `collectionScope` in tools/library.ts. Nothing invisible is left
         * applying up there, which is the property that mattered. */}
-      {exactly(config.mode, "library") && !lookup ? (
+      {/* A project's own collections win over this setting whenever
+          search_library runs in one of its conversations -- so the bar says
+          so, at every rung the tool runs at, rather than offering a choice
+          that would not be the one applied. */}
+      {projectScope?.collections?.length && readsLibrary(config.mode) && !lookup ? (
+        <div
+          className="collection-ask"
+          title={`Searches of your Zotero library in this project look only in: ${projectScope.collections
+            .map((c) => c.name)
+            .join(", ")}. Change them on the project's page.`}
+        >
+          <span>
+            Zotero: this project's{" "}
+            {projectScope.collections.length === 1 ? "collection" : `${projectScope.collections.length} collections`}
+          </span>
+          {onOpenProject ? (
+            <button type="button" className="linkish collection-note" onClick={onOpenProject}>
+              change
+            </button>
+          ) : null}
+        </div>
+      ) : exactly(config.mode, "library") && !lookup ? (
         <CollectionPicker
           chosen={config.collection ?? ALL}
           chosenName={config.collectionName ?? ""}

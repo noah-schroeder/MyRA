@@ -1,7 +1,7 @@
 ---
 layout: default
 title: "Privacy: what leaves this machine"
-nav_order: 13
+nav_order: 16
 ---
 
 # Privacy: what leaves this machine
@@ -18,6 +18,9 @@ named.
 | Speech-to-speech voice | voice model is local | voice model is a provider's |
 | Image generation | image model is local | image model is a provider's |
 | Paper drafter | model drafting the section is local | model is a provider's |
+| A research project's notes | endpoint the conversation is using is local | notes ride in every request to a hosted endpoint, same as any system prompt |
+| A project's papers (uploads, Zotero PDFs) | endpoint reading them is local | passages/sections go to a hosted endpoint when it asks for them |
+| Figures (diagrams, charts, tables, PRISMA) | always — drawn by MyRA's own code | never; a file is written only when you press Export |
 | Scholarly search (OpenAlex, arXiv) | always reaches these — no key needed | — |
 | Scholarly search (PubMed, CORE) | off until you add a key | search terms + your key, once added |
 | Semantic Scholar | — | asked only whether a found paper has an open-access PDF |
@@ -49,6 +52,20 @@ named.
   **Settings → Database keys**; once added, a search that includes them
   sends your search terms and that key. Semantic Scholar is asked only
   whether a paper already found has an open-access PDF.
+- **A research project's notes** ride in every chat request made inside that
+  project, to whichever model the bar names — the same rule as any other
+  system prompt. Growing them on their own makes one short extra request to
+  that same model before each reply. A deep run started in the project also
+  gives its scoping step the settled notes.
+- **A project's papers** — passages and sections read from papers you
+  uploaded or from your Zotero PDFs — go to whichever model the bar names
+  when the model asks for them, like any other tool result. Nothing is
+  looked up about a paper you add: its title and DOI are read off its own
+  first pages.
+- **Figures never leave this machine on their own.** A diagram, chart, table,
+  or PRISMA figure is drawn by MyRA's own code from data already in the
+  conversation; a file is written only when you press Save SVG, Save PNG, or
+  Copy figure.
 - **Pages you ask it to read** see a request from this machine.
 - **Looking for a model** reaches Hugging Face, and only when you press
   something: Search sends what you typed, opening a result asks for that

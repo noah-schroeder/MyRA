@@ -174,8 +174,9 @@ transcription failed must not vanish while its audio sits on disk.
 ### Projects
 
 A project is an **index, not a folder** ([project.ts](src/core/projects/project.ts)): it
-lists the six kinds of thing MyRA makes — `chat | meeting | run | paper | review | image`
-— and the files never move. Adding a kind means moving six enumerations together
+lists the seven kinds of thing a project holds — the six MyRA makes, `chat | meeting | run |
+paper | review | image`, and `source`, a paper uploaded into the project — and the files
+never move. Adding a kind means moving the enumerations together
 (`MemberKind`/`MEMBER_KINDS`/`KIND_WORDS`/`countsOf`, render.ts's `FOLDERS`/`HEADINGS`/
 `ORDER`, `defaultStores`, and the two renderer tables); `asMembers` validates against
 `MEMBER_KINDS` rather than a chain of literals, because that chain was the one place a new
@@ -201,6 +202,14 @@ it, attachments included. `myra:recent` returns both groups, each row carrying i
 its limit is counted **per project** (`perProjectLimit`) — a limit across the whole list would
 let a morning's filing push every loose conversation out of a list that was never going to show
 those rows.
+
+**A project's record is written under one lock.** `withProjectsLock` / `updateProject` in
+[projectStore.ts](src/main/projectStore.ts) serialise every read-modify-write of the
+records, because the record now carries a field the window edits — the linked Zotero
+`collections` — and `fileInActiveProject` rewrites the same record after every turn; unlocked,
+the later of two writes dropped the other's change. The memory still lives in its own file
+for the reason given below. The lock is not re-entrant: `writeProject` stays unlocked so a
+locked caller can use it.
 
 "All of it together on disk" is a real want, and it is answered by **exporting** a folder
 rather than by living in one. [render.ts](src/core/projects/render.ts) decides what goes
@@ -242,7 +251,39 @@ for the same reason: a research pipeline stage, the reviewer or a meeting readin
 project's notes could have them rewrite a PRISMA checklist or a review's house rules the
 way an unwary custom persona could, and nothing downstream is built to guard against
 that. `systemPrompt()` takes an optional `project` and renders its notes in one block,
-never touched by `persona`.
+never touched by `persona`. Two exceptions, both **visible before anything is sent**, which
+is what the rule is actually about. A deep run's **scope** stage is given `renderSeed` (the
+settled fields: questions, aims, theory, methods, decisions, literature) so it does not ask
+again what the project already says — every answer it draws lands in the plan editor before
+anything expensive runs, and the notes are written into the run as `project-notes.md`; no
+later stage sees them (`PipelineOptions.projectNotes`). And the paper drafter's **From
+project notes** button copies `renderPaperBrief` — without `literature`, since the drafter
+forbids citations — into the author's own instructions box, where the preview shows it.
+
+**A note says where it came from, and a decision can change without being overwritten.**
+Each item keeps the quote it was grounded on — what was *found*, the line itself when the
+match was not verbatim, never the model's reconstruction — and the message index, so the
+project page names the conversation or meeting and opens it at that turn (`data-msg` in
+[restore.ts](src/renderer/restore.ts)). Replacing a note closes it (`status: "superseded"`,
+linked both ways) rather than editing it, and an open question is closed as `"resolved"`;
+closed notes leave the prompt and stay in the field's history, and the export's
+`decision-log.md` is the whole record — how a decision changed is what a methods chapter
+or a reviewer asks about. The automatic pass is shown the current notes numbered
+(`numberedNotes`, one function for the prompt and for turning `"replaces": 3` back into an
+id) and may say a new note replaces or answers one of them. **Who wrote the old note
+decides what happens**: an `"auto"` note is closed on the spot, but a `"you"` or `"setup"`
+note is never touched — the new note carries a `suggests` that the project page asks about
+(Replace it / Keep both), so an automatic write still never changes what a person wrote or
+approved. The page's **Where you left off** card is built from these records with no
+model: notes added and closed since the last visit (`projects/state/visits.json`, outside
+`readAll`'s sweep), new work, open questions, suggestions waiting.
+
+**A meeting feeds its project's notes through review.** The notes run now keeps every
+verified item in `items.json` (only `actions.json` was structured before), and a meeting
+filed to a research project offers "Add to project notes": decisions, questions and risks
+the transcript actually holds (`meetingCandidates` in
+[fromMeeting.ts](src/core/projects/fromMeeting.ts)), saved as `"you"` once approved —
+never `"auto"`, because the words are often a supervisor's rather than the user's.
 
 **The memory is never capped for size; the prompt is, and only by a share of the actual
 window.** [memory.ts](src/core/projects/memory.ts)'s `renderMemory` reads
@@ -261,7 +302,10 @@ takes the model's candidate items and keeps only the ones `verifyQuote`
 the quote is something the user wrote. **Confirmed**: the quote is something the
 assistant proposed, and the very next message from the user agrees to it — code checks
 the position, the model only judges whether the reply was a yes. `<<<UNTRUSTED
-CONTENT>>>` blocks are stripped from every message first, so a fetched page or a dropped
+CONTENT>>>` blocks are stripped from every message first — and `asUntrusted` defuses any
+marker lookalike inside the text it wraps, because a dropped document carrying the literal
+closing line used to end its own block early and have the rest of itself read as the
+user's words — so a fetched page or a dropped
 document cannot plant a "memory" of its own; it can only reach memory by first reaching
 an assistant reply that the user then actually confirmed. There is no third, unreviewed
 pile — an item is grounded and kept, or it is dropped.
@@ -624,12 +668,66 @@ rung, below anything that leaves the machine. Two ways in, in this order:
    file**: Zotero holds it in WAL mode, so the read is against a snapshot taken with
    SQLite's backup API. A plain file copy tears pages whenever Zotero syncs mid-search.
 
+**A project's linked collections win over the research bar's.** A project can link several
+Zotero collections (`Project.collections`); in its conversations `search_library` searches
+their union, each with its subtree, under the same fan-out cap one collection gets
+(`resolveCollections`), at every rung the tool runs at, and names any that Zotero no longer
+has rather than failing the lot. The bar says so instead of offering a choice that would not
+be applied.
+
 Where the library lives is *read* from Zotero's own `prefs.js`
 ([zoteroProfile.ts](src/core/library/zoteroProfile.ts)), not guessed from a candidate list
 — a moved data directory otherwise produces "Zotero is not reachable", the message for an
 entirely different problem. As everywhere in core, the pure half (SQL, parsing, candidate
 paths) is split from the half that touches a disk, so it is testable with no Zotero
 installed.
+
+### A project's papers
+
+The papers a project is built on — uploaded to it, or the PDFs in its linked Zotero
+collections — explored by the model through `project_papers` and `read_paper`
+([tools/papers.ts](src/core/agent/tools/papers.ts)), and the design answer is **navigate,
+don't retrieve**: no vector database. The model skims the way a person does — the list,
+then the passages a keyword search points at, then the section worth reading — and every
+step returns literal text with its page, which is what makes it quotable and checkable; a
+nearest-neighbour lookup returns what is *similar* to a claim, which is the one thing a
+citation must not settle for. The search is SQLite **FTS5** (porter stemming, BM25) over
+~150-word passages ([sources/search.ts](src/core/sources/search.ts)), compiled into the SQLite
+`node:sqlite` already ships for the Zotero reader, so no dependency; built **in memory** per
+project from the cached texts and rebuilt only when a text's stamp changes, so no index file
+can go stale. The model's query never reaches MATCH syntax: `ftsQuery` rebuilds it from the
+words alone. `readSpan` ([sources/fulltext.ts](src/core/sources/fulltext.ts)) returns whole
+pages up to a budget of `min(3000, window/6)` tokens and says where to continue.
+
+**Pages are kept.** `pdfToPages` runs pdftotext without `-nopgbrk` and splits on the form
+feed; an empty page stays an empty string, so page N is always `pages[N-1]`. Paper text
+reaches the model inside an UNTRUSTED CONTENT block with **every line indented**: the
+renderer's citation harvester reads `[n] Title` over an indented URL as a source, and a
+paper's own numbered reference list is exactly that shape. The reference list is not
+searched at all.
+
+**Uploaded papers** are the `source` member kind, kept under `sourcesRoot`
+(`~/Documents/myra/sources` by default, visible and movable in Settings, because these are
+papers the person chose to keep) as `<id>/{original.<ext>, text.json, source.json}`, with
+`source.json` written last as the done-marker. They arrive as bytes, never a path. Title and
+DOI are guessed from the first pages and editable; nothing is looked up. Deleting one is a
+real delete — it exists only for its project.
+
+**Zotero PDFs are read in place** ([main/runtime/zoteroFulltext.ts](src/main/runtime/zoteroFulltext.ts),
+rules in [library/zoteroFulltext.ts](src/core/library/zoteroFulltext.ts)). The model names an
+item key; the path is what Zotero's database records for it, looked up in the snapshot. A
+file in Zotero's storage goes through `resolveInJail` against `<data dir>/storage`; a
+**linked** file (ZotMoov, Attanger, a synced "Zotero Attachments" folder — `attachments:`
+paths resolved through `baseAttachmentPath` from `prefs.js`) is read on an **allowlist**
+rather than a jail: only at the path the database records for an item in the turn's scope,
+and only if it resolves to a regular `.pdf`. That was decided explicitly, because many real
+libraries keep every PDF that way. Searching uses Zotero's own `.zotero-ft-cache`, so a
+shelf of hundreds is searchable without hundreds of pdftotext runs — it has no page breaks,
+and the reply says so; `read_paper` runs pdftotext once and caches the pages under
+`CONFIG_DIR/fulltext/<key>.json`, keyed by size and mtime. A key outside the project's
+collections is refused. Both tools are offered from the Assistant rung up in a project that
+has papers; `read_paper` also works at the Library rung outside one, for a key
+`search_library` returned, whose results now say which items have a readable PDF.
 
 ### Models and endpoints
 
@@ -958,10 +1056,10 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `myra:*` — 183 of them, registered in
+IPC channels are all `myra:*` — 196 of them, registered in
 [main/index.ts](src/main/index.ts)'s `installIpc` and in the `install*Ipc` modules it
-calls (meetings, dictation, audio, images, papers, projects, project memory, runtime, api,
-review, tasks), and exposed one-by-one in the preload. Adding a capability means touching all
+calls (meetings, dictation, audio, images, papers, projects, project memory, project papers,
+sources, runtime, api, review, tasks), and exposed one-by-one in the preload. Adding a capability means touching all
 three layers plus `src/renderer/types.ts`, and at that scale a channel wired in only three of
 the four is a `window.myra` call that is `undefined` at runtime.
 

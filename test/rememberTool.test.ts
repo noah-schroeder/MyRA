@@ -72,7 +72,14 @@ test("a note resting on the user's own words is saved", async () => {
     ctx,
   );
   assert.match(result.content, /^Saved to this project's notes under Guiding theory/);
-  assert.deepEqual(saved, [[{ slot: "theory", text: "The interviews are analysed with grounded theory." }]]);
+  // The quote and the message it was found in travel with the note, so the
+  // project page can say where it came from and open the conversation there.
+  assert.deepEqual(saved, [[{
+    slot: "theory",
+    text: "The interviews are analysed with grounded theory.",
+    quote: "we are using grounded theory for the interviews",
+    msg: 0,
+  }]]);
 });
 
 test("a quote that exists only inside a fetched page is refused", async () => {

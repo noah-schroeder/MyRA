@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Architecture
-nav_order: 14
+nav_order: 17
 ---
 
 # Architecture
@@ -15,12 +15,16 @@ supervises, no container, no VM.
 ```
 Electron main                       Renderer (sandboxed)
 ├─ agent loop  ── the only LLM caller ├─ chat · tool cards · citations
-│   └─ tool registry ~8 tools         ├─ meeting capture (getUserMedia)
+│   └─ tool registry, 19 tools        ├─ meeting capture (getUserMedia)
 ├─ core/       pure TS, no electron   └─ settings
 │   ├─ audio      speech · voices · what is worth reading aloud
 │   ├─ images     prompts · sizes · where a picture is filed
+│   ├─ diagrams   Mermaid parsed, laid out, drawn — never executed
+│   ├─ prisma     the 2020 box model, one spec for the form and the figure
 │   ├─ library    Zotero: local API, then the database file
+│   ├─ sources    a project's own uploaded papers, FTS5 search
 │   ├─ meetings   merge · prompts · verify
+│   ├─ projects   the index, memory notes, grounded auto-writes
 │   ├─ research   OpenAlex · arXiv · PubMed · CORE · S2 · hydrate · pdf
 │   ├─ documents  pandoc argv · path jail
 │   └─ llm        one HTTP client, OpenAI-shaped

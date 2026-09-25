@@ -20,7 +20,7 @@ import { harvestSources } from "../src/renderer/restore.ts";
 
 import {
   collectionTree, descendantKeys, describeFailure, formatCreators, formatItems, linkFor,
-  MAX_FANOUT, parseCollections, parseItems, searchPath, yearOf, ZOTERO_PORT,
+  MAX_FANOUT, parseCollections, parseItems, resolveCollections, searchPath, yearOf, ZOTERO_PORT,
 } from "../src/core/library/zotero.ts";
 
 /* ------------------------------------------------------------ the query --- */
@@ -327,6 +327,7 @@ async function runTool(
   cfg: Record<string, unknown>,
   cols: { key: string; name: string; parent?: string }[],
   params: Record<string, unknown> = { query: "memory" },
+  project?: { name: string; collections: { key: string; name: string }[] },
 ): Promise<{ text: string; asked: string[] | undefined; error?: string }> {
   const file = join(mkdtempSync(join(tmpdir(), "myra-lib-")), "research.json");
   writeFileSync(file, JSON.stringify({ v: 2, category: "science", ...cfg }));
@@ -340,6 +341,7 @@ async function runTool(
       asked = opts.collections;
       return Promise.resolve(parseItems([ITEM]));
     },
+    ...(project ? { projectScope: () => project } : {}),
   });
   try {
     const res = await searchLibraryTool.handler(params, {} as never);
@@ -468,4 +470,66 @@ test("the collection scope applies only at the rung that shows the picker", asyn
   for (const mode of ["web", "deep"] as const) {
     assert.equal(collectionScope({ ...cfg, mode }), undefined, mode);
   }
+});
+
+/* ------------------------------------------------- a project's collections --- */
+
+/**
+ * A project can link several collections, and in its conversations they win
+ * over the research bar's single choice -- at every rung the tool runs at,
+ * because the person linked them to this work specifically.
+ */
+
+test("a project's collections are searched together, each with what is below it", async () => {
+  const { asked, text } = await runTool({ mode: "library" }, TREE, { query: "memory" }, {
+    name: "Thesis",
+    collections: [{ key: "AAAAAAAA", name: "Projects" }, { key: "DDDDDDDD", name: "Archive" }],
+  });
+  assert.deepEqual(asked, ["AAAAAAAA", "BBBBBBBB", "DDDDDDDD"]);
+  assert.match(text, /collections linked to this project \(Projects, Archive, and 1 below them\)/);
+});
+
+test("a project's collections win over the one chosen in the research bar, even at Deep", async () => {
+  const project = { name: "Thesis", collections: [{ key: "DDDDDDDD", name: "Archive" }] };
+  const library = await runTool({ mode: "library", collection: "AAAAAAAA", collectionName: "Projects" }, TREE, { query: "memory" }, project);
+  assert.deepEqual(library.asked, ["DDDDDDDD"]);
+  const deep = await runTool({ mode: "deep" }, TREE, { query: "memory" }, project);
+  assert.deepEqual(deep.asked, ["DDDDDDDD"]);
+});
+
+test("one missing collection is named, and the others are still searched", async () => {
+  const { asked, text } = await runTool({ mode: "library" }, TREE, { query: "memory" }, {
+    name: "Thesis",
+    collections: [{ key: "DDDDDDDD", name: "Archive" }, { key: "ZZZZZZZZ", name: "Deleted shelf" }],
+  });
+  assert.deepEqual(asked, ["DDDDDDDD"]);
+  assert.match(text, /Not searched, because Zotero no longer has it: “Deleted shelf”/);
+});
+
+test("when none of a project's collections is left, it refuses rather than searching everything", async () => {
+  const { error, asked } = await runTool({ mode: "library" }, TREE, { query: "memory" }, {
+    name: "Thesis",
+    collections: [{ key: "ZZZZZZZZ", name: "Deleted shelf" }],
+  });
+  assert.equal(asked, undefined);
+  assert.match(error ?? "", /None of the Zotero collections linked to the project “Thesis”/);
+});
+
+test("resolveCollections holds the union to the one fan-out cap", () => {
+  const many = Array.from({ length: 40 }, (_, i) => ({ key: `K${String(i).padStart(7, "0")}`, name: `c${i}` }));
+  const r = resolveCollections(many, many.slice(0, 30));
+  assert.equal(r.keys.length, MAX_FANOUT);
+  assert.equal(r.truncated, true);
+  // Overlapping subtrees are searched once.
+  const again = resolveCollections(TREE, [{ key: "AAAAAAAA", name: "Projects" }, { key: "BBBBBBBB", name: "2026" }]);
+  assert.deepEqual(again.keys, ["AAAAAAAA", "BBBBBBBB"]);
+});
+
+test("a full-text flag is printed per item, and nothing when it could not be checked", () => {
+  const [item] = parseItems([ITEM]);
+  const yes = formatItems([item!], "memory", "", [1], { fullText: new Map([[item!.key, "readable" as const]]) });
+  assert.match(yes, new RegExp(`read it with read_paper\\("${item!.key}"\\)`));
+  const no = formatItems([item!], "memory", "", [1], { fullText: new Map([[item!.key, "none" as const]]) });
+  assert.match(no, /no readable PDF attached/);
+  assert.doesNotMatch(formatItems([item!], "memory", "", [1]), /Full text/);
 });

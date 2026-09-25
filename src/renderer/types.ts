@@ -34,6 +34,12 @@ import type { MemoryItem, MemorySlot, ProjectMemory } from "../core/projects/mem
 export type { MemoryItem, MemorySlot, ProjectMemory } from "../core/projects/memory.ts";
 import type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
 export type { DeleteReport, ItemRow, ProjectDetail } from "../main/projectStore.ts";
+import type { Source } from "../core/sources/source.ts";
+export type { Source } from "../core/sources/source.ts";
+/** Mirrors SourceRow in main/sources.ts, which imports electron and so cannot be imported here. */
+export interface SourceRow extends Source {
+  outline?: string;
+}
 import type { DraftRequest } from "../core/papers/prompt.ts";
 export type { Paper, PaperKind, PaperSection, PaperSummary } from "../core/papers/paper.ts";
 export type { DraftRequest } from "../core/papers/prompt.ts";
@@ -68,6 +74,13 @@ export interface UserItem {
   id: string;
   kind: "user";
   text: string;
+  /**
+   * Which stored message this was restored from. A project note records the
+   * message its quote was found in, and this is how the page it opens from
+   * finds that turn again -- `id` is a counter minted per render and means
+   * nothing across a reopen.
+   */
+  msg?: number;
   /** What was attached, for the sent bubble -- name and kind only, never the bytes or the extracted text. */
   attachments?: { kind: "image" | "document" | "data"; name: string }[];
 }
@@ -91,6 +104,8 @@ export interface AssistantItem {
   id: string;
   kind: "assistant";
   blocks: Block[];
+  /** Which stored message this was restored from -- see UserItem's. */
+  msg?: number;
   streaming?: boolean;
   /** Absent while streaming; filled in when the "stats" event for this reply arrives. */
   stats?: MessageStats;
@@ -232,6 +247,8 @@ export interface Settings {
   /** Where the paper drafter keeps one file per paper. */
   papersRoot: string;
   reviewsRoot: string;
+  /** Where papers uploaded into a project are kept. */
+  sourcesRoot: string;
   /** The project new work files itself into. Empty means none. */
   activeProject: string;
   /** The peer reviewer's instructions, and one block per study design. */
@@ -375,6 +392,8 @@ export interface MeetingSummary {
   audioBytes: number;
   transcribed: boolean;
   noted: boolean;
+  /** Whether the notes run saved its items, which is what "Add to project notes" reads. */
+  itemized: boolean;
   state: MeetingArtifacts;
 }
 
@@ -791,6 +810,10 @@ export interface MyRAApi {
   meetingCancel(): Promise<{ ok: boolean }>;
   meetingInstructions(dir: string, text: string): Promise<{ ok: boolean }>;
   meetingRead(dir: string, which: "notes" | "transcript"): Promise<string | undefined>;
+  /** Meetings filed in a research project, by directory name. */
+  meetingResearchProjects(): Promise<Record<string, { projectId: string; name: string }>>;
+  /** Offer a meeting's verified items to its project's notes, through the review form. */
+  meetingToProjectNotes(dir: string): Promise<{ ok: boolean; error?: string; added?: number; offered?: number; projectId?: string }>;
   meetingActions(dir: string): Promise<{ ok: boolean; error?: string; actions?: ActionRecord[] }>;
   meetingActionToTask(
     dir: string,
@@ -1066,7 +1089,27 @@ export interface MyRAApi {
   /** `research` starts the project's memory "pending" -- the setup chat runs on its first message. */
   projectCreate(name: string, research?: boolean): Promise<{ ok: boolean; project?: Project }>;
   projectRename(id: string, name: string): Promise<{ ok: boolean; error?: string }>;
-  projectOpen(id: string): Promise<{ ok: boolean; error?: string; detail?: ProjectDetail }>;
+  /** `visit` marks the page's first load, which records the visit and returns the previous one as `since`. */
+  projectOpen(id: string, visit?: boolean): Promise<{ ok: boolean; error?: string; detail?: ProjectDetail }>;
+  /** Every uploaded paper in the project, with its outline when it has text. */
+  projectSources(id: string): Promise<{ ok: boolean; error?: string; sources: SourceRow[] }>;
+  /** How many of the papers in the project's Zotero collections have a PDF MyRA can read. */
+  projectPapersStatus(id: string): Promise<{ ok: boolean; error?: string; zotero?: { items: number; readable: number } }>;
+  /** Keep a paper in the project -- bytes, never a path. */
+  sourceAdd(projectId: string, name: string, bytes: ArrayBuffer): Promise<{ ok: boolean; error?: string; source?: Source }>;
+  sourceEdit(
+    id: string,
+    edit: { title?: string; authors?: string; year?: string; doi?: string },
+  ): Promise<{ ok: boolean; error?: string; source?: Source }>;
+  /** Deletes the file and its text; an uploaded paper exists only for its project. */
+  sourceDelete(id: string): Promise<{ ok: boolean }>;
+  sourceOpen(id: string): Promise<{ ok: boolean; error?: string }>;
+  onProjectSourcesChanged(cb: (payload: { projectId: string }) => void): () => void;
+  /** Link these Zotero collections to the project, replacing whatever was linked. */
+  projectSetCollections(
+    id: string,
+    collections: { key: string; name: string }[],
+  ): Promise<{ ok: boolean; error?: string; project?: Project }>;
   /** Everything in every store, each row naming the project it is already in. */
   projectItems(): Promise<{
     ok: boolean;
@@ -1102,6 +1145,17 @@ export interface MyRAApi {
   projectMemoryEdit(id: string, itemId: string, text: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
   projectMemoryRemove(id: string, itemId: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
   projectMemorySetAuto(id: string, auto: boolean): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  /** Replace a note with new text; the old one closes and stays in the history. */
+  projectMemorySupersede(id: string, itemId: string, text: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  /** Mark an open question answered -- by a new decision, an existing note, or nothing named. */
+  projectMemoryResolve(
+    id: string,
+    itemId: string,
+    by?: { text: string } | { id: string },
+  ): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  projectMemoryReopen(id: string, itemId: string): Promise<{ ok: boolean; memory: ProjectMemory }>;
+  /** Accept or dismiss what an automatic note suggested about a note the person wrote. */
+  projectMemorySuggestion(id: string, itemId: string, accept: boolean): Promise<{ ok: boolean; memory: ProjectMemory }>;
   /** Reads the currently open conversation, shows a review dialog, saves what is approved. */
   projectMemoryUpdate(id: string): Promise<{ ok: boolean; added: number; memory: ProjectMemory }>;
   onProjectMemoryChanged(cb: (payload: { projectId: string }) => void): () => void;

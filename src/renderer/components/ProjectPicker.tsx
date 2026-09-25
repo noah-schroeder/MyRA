@@ -17,7 +17,7 @@ import type { ItemRow, MemberKind } from "../types.ts";
  * a thing to be told before you tick it rather than after.
  */
 
-const ORDER: MemberKind[] = ["paper", "review", "run", "meeting", "chat", "image"];
+const ORDER: MemberKind[] = ["paper", "review", "run", "source", "meeting", "chat", "image"];
 
 const HEADINGS: Record<MemberKind, string> = {
   chat: "Conversations",
@@ -26,6 +26,7 @@ const HEADINGS: Record<MemberKind, string> = {
   paper: "Papers",
   review: "Peer reviews",
   image: "Images",
+  source: "Full texts",
 };
 
 type Row = ItemRow & { kind: MemberKind; project: string };
