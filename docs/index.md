@@ -25,10 +25,11 @@ five-minute tour, the app has one built in on first launch.
 - **[Providers & models](providers-and-models.html)** — pointing MyRA at a
   local runtime or a hosted API, and picking models.
 - One page per feature: **[Projects](projects.html)**,
-  **[Meetings](meetings.html)**, **[Research](research.html)**,
-  **[Paper drafter](paper-drafter.html)**, **[Peer review](peer-review.html)**,
-  **[Documents](documents.html)**, **[Images](images.html)**, and
-  **[Speech & dictation](speech.html)**.
+  **[Your library](library.html)**, **[Meetings](meetings.html)**,
+  **[Research](research.html)**, **[Paper drafter](paper-drafter.html)**,
+  **[Peer review](peer-review.html)**, **[Figures & diagrams](figures.html)**,
+  **[Documents](documents.html)**, **[Tasks](tasks.html)**,
+  **[Images](images.html)**, and **[Speech & dictation](speech.html)**.
 - **[Privacy: what leaves this machine](privacy.html)** — a plain accounting
   of every network request MyRA makes and when.
 - **[Architecture](architecture.html)** — for anyone reading the code or

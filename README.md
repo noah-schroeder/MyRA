@@ -7,7 +7,7 @@
 TLDR: An all-in-one AI assistant for academic work, intended for non-technical users. Voice to voice, voice dictation, meeting notes, research
 synthesis, deep research, document drafting, and AI-assisted reviewing all in one place. Can connect to your Zotero library. You can use private AI models (recommended) or you can configure external models. MyRA is built on Lemonade server, so the app is an all-in-one program that includes llama.cpp, whisper, kokoro, etc. You can download local models directly from HuggingFace within the app.
 
-**Warning:** In some modes, this app gives the LLM tools that can read and write documents. You can control this with the mode selector in the chat window — leaving it on **Off** prevents the model from using these tools at all.
+**Warning:** In some modes, this app gives the LLM tools that can read and write documents. You can control this with the mode selector in the chat window — leaving it on **Chat** prevents the model from using these tools at all when not inside a project folder.
 
 Note: This app is 100% vibe coded. Don't use it if you're not comfortable with that. 
 
@@ -17,8 +17,8 @@ feature, or keep reading for the pitch and the technical detail.
 <table>
 <tr>
 <td width="33%"><img src="docs/assets/screenshots/chat.png" alt="MyRA's main chat view, with document and deep-research modes"></td>
+<td width="33%"><img src="docs/assets/screenshots/figures.png" alt="A flowchart the model drew, in the Journal look, with its export options"></td>
 <td width="33%"><img src="docs/assets/screenshots/meeting-report.png" alt="A meeting report with an Unverified section"></td>
-<td width="33%"><img src="docs/assets/screenshots/paper-drafter.png" alt="The paper drafter, choosing between a whole paper and one section"></td>
 </tr>
 </table>
 
@@ -54,6 +54,34 @@ with the option to keep them. Nothing moves on disk; **Export** writes the whole
 project out as one real folder, conversations rendered readable, which is also
 what you would send a co-author.
 
+A **research project** also keeps notes — research questions, aims, theory,
+methods, decisions, key literature, open questions — that every conversation in
+it reads. A short setup wizard asks about them when you create the project,
+Socratic-style, and a decision made mid-conversation is picked up and saved on
+the same turn it's said, with a notice under your message showing what was
+kept. Each note says where it came from and opens the conversation or meeting
+at that point; a decision that changes is replaced, not overwritten, and the
+export includes a dated decision log. The project page's **Where you left off**
+card shows what changed since you last looked. A meeting's decisions can be
+added to the notes after you review them, and highlighting any text in a reply
+offers a **Remember** button of its own.
+
+**Your library.** Link a project's **Zotero collections** or upload the
+**full-text papers** it's built on, and MyRA searches and reads them section by
+section, citing the page — a keyword search over the actual text, not a vector
+database, and nothing leaves the machine. Outside a project, the same search
+reaches your whole Zotero library, through its local API or its database file
+directly if the API isn't running.
+
+**Figures.** The model can draw a flowchart, a PRISMA 2020 diagram, a chart or
+a table straight into the conversation — Mermaid syntax parsed and laid out by
+MyRA's own code, never executed, so what renders is always exactly what was
+drawn. Pick a look (Journal, Poster, Monochrome, or the app's own default) and
+export as SVG or PNG, sized to a page or to the figure's own natural size. A
+PRISMA figure comes from a short form, not the model's arithmetic — counts it
+suggests land in the form marked as a guess, never drawn straight onto the
+figure.
+
 **Paper drafter.** Turns raw, half-formed notes into first-draft academic prose
 in **your own voice**: paste a sample of your writing, jot or dictate what you
 want to say under each heading, and each section is written on its own. It does
@@ -76,7 +104,7 @@ beside a note of what it was asked for.
 
 ## What the model can do
 
-Everything the model can do is one list of twelve tools, and **the mode bar
+Everything the model can do is one list of nineteen tools, and **the mode bar
 under the message box decides which of them it is even shown**. That bar is a
 ladder — each rung is the one below plus something more — with a line drawn
 through the middle where MyRA stops being able to reach off this machine.
@@ -98,7 +126,7 @@ small local models, which will use a tool simply because one is there.
 type to the databases directly rather than to a model. Stepping away from it
 puts you back on whichever rung you were on.
 
-### The twelve tools
+### The nineteen tools
 
 **Documents** — from **Assistant** up. All four are confined to the documents
 folder you chose in Settings; every path is resolved with `realpath` on every
@@ -131,6 +159,14 @@ Deliberately **not** offered at Quick. "What does the literature say" and "what
 is in my library" are two different questions, and answering both at once made
 one feature out of two.
 
+**A project's papers** — from **Assistant** up, in a project with uploaded papers
+or linked Zotero collections.
+
+| Tool | What it does |
+| --- | --- |
+| `project_papers` | Keyword search over the full text of the project's papers, returning passages with their page and section; with no query, lists them. Local only. |
+| `read_paper` | Reads one paper's outline and the section or page asked for, in parts sized to the model's window. Also opens a Zotero item `search_library` returned, at **Zotero**. |
+
 **The literature** — the rungs past the line.
 
 | Tool | Where | What it does |
@@ -145,6 +181,22 @@ that asking for a report cannot be quietly answered with a single lookup. And
 the two research tools run **once per turn**: a model left free to call one
 again after reading its own report did exactly that, three times on one
 question, re-asking every scoping question each time.
+
+**Figures** — from **Assistant** up. Nothing here touches disk on its own; a
+file is written only when you press Export.
+
+| Tool | What it does |
+| --- | --- |
+| `create_diagram` | Draws a flowchart from Mermaid syntax — parsed and laid out by MyRA's own code, never handed to a renderer that executes it. |
+| `create_prisma_diagram` | Asks two questions to settle which of the four official PRISMA 2020 templates applies, then shows a form for the counts — a model-supplied number lands in the form marked as a guess, never drawn straight onto the figure. |
+| `create_chart` | Draws a bar, line, scatter, box, or histogram chart from data the model provides. |
+| `create_table` | Draws a formatted table. |
+
+**Memory** — from **Assistant** up, in a research project only.
+
+| Tool | What it does |
+| --- | --- |
+| `remember` | Saves a note to the project's memory. Only saved if its quote is something you actually typed, or your own reply agreeing to a suggestion — the same grounding rule the automatic pass and the meeting notes already follow, so injected text can ask for a note but can't supply what it would rest on. |
 
 ### What is not on the list
 
@@ -265,10 +317,13 @@ Stated plainly, because a privacy claim is only honest if its edges are named:
   exactly what would be sent, and showing it sends nothing.
 - **A research project's notes** ride in every chat request made inside that
   project, to whichever model the bar names — the same rule as any other
-  system prompt. Growing them on their own makes one extra request after a
-  conversation goes quiet for about 90 seconds; it is skipped rather than
-  loading a local model that is not already resident, so it never costs you a
-  reload you did not ask for.
+  system prompt. Growing them on their own makes one short extra request to that
+  same model before each reply. A deep run started in the project also gives
+  its scoping step the settled notes.
+- **A project's papers** — passages and sections read from papers you uploaded
+  or from your Zotero PDFs — go to whichever model the bar names when the model
+  asks for them, like any other tool result. Nothing is looked up about a paper
+  you add: its title and DOI are read off its own first pages.
 - **Scholarly searches** reach OpenAlex and arXiv, which need no key. PubMed and
   CORE are off until you add your own free key for each in Settings → Database
   keys; once added, a search that includes them sends your search terms and
@@ -316,12 +371,16 @@ One process tree, no daemon, no container, no VM.
 ```
 Electron main                       Renderer (sandboxed)
 ├─ agent loop  ── the only LLM caller ├─ chat · tool cards · citations
-│   └─ tool registry · 12 tools       ├─ meeting capture (getUserMedia)
+│   └─ tool registry · 19 tools       ├─ meeting capture (getUserMedia)
 ├─ core/       pure TS, no electron   └─ settings
 │   ├─ audio      speech · voices · what is worth reading aloud
 │   ├─ images     prompts · sizes · where a picture is filed
+│   ├─ diagrams   Mermaid parsed, laid out, drawn — never executed
+│   ├─ prisma     the 2020 box model, one spec for the form and the figure
 │   ├─ library    Zotero: local API, then the database file
+│   ├─ sources    a project's own uploaded papers, FTS5 search
 │   ├─ meetings   merge · prompts · verify
+│   ├─ projects   the index, memory notes, grounded auto-writes
 │   ├─ research   OpenAlex · arXiv · PubMed · CORE · S2 · hydrate · pdf
 │   ├─ documents  pandoc argv · path jail
 │   └─ llm        one HTTP client, OpenAI-shaped

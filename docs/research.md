@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Research
-nav_order: 7
+nav_order: 8
 ---
 
 # Research
@@ -61,4 +61,14 @@ is one stage's own output.
 If you use Zotero, MyRA can search your library directly — through Zotero's
 local API when it's running, or its database file otherwise — so your own
 collection is part of what deep research and Quick search draw on, alongside
-the open databases above.
+the open databases above. See [Your library](library.html) for linking
+specific collections to a project, and for the papers you upload directly.
+
+## A research project's own notes
+
+Open a **research project** and a deep run's scoping step is shown the
+project's settled notes — questions, aims, theory, methods, decisions, key
+literature — so it doesn't ask again what the project already told MyRA.
+Every answer it draws still lands in the plan editor before anything
+expensive runs. See [Projects](projects.html#research-project-notes) for how
+those notes are built up.
