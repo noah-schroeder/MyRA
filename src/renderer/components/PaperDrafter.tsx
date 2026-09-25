@@ -5,6 +5,7 @@ import { PaperSection } from "./PaperSection.tsx";
 import { assemble, moveSection, newSection, withoutSection } from "../../core/papers/paper.ts";
 import { requestFor } from "../../core/papers/prompt.ts";
 import { FORMATS } from "../../core/documents/formats.ts";
+import { renderPaperBrief } from "../../core/projects/memory.ts";
 import type {
   DictationState, JobSnapshot, Paper, PaperKind, PaperSection as Section, PaperSummary,
 } from "../types.ts";
@@ -43,8 +44,11 @@ export function PaperDrafter({
   openId,
   dictation,
   sink,
+  projectId,
 }: {
   onClose: () => void;
+  /** The active project, whose notes can fill the paper prompt. */
+  projectId?: string | undefined;
   dictation: {
     state: DictationState;
     start: () => Promise<void>;
@@ -115,6 +119,37 @@ export function PaperDrafter({
   const edit = useCallback((patch: Partial<Paper>): void => {
     setPaper((p) => (p ? { ...p, ...patch } : p));
   }, []);
+
+  /*
+   * The active project's notes as a paper brief -- questions, aims, theory,
+   * methods, decisions -- for the one box the author's own instructions go in.
+   * Appended, never substituted, and shown in that box before anything is
+   * sent: the notes are text the author can read and cut, not a hidden input.
+   */
+  const [brief, setBrief] = useState("");
+  useEffect(() => {
+    if (!projectId) {
+      setBrief("");
+      return;
+    }
+    let live = true;
+    void window.myra.projectMemory(projectId).then((r) => {
+      if (live) setBrief(r.memory ? renderPaperBrief(r.memory) : "");
+    });
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
+  const fillFromNotes = (): void => {
+    if (!paper || !brief) return;
+    const current = paper.instructions.trim();
+    if (current.includes(brief)) {
+      setEditing({ scope: "paper" });
+      return;
+    }
+    edit({ instructions: current ? `${current}\n\n${brief}` : brief });
+    setEditing({ scope: "paper" });
+  };
 
   const editSection = useCallback((id: string, patch: Partial<Section>): void => {
     setPaper((p) =>
@@ -388,6 +423,16 @@ export function PaperDrafter({
           {whole ? (
             <button type="button" className="ghost paper-btn" onClick={() => setEditing({ scope: "paper" })}>
               ✎ Paper prompt{paper.instructions.trim() ? " ●" : ""}
+            </button>
+          ) : null}
+          {whole && brief ? (
+            <button
+              type="button"
+              className="ghost paper-btn"
+              title="Add this project's research questions, aims, theory, methods and decisions to the paper prompt, where you can edit them before anything is written."
+              onClick={fillFromNotes}
+            >
+              ＋ From project notes
             </button>
           ) : null}
           <CopyButton className="ghost paper-btn" label="⧉ Copy full draft" text={() => assemble(paper)} />

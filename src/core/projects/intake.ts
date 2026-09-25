@@ -15,7 +15,7 @@
 
 import { parseJsonReply } from "../llm/chat.ts";
 import { cleanOptions, JOIN } from "../research/questions.ts";
-import { isMemorySlot, MEMORY_SLOTS, SLOT_LABELS, type NewItem, type ProjectMemory } from "./memory.ts";
+import { activeItems, isMemorySlot, MEMORY_SLOTS, SLOT_LABELS, type NewItem, type ProjectMemory } from "./memory.ts";
 import { SETUP_GREETING } from "./greeting.ts";
 
 export { SETUP_GREETING };
@@ -69,9 +69,10 @@ export function buildOffersPrompt(description: string): string {
     `Two jobs.`,
     ``,
     `1. Pull out anything they stated as fact -- an aim, a research question, a theory they're`,
-    `   working from, a method they've already decided on, a decision already made, something`,
-    `   still genuinely open, or background context. Only what they actually said; do not invent`,
-    `   or infer anything beyond it. None is a fine answer if they were vague.`,
+    `   working from, a method they've already decided on, a decision already made, a paper or`,
+    `   author they named as central (slot "literature"), something still genuinely open, or`,
+    `   background context. Only what they actually said; do not invent or infer anything beyond`,
+    `   it. None is a fine answer if they were vague.`,
     ``,
     `2. Suggest 3-5 concrete ways you could help them develop this further. Each needs a short`,
     `   label, a few words, imperative ("Brainstorm research questions") and one line on why it`,
@@ -146,8 +147,9 @@ export interface TaskQuestion {
 }
 
 function knownSoFar(memory: ProjectMemory): string {
-  if (!memory.items.length) return "";
-  return `\n\nAlready noted about this project:\n${memory.items
+  const current = activeItems(memory);
+  if (!current.length) return "";
+  return `\n\nAlready noted about this project:\n${current
     .map((i) => `- (${SLOT_LABELS[i.slot]}) ${i.text}`)
     .join("\n")}`;
 }

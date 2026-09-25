@@ -107,6 +107,8 @@ export function systemPrompt(opts: {
     /** Whether `remember` is offered this turn -- main decides, since only it
      *  knows the project keeps notes that may grow on their own. */
     remembers?: boolean;
+    /** The papers it holds: how many were uploaded, and the Zotero collections linked. */
+    papers?: { uploads: number; collections: readonly string[] } | undefined;
   } | undefined;
   /** Injectable so this stays a pure function of its inputs and a test does
    *  not depend on the day it happens to run. Main passes nothing, so every
@@ -146,6 +148,25 @@ export function systemPrompt(opts: {
           "theory, a method, a decision -- is added to its notes automatically before you reply, so",
           "do not save that again. When the user asks you to remember something that is not in the",
           "notes yet, save it with the remember tool, quoting their own words.",
+        ]
+      : [];
+
+  /* Stable for a project -- counts and collection names change when the
+     person changes them, not per turn -- so the prompt cache holds. Said
+     because the tools are otherwise invisible until tried, and a model that
+     does not know the papers exist answers from memory instead of from them. */
+  const shelf = opts.project?.papers;
+  const papers =
+    shelf && (shelf.uploads || shelf.collections.length) && readsDocuments(mode)
+      ? [
+          `This project holds papers the user chose: ${[
+            shelf.uploads ? `${shelf.uploads} uploaded` : "",
+            shelf.collections.length ? `the Zotero collection${shelf.collections.length === 1 ? "" : "s"} ${shelf.collections.map((c) => `"${c}"`).join(", ")}` : "",
+          ]
+            .filter(Boolean)
+            .join(", and ")}. When a question is about them, search their full text with`,
+          "project_papers and read a paper with read_paper, rather than answering from memory. Cite",
+          "a paper by the [n] the tool printed and give the page in your prose, e.g. \"(p. 7)\".",
         ]
       : [];
 
@@ -207,6 +228,7 @@ export function systemPrompt(opts: {
     "", ...todayLine(opts.now),
     ...(project.length ? ["", ...project] : []),
     ...(remember.length ? ["", ...remember] : []),
+    ...(papers.length ? ["", ...papers] : []),
     ...tools, "", ...SYSTEM_PROMPT,
     ...(closing.length ? ["", ...closing] : []),
     ...(spoken.length ? ["", ...spoken] : []),

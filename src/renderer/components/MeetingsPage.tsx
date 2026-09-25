@@ -73,7 +73,7 @@ function when(iso: string): string {
 }
 
 export function MeetingsPage({
-  settings, resident, onSettingsChange, onOpenSettings, onClose,
+  settings, resident, onSettingsChange, onOpenSettings, onClose, openId,
 }: {
   settings: Settings;
   /** Every model the daemon is holding, so the transcription picker can say whether this is one. */
@@ -81,6 +81,8 @@ export function MeetingsPage({
   onSettingsChange: (s: Settings) => void;
   onOpenSettings: () => void;
   onClose: () => void;
+  /** A meeting to open, by directory name -- from a project note that came from it. */
+  openId?: string;
 }) {
   const [tab, setTab] = useState<Tab>("record");
   const [state, setState] = useState<MeetingState>({ phase: "idle" });
@@ -91,8 +93,13 @@ export function MeetingsPage({
   const [open, setOpen] = useState<string | undefined>();
   const capture = useRef<MeetingCapture | undefined>(undefined);
 
+  /* Which meetings sit in a research project, so a row offers its items to
+     that project's notes. Re-read with the list: filing a meeting elsewhere
+     is exactly the kind of change the list refresh exists for. */
+  const [research, setResearch] = useState<Record<string, { projectId: string; name: string }>>({});
   const refresh = useCallback(async () => {
     setMeetings(await window.myra.meetingList());
+    setResearch(await window.myra.meetingResearchProjects());
   }, []);
 
   useEffect(() => {
@@ -116,6 +123,21 @@ export function MeetingsPage({
   useEffect(() => {
     if (tab === "past") void refresh();
   }, [tab, refresh]);
+
+  /* Opened at one meeting: the past list, with that one expanded. Matched on
+     the directory's name, since that -- not its path -- is what a project
+     stores, and the meetings folder may have moved since. */
+  const applied = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!openId || applied.current === openId) return;
+    const found = meetings.find((m) => m.dir.split(/[\\/]/).pop() === openId);
+    if (!found) return;
+    /* Once per open, not on every list push after it -- collapsing the row
+       must not be undone by the next stage finishing. */
+    applied.current = openId;
+    setTab("past");
+    setOpen(found.dir);
+  }, [openId, meetings]);
 
   // Levels are polled rather than pushed: at 10 Hz an IPC message per reading
   // per track is a lot of traffic for a meter, and a dropped frame is invisible.
@@ -289,6 +311,7 @@ export function MeetingsPage({
                 expanded={open === m.dir}
                 onToggle={() => setOpen(open === m.dir ? undefined : m.dir)}
                 onChanged={refresh}
+                research={research[m.dir.split(/[\\/]/).pop() ?? ""]}
               />
             ))}
           </ul>
@@ -408,7 +431,7 @@ function Level({ label, level }: { label: string; level: number }) {
 /* ----------------------------------------------------------- past meetings - */
 
 function MeetingRow({
-  meeting, busy, progress, expanded, onToggle, onChanged,
+  meeting, busy, progress, expanded, onToggle, onChanged, research,
 }: {
   meeting: MeetingSummary;
   busy: boolean;
@@ -416,7 +439,23 @@ function MeetingRow({
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => void;
+  /** The research project this meeting is filed in, if it is in one. */
+  research?: { projectId: string; name: string } | undefined;
 }) {
+  const [noted, setNoted] = useState<string | undefined>();
+  const toNotes = async (): Promise<void> => {
+    setNoted(undefined);
+    const r = await window.myra.meetingToProjectNotes(meeting.dir);
+    setNoted(
+      !r.ok
+        ? r.error
+        : r.offered === 0
+          ? `Nothing new for “${research?.name ?? "the project"}” — its notes already have everything this meeting settled.`
+          : r.added
+            ? `Added ${r.added} note${r.added === 1 ? "" : "s"} to “${research?.name ?? "the project"}”.`
+            : "Nothing was added.",
+    );
+  };
   const [view, setView] = useState<"notes" | "transcript" | "prompt">("notes");
   const [text, setText] = useState<string | undefined>();
   const [actions, setActions] = useState<ActionRecord[] | undefined>();
@@ -533,6 +572,20 @@ function MeetingRow({
             Transcribe and take notes
           </button>
         ) : null}
+        {research && meeting.noted ? (
+          <button
+            type="button"
+            disabled={busy || !meeting.itemized}
+            onClick={() => void toNotes()}
+            title={
+              meeting.itemized
+                ? `Offer this meeting's decisions, open questions and risks to the notes of “${research.name}”. You review them first.`
+                : "These notes were taken before MyRA kept their items. Take notes again to add them — the recording is not transcribed twice."
+            }
+          >
+            Add to project notes…
+          </button>
+        ) : null}
         <span className="meet-spacer" />
         <button type="button" onClick={() => void window.myra.meetingReveal(meeting.dir)}>
           Open folder
@@ -557,6 +610,12 @@ function MeetingRow({
           </button>
         )}
       </div>
+
+      {noted ? (
+        <p className="dim meet-noted" role="status">
+          {noted}
+        </p>
+      ) : null}
 
       {expanded ? (
         <div className="meet-body">

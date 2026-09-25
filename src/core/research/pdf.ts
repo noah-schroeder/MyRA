@@ -46,14 +46,46 @@ export async function pdfToolAvailable(): Promise<boolean> {
 }
 
 /**
- * Extract text from PDF bytes.
- *
- * `-layout` preserves column structure, which matters enormously for papers:
- * without it, two-column text interleaves line by line into nonsense.
+ * Extract text from PDF bytes, in reading order -- see the note on `-layout`
+ * inside `extract`, which is why that flag is NOT passed.
  */
 export async function pdfToText(
   bytes: Uint8Array,
   opts: { maxPages?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  return extract(bytes, { ...opts, pages: false });
+}
+
+/**
+ * The same text, one string per page.
+ *
+ * For a paper somebody will cite: "p. 7" is what a reader needs to find the
+ * passage again, and `-nopgbrk` throws exactly that away. pdftotext ends every
+ * page with a form feed, so the pages are recovered by splitting on it; the
+ * hyphen repair runs over the whole document first, so a compound written
+ * elsewhere in the paper still counts as evidence on this page.
+ *
+ * A page with no text -- a full-page figure -- is kept as an empty string, so
+ * page N is always `pages[N - 1]` and a citation's number stays true.
+ */
+export async function pdfToPages(
+  bytes: Uint8Array,
+  opts: { maxPages?: number; timeoutMs?: number } = {},
+): Promise<string[]> {
+  const text = await extract(bytes, { ...opts, pages: true });
+  const pages = text.split("\f").map((p) => p.replace(/\n{3,}/g, "\n\n").trim());
+  /* pdftotext ends every page with a form feed, including the last one, so the
+     split above always leaves exactly one trailing empty string that is not a
+     page. Popping more than that one -- the previous `while` did -- would also
+     drop a genuinely blank final page from the source PDF, undercounting the
+     true page count this function promises to preserve. */
+  if (pages.length > 1 && !pages[pages.length - 1]) pages.pop();
+  return pages;
+}
+
+async function extract(
+  bytes: Uint8Array,
+  opts: { maxPages?: number | undefined; timeoutMs?: number | undefined; pages: boolean },
 ): Promise<string> {
   if (!(await pdfToolAvailable())) {
     throw new PdfError("pdftotext is not installed (apt install poppler-utils)");
@@ -83,7 +115,7 @@ export async function pdfToText(
      * figure labels -- "weight layer", "relu", "identity" -- landing in the
      * middle of body sentences, because on the page they are physically there.
      */
-    const args = ["-nopgbrk", "-enc", "UTF-8"];
+    const args = [...(opts.pages ? [] : ["-nopgbrk"]), "-enc", "UTF-8"];
     if (opts.maxPages) args.push("-l", String(opts.maxPages));
     args.push(src, "-"); // "-" writes to stdout
 
@@ -92,10 +124,18 @@ export async function pdfToText(
       maxBuffer: 64 * 1024 * 1024,
     });
 
+    /* A blanket `.trim()` treats a form feed as whitespace like any other, so
+       it silently ate a page boundary along with the ordinary whitespace
+       around it -- a document ending (or starting) on a genuinely blank page
+       lost that page entirely, before `pdfToPages` ever got to split on it.
+       `[^\S\f]` is "whitespace, but not a form feed", so only ordinary
+       leading/trailing whitespace is trimmed and every `\f` pdftotext wrote
+       survives to the split. `pdfToText` passes `-nopgbrk`, so its output has
+       no `\f` at all and this is unchanged for it. */
     const text = dehyphenate(
-      stdout.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(),
+      stdout.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/^[^\S\f]+|[^\S\f]+$/g, ""),
     );
-    if (!text) {
+    if (!text.replace(/\f/g, "").trim()) {
       // Almost always a scanned image PDF. Say which, because the fix differs.
       throw new PdfError("no extractable text — the PDF is probably scanned images, which need OCR");
     }

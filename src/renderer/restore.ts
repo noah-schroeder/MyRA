@@ -103,7 +103,7 @@ export function restoreThread(messages: StoredMessage[]): Restored {
   const items: Item[] = [];
   const sources = new Map<number, CitedSource>();
 
-  for (const m of messages) {
+  for (const [msg, m] of messages.entries()) {
     // The system prompt is ours, not the conversation's, and showing it would
     // be both noise and a leak of wording the user never wrote.
     if (m.role === "system" || m.role === "tool") continue;
@@ -118,6 +118,7 @@ export function restoreThread(messages: StoredMessage[]): Restored {
           id: nextId(),
           kind: "user",
           text: m.content,
+          msg,
           ...(m.attachments?.length
             ? { attachments: m.attachments.map((a) => ({ kind: a.kind, name: a.name })) }
             : {}),
@@ -130,6 +131,7 @@ export function restoreThread(messages: StoredMessage[]): Restored {
       items.push({
         id: nextId(),
         kind: "assistant",
+        msg,
         blocks: [{ kind: "text", text: m.content }],
         streaming: false,
         ...(m.meta ? { stats: m.meta } : {}),

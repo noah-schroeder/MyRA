@@ -14,9 +14,9 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  addMembers, assertProjectId, byNewest, countsOf, hasMember, kindLabel, newProject, ownerOf,
-  parseProject, perProjectLimit, projectId, pruneMembers, railRows, removeMembers, sameMember,
-  summaryOf,
+  addMembers, assertProjectId, byNewest, cleanCollections, countsOf, hasMember, kindLabel,
+  MAX_PROJECT_COLLECTIONS, newProject, ownerOf, parseProject, perProjectLimit, projectId, pruneMembers,
+  railRows, removeMembers, sameMember, setCollections, summaryOf,
   type Member, type Project,
 } from "../src/core/projects/project.ts";
 
@@ -216,5 +216,35 @@ describe("hasMember", () => {
     const p = project("x", [chat("a")]);
     assert.equal(hasMember(p, chat("a")), true);
     assert.equal(hasMember(p, paper("a")), false);
+  });
+});
+
+describe("a project's Zotero collections", () => {
+  it("keeps well-formed keys, deduplicated, and names a nameless one by its key", () => {
+    const cleaned = cleanCollections([
+      { key: "AAAAAAAA", name: " Thesis " },
+      { key: "AAAAAAAA", name: "again" },
+      { key: "../../x", name: "escape" },
+      { key: "BBBBBBBB" },
+      "nonsense",
+    ]);
+    assert.deepEqual(cleaned, [{ key: "AAAAAAAA", name: "Thesis" }, { key: "BBBBBBBB", name: "BBBBBBBB" }]);
+  });
+
+  it("is capped, so a corrupt record cannot fan a search out without end", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ key: `K${String(i).padStart(7, "0")}`, name: "c" }));
+    assert.equal(cleanCollections(many).length, MAX_PROJECT_COLLECTIONS);
+  });
+
+  it("survives a round trip through disk, and a project with none has no field at all", () => {
+    const project = setCollections(newProject({ name: "P", id: "p1" }), [{ key: "AAAAAAAA", name: "Thesis" }]);
+    assert.deepEqual(parseProject(JSON.parse(JSON.stringify(project)), "p1")?.collections, [{ key: "AAAAAAAA", name: "Thesis" }]);
+    const cleared = setCollections(project, []);
+    assert.equal("collections" in cleared, false);
+  });
+
+  it("setting the same collections again is a no-op, so the rail does not reorder", () => {
+    const project = setCollections(newProject({ name: "P", id: "p1" }), [{ key: "AAAAAAAA", name: "Thesis" }]);
+    assert.equal(setCollections(project, [{ key: "AAAAAAAA", name: "Thesis" }]), project);
   });
 });

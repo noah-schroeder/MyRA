@@ -25,13 +25,15 @@ import { join } from "node:path";
 import { CONFIG_DIR, OWNER_ONLY_DIR } from "../../core/paths.ts";
 
 import {
-  BATCH, chunk, collectionCountSql, COLLECTIONS_SQL, creatorsSql, dataDirCandidates, fieldsSql,
+  BATCH, chunk, collectionCountSql, COLLECTIONS_SQL, creatorsSql, dataDirCandidates, fieldsSql, idsByKeySql,
   inCollectionsSql, ITEM_COUNT_SQL, likeParam, matchSql, rowsSql, SCAN_BUDGET, searchRoots,
   searchTerms, shapeItem, SKIP_DIRS, tagsSql, ZOTERO_DB, type ItemParts,
 } from "../../core/library/zoteroDb.ts";
 import {
-  dataDirFromPrefs, looksLikeProfileDir, parseProfilesIni, PREFS_FILE, PROFILES_INI, profileRoots,
+  baseAttachmentFromPrefs, dataDirFromPrefs, looksLikeProfileDir, parseProfilesIni, PREFS_FILE, PROFILES_INI,
+  profileRoots,
 } from "../../core/library/zoteroProfile.ts";
+import { attachmentsSql, type AttachmentRow } from "../../core/library/zoteroFulltext.ts";
 import { ZoteroError, type LibraryItem, type SearchMode, type ZoteroCollection } from "../../core/library/zotero.ts";
 
 /**
@@ -136,6 +138,25 @@ export function findZoteroDataDir(): string | undefined {
 }
 
 /**
+ * Every profile's prefs.js, read once, most-default first -- the one walk
+ * both `readProfiles` (which wants the data directory) and
+ * `zoteroBaseAttachmentDir` (which wants a different pref out of the same
+ * file) need, so a fix to how profiles are found or filtered reaches both
+ * instead of drifting between two copies of the same double loop.
+ */
+function* profilePrefs(home: string): Generator<{ dir: string; text: string }> {
+  for (const root of profileRoots(home, process.env)) {
+    for (const dir of profileDirs(root)) {
+      try {
+        yield { dir, text: readFileSync(join(dir, PREFS_FILE), "utf8") };
+      } catch {
+        // No prefs.js in it, or unreadable: not a profile MyRA can learn from.
+      }
+    }
+  }
+}
+
+/**
  * Every data directory Zotero's own profiles name, most-default first.
  *
  * Records what each profile said as it goes, including the profiles that said
@@ -145,18 +166,10 @@ export function findZoteroDataDir(): string | undefined {
  */
 function readProfiles(home: string, into: { path: string; dataDir?: string }[]): string[] {
   const out: string[] = [];
-  for (const root of profileRoots(home, process.env)) {
-    for (const dir of profileDirs(root)) {
-      let dataDir: string | undefined;
-      try {
-        dataDir = dataDirFromPrefs(readFileSync(join(dir, PREFS_FILE), "utf8"));
-      } catch {
-        // No prefs.js in it, or unreadable: not a profile MyRA can learn from.
-        continue;
-      }
-      into.push(dataDir ? { path: dir, dataDir } : { path: dir });
-      if (dataDir) out.push(dataDir);
-    }
+  for (const { dir, text } of profilePrefs(home)) {
+    const dataDir = dataDirFromPrefs(text);
+    into.push(dataDir ? { path: dir, dataDir } : { path: dir });
+    if (dataDir) out.push(dataDir);
   }
   return out;
 }
@@ -510,71 +523,180 @@ export async function searchDb(opts: {
     }
     if (ids.size === 0) return [];
 
-    /* Sorted here rather than by the database, because the candidates are read
-       in batches and each batch would otherwise be ordered only within itself.
-       `dateModified` descending is what the API route asks for, so the two
-       agree on which paper is at the top. */
-    type Row = { itemID: number; key: string; itemType: string; dateModified: string };
-    const rows: Row[] = [];
-    for (const part of chunk([...ids])) {
-      for (const row of db.prepare(rowsSql(part)).all(...part) as Record<string, unknown>[]) {
-        if (typeof row["itemID"] !== "number") continue;
-        rows.push({
-          itemID: row["itemID"],
-          key: text(row["key"]),
-          itemType: text(row["itemType"]),
-          dateModified: text(row["dateModified"]),
-        });
-      }
-    }
-    rows.sort((a, b) => b.dateModified.localeCompare(a.dateModified));
+    /* Sorted after reading rather than by the database, because the
+       candidates are read in batches and each batch would otherwise be
+       ordered only within itself. `dateModified` descending is what the API
+       route asks for, so the two agree on which paper is at the top. */
+    const rows = rowsFor(db, ids);
 
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 25), 1), 100);
-    const wanted = rows.slice(0, limit);
-    const chosen = wanted.map((r) => r.itemID);
-    if (chosen.length === 0) return [];
-
-    const fields = gather<Record<string, string>>(db, fieldsSql, chosen, (into, row) => {
-      const id = row["itemID"] as number;
-      const bag = into.get(id) ?? {};
-      bag[text(row["fieldName"])] = text(row["value"]);
-      into.set(id, bag);
-    });
-    const creators = gather<ItemParts["creators"]>(db, creatorsSql, chosen, (into, row) => {
-      const id = row["itemID"] as number;
-      const list = into.get(id) ?? [];
-      list.push({
-        firstName: text(row["firstName"]),
-        lastName: text(row["lastName"]),
-        fieldMode: typeof row["fieldMode"] === "number" ? row["fieldMode"] : 0,
-      });
-      into.set(id, list);
-    });
-    const tags = gather<string[]>(db, tagsSql, chosen, (into, row) => {
-      const id = row["itemID"] as number;
-      const list = into.get(id) ?? [];
-      const name = text(row["name"]).trim();
-      if (name) list.push(name);
-      into.set(id, list);
-    });
-    const counts = gather<number>(db, collectionCountSql, chosen, (into, row) => {
-      const id = row["itemID"] as number;
-      into.set(id, typeof row["n"] === "number" ? row["n"] : 0);
-    });
-
-    return wanted.map((row) =>
-      shapeItem({
-        key: row.key,
-        itemType: row.itemType,
-        fields: fields.get(row.itemID) ?? {},
-        creators: creators.get(row.itemID) ?? [],
-        tags: tags.get(row.itemID) ?? [],
-        collections: counts.get(row.itemID) ?? 0,
-      }),
-    );
+    return shapeRows(db, rows.slice(0, limit));
   } finally {
     db.close();
   }
+}
+
+type ItemRowDb = { itemID: number; key: string; itemType: string; dateModified: string };
+
+/** Real items among these ids, newest first -- the rows a search or a listing shows. */
+function rowsFor(db: DatabaseSync, ids: Iterable<number>): ItemRowDb[] {
+  const rows: ItemRowDb[] = [];
+  for (const part of chunk([...ids])) {
+    for (const row of db.prepare(rowsSql(part)).all(...part) as Record<string, unknown>[]) {
+      if (typeof row["itemID"] !== "number") continue;
+      rows.push({
+        itemID: row["itemID"],
+        key: text(row["key"]),
+        itemType: text(row["itemType"]),
+        dateModified: text(row["dateModified"]),
+      });
+    }
+  }
+  return rows.sort((a, b) => b.dateModified.localeCompare(a.dateModified));
+}
+
+/** Rows turned into the items a reply prints, with their fields, creators, tags and collection counts. */
+function shapeRows(db: DatabaseSync, wanted: ItemRowDb[]): LibraryItem[] {
+  const chosen = wanted.map((r) => r.itemID);
+  if (chosen.length === 0) return [];
+
+  const fields = gather<Record<string, string>>(db, fieldsSql, chosen, (into, row) => {
+    const id = row["itemID"] as number;
+    const bag = into.get(id) ?? {};
+    bag[text(row["fieldName"])] = text(row["value"]);
+    into.set(id, bag);
+  });
+  const creators = gather<ItemParts["creators"]>(db, creatorsSql, chosen, (into, row) => {
+    const id = row["itemID"] as number;
+    const list = into.get(id) ?? [];
+    list.push({
+      firstName: text(row["firstName"]),
+      lastName: text(row["lastName"]),
+      fieldMode: typeof row["fieldMode"] === "number" ? row["fieldMode"] : 0,
+    });
+    into.set(id, list);
+  });
+  const tags = gather<string[]>(db, tagsSql, chosen, (into, row) => {
+    const id = row["itemID"] as number;
+    const list = into.get(id) ?? [];
+    const name = text(row["name"]).trim();
+    if (name) list.push(name);
+    into.set(id, list);
+  });
+  const counts = gather<number>(db, collectionCountSql, chosen, (into, row) => {
+    const id = row["itemID"] as number;
+    into.set(id, typeof row["n"] === "number" ? row["n"] : 0);
+  });
+
+  return wanted.map((row) =>
+    shapeItem({
+      key: row.key,
+      itemType: row.itemType,
+      fields: fields.get(row.itemID) ?? {},
+      creators: creators.get(row.itemID) ?? [],
+      tags: tags.get(row.itemID) ?? [],
+      collections: counts.get(row.itemID) ?? 0,
+    }),
+  );
+}
+
+/**
+ * Every real item filed in these collections, newest first, up to `limit`.
+ *
+ * What a project's papers are, when a project is linked to collections: not a
+ * search, a listing. The same shaping a search result gets, so a paper reads
+ * the same in either.
+ */
+export async function itemsInCollectionsFromDb(keys: string[], limit: number): Promise<LibraryItem[]> {
+  if (!keys.length) return [];
+  const { db } = await open();
+  try {
+    const rows = rowsFor(db, idsInCollections(db, keys));
+    return shapeRows(db, rows.slice(0, Math.max(1, limit)));
+  } finally {
+    db.close();
+  }
+}
+
+/** Real items by key -- the ones a model named -- shaped the way a search result is. */
+export async function itemsByKeysFromDb(keys: string[]): Promise<LibraryItem[]> {
+  if (!keys.length) return [];
+  const { db } = await open();
+  try {
+    const ids = new Set<number>();
+    for (const part of chunk(keys)) {
+      for (const row of db.prepare(idsByKeySql(part)).all(...part) as { itemID: unknown }[]) {
+        if (typeof row.itemID === "number") ids.add(row.itemID);
+      }
+    }
+    return shapeRows(db, rowsFor(db, ids));
+  } finally {
+    db.close();
+  }
+}
+
+/** The keys of every real item in these collections -- a membership check, not a listing. */
+export async function keysInCollectionsFromDb(keys: string[]): Promise<Set<string>> {
+  if (!keys.length) return new Set();
+  const { db } = await open();
+  try {
+    return new Set(rowsFor(db, idsInCollections(db, keys)).map((r) => r.key));
+  } finally {
+    db.close();
+  }
+}
+
+/** How many real items those collections hold, for "and N more" when a listing is capped. */
+export async function countInCollectionsFromDb(keys: string[]): Promise<number> {
+  if (!keys.length) return 0;
+  const { db } = await open();
+  try {
+    return rowsFor(db, idsInCollections(db, keys)).length;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The PDF attachments of these items, from the snapshot, and the data
+ * directory they are relative to -- the one the snapshot was taken of.
+ */
+export async function attachmentRowsFromDb(
+  parentKeys: string[],
+): Promise<{ rows: AttachmentRow[]; dataDir: string }> {
+  const { db, dataDir } = await open();
+  try {
+    const rows: AttachmentRow[] = [];
+    for (const part of chunk(parentKeys)) {
+      for (const row of db.prepare(attachmentsSql(part)).all(...part) as Record<string, unknown>[]) {
+        rows.push({
+          parentKey: text(row["parentKey"]),
+          key: text(row["key"]),
+          linkMode: typeof row["linkMode"] === "number" ? row["linkMode"] : -1,
+          contentType: text(row["contentType"]),
+          path: text(row["path"]),
+        });
+      }
+    }
+    return { rows, dataDir };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The Linked Attachment Base Directory, read from Zotero's own profile.
+ *
+ * Every profile is asked, default first, the same walk `locateZoteroDataDir`
+ * makes -- `attachments:` paths mean nothing without it.
+ */
+export function zoteroBaseAttachmentDir(): string | undefined {
+  const home = process.env["HOME"] ?? homedir();
+  for (const { text } of profilePrefs(home)) {
+    const base = baseAttachmentFromPrefs(text);
+    if (base) return base;
+  }
+  return undefined;
 }
 
 /** Exported for the tests, which need the batch size to exceed it on purpose. */

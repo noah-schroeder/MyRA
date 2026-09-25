@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { newProject, type Member, type Project } from "../src/core/projects/project.ts";
 import {
   deleteProject, filedRefs, fileInActiveProject, projectsDir, readAll, readAllPruned, readProject,
-  writeProject, type ProjectStores,
+  updateProject, withProjectsLock, writeProject, type ProjectStores,
 } from "../src/main/projectStore.ts";
 
 /**
@@ -60,7 +60,9 @@ function stores(over: Partial<ProjectStores> = {}): ProjectStores {
   const empty = {
     assertRef: realRef, list: async () => [], remove: async () => {}, payload: async () => ({}),
   };
-  return { chat: empty, meeting: empty, run: empty, paper: empty, review: empty, image: empty, ...over };
+  return {
+    chat: empty, meeting: empty, run: empty, paper: empty, review: empty, image: empty, source: empty, ...over,
+  };
 }
 
 function project(members: Member[]): Project {
@@ -254,6 +256,30 @@ describe("filing new work", () => {
        would ever show what it had collected. */
     await fileInActiveProject(config("20260101-0000-gone"), "chat", "c1");
     assert.equal(await readProject("20260101-0000-gone"), undefined);
+  });
+
+  /* The race the lock exists for: a turn filing its conversation while the
+     project page edits the same record. Unlocked, both read the old record and
+     the later write drops the other's change. */
+  it("an edit racing the filing write loses neither half", async () => {
+    await inTempDir();
+    const p = await writeProject(project([]));
+    await Promise.all([
+      fileInActiveProject(config(p.id), "chat", "c1"),
+      updateProject(p.id, (x) => ({ ...x, name: "Renamed" })),
+      fileInActiveProject(config(p.id), "chat", "c2"),
+    ]);
+    const after = await readProject(p.id);
+    assert.equal(after?.name, "Renamed");
+    assert.deepEqual(after?.members.map((m) => m.ref).sort(), ["c1", "c2"]);
+  });
+
+  it("a failed edit does not wedge the lock for the next one", async () => {
+    await inTempDir();
+    const p = await writeProject(project([]));
+    await assert.rejects(withProjectsLock(async () => { throw new Error("boom"); }));
+    await updateProject(p.id, (x) => ({ ...x, name: "Still works" }));
+    assert.equal((await readProject(p.id))?.name, "Still works");
   });
 });
 

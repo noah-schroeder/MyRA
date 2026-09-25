@@ -33,10 +33,10 @@
  */
 
 import { parseJsonReply, type ChatMessage } from "../llm/chat.ts";
-import { verifyQuote } from "../meetings/transcript.ts";
+import { verifyQuote, type QuoteMatch } from "../meetings/transcript.ts";
 import {
-  conversationLines, isMemorySlot, mergeAuto, MEMORY_SLOTS, SLOT_LABELS,
-  type GroundingLine, type MemoryItem, type NewItem, type ProjectMemory,
+  activeItems, conversationLines, isMemorySlot, mergeAuto, MEMORY_SLOTS, SLOT_LABELS,
+  type AutoItem, type GroundingLine, type MemoryItem, type NewItem, type ProjectMemory,
 } from "./memory.ts";
 
 /**
@@ -64,8 +64,9 @@ export function buildUpdatePrompt(
   since: number,
 ): string {
   const lines = linesSince(messages, since);
-  const known = memory.items.length
-    ? `Already noted about this project:\n${memory.items.map((i) => `- (${SLOT_LABELS[i.slot]}) ${i.text}`).join("\n")}\n\n`
+  const notes = numberedNotes(memory);
+  const known = notes.length
+    ? `Already noted about this project:\n${notes.map((i, n) => `#${n + 1} (${SLOT_LABELS[i.slot]}) ${i.text}`).join("\n")}\n\n`
     : "";
   const transcript = lines.map((l) => `${l.speaker === "user" ? "User" : "Assistant"}: ${l.text}`).join("\n\n");
 
@@ -76,20 +77,43 @@ export function buildUpdatePrompt(
     ``,
     `Is there anything here worth remembering about the PROJECT itself -- not this one message,`,
     `something that would still matter in a different conversation in the same project? An aim, a`,
-    `research question, a theory being used, a method decided on, a decision made, something left`,
-    `open, or useful background. Do not repeat anything already noted above. None is a fine answer,`,
-    `and is the right answer for small talk or a question with no lasting content.`,
+    `research question, a theory being used, a method decided on, a decision made, a key paper or`,
+    `author the project builds on, something left open, or useful background. Do not repeat`,
+    `anything already noted above. None is a fine answer, and is the right answer for small talk`,
+    `or a question with no lasting content.`,
     ``,
     `Every item needs a "quote" copied EXACTLY, word for word, from the conversation above --`,
     `either something the User actually wrote, or something the Assistant suggested that the User`,
     `then agreed to. In the second case also give "confirmation": the User's own words agreeing to`,
     `it, quoted exactly from their very next message. Never write a quote from your own summary --`,
     `copy it.`,
+    ...(notes.length
+      ? [
+          ``,
+          `If the User has changed their mind about a note above, give the new version with "replaces"`,
+          `set to that note's number. If they have answered one of the open questions above, set`,
+          `"resolves" to its number. Leave both out otherwise.`,
+        ]
+      : []),
     ``,
     `Reply with JSON only:`,
     `{"proposals": [{"slot": "${MEMORY_SLOTS.join("|")}", "text": "one sentence, your own words",`,
-    ` "quote": "copied exactly", "confirmation": "copied exactly, only if quote is the Assistant's"}]}`,
+    ` "quote": "copied exactly", "confirmation": "copied exactly, only if quote is the Assistant's"${
+      notes.length ? `,\n "replaces": 0, "resolves": 0` : ""
+    }}]}`,
   ].join("\n");
+}
+
+/**
+ * The notes the prompt numbers, in the order it numbers them.
+ *
+ * One function for both halves -- the prompt that shows `#3` and the code that
+ * turns a reply's `"replaces": 3` back into an id -- because two orderings
+ * that drift apart would close the wrong note. Current notes only: a model
+ * shown a note that was already replaced would propose replacing it again.
+ */
+export function numberedNotes(memory: ProjectMemory): MemoryItem[] {
+  return activeItems(memory);
 }
 
 export interface Proposal {
@@ -97,6 +121,10 @@ export interface Proposal {
   text: string;
   quote: string;
   confirmation: string;
+  /** The `#n` of a note this one says it replaces, as the model was shown it. */
+  replaces?: number;
+  /** The `#n` of an open question this one says it answers. */
+  resolves?: number;
 }
 
 interface RawUpdate {
@@ -120,19 +148,49 @@ export function parseProposals(reply: string): Proposal[] | undefined {
   const out: Proposal[] = [];
   for (const entry of Array.isArray(raw.proposals) ? raw.proposals : []) {
     if (!entry || typeof entry !== "object") continue;
-    const row = entry as { slot?: unknown; text?: unknown; quote?: unknown; confirmation?: unknown };
+    const row = entry as {
+      slot?: unknown; text?: unknown; quote?: unknown; confirmation?: unknown; replaces?: unknown; resolves?: unknown;
+    };
     const text = typeof row.text === "string" ? row.text.trim() : "";
     const quote = typeof row.quote === "string" ? row.quote.trim() : "";
     if (!text || !quote || !isMemorySlot(row.slot)) continue;
+    const replaces = noteNumber(row.replaces);
+    const resolves = noteNumber(row.resolves);
     out.push({
       slot: row.slot,
       text,
       quote,
       confirmation: typeof row.confirmation === "string" ? row.confirmation.trim() : "",
+      ...(replaces ? { replaces } : {}),
+      ...(resolves ? { resolves } : {}),
     });
     if (out.length >= 8) break;
   }
   return out;
+}
+
+/**
+ * A note number from a reply: a positive integer, or a string holding one.
+ * The schema example shows `0` for "none", and a small model copies it.
+ */
+function noteNumber(raw: unknown): number | undefined {
+  const n = typeof raw === "string" ? Number(raw.replace(/^#/, "")) : raw;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * A proposal that survived grounding, with where it was found.
+ *
+ * `quote` is what was FOUND, not what the model claimed: for a near-verbatim
+ * match it is the line itself, trimmed -- the meeting-notes rule that a
+ * model's reconstruction of a quote is never believed over the transcript.
+ */
+export interface GroundedItem extends NewItem {
+  quote: string;
+  /** The message index the quote was found in. */
+  msg: number;
+  replaces?: number;
+  resolves?: number;
 }
 
 /**
@@ -143,32 +201,59 @@ export function parseProposals(reply: string): Proposal[] | undefined {
  * whether the words are really there. `mergeAuto`'s own dedupe is what makes
  * re-checking older messages harmless.
  */
-export function groundProposals(proposals: readonly Proposal[], messages: readonly ChatMessage[]): NewItem[] {
+export function groundProposals(proposals: readonly Proposal[], messages: readonly ChatMessage[]): GroundedItem[] {
   const lines = conversationLines(messages);
   const userLines = lines.filter((l) => l.speaker === "user");
   const assistantLines = lines.filter((l) => l.speaker === "assistant");
 
-  const out: NewItem[] = [];
+  const out: GroundedItem[] = [];
+  const keep = (p: Proposal, match: QuoteMatch): void => {
+    /* `verifyQuote` is typed against the general `Line`, but the object it
+       hands back is always one of the `GroundingLine`s it was given. */
+    const line = match.line as GroundingLine;
+    out.push({
+      slot: p.slot as NewItem["slot"],
+      text: p.text,
+      quote: match.exact ? p.quote : line.text.trim(),
+      msg: line.at,
+      ...(p.replaces ? { replaces: p.replaces } : {}),
+      ...(p.resolves ? { resolves: p.resolves } : {}),
+    });
+  };
+
   for (const p of proposals) {
     if (!isMemorySlot(p.slot)) continue;
 
-    if (verifyQuote(userLines, p.quote)) {
-      out.push({ slot: p.slot, text: p.text });
+    const stated = verifyQuote(userLines, p.quote);
+    if (stated) {
+      keep(p, stated);
       continue;
     }
 
     if (!p.confirmation) continue;
     const match = verifyQuote(assistantLines, p.quote);
     if (!match) continue;
-    /* `verifyQuote` is typed against the general `Line`, but the object it
-       hands back is always one of the `GroundingLine`s it was given --
-       `assistantLines` never holds anything else. */
     const next = nextLine(lines, match.line as GroundingLine);
-    if (next && next.speaker === "user" && verifyQuote([next], p.confirmation)) {
-      out.push({ slot: p.slot, text: p.text });
-    }
+    if (next && next.speaker === "user" && verifyQuote([next], p.confirmation)) keep(p, match);
   }
   return out;
+}
+
+/**
+ * Grounded items with their `#n` claims turned into ids, against the same
+ * numbering the prompt was built from. A number that names no note is
+ * dropped, never guessed at.
+ */
+export function toAutoItems(memory: ProjectMemory, grounded: readonly GroundedItem[]): AutoItem[] {
+  const notes = numberedNotes(memory);
+  return grounded.map((g) => ({
+    slot: g.slot,
+    text: g.text,
+    quote: g.quote,
+    msg: g.msg,
+    replaces: g.replaces ? notes[g.replaces - 1]?.id : undefined,
+    resolves: g.resolves ? notes[g.resolves - 1]?.id : undefined,
+  }));
 }
 
 function nextLine(lines: readonly GroundingLine[], after: GroundingLine): GroundingLine | undefined {
@@ -181,6 +266,8 @@ export interface NotePass {
   memory: ProjectMemory;
   /** The items that were new. Empty is a finished pass that found nothing. */
   added: MemoryItem[];
+  /** Automatic notes this pass closed on its own, because a newer one replaced or answered them. */
+  closed: MemoryItem[];
 }
 
 /**
@@ -211,6 +298,12 @@ export async function notePass(
   const proposals = parseProposals(await ask(buildUpdatePrompt(memory, messages, since)));
   if (!proposals) return undefined;
 
-  const merged = mergeAuto(memory, groundProposals(proposals, messages), sessionId, messages.length, now);
-  return { memory: merged, added: merged.items.slice(memory.items.length) };
+  const grounded = toAutoItems(memory, groundProposals(proposals, messages));
+  const merged = mergeAuto(memory, grounded, sessionId, messages.length, now);
+  const wasActive = new Set(memory.items.filter((it) => it.status === undefined).map((it) => it.id));
+  return {
+    memory: merged,
+    added: merged.items.slice(memory.items.length),
+    closed: merged.items.filter((it) => wasActive.has(it.id) && it.status !== undefined),
+  };
 }

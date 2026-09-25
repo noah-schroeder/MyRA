@@ -196,6 +196,12 @@ export interface ResearchHost {
    * abandoned halfway is still part of the work it was abandoned during.
    */
   onRunCreated?: (id: string) => void;
+  /**
+   * The notes of the research project this turn belongs to, rendered for
+   * scoping, or nothing outside one. Read at run time rather than handed in,
+   * because the turn's own note pass may have just added to them.
+   */
+  projectNotes?: () => Promise<string | undefined>;
 }
 
 let host: ResearchHost | undefined;
@@ -262,8 +268,10 @@ async function deepRun(
   const run = await ResearchRun.create(question);
   doneThisTurn = { question: question.trim(), runId: run.id };
   host?.onRunCreated?.(run.id);
+  const projectNotes = await host.projectNotes?.().catch(() => undefined);
   try {
     const result = await runPipeline({
+      ...(projectNotes ? { projectNotes } : {}),
       question,
       run,
       // Forced, so "academic_research" means what it says regardless of what

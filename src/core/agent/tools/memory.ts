@@ -25,7 +25,7 @@
 
 import type { ChatMessage } from "../../llm/chat.ts";
 import { actsLocally, readResearchConfig } from "../../research/config.ts";
-import { isMemorySlot, MEMORY_SLOTS, SLOT_LABELS, type NewItem } from "../../projects/memory.ts";
+import { isMemorySlot, MEMORY_SLOTS, SLOT_LABELS, type AutoItem } from "../../projects/memory.ts";
 import { groundProposals } from "../../projects/memoryUpdate.ts";
 import type { ToolDef } from "../registry.ts";
 
@@ -40,7 +40,7 @@ import type { ToolDef } from "../registry.ts";
 export interface MemoryToolHost {
   current(): { projectId: string; sessionId: string; messages: readonly ChatMessage[] } | undefined;
   /** Saves grounded items and returns how many were new (a duplicate adds nothing). */
-  save(projectId: string, sessionId: string, items: readonly NewItem[]): Promise<number>;
+  save(projectId: string, sessionId: string, items: readonly AutoItem[]): Promise<number>;
 }
 
 let host: MemoryToolHost | undefined;
@@ -59,7 +59,7 @@ export const rememberTool: ToolDef = {
     "Save one note to the notes of the research project this conversation belongs to, so every " +
     "later conversation in the project starts out knowing it. Use it when the user asks you to " +
     "remember something lasting about the project -- a research question, an aim, a guiding " +
-    "theory, a method, a decision, an open question, or useful background -- that is not in its " +
+    "theory, a method, a decision, a key paper, an open question, or useful background -- that is not in its " +
     "notes yet. What the user settles is noted automatically before you reply, so never save the " +
     "same thing again. Not for small talk, and not for a one-off request about this reply. `note` is one " +
     "sentence in your own words. `quote` is the user's own words the note rests on, copied " +
@@ -74,7 +74,9 @@ export const rememberTool: ToolDef = {
       slot: {
         type: "string",
         enum: [...MEMORY_SLOTS],
-        description: "Where the note belongs: questions, aims, theory, methods, decisions, open (open questions) or context",
+        description:
+          "Where the note belongs: questions, aims, theory, methods, decisions, literature (a key paper or " +
+          "author the project builds on), open (open questions) or context",
       },
       note: { type: "string", description: "One sentence, in your words" },
       quote: { type: "string", description: "Copied exactly from the user's message (or from your suggestion they agreed to)" },
@@ -115,7 +117,13 @@ export const rememberTool: ToolDef = {
       };
     }
 
-    const added = await host.save(current.projectId, current.sessionId, grounded);
+    /* The quote and where it was found travel with the note; a `replaces`
+       claim cannot, since this tool shows the model no numbered notes. */
+    const added = await host.save(
+      current.projectId,
+      current.sessionId,
+      grounded.map((g) => ({ slot: g.slot, text: g.text, quote: g.quote, msg: g.msg })),
+    );
     return added
       ? {
           content:

@@ -19,17 +19,20 @@ import { runSubagent } from "../core/llm/chat.ts";
 import type { TurnProgress } from "../core/llm/progress.ts";
 import type { Choice } from "../core/research/questions.ts";
 import {
-  addItems, editItem, fieldsToItems, itemsToFields, markSetupDone, removeItem, setAuto,
-  type MemoryFormField, type MemorySlot, type NewItem, type ProjectMemory,
+  acceptSuggestion, addAuto, addItems, dismissSuggestion, editItem, fieldsToItems, isMemorySlot, itemsToFields,
+  markSetupDone, removeItem, reopen, resolve, setAuto, supersede,
+  type MemoryFormField, type MemoryItem, type MemorySlot, type NewItem, type ProjectMemory,
 } from "../core/projects/memory.ts";
+import type { VerifiedItem } from "../core/meetings/notes.ts";
+import { meetingCandidates } from "../core/projects/fromMeeting.ts";
 import {
   buildOffersPrompt, buildTaskQuestionsPrompt, buildTaskResultPrompt, FIXED_TASKS, parseOffers,
   parseTaskQuestions, parseTaskResult, SETUP_GREETING, type AnsweredQuestion, type Task,
 } from "../core/projects/intake.ts";
 import {
-  buildUpdatePrompt, groundProposals, notePass, parseProposals, type NotePass,
+  buildUpdatePrompt, groundProposals, notePass, parseProposals, toAutoItems, type GroundedItem, type NotePass,
 } from "../core/projects/memoryUpdate.ts";
-import { readMemory, writeMemory } from "./memoryStore.ts";
+import { readMemory, updateMemory, withMemoryLock, writeMemory } from "./memoryStore.ts";
 
 /* ------------------------------------------------------------------ *
  * What this needs from the app                                       *
@@ -167,15 +170,13 @@ export async function runProjectSetup(
   if (draft.items.length) {
     const approved = await review(ui, "What I noticed", draft.items);
     if (approved.length) {
-      memory = addItems(memory, approved, "setup");
-      await writeMemory(projectId, memory);
+      memory = await updateMemory(projectId, (m) => addItems(m, approved, "setup"));
       say(` Saved ${approved.length} note${approved.length === 1 ? "" : "s"} from what you said.`);
     }
   }
 
   if (!draft.offers.length) {
-    memory = markSetupDone(memory);
-    await writeMemory(projectId, memory);
+    memory = await updateMemory(projectId, markSetupDone);
     say("\n\nThat's everything for now -- I'll keep building on these notes as we go.");
     return memory;
   }
@@ -190,8 +191,7 @@ export async function runProjectSetup(
 
   const chosen = draft.offers.filter((_, i) => (chosenAnswer ?? "").split("; ").includes(optionLabels[i]!));
   if (!chosen.length) {
-    memory = markSetupDone(memory);
-    await writeMemory(projectId, memory);
+    memory = await updateMemory(projectId, markSetupDone);
     say("\n\nNo problem -- I'll keep building on these notes as we go.");
     return memory;
   }
@@ -201,8 +201,7 @@ export async function runProjectSetup(
     memory = await runTask(projectId, memory, task, description, ui, out, signal);
   }
 
-  memory = markSetupDone(memory);
-  await writeMemory(projectId, memory);
+  memory = await updateMemory(projectId, markSetupDone);
   say("\n\nThat's your project set up -- I'll keep building on these notes as we go.");
   return memory;
 }
@@ -222,8 +221,17 @@ function asking(ui: MemoryUi, out: SetupOutput): MemoryUi {
   };
 }
 
-async function review(ui: MemoryUi, title: string, items: readonly NewItem[]): Promise<NewItem[]> {
-  const answer = await ui.form(title, "Edit or clear anything that isn't right.", itemsToFields(items, true));
+async function review<T extends NewItem>(
+  ui: MemoryUi,
+  title: string,
+  items: readonly T[],
+  opts: { guessed?: boolean; message?: string } = {},
+): Promise<T[]> {
+  const answer = await ui.form(
+    title,
+    opts.message ?? "Edit or clear anything that isn't right.",
+    itemsToFields(items, opts.guessed ?? true),
+  );
   return answer ? fieldsToItems(items, answer) : [];
 }
 
@@ -272,8 +280,7 @@ async function runTask(
     return memory;
   }
 
-  const next = addItems(memory, approved, "setup");
-  await writeMemory(projectId, next);
+  const next = await updateMemory(projectId, (m) => addItems(m, approved, "setup"));
   say(` Saved ${approved.length} note${approved.length === 1 ? "" : "s"}.`);
   return next;
 }
@@ -313,23 +320,78 @@ export async function notesBeforeReply(
   session: Session,
   signal: AbortSignal,
 ): Promise<NotePass | undefined> {
-  const memory = await readMemory(projectId);
-  if (!memory.auto) return undefined;
-  const pass = await notePass(memory, session.messages_, session.id, (prompt) =>
-    ask(prompt, signal, undefined, { reasoning: true }),
-  );
-  if (!pass) return undefined;
-  await writeMemory(projectId, pass.memory);
-  if (pass.added.length) host().send("myra:project-memory-changed", { projectId });
-  return pass;
+  /* Held across the one model call `notePass` makes, not just the write: the
+     read that decides "since" and the write that folds the reply in must not
+     let another writer land in between, and unlike the project page's dialogs
+     this has no person to leave it open -- the turn's own signal bounds it. */
+  return withMemoryLock(projectId, async () => {
+    const memory = await readMemory(projectId);
+    if (!memory.auto) return undefined;
+    const pass = await notePass(memory, session.messages_, session.id, (prompt) =>
+      ask(prompt, signal, undefined, { reasoning: true }),
+    );
+    if (!pass) return undefined;
+    await writeMemory(projectId, pass.memory);
+    if (pass.added.length) host().send("myra:project-memory-changed", { projectId });
+    return pass;
+  });
 }
 
-/** The line a turn shows when its pass saved something -- said where it happened. */
-export function notedNotice(added: readonly { text: string }[]): string {
-  return (
+/**
+ * The line a turn shows when its pass saved something -- said where it happened.
+ *
+ * Text only, because a notice is: it has no buttons and is not kept when the
+ * conversation is reopened. So anything that needs a decision -- a new note
+ * that may replace one the person wrote -- is named here and decided on the
+ * project page, where it waits.
+ */
+export function notedNotice(added: readonly MemoryItem[], closed: readonly MemoryItem[] = []): string {
+  const base =
     `Added to this project's notes: ${added.map((it) => `“${it.text}”`).join("; ")} — ` +
-    `edit or remove ${added.length === 1 ? "it" : "them"} from the project page.`
-  );
+    `edit or remove ${added.length === 1 ? "it" : "them"} from the project page.`;
+  const replaced = closed.length
+    ? ` It replaces ${closed.map((it) => `“${it.text}”`).join("; ")}, which stays in the project's history.`
+    : "";
+  const asks = added.filter((it) => it.suggests).length;
+  const pending = asks
+    ? ` ${asks === 1 ? "One of these may replace a note" : `${asks} of these may replace notes`} you wrote — ` +
+      `the project page asks before changing anything of yours.`
+    : "";
+  return base + replaced + pending;
+}
+
+/* ------------------------------------------------------------------ *
+ * A meeting's decisions, into its project's notes                     *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Offer a meeting's items to its project's notes, through the review form.
+ *
+ * Saved as `"you"` once approved, never as `"auto"`: the words are the
+ * meeting's -- often a supervisor's, not the user's -- so they are grounded in
+ * the transcript but not in anything the user said, and only the person
+ * pressing Save makes them theirs.
+ */
+export async function meetingToNotes(
+  projectId: string,
+  meetingTitle: string,
+  meeting: string,
+  items: readonly VerifiedItem[],
+): Promise<{ added: number; offered: number }> {
+  const memory = await readMemory(projectId);
+  const candidates = meetingCandidates(memory, items, meeting);
+  if (!candidates.length) return { added: 0, offered: 0 };
+  const approved = await review(host().ui, `Add “${meetingTitle}” to this project's notes?`, candidates, {
+    guessed: false,
+    message: "Each of these was found in the transcript. Edit or clear anything that isn't right.",
+  });
+  if (!approved.length) return { added: 0, offered: candidates.length };
+  /* The review dialog above can sit open a while -- fold into a fresh read
+     rather than the snapshot taken before it, so a concurrent write (the
+     automatic pass, a button on the project page) is never clobbered. */
+  await updateMemory(projectId, (m) => addItems(m, approved, "you"));
+  host().send("myra:project-memory-changed", { projectId });
+  return { added: approved.length, offered: candidates.length };
 }
 
 /* ------------------------------------------------------------------ *
@@ -337,8 +399,7 @@ export function notedNotice(added: readonly { text: string }[]): string {
  * ------------------------------------------------------------------ */
 
 function slotOf(raw: unknown): MemorySlot | undefined {
-  const slots: MemorySlot[] = ["questions", "aims", "theory", "methods", "decisions", "open", "context"];
-  return typeof raw === "string" && (slots as string[]).includes(raw) ? (raw as MemorySlot) : undefined;
+  return isMemorySlot(raw) ? raw : undefined;
 }
 
 export function installMemoryIpc(installed: MemoryDeps): void {
@@ -352,39 +413,65 @@ export function installMemoryIpc(installed: MemoryDeps): void {
 
   ipcMain.handle("myra:project-memory-start-setup", async (_e, id: unknown) => {
     const projectId = String(id ?? "");
-    const memory = await readMemory(projectId);
-    const next = { ...memory, setup: "pending" as const };
-    await writeMemory(projectId, next);
-    return { ok: true, memory: next };
+    const memory = await updateMemory(projectId, (m) => ({ ...m, setup: "pending" as const }));
+    return { ok: true, memory };
   });
 
   ipcMain.handle("myra:project-memory-add", async (_e, id: unknown, slot: unknown, text: unknown) => {
     const projectId = String(id ?? "");
     const s = slotOf(slot);
     if (!s || typeof text !== "string" || !text.trim()) return { ok: false, error: "Nothing to add." };
-    const memory = addItems(await readMemory(projectId), [{ slot: s, text }], "you");
-    await writeMemory(projectId, memory);
+    const memory = await updateMemory(projectId, (m) => addItems(m, [{ slot: s, text }], "you"));
     return { ok: true, memory };
   });
 
   ipcMain.handle("myra:project-memory-edit", async (_e, id: unknown, itemId: unknown, text: unknown) => {
     const projectId = String(id ?? "");
-    const memory = editItem(await readMemory(projectId), String(itemId ?? ""), String(text ?? ""));
-    await writeMemory(projectId, memory);
+    const memory = await updateMemory(projectId, (m) => editItem(m, String(itemId ?? ""), String(text ?? "")));
     return { ok: true, memory };
   });
 
   ipcMain.handle("myra:project-memory-remove", async (_e, id: unknown, itemId: unknown) => {
     const projectId = String(id ?? "");
-    const memory = removeItem(await readMemory(projectId), String(itemId ?? ""));
-    await writeMemory(projectId, memory);
+    const memory = await updateMemory(projectId, (m) => removeItem(m, String(itemId ?? "")));
     return { ok: true, memory };
   });
 
+  /* Replacing, answering, putting back and deciding a suggestion: each is one
+     pure function in core, applied under the lock to a fresh read. */
+  const change = async (projectId: string, fn: (memory: ProjectMemory) => ProjectMemory) => {
+    const memory = await updateMemory(projectId, fn);
+    return { ok: true, memory };
+  };
+
+  ipcMain.handle("myra:project-memory-supersede", (_e, id: unknown, itemId: unknown, text: unknown) =>
+    change(String(id ?? ""), (m) => supersede(m, String(itemId ?? ""), String(text ?? ""))),
+  );
+
+  ipcMain.handle("myra:project-memory-resolve", (_e, id: unknown, itemId: unknown, by: unknown) => {
+    const row = by && typeof by === "object" ? (by as Record<string, unknown>) : {};
+    const how =
+      typeof row["id"] === "string" && row["id"]
+        ? { id: row["id"] }
+        : typeof row["text"] === "string" && row["text"].trim()
+          ? { text: row["text"] }
+          : undefined;
+    return change(String(id ?? ""), (m) => resolve(m, String(itemId ?? ""), how));
+  });
+
+  ipcMain.handle("myra:project-memory-reopen", (_e, id: unknown, itemId: unknown) =>
+    change(String(id ?? ""), (m) => reopen(m, String(itemId ?? ""))),
+  );
+
+  ipcMain.handle("myra:project-memory-suggestion", (_e, id: unknown, itemId: unknown, accept: unknown) =>
+    change(String(id ?? ""), (m) =>
+      accept === true ? acceptSuggestion(m, String(itemId ?? "")) : dismissSuggestion(m, String(itemId ?? "")),
+    ),
+  );
+
   ipcMain.handle("myra:project-memory-set-auto", async (_e, id: unknown, auto: unknown) => {
     const projectId = String(id ?? "");
-    const memory = setAuto(await readMemory(projectId), auto === true);
-    await writeMemory(projectId, memory);
+    const memory = await updateMemory(projectId, (m) => setAuto(m, auto === true));
     return { ok: true, memory };
   });
 
@@ -397,10 +484,15 @@ export function installMemoryIpc(installed: MemoryDeps): void {
   ipcMain.handle("myra:project-memory-update", async (_e, id: unknown) => {
     const projectId = String(id ?? "");
     const session = installed.currentSession();
-    let memory = await readMemory(projectId);
+    const memory = await readMemory(projectId);
     const since = memory.seen[session.id] ?? 0;
+    const upTo = session.messages_.length;
+    // The watermark moves whether or not anything was found or kept -- a
+    // pass that found nothing is a finished pass, the same rule the deep
+    // research pipeline's own stages run on.
+    const bumpSeen = (m: ProjectMemory): ProjectMemory => ({ ...m, seen: { ...m.seen, [session.id]: upTo } });
 
-    let grounded: NewItem[];
+    let grounded: GroundedItem[];
     try {
       const proposals = parseProposals(await ask(buildUpdatePrompt(memory, session.messages_, since)));
       /* Unreadable is not "nothing found": the stretch stays unread, so the
@@ -410,21 +502,29 @@ export function installMemoryIpc(installed: MemoryDeps): void {
     } catch {
       return { ok: true, added: 0, memory };
     }
-    // The watermark moves whether or not anything was found or kept -- a
-    // pass that found nothing is a finished pass, the same rule the deep
-    // research pipeline's own stages run on.
-    memory = { ...memory, seen: { ...memory.seen, [session.id]: session.messages_.length } };
 
     if (!grounded.length) {
-      await writeMemory(projectId, memory);
+      const next = await updateMemory(projectId, bumpSeen);
       send("myra:project-memory-changed", { projectId });
-      return { ok: true, added: 0, memory };
+      return { ok: true, added: 0, memory: next };
     }
 
+    /* The review dialog can sit open a while, so the fold-in below reads
+       fresh rather than trusting the `memory` snapshot taken before it --
+       only the replaces/resolves `#n` resolution needs that snapshot, since
+       it must match the numbering the prompt (and the person reviewing it)
+       actually saw. */
     const approved = await review(installed.ui, "Update this project's notes?", grounded);
-    if (approved.length) memory = addItems(memory, approved, "you");
-    await writeMemory(projectId, memory);
+    const items = toAutoItems(memory, approved);
+    const next = await updateMemory(projectId, (m) => {
+      const bumped = bumpSeen(m);
+      /* toAutoItems has already resolved each approved item's replaces/resolves
+         `#n` to an id, so a reviewed "we changed our minds" note still closes
+         or suggests against the note it named -- addItems has no path for
+         that at all, see addAuto's own doc comment. */
+      return items.length ? addAuto(bumped, items, session.id, new Date(), "you") : bumped;
+    });
     send("myra:project-memory-changed", { projectId });
-    return { ok: true, added: approved.length, memory };
+    return { ok: true, added: approved.length, memory: next };
   });
 }

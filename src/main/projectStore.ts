@@ -16,7 +16,7 @@ import type { ConfigStore } from "../core/config.ts";
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import {
   addMembers, assertProjectId, parseProject, pruneMembers,
-  type MemberKind, type Project,
+  type Member, type MemberKind, type Project,
 } from "../core/projects/project.ts";
 import type { ExportItem } from "../core/projects/render.ts";
 
@@ -60,6 +60,8 @@ export type ProjectStores = Record<MemberKind, KindStore>;
 export interface ProjectDetail {
   project: Project;
   items: (ItemRow & { kind: MemberKind })[];
+  /** When the project was opened before this visit -- only on the open that records one. */
+  since?: string;
 }
 
 export interface DeleteReport {
@@ -90,6 +92,45 @@ let watcher: (() => void) | undefined;
 
 export function setProjectsWatcher(fn: (() => void) | undefined): void {
   watcher = fn;
+}
+
+/**
+ * One read-modify-write of the project records at a time.
+ *
+ * Every writer lives in this process, so a promise chain is the whole lock.
+ * Without it a field on a record could be lost to the write that files a
+ * conversation after every turn: both read the same record, both change
+ * different halves of it, and the second rename wins. That race is why the
+ * memory was split into its own file; a project's Zotero collections live on
+ * the record itself, so the record needed this instead.
+ *
+ * Not re-entrant: nothing called inside `fn` may take the lock again.
+ * `writeProject` itself stays unlocked for exactly that reason.
+ */
+let chain: Promise<unknown> = Promise.resolve();
+
+export function withProjectsLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.then(fn, fn);
+  chain = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Change one project under the lock, reading it fresh first.
+ *
+ * `fn` returning the same object writes nothing, the convention every pure
+ * edit in core/projects/project.ts already follows.
+ */
+export function updateProject(
+  id: string,
+  fn: (project: Project) => Project,
+): Promise<Project | undefined> {
+  return withProjectsLock(async () => {
+    const project = await readProject(id);
+    if (!project) return undefined;
+    const next = fn(project);
+    return next === project ? project : writeProject(next);
+  });
 }
 
 export async function writeProject(project: Project): Promise<Project> {
@@ -150,18 +191,21 @@ async function aliveRefs(stores: ProjectStores): Promise<Partial<Record<MemberKi
 
 /** Prune every project against what the stores actually hold, and persist. */
 export async function readAllPruned(stores: ProjectStores): Promise<Project[]> {
-  const projects = await readAll();
+  // Listed outside the lock: seven store listings are the slow part, and
+  // nothing here depends on them being read at the same instant as the records.
   const alive = await aliveRefs(stores);
-  const out: Project[] = [];
-  for (const project of projects) {
-    const pruned = pruneMembers(project, (m) => {
-      const set = alive[m.kind];
-      return !set || set.has(m.ref);
-    });
-    if (pruned !== project) await writeProject(pruned);
-    out.push(pruned);
-  }
-  return out;
+  return withProjectsLock(async () => {
+    const out: Project[] = [];
+    for (const project of await readAll()) {
+      const pruned = pruneMembers(project, (m) => {
+        const set = alive[m.kind];
+        return !set || set.has(m.ref);
+      });
+      if (pruned !== project) await writeProject(pruned);
+      out.push(pruned);
+    }
+    return out;
+  });
 }
 
 /**
@@ -215,7 +259,9 @@ export async function deleteProject(
     }
   }
 
-  await rm(pathFor(project.id), { force: true });
+  /* Under the lock, so a conversation filing itself at this moment cannot
+     write the record back after it has gone. */
+  await withProjectsLock(() => rm(pathFor(project.id), { force: true }));
   watcher?.();
   return { removed: [...removed].map(([kind, count]) => ({ kind, count })), failed };
 }
@@ -236,13 +282,81 @@ export async function fileInActiveProject(
   const active = config.current.activeProject;
   if (!active || !ref) return;
   try {
-    const projects = await readAll();
-    if (!projects.some((p) => p.id === active)) return;
-    const next = addMembers(projects, active, [{ kind, ref }]);
-    for (const [i, project] of next.entries()) {
-      if (project !== projects[i]) await writeProject(project);
-    }
+    await fileInProject(active, [{ kind, ref }]);
   } catch {
     /* Nothing the person did failed. Say nothing. */
   }
+}
+
+/**
+ * Put these into that project and out of any other, under the lock.
+ *
+ * Every project is rewritten, not just the target: membership is exclusive, so
+ * moving something in is an edit to whichever project it was in. `false` when
+ * the project does not exist.
+ */
+export function fileInProject(projectId: string, members: readonly Member[]): Promise<boolean> {
+  return withProjectsLock(async () => {
+    const projects = await readAll();
+    if (!projects.some((p) => p.id === projectId)) return false;
+    const next = addMembers(projects, projectId, members);
+    for (const [i, project] of next.entries()) {
+      if (project !== projects[i]) await writeProject(project);
+    }
+    return true;
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * When each project was last opened                                   *
+ * ------------------------------------------------------------------ */
+
+/**
+ * One small map, in a subdirectory for memory's reason: `readAll` reads every
+ * `*.json` directly inside `projects/` as a project, and `parseProject` will
+ * make a project out of any object at all.
+ *
+ * Not on the project record. Opening a project is not an edit to it, and a
+ * write per open would move nothing the rail sorts by -- but it would still
+ * fire the watcher and redraw the rail every time somebody looked at a page.
+ */
+function visitsPath(): string {
+  return join(projectsDir(), "state", "visits.json");
+}
+
+let visitChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Record that the project is open now, and say when it was opened before.
+ *
+ * Best-effort both ways: a resume card that cannot say "since" is a smaller
+ * card, never a page that fails to open.
+ */
+export function recordVisit(id: string, now = new Date()): Promise<string | undefined> {
+  const run = visitChain.then(async () => {
+    let visits: Record<string, string> = {};
+    try {
+      const raw = JSON.parse(await readFile(visitsPath(), "utf8")) as unknown;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+          if (typeof value === "string") visits[key] = value;
+        }
+      }
+    } catch {
+      visits = {};
+    }
+    const previous = visits[assertProjectId(id)];
+    visits[id] = now.toISOString();
+    try {
+      await makeOwnDir(join(projectsDir(), "state"));
+      const temp = `${visitsPath()}.partial`;
+      await writeFile(temp, `${JSON.stringify(visits, null, 2)}\n`, { mode: OWNER_ONLY_FILE });
+      await rename(temp, visitsPath());
+    } catch {
+      /* A visit that could not be written is only a "since" that is older. */
+    }
+    return previous;
+  });
+  visitChain = run.catch(() => undefined);
+  return run.catch(() => undefined);
 }

@@ -45,6 +45,9 @@ import { parse } from "../core/tabular/parse.ts";
 import { rowCount } from "../core/tabular/table.ts";
 import { setTaskHost, TASK_TOOL_DEFS } from "../core/agent/tools/tasks.ts";
 import { MEMORY_TOOL_DEFS, setMemoryToolHost } from "../core/agent/tools/memory.ts";
+import { PAPER_TOOL_DEFS, setPapersHost } from "../core/agent/tools/papers.ts";
+import { installProjectPapers } from "./projectPapers.ts";
+import { installSourceIpc } from "./sources.ts";
 import {
   libraryCollections, librarySearch, libraryRoute, libraryStatus,
 } from "./runtime/zoteroLibrary.ts";
@@ -113,7 +116,7 @@ import { fileInActiveProject, filedRefs, readAll as readAllProjects } from "./pr
 import { ownerOf, type Project } from "../core/projects/project.ts";
 import { installMemoryIpc, notedNotice, notesBeforeReply, runProjectSetup, SETUP_GREETING } from "./projectMemory.ts";
 import { hasMemory, readMemory, writeMemory } from "./memoryStore.ts";
-import { addAuto, type ProjectMemory } from "../core/projects/memory.ts";
+import { addAuto, renderSeed, type ProjectMemory } from "../core/projects/memory.ts";
 import { explainModelFailure } from "./models.ts";
 import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
@@ -552,6 +555,14 @@ let resolveEndpoint: () => Promise<EndpointResolution> = () => {
 let rememberTurn: { projectId: string; sessionId: string; messages: ChatMessage[] } | undefined;
 
 /**
+ * The project the turn in flight belongs to, for the tools that read one --
+ * the Zotero collections `search_library` is scoped to, and the papers the
+ * paper tools search. Set and cleared beside `rememberTurn`; a tool reading it
+ * outside a turn sees nothing, which is the same as no project.
+ */
+let turnProject: Project | undefined;
+
+/**
  * Which project this conversation belongs to, if any.
  *
  * The project that already owns it wins; a brand-new conversation may not
@@ -707,6 +718,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       ? { projectId: project.id, sessionId: conversation.id, messages: conversation.messages_ }
       : undefined;
   rememberTurn = turnMemory;
+  turnProject = project;
 
   inFlight?.abort();
   inFlight = new AbortController();
@@ -810,7 +822,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       );
       if (pass) {
         notes = pass.memory;
-        if (pass.added.length) emit({ type: "notice", text: notedNotice(pass.added) });
+        if (pass.added.length) emit({ type: "notice", text: notedNotice(pass.added, pass.closed) });
       }
     }
 
@@ -837,6 +849,10 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
                 name: project.name, memory: notes,
                 ...(limit ? { contextTokens: limit } : {}),
                 ...(turnMemory ? { remembers: true } : {}),
+                papers: {
+                  uploads: project.members.filter((m) => m.kind === "source").length,
+                  collections: (project.collections ?? []).map((c) => c.name),
+                },
               },
             }
           : {}),
@@ -902,6 +918,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
      */
     void fileInActiveProject(config, "chat", conversation.id);
     if (rememberTurn === turnMemory) rememberTurn = undefined;
+    if (turnProject === project) turnProject = undefined;
     inFlight = undefined;
     inFlightConversation = undefined;
     liveEvents = [];
@@ -930,6 +947,27 @@ function ask(
   message?: string,
 ): Promise<string | undefined> {
   return prompt({ method, title, ...(prefill ? { prefill } : {}), ...(message ? { message } : {}) });
+}
+
+/**
+ * A line of text, with the hint and any real answer kept apart.
+ *
+ * Both hosts used to pass their placeholder through `ask`'s prefill slot, so a
+ * scoping question with no options opened with "Enter to skip" typed into the
+ * box -- and Enter submitted it as the answer.
+ */
+function askInput(
+  title: string,
+  placeholder?: string,
+  extra: { prefill?: string | undefined; message?: string | undefined } = {},
+): Promise<string | undefined> {
+  return prompt({
+    method: "input",
+    title,
+    ...(placeholder ? { placeholder } : {}),
+    ...(extra.prefill ? { prefill: extra.prefill } : {}),
+    ...(extra.message ? { message: extra.message } : {}),
+  });
 }
 
 /**
@@ -2430,16 +2468,31 @@ async function main(): Promise<void> {
   for (const def of [
     ...RESEARCH_TOOL_DEFS, ...DOCUMENT_TOOL_DEFS, ...LIBRARY_TOOL_DEFS, ...TASK_TOOL_DEFS,
     ...DIAGRAM_TOOL_DEFS, ...TABLE_TOOL_DEFS, ...PRISMA_TOOL_DEFS, ...CHART_TOOL_DEFS, ...MEMORY_TOOL_DEFS,
+    ...PAPER_TOOL_DEFS,
   ]) {
     registry.register(def);
   }
 
   /* Loopback, no key, nothing cached. The client is in the main process for the
      same reason every other one is: the renderer never makes a request. */
+  /* The papers a project holds -- its uploads and its linked collections'
+     PDFs -- for project_papers and read_paper, read against the turn's own
+     project so a ref from anywhere else is refused. */
+  const papers = installProjectPapers({
+    config,
+    turnProject: () => turnProject,
+    contextTokens: () => runtime.chatEndpoint()?.contextTokens,
+  });
+  setPapersHost(papers.host);
   setLibraryHost({
     search: (opts) => librarySearch(opts),
     collections: () => libraryCollections(),
     route: () => libraryRoute(),
+    projectScope: () =>
+      turnProject?.collections?.length
+        ? { name: turnProject.name, collections: turnProject.collections }
+        : undefined,
+    fullTextFlags: papers.fullTextFlags,
   });
 
   /* A flat directory of JSON in MyRA's own folder -- see tools/tasks.ts's
@@ -2500,7 +2553,7 @@ async function main(): Promise<void> {
           return {};
         }
       },
-      input: (title, placeholder) => ask("input", title, placeholder),
+      input: (title, placeholder, extra) => askInput(title, placeholder, extra),
       editor: (title, prefill) => ask("editor", title, prefill),
       notify: (message) => send("myra:research-progress", message),
     },
@@ -2523,6 +2576,14 @@ async function main(): Promise<void> {
       activeRun = { id };
       publishActiveRun();
       void fileInActiveProject(config, "run", id);
+    },
+    /* What the turn's research project has already settled, for scoping
+       only -- see PipelineOptions.projectNotes. A simple folder has no notes
+       file and seeds nothing, the same test `remember` is offered by. */
+    projectNotes: async () => {
+      const project = turnProject;
+      if (!project || !(await hasMemory(project.id))) return undefined;
+      return renderSeed(await readMemory(project.id)) || undefined;
     },
   });
 
@@ -3018,6 +3079,7 @@ async function main(): Promise<void> {
   /* Last of the five, because it reads all of them: a project is an index over
      the other stores rather than a store of its own. */
   installProjectIpc({ config, send, stores: defaultStores(config) });
+  installSourceIpc({ config, send });
   installMemoryIpc({
     config,
     send,
@@ -3033,7 +3095,7 @@ async function main(): Promise<void> {
           ...(choice.multi ? { multi: true } : {}),
           ...(choice.required ? { required: true } : {}),
         }),
-      input: (title, placeholder) => ask("input", title, placeholder),
+      input: (title, placeholder) => askInput(title, placeholder),
       form: async (title, message, fields) => {
         const answer = await prompt({ method: "form", title, ...(message ? { message } : {}), fields });
         if (answer === undefined) return undefined;

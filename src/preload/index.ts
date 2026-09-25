@@ -133,7 +133,18 @@ const api = {
     ipcRenderer.invoke("myra:project-create", name, research === true),
   projectRename: (id: string, name: string) =>
     ipcRenderer.invoke("myra:project-rename", id, name),
-  projectOpen: (id: string) => ipcRenderer.invoke("myra:project-open", id),
+  projectOpen: (id: string, visit?: boolean) => ipcRenderer.invoke("myra:project-open", id, visit === true),
+  projectSetCollections: (id: string, collections: { key: string; name: string }[]) =>
+    ipcRenderer.invoke("myra:project-set-collections", id, collections),
+  projectSources: (id: string) => ipcRenderer.invoke("myra:project-sources", id),
+  projectPapersStatus: (id: string) => ipcRenderer.invoke("myra:project-papers-status", id),
+  sourceAdd: (projectId: string, name: string, bytes: ArrayBuffer) =>
+    ipcRenderer.invoke("myra:source-add", projectId, name, bytes),
+  sourceEdit: (id: string, edit: { title?: string; authors?: string; year?: string; doi?: string }) =>
+    ipcRenderer.invoke("myra:source-edit", id, edit),
+  sourceDelete: (id: string) => ipcRenderer.invoke("myra:source-delete", id),
+  sourceOpen: (id: string) => ipcRenderer.invoke("myra:source-open", id),
+  onProjectSourcesChanged: (cb: (payload: { projectId: string }) => void) => on("myra:project-sources-changed", cb),
   /** Everything in every store, each row naming the project it is already in. */
   projectItems: () => ipcRenderer.invoke("myra:project-items"),
   projectAdd: (id: string, members: unknown) =>
@@ -162,6 +173,14 @@ const api = {
     ipcRenderer.invoke("myra:project-memory-remove", id, itemId),
   projectMemorySetAuto: (id: string, auto: boolean) =>
     ipcRenderer.invoke("myra:project-memory-set-auto", id, auto),
+  projectMemorySupersede: (id: string, itemId: string, text: string) =>
+    ipcRenderer.invoke("myra:project-memory-supersede", id, itemId, text),
+  projectMemoryResolve: (id: string, itemId: string, by?: { text: string } | { id: string }) =>
+    ipcRenderer.invoke("myra:project-memory-resolve", id, itemId, by),
+  projectMemoryReopen: (id: string, itemId: string) =>
+    ipcRenderer.invoke("myra:project-memory-reopen", id, itemId),
+  projectMemorySuggestion: (id: string, itemId: string, accept: boolean) =>
+    ipcRenderer.invoke("myra:project-memory-suggestion", id, itemId, accept),
   /** Grounds whatever the current conversation offers, shows a review dialog, saves what is approved. */
   projectMemoryUpdate: (id: string) => ipcRenderer.invoke("myra:project-memory-update", id),
   /** A memory changed somewhere other than this call -- the auto pass, or the update button. */
@@ -249,6 +268,8 @@ const api = {
   /* The note's action items, and turning one into a MyRA task -- see
      core/agent/tools/tasks.ts's header for why that list stays a plain
      `write` and never touches a real calendar or task manager. */
+  meetingResearchProjects: () => ipcRenderer.invoke("myra:meeting-research-projects"),
+  meetingToProjectNotes: (dir: string) => ipcRenderer.invoke("myra:meeting-to-project-notes", dir),
   meetingActions: (dir: string) => ipcRenderer.invoke("myra:meeting-actions", dir),
   meetingActionToTask: (dir: string, index: number) =>
     ipcRenderer.invoke("myra:meeting-action-to-task", dir, index),

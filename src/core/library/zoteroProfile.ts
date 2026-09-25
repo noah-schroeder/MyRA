@@ -174,3 +174,18 @@ export function dataDirFromPrefs(text: string): string | undefined {
   const dir = prefValue(text, DATA_DIR_PREF)?.trim();
   return dir ? dir : undefined;
 }
+
+const BASE_ATTACHMENT_PREF = "extensions.zotero.baseAttachmentPath";
+
+/**
+ * The folder Zotero resolves `attachments:` paths against, if one is set.
+ *
+ * A linked file stored relative to "Linked Attachment Base Directory" -- what
+ * ZotMoov, Attanger and a synced "Zotero Attachments" folder all produce --
+ * is recorded in the database as `attachments:Smith 2020.pdf`, which means
+ * nothing without this. Undefined when the profile sets none.
+ */
+export function baseAttachmentFromPrefs(text: string): string | undefined {
+  const dir = prefValue(text, BASE_ATTACHMENT_PREF)?.trim();
+  return dir ? dir : undefined;
+}

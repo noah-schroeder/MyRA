@@ -237,6 +237,14 @@ export interface Settings {
    */
   reviewsRoot: string;
   /**
+   * On the host: where papers uploaded into a project are kept, one folder per
+   * paper holding the file and its extracted text.
+   *
+   * Visible rather than under CONFIG_DIR -- the person chose these papers and
+   * may want them in a file manager -- and settable like the other roots.
+   */
+  sourcesRoot: string;
+  /**
    * The project new work files itself into. Empty means none.
    *
    * A setting rather than window state because the main process is what has to
@@ -460,6 +468,7 @@ export const DEFAULT_SETTINGS: Settings = {
   imagesRoot: join(homedir(), "Documents", "myra", "images"),
   papersRoot: join(homedir(), "Documents", "myra", "papers"),
   reviewsRoot: join(homedir(), "Documents", "myra", "reviews"),
+  sourcesRoot: join(homedir(), "Documents", "myra", "sources"),
   activeProject: "",
   reviewPrompt: DEFAULT_REVIEW_PROMPT,
   /* Copied, not shared: these are edited in place by the settings pane, and a
@@ -577,6 +586,7 @@ export class ConfigStore {
         imagesRoot: sanitiseRoot(parsed.imagesRoot, DEFAULT_SETTINGS.imagesRoot),
         papersRoot: sanitiseRoot(parsed.papersRoot, DEFAULT_SETTINGS.papersRoot),
         reviewsRoot: sanitiseRoot(parsed.reviewsRoot, DEFAULT_SETTINGS.reviewsRoot),
+        sourcesRoot: sanitiseRoot(parsed.sourcesRoot, DEFAULT_SETTINGS.sourcesRoot),
         /* Empty is a real answer for these two: no vault configured, and
            "look in the usual places" for Zotero. */
         vaultRoot: sanitiseRoot(parsed.vaultRoot, DEFAULT_SETTINGS.vaultRoot, { emptyMeans: "none" }),
@@ -649,6 +659,9 @@ export class ConfigStore {
         : {}),
       ...("reviewsRoot" in patch
         ? { reviewsRoot: sanitiseRoot(patch.reviewsRoot, this.#settings.reviewsRoot) }
+        : {}),
+      ...("sourcesRoot" in patch
+        ? { sourcesRoot: sanitiseRoot(patch.sourcesRoot, this.#settings.sourcesRoot) }
         : {}),
       ...("vaultRoot" in patch
         ? { vaultRoot: sanitiseRoot(patch.vaultRoot, this.#settings.vaultRoot, { emptyMeans: "none" }) }

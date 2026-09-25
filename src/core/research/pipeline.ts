@@ -43,9 +43,20 @@ import {
 } from "./questions.ts";
 import type { ResearchRun } from "./run.ts";
 
+export interface InputExtra {
+  prefill?: string | undefined;
+  /** A line under the title: where a prefilled answer came from. */
+  message?: string | undefined;
+}
+
 /** Just the dialog surface the pipeline needs, so it can be run headless in tests. */
 export interface PipelineUi {
-  input(title: string, placeholder?: string): Promise<string | undefined>;
+  /**
+   * A line of text. `placeholder` is the grey hint; `prefill` is a real answer
+   * already in the box, which the person keeps by pressing Enter. The two were
+   * once the same argument, and "Enter to skip" arrived typed into the box.
+   */
+  input(title: string, placeholder?: string, extra?: InputExtra): Promise<string | undefined>;
   editor(title: string, prefill?: string): Promise<string | undefined>;
   /**
    * A question with answers to pick from.
@@ -86,6 +97,13 @@ export interface PipelineOptions {
    * single line that keeps changing.
    */
   onStage?: (stage: string) => void;
+  /**
+   * The notes of the research project this run belongs to, for scoping only --
+   * the one stage whose every output a person confirms before anything runs.
+   * No later stage sees them: a screening or synthesis prompt steered by
+   * project notes is the unguarded path CLAUDE.md's memory rule exists for.
+   */
+  projectNotes?: string | undefined;
 }
 
 export class PausedError extends Error {
@@ -172,13 +190,19 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     say("resuming: scope already settled");
   } else {
     const roles = resolveRoles(readRoleConfig(), opts.fallbackModel);
-    say("working out what to ask you…");
+    say(opts.projectNotes?.trim() ? "working out what to ask you, from the question and this project's notes…" : "working out what to ask you…");
+    if (opts.projectNotes?.trim()) {
+      /* Kept with the run, because the run directory is the audit trail: a
+         scope that came partly from project notes should say which notes. */
+      await run.write("project-notes.md", `${opts.projectNotes.trim()}\n`);
+    }
     const { draft } = await draftScope({
       question: opts.question,
       model: roles.analyst,
       ...(opts.signal ? { signal: opts.signal } : {}),
       cwd,
       onDelta: stream("scoping"),
+      ...(opts.projectNotes?.trim() ? { projectNotes: opts.projectNotes } : {}),
     });
 
     const answers = new Map<ScopeQuestion, string>();

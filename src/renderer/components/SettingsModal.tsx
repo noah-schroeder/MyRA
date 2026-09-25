@@ -481,6 +481,7 @@ const FOLDERS = [
   { key: "imagesRoot", label: "Images", hint: "Where generated figures are filed, beside a note of what was asked for." },
   { key: "papersRoot", label: "Papers", hint: "Where the paper drafter keeps your notes and drafts, one file per paper." },
   { key: "reviewsRoot", label: "Peer reviews", hint: "Where finished reviews are kept. The manuscript itself is never written here." },
+  { key: "sourcesRoot", label: "Project papers", hint: "Papers you add to a project are kept here, one folder per paper: the file you dropped and the text MyRA read from it." },
 ] as const;
 
 function Folders({

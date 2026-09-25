@@ -28,6 +28,7 @@ import { TABLE_TOOL_DEFS } from "../src/core/agent/tools/table.ts";
 import { PRISMA_TOOL_DEFS } from "../src/core/agent/tools/prisma.ts";
 import { CHART_TOOL_DEFS } from "../src/core/agent/tools/chart.ts";
 import { MEMORY_TOOL_DEFS } from "../src/core/agent/tools/memory.ts";
+import { PAPER_TOOL_DEFS } from "../src/core/agent/tools/papers.ts";
 import { RISK_CLASSES } from "../src/core/policy.ts";
 
 const DOC = "docs/threat-model.md";
@@ -42,6 +43,7 @@ const REGISTERED = [
   ...PRISMA_TOOL_DEFS,
   ...CHART_TOOL_DEFS,
   ...MEMORY_TOOL_DEFS,
+  ...PAPER_TOOL_DEFS,
 ].map((t) => [t.name, t.risk] as [string, string]);
 
 /** The `| \`name\` | \`risk\` |` rows, in order. */
@@ -82,7 +84,7 @@ test("no tool array is registered that this test does not know about", () => {
   assert.deepEqual(
     [...registered].sort(),
     ["CHART_TOOL_DEFS", "DIAGRAM_TOOL_DEFS", "DOCUMENT_TOOL_DEFS", "LIBRARY_TOOL_DEFS", "MEMORY_TOOL_DEFS",
-      "PRISMA_TOOL_DEFS", "RESEARCH_TOOL_DEFS", "TABLE_TOOL_DEFS", "TASK_TOOL_DEFS"],
+      "PAPER_TOOL_DEFS", "PRISMA_TOOL_DEFS", "RESEARCH_TOOL_DEFS", "TABLE_TOOL_DEFS", "TASK_TOOL_DEFS"],
     "A tool array was added to installIpc. Import it here and add its rows to " + DOC,
   );
 });

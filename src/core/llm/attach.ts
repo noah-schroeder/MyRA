@@ -139,12 +139,15 @@ export function composeMessageContent(
   documents: readonly { name: string; text: string }[],
   data: readonly { id: string; name: string; rows: number; columns: readonly string[] }[],
 ): string {
-  const documentText = documents.map((d) => asUntrusted(d.name, d.text)).join("\n\n");
+  const documentText = documents
+    .map((d) => asUntrusted(d.name, d.text, "is a document the user attached to this message"))
+    .join("\n\n");
   const dataText = data
     .map((d) =>
       asUntrusted(
         d.name,
         `[data ${d.id}: "${d.name}" -- ${d.columns.length} columns (${d.columns.join(", ")}), ${d.rows} rows]`,
+        "describes a table the user attached to this message",
       ),
     )
     .join("\n\n");

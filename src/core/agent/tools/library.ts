@@ -17,8 +17,8 @@ import {
   exactly, readResearchConfig, readsLibrary, type ResearchConfig,
 } from "../../research/config.ts";
 import {
-  descendantKeys, formatItems, linkFor, MAX_FANOUT,
-  type LibraryItem, type SearchMode, type ZoteroCollection,
+  descendantKeys, formatItems, linkFor, MAX_FANOUT, resolveCollections,
+  type FullTextFlags, type LibraryItem, type ScopeWording, type SearchMode, type ZoteroCollection,
 } from "../../library/zotero.ts";
 import { DATABASE_ROUTE_NOTE } from "../../library/zoteroDb.ts";
 import { cite } from "../../research/ledger.ts";
@@ -52,6 +52,20 @@ export interface LibraryHost {
    * wider one.
    */
   route?(): "api" | "database";
+  /**
+   * The project this turn's conversation belongs to, when it has Zotero
+   * collections linked -- set by main per turn, the way the `remember` tool's
+   * host is. Absent outside a project, or in one with none linked.
+   */
+  projectScope?(): ProjectLibraryScope | undefined;
+  /** Which of these items have a PDF MyRA can read. Absent when that cannot be checked at all. */
+  fullTextFlags?(keys: readonly string[]): Promise<FullTextFlags | undefined>;
+}
+
+export interface ProjectLibraryScope {
+  /** The project's name, for a reply that has to say why the search was narrowed. */
+  name: string;
+  collections: { key: string; name: string }[];
 }
 
 let host: LibraryHost | undefined;
@@ -98,8 +112,9 @@ export const searchLibraryTool: ToolDef = {
     "keyword, author or subject. Searches titles, abstracts, tags, notes and the indexed " +
     "text of attached PDFs. Returns each item's authors, year, DOI and abstract. This is " +
     "the user's personal collection, not the wider literature; it runs entirely on this " +
-    "machine and reaches no network. The user may have limited the search to one of their " +
-    "Zotero collections; the result says which, and that limit cannot be widened from here.",
+    "machine and reaches no network. The user may have limited the search to some of their " +
+    "Zotero collections -- in the research bar, or by linking them to this conversation's " +
+    "project; the result says which, and that limit cannot be widened from here.",
   risk: "safe",
   enabled: available,
   parameters: {
@@ -145,10 +160,43 @@ export const searchLibraryTool: ToolDef = {
     const rawLimit = Number(params["limit"]);
 
     const chosen = collectionScope(readResearchConfig());
+    const project = host.projectScope?.();
     let collections: string[] = [];
     let scope = "";
     let truncated = false;
-    if (chosen) {
+    let wording: ScopeWording | undefined;
+    const notes: string[] = [];
+    if (project?.collections.length) {
+      /* A project's own collections win over the bar's, at every rung this
+         tool runs at: the person linked them to THIS work, and the reply says
+         so, so the model can pass on that the rest of the library was not
+         searched. */
+      const r = resolveCollections(await host.collections(), project.collections);
+      if (!r.keys.length) {
+        throw new Error(
+          `None of the Zotero collections linked to the project “${project.name}” is still in the library ` +
+            `(${project.collections.map((c) => c.name).join(", ")}) — they have probably been deleted or ` +
+            "are in a different Zotero profile. Link others from the project's page.",
+        );
+      }
+      collections = r.keys;
+      truncated = r.truncated;
+      const names = r.found.map((c) => c.name);
+      scope = names.join(", ");
+      const below = r.keys.length - r.found.length;
+      wording = {
+        where:
+          `the Zotero collection${names.length === 1 ? "" : "s"} linked to this project (${names.join(", ")}` +
+          `${below > 0 ? `, and ${below} below ${names.length === 1 ? "it" : "them"}` : ""})`,
+        why: "because the user linked them to this project",
+      };
+      if (r.missing.length) {
+        notes.push(
+          `Not searched, because Zotero no longer has ${r.missing.length === 1 ? "it" : "them"}: ` +
+            `${r.missing.map((m) => `“${m.name}”`).join(", ")}. Mention this if it matters to the answer.`,
+        );
+      }
+    } else if (chosen) {
       const all = await host.collections();
       const found = all.find((c) => c.key === chosen);
       if (!found) {
@@ -179,14 +227,15 @@ export const searchLibraryTool: ToolDef = {
        link, so a paper the user has in Zotero AND that a web search returns
        keeps one number across both. */
     const links = items.map(linkFor).filter(Boolean);
-    const notes = [
-      truncated
-        ? `Only the first ${MAX_FANOUT} collections of that subtree were searched; it has ` +
-          "more. Say so if the answer looks incomplete."
-        : "",
-      host.route?.() === "database" ? DATABASE_ROUTE_NOTE : "",
-    ].filter(Boolean);
-    const content = formatItems(items, query, scope, cite(links));
+    if (truncated) {
+      notes.push(
+        `Only the first ${MAX_FANOUT} collections of that subtree were searched; it has ` +
+          "more. Say so if the answer looks incomplete.",
+      );
+    }
+    if (host.route?.() === "database") notes.push(DATABASE_ROUTE_NOTE);
+    const fullText = await host.fullTextFlags?.(items.map((i) => i.key)).catch(() => undefined);
+    const content = formatItems(items, query, scope, cite(links), { wording, fullText });
     return {
       content: notes.length ? `${content}\n\n${notes.join("\n\n")}` : content,
       detail: { count: items.length, keys: items.map((i) => i.key), ...(scope ? { scope } : {}) },

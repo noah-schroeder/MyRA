@@ -32,8 +32,12 @@
  * the files and resolves members against the five stores.
  */
 
-/** The six kinds of thing that have a page listing them. */
-export type MemberKind = "chat" | "meeting" | "run" | "paper" | "review" | "image";
+/**
+ * The kinds of thing a project can hold. Six are things MyRA made; `source`
+ * -- a paper somebody uploaded into the project -- is the one it did not, and
+ * the only one that exists only because a project does.
+ */
+export type MemberKind = "chat" | "meeting" | "run" | "paper" | "review" | "image" | "source";
 
 export const MEMBER_KINDS: readonly MemberKind[] = [
   "chat",
@@ -42,6 +46,7 @@ export const MEMBER_KINDS: readonly MemberKind[] = [
   "paper",
   "review",
   "image",
+  "source",
 ];
 
 /**
@@ -64,6 +69,55 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   members: Member[];
+  /**
+   * Zotero collections this project reads from, by key, with the name each
+   * had when it was linked (shown if Zotero no longer has it). Several,
+   * because a thesis draws on more than one shelf. Not members: a collection
+   * is not a thing MyRA made, and linking one to two projects is fine.
+   */
+  collections?: ProjectCollection[];
+}
+
+export interface ProjectCollection {
+  key: string;
+  name: string;
+}
+
+/** Zotero's own key shape -- the same test `isCollectionKey` in library/zotero.ts applies. */
+const COLLECTION_KEY = /^[A-Z0-9]{8}$/;
+
+/** A generous ceiling that no real project reaches, so a corrupt record cannot fan a search out without end. */
+export const MAX_PROJECT_COLLECTIONS = 25;
+
+/**
+ * Collections as they may be stored: known shape, deduplicated, capped.
+ * Applied to what the window sends and to what is read back off disk alike.
+ */
+export function cleanCollections(raw: unknown): ProjectCollection[] {
+  const out: ProjectCollection[] = [];
+  const seen = new Set<string>();
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const key = typeof row["key"] === "string" ? row["key"] : "";
+    if (!COLLECTION_KEY.test(key) || seen.has(key)) continue;
+    const name = typeof row["name"] === "string" ? row["name"].trim().slice(0, 200) : "";
+    seen.add(key);
+    out.push({ key, name: name || key });
+    if (out.length >= MAX_PROJECT_COLLECTIONS) break;
+  }
+  return out;
+}
+
+/** Link these collections, replacing whatever was linked. `updatedAt` moves only if something changed. */
+export function setCollections(project: Project, collections: readonly ProjectCollection[], now = new Date()): Project {
+  const next = cleanCollections(collections);
+  const before = project.collections ?? [];
+  if (next.length === before.length && next.every((c, i) => c.key === before[i]!.key && c.name === before[i]!.name)) {
+    return project;
+  }
+  const { collections: _drop, ...rest } = project;
+  return { ...(next.length ? { ...rest, collections: next } : rest), updatedAt: now.toISOString() };
 }
 
 export interface ProjectSummary {
@@ -72,6 +126,8 @@ export interface ProjectSummary {
   createdAt: string;
   updatedAt: string;
   items: number;
+  /** Linked Zotero collections, so the research bar can say a project's scope is in force. */
+  collections?: ProjectCollection[];
 }
 
 /** Singular and plural, for a confirm dialog that has to name what it removes. */
@@ -82,6 +138,7 @@ const KIND_WORDS: Record<MemberKind, [string, string]> = {
   paper: ["paper", "papers"],
   review: ["peer review", "peer reviews"],
   image: ["image", "images"],
+  source: ["uploaded paper", "uploaded papers"],
 };
 
 export function kindLabel(kind: MemberKind, count: number): string {
@@ -291,7 +348,7 @@ export function perProjectLimit<T extends { project: string }>(
 
 /** How many of each kind, for a dialog that has to say what it is about to do. */
 export function countsOf(members: readonly Member[]): Record<MemberKind, number> {
-  const counts = { chat: 0, meeting: 0, run: 0, paper: 0, review: 0, image: 0 };
+  const counts = { chat: 0, meeting: 0, run: 0, paper: 0, review: 0, image: 0, source: 0 };
   for (const member of members) counts[member.kind] += 1;
   return counts;
 }
@@ -303,6 +360,7 @@ export function summaryOf(project: Project): ProjectSummary {
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     items: project.members.length,
+    ...(project.collections?.length ? { collections: project.collections } : {}),
   };
 }
 
@@ -348,11 +406,13 @@ export function parseProject(raw: unknown, id: string): Project | undefined {
   }
 
   const createdAt = text("createdAt");
+  const collections = cleanCollections(row["collections"]);
   return {
     id,
     name: text("name") || "Untitled project",
     createdAt,
     updatedAt: text("updatedAt", createdAt),
     members,
+    ...(collections.length ? { collections } : {}),
   };
 }
