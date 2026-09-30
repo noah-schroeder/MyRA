@@ -13,6 +13,7 @@
 import { parseDownloads, parseSystemInfo, type DownloadJob, type MachineInfo } from "../../core/runtime/systemInfo.ts";
 import type { PullProgress } from "../../core/runtime/systemInfo.ts";
 import { parseModelOptions, type ModelOptions } from "../../core/runtime/modelOptions.ts";
+import { configKeyOf, isName } from "../../core/runtime/backendDefault.ts";
 import {
   parseVariants,
   type RegistrySource,
@@ -137,6 +138,25 @@ export class LemonadeApi {
     if (!target) throw new LemonadeApiError("Lemonade is not running.");
     return this.#send<T>(
       `${target.base.replace(/\/v\d+$/, "")}${path}`, `/api${path}`, target.headers, init, timeoutMs,
+    );
+  }
+
+  /**
+   * The daemon's `/internal/*` routes, which sit at the server root.
+   *
+   * Measured against lemond 11.8.0: `POST /internal/set` answers 200 and the
+   * same path under `/api/v1` answers 404 "The requested endpoint does not
+   * exist". They are what `lemonade config set` itself calls, so they are the
+   * supported way to change a setting on a running daemon -- which is why the
+   * default runtime is written here rather than into `config.json` behind its
+   * back (the daemon rewrites that file, and would not see the edit until a
+   * restart that drops every loaded model).
+   */
+  async #callRoot<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+    const target = this.#target();
+    if (!target) throw new LemonadeApiError("Lemonade is not running.");
+    return this.#send<T>(
+      `${target.base.replace(/\/api\/v\d+$/, "")}${path}`, path, target.headers, init, timeoutMs,
     );
   }
 
@@ -399,6 +419,45 @@ export class LemonadeApi {
   async resetModelOptions(modelName: string): Promise<ModelOptions> {
     const path = `/models/${encodeURIComponent(modelName)}/options`;
     return parseModelOptions(await this.#call<unknown>(path, { method: "DELETE" }, 15_000), modelName);
+  }
+
+  /* ------------------------------------------------- default runtime -- */
+
+  /**
+   * The daemon's whole configuration, defaults merged in.
+   *
+   * Read, never written back: `backendDefault.ts` picks out the one field it
+   * wants, and the only write MyRA makes to this store is `setEngineBackend`.
+   */
+  async config(): Promise<unknown> {
+    return this.#callRoot<unknown>("/internal/config", {}, 15_000);
+  }
+
+  /**
+   * Set which runtime an engine's models start on, for every model that has not
+   * chosen its own.
+   *
+   * **The body is a fixed template with two checked names in it.** `/internal/set`
+   * takes any key in the daemon's config -- its port, its model folder, its
+   * telemetry -- so a method that passed a caller's object through would hand
+   * all of it to whoever can reach this class. This one can write a single
+   * field: `<engine>.backend`. The daemon still validates the value against the
+   * machine (`must be one of: auto, vulkan, cpu`) and that sentence is left as
+   * it came.
+   *
+   * Live and persistent: measured, the new default shows in every model's
+   * `defaults` on the next read and in `config.json` straight away, with no
+   * restart.
+   */
+  async setEngineBackend(recipe: string, backend: string): Promise<void> {
+    if (!isName(recipe) || !isName(backend)) {
+      throw new LemonadeApiError("That is not a runtime name Lemonade could have.");
+    }
+    await this.#callRoot("/internal/set", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ [configKeyOf(recipe)]: { backend } }),
+    }, 15_000);
   }
 
   async loadModel(modelName: string): Promise<void> {

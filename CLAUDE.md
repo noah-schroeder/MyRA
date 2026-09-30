@@ -1029,6 +1029,82 @@ making it an `enum` like every other typed value in this list; an old saved conf
 bare form heals itself the next time anything here is edited, since it is read back as a token
 nothing owns and dropped rather than carried forward.
 
+**Speculative decoding is offered only where the file can do it.** A model with
+multi-token-prediction (MTP) heads drafts several tokens a step, and
+`--spec-type draft-mtp` with `--spec-draft-n-max N` is how a person says how many. Three
+measured facts shape the controls (llama-server b10375; lemond 11.8.0 read from its source).
+llama.cpp renamed the whole family: `--draft-max` and its siblings are now *refused* at
+launch ("the argument has been removed"), so `FlagSpec.aliases` lists every old spelling and
+a saved string carrying one is healed into the current name the next time the panel rewrites
+it. `draft-mtp` on a file with no MTP layers fails the load ("context type MTP requested but
+model doesn't contain MTP layers"), so the flags carry `gate: "mtp"` and the panel decides
+from two findings it keeps apart: the GGUF header's `<arch>.nextn_predict_layers`
+(`ModelShape.mtpLayers`: `0` is read-and-none, absent is unread — the same two states
+`experts` and `hasChatTemplate` keep), and Lemonade's `mtp` label, which is the only
+evidence for a Gemma-4 MTP model whose head is a separate draft file its own weights say
+nothing of. A model not known to have MTP keeps the controls behind "Every flag MyRA knows"
+rather than losing them, and one that already carries the flag keeps it in view, so a value
+that would stop the model loading can still be cleared. And Lemonade adds
+`--spec-type draft-mtp` itself for a labelled model, as a default that *any* `--spec-type` in
+the user's own arguments replaces (`append_runtime_arg_defaults`, the mechanism
+`--parallel 1` already uses) — so "not set" on such a model means *on*, the select says so,
+and `none` is how it is turned off. `config.json` is deliberately not consulted for any of
+this: it describes the unquantised parent, converters drop the head, and Qwen3.5 nests the
+key where `shapeFromConfig` does not look. An install that predates the field has its header
+re-read when the panel opens (`myra:model-facts`) — a local file, not a request.
+
+### The default runtime
+
+An engine can hold several runtimes at once — Vulkan and ROCm for llama.cpp is the ordinary
+pair on an AMD card — and "which one runs this model" used to be a text box on every model's
+Tune page, so moving sixty models from one to the other was sixty edits. Lemonade already
+keeps both halves of the answer, and **MyRA keeps nothing of its own**
+([backendDefault.ts](src/core/runtime/backendDefault.ts)): a second copy would be a
+preference the launch never reads, the reason `modelOptions.ts` gives for keeping load
+settings in the daemon. Measured against lemond 11.8.0, **the engine's default** is
+`llamacpp.backend` in the daemon's config (`auto` until chosen), changed live — no restart —
+by `POST /internal/set` at the server *root* (the same path is a 404 under `/api/v1`), which
+the daemon persists itself and refuses for a runtime the machine cannot run. **A model's own
+choice** is `<recipe>_backend` in its options; it beats the default, and it is what the Tune
+page has always edited. `defaults.<recipe>_backend` in that response is the *resolved*
+default and `saved` holds only overrides, so "has this model chosen" is read, never guessed.
+
+The controls are a dropdown and a button on each engine's card under Settings → Runtime
+([RuntimeDefault.tsx](src/renderer/components/RuntimeDefault.tsx)), drawn only for an engine
+with two or more runtimes installed, and only where the daemon's own config has a `backend`
+for it — so kokoro and moonshine, which ship one CPU build, get nothing, and an engine
+Lemonade adds later is covered without a release. Four rules hold it up.
+
+1. **Clearing a model's runtime is `{"<recipe>_backend": null}`, never `DELETE`.** `DELETE
+   …/options` drops every saved setting, so handing a model back to the default that way
+   would take its context window and extra arguments with it. `null` removes that one key and
+   nothing else (`""` and `"auto"` do the same — which is why emptying the Backend box on a
+   Tune page is the way back to the default). The reset checks the options the daemon *answers
+   with* rather than trusting the 200, and names where the models end up on the button itself
+   ("Reset all 3 to AMD (ROCm)"), so it needs no confirmation in front of it.
+2. **Only installed runtimes are offered, and MyRA checks it again at the write.** The daemon
+   validates the *machine*, not the install, and then fetches a missing runtime silently at the
+   next load — so a dropdown entry that is not installed is a hidden download.
+   `installedRuntimes` is the one definition the card and the validation share.
+3. **`/internal/set` takes any key in the daemon's config — its port, its model folder, its
+   telemetry.** `LemonadeApi.setEngineBackend` can write exactly one field, `<engine>.backend`,
+   from a fixed body with two names checked against `[A-Za-z0-9._-]`, and
+   [backendDefaults.ts](src/main/runtime/backendDefaults.ts) only reaches it for an engine the
+   daemon's config already has a `backend` under. That file is split from the manager for the
+   reason `modelDelete.ts` is: a bulk write to state the daemon owns is exactly what has to
+   be tested, and the manager imports `electron`.
+4. **A change reaches nothing that is already running.** The notice after it names the loaded
+   models that would change runtime on their next load and offers to reload the one the rest of
+   the app calls loaded, through the same unload-then-load the Tune panel uses.
+
+Two spellings are irregular and were measured rather than assumed: the image engine is `sd-cpp`
+as a recipe and on a model (`sd-cpp_backend`) but `sdcpp` in the config. MyRA's own
+startup merge (`mergeConfig`) keeps a chosen default and pins nothing under `backend`; a test
+holds both, because a pin there would put Vulkan back the next time the app opened. One CSS
+trap is written into [styles.css](src/renderer/styles.css) beside the control: Settings'
+`.pane label` stacks its children in a column and `.pane select` restates `background` as a
+shorthand, which together centred the caption and wiped the dropdown's chevron.
+
 ### Images
 
 The third model role, and the one with files. [main/images.ts](src/main/images.ts) owns the
@@ -1056,7 +1132,7 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `myra:*` — 196 of them, registered in
+IPC channels are all `myra:*` — 199 of them, registered in
 [main/index.ts](src/main/index.ts)'s `installIpc` and in the `install*Ipc` modules it
 calls (meetings, dictation, audio, images, papers, projects, project memory, project papers,
 sources, runtime, api, review, tasks), and exposed one-by-one in the preload. Adding a capability means touching all

@@ -54,6 +54,10 @@ import { kvBytesPerElement, readFlags, writeFlags } from "../../core/runtime/lla
 import { factsFor, learnShapeFromFile, setAutoCtxSize } from "./modelFacts.ts";
 import { ctxIsOurs, savedValue, type ModelOptions } from "../../core/runtime/modelOptions.ts";
 import { weightsFile } from "./modelFiles.ts";
+import { installedRuntimes, type EngineBackendState } from "../../core/runtime/backendDefault.ts";
+import {
+  readBackendDefaults, resetModelBackends, setDefaultBackend, type ResetResult,
+} from "./backendDefaults.ts";
 
 /**
  * Whether CUDA is what this model would actually run on.
@@ -586,6 +590,42 @@ export class RuntimeManager {
     return binary ? bundledLoader(dirname(binary)) !== undefined : false;
   }
 
+  /* ---------------------------------------------------- default runtime -- */
+
+  /**
+   * The runtime each asked-about engine starts its models on, and which models
+   * chose otherwise. See `core/runtime/backendDefault.ts` for where the daemon
+   * keeps each half.
+   *
+   * `loaded` is what is in memory right now, by engine: a runtime change does
+   * not reach a model that is already running, and the window says so.
+   */
+  async backendDefaults(recipes: readonly string[]): Promise<Record<string, EngineBackendState>> {
+    await this.ensureLemonade();
+    const loaded: Record<string, string[]> = {};
+    for (const m of this.#lemonade.status.health?.models ?? []) {
+      if (m.recipe) (loaded[m.recipe] ??= []).push(m.id);
+    }
+    return readBackendDefaults(this.#api, recipes, loaded);
+  }
+
+  /** Choose what an engine's models start on; `auto` hands the choice back to Lemonade. */
+  async setDefaultBackend(recipe: string, backend: string): Promise<void> {
+    await this.ensureLemonade();
+    /* Asked for here, at the moment of the write, rather than trusted from the
+       window's last look: a runtime can be uninstalled between the two. */
+    const info = await this.#api.systemInfo();
+    await setDefaultBackend(
+      this.#api, recipe, backend, installedRuntimes(info.engines.find((e) => e.id === recipe)),
+    );
+  }
+
+  /** Let every model of an engine follow the default again. */
+  async resetModelBackends(recipe: string): Promise<ResetResult> {
+    await this.ensureLemonade();
+    return resetModelBackends(this.#api, recipe);
+  }
+
   /* -------------------------------------------------------------- models -- */
 
   /**
@@ -849,6 +889,22 @@ export class RuntimeManager {
     if (model?.sizeBytes) return model.sizeBytes;
     const files = await weightsFile(id, this.#modelFilesDeps()).catch(() => undefined);
     return files?.bytes;
+  }
+
+  /**
+   * What the daemon says a model is for, falling back to the shipped catalogue.
+   *
+   * The catalogue is the fallback rather than the source because a model the
+   * user registered is only known to the daemon -- and it is a fallback at all
+   * because the daemon is not always up when the tuning panel opens. The one
+   * label asked of it today is `mtp`: Lemonade turns `--spec-type draft-mtp`
+   * on by itself for such a model, including Gemma-4 whose MTP head is a
+   * separate draft file, so its own weights name no MTP layers to find.
+   */
+  async modelLabels(id: string): Promise<string[] | undefined> {
+    const live = (await this.#api.listModels().catch(() => [])).find((m) => m.id === id)?.labels;
+    if (live) return live;
+    return (await this.catalog().catch(() => [])).find((e) => e.id === id)?.labels;
   }
 
   /**

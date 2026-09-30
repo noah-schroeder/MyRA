@@ -49,6 +49,7 @@ import { formatTokens } from "../../core/tokens.ts";
 import {
   LLAMA_FLAGS, readFlags, validFlag, writeFlags, type FlagSpec,
 } from "../../core/runtime/llamaArgs.ts";
+import { gatedOut, speculativeNote, type SpeculativeNote } from "../../core/runtime/speculative.ts";
 
 /**
  * Form state is all strings, including the toggles, and that is deliberate.
@@ -470,13 +471,23 @@ function FlagsField({
    * plain number box, same as every other integer flag without a measured
    * model.
    */
-  const [shape, setShape] = useState<{ layers?: number; experts?: number }>({});
+  const [shape, setShape] = useState<{
+    layers?: number;
+    experts?: number;
+    mtpLayers?: number;
+    lemonadeMtp?: boolean;
+  }>({});
 
   useEffect(() => {
     let alive = true;
     void window.myra.modelFacts(model).then((r) => {
       if (!alive) return;
-      setShape({ ...(r.layers ? { layers: r.layers } : {}), ...(r.experts ? { experts: r.experts } : {}) });
+      setShape({
+        ...(r.layers ? { layers: r.layers } : {}),
+        ...(r.experts ? { experts: r.experts } : {}),
+        ...(r.mtpLayers !== undefined ? { mtpLayers: r.mtpLayers } : {}),
+        ...(r.lemonadeMtp ? { lemonadeMtp: true } : {}),
+      });
     });
     return () => {
       alive = false;
@@ -496,6 +507,11 @@ function FlagsField({
     /* Offloading MoE experts to the CPU does nothing on a model that has none
        -- a control that does nothing is worse than an absent one. */
     if (f.flag === "--n-cpu-moe" && !shape.experts) return false;
+    /* The same rule for MTP, softened to where it can be reached rather than
+       removed: a model not known to have it keeps the controls behind "Every
+       flag MyRA knows", and one that already carries the flag keeps it in view
+       so a value that would stop the model loading can still be cleared. */
+    if (gatedOut(f, shape)) return showAll || values[f.flag] !== undefined;
     return showAll || !f.advanced || values[f.flag] !== undefined;
   });
 
@@ -531,12 +547,21 @@ function FlagsField({
               value={values[spec.flag] ?? ""}
               onChange={(e) => set(spec, e.target.value)}
             >
-              <option value="">not set</option>
+              <option value="">
+                {spec.flag === "--spec-type" && shape.lemonadeMtp ? "not set (Lemonade: draft-mtp)" : "not set"}
+              </option>
               {spec.values?.map((v) => (
                 <option key={v} value={v}>
                   {v}
                 </option>
               ))}
+              {/* A value this list does not offer -- `ngram-mod`, or a comma list
+                  somebody typed in by hand -- is shown as it stands. A select
+                  whose value matches no option draws its first one, which would
+                  say "not set" over a flag that is very much set. */}
+              {values[spec.flag] && !spec.values?.includes(values[spec.flag]!) ? (
+                <option value={values[spec.flag]}>{values[spec.flag]}</option>
+              ) : null}
             </select>
           ) : (
             <input
@@ -564,6 +589,7 @@ function FlagsField({
             {spec.help}
             {spec.warn ? <strong className="mopt-flag-warn"> {spec.warn}</strong> : null}
           </p>
+          <FlagNote note={speculativeNote(spec, values, shape)} />
         </div>
       ))}
 
@@ -600,6 +626,11 @@ function FlagsField({
       ) : null}
     </div>
   );
+}
+
+/** A line under a flag about how it interacts with the model or another flag. */
+function FlagNote({ note }: { note: SpeculativeNote | undefined }) {
+  return note ? <p className={note.bad ? "mopt-hint bad" : "mopt-hint"}>{note.text}</p> : null;
 }
 
 /**

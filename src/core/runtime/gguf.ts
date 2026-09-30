@@ -230,6 +230,15 @@ export function modelShape(header: GgufHeader): ModelShape {
     if (value !== undefined) (shape as unknown as Record<string, number>)[key] = value;
   }
 
+  /* Absent is `0` rather than "unknown" once the layer count was read: the
+     `<arch>.*` keys are written together, ahead of the tokenizer, so a read
+     that reached `block_count` has read the whole group. A model with no MTP
+     head never writes this key at all, so without this a dense model and a
+     read that stopped early would look the same. */
+  const mtp = at("nextn_predict_layers");
+  if (mtp !== undefined) shape.mtpLayers = mtp;
+  else if (shape.layers !== undefined) shape.mtpLayers = 0;
+
   const perLayer = arch ? numbers(m.get(`${arch}.attention.head_count_kv`)) : undefined;
   if (perLayer && perLayer.some((n) => n !== perLayer[0])) shape.headCountKvPerLayer = perLayer;
   return shape;

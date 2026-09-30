@@ -1550,7 +1550,18 @@ function installIpc(): void {
    */
   ipcMain.handle("myra:model-facts", async (_e, ref?: unknown) => {
     const key = modelKey(typeof ref === "string" ? ref : undefined);
-    const facts = await factsFor(key);
+    const hosted = Boolean(key && providerFor(config.current.providers, key));
+    let facts = await factsFor(key);
+    /* A shape recorded before `mtpLayers` existed, or never recorded, is read
+       from the file now rather than at the next load: the tuning panel decides
+       whether to offer the speculative-decoding flags from it, and a model that
+       is already installed would otherwise never get them. A local read of a
+       file on this machine, not a request -- see modelFacts.ts. */
+    if (key && !hosted && facts?.shape?.mtpLayers === undefined) {
+      await runtime.learnShape(key);
+      facts = await factsFor(key);
+    }
+    const labels = key && !hosted ? await runtime.modelLabels(key).catch(() => undefined) : undefined;
     /* The renderer already imports fit.ts to draw a fit chip on the models
        list, so this hands it the shape and the file size rather than a
        precomputed budget -- one round trip lets the tuning panel's memory bar
@@ -1573,6 +1584,11 @@ function installIpc(): void {
          every other integer flag already does without a measured model. */
       ...(facts?.shape?.layers ? { layers: facts.shape.layers } : {}),
       ...(facts?.shape?.experts ? { experts: facts.shape.experts } : {}),
+      /* Kept apart on purpose: the file having MTP layers and Lemonade
+         switching MTP on for the model are two findings, and a Gemma-4 MTP
+         model has the second without the first. */
+      ...(facts?.shape?.mtpLayers !== undefined ? { mtpLayers: facts.shape.mtpLayers } : {}),
+      ...(labels?.includes("mtp") ? { lemonadeMtp: true } : {}),
       ...(facts?.shape ? { shape: facts.shape } : {}),
       ...(sizeBytes ? { sizeBytes } : {}),
       ...(facts?.autoCtxSize !== undefined ? { autoCtxSize: facts.autoCtxSize } : {}),

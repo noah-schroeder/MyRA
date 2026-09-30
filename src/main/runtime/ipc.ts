@@ -30,6 +30,7 @@ import { deleteModel } from "./modelDelete.ts";
 import { Downloads } from "../downloads.ts";
 import { pollForModel } from "../../core/downloads/download.ts";
 import { learnFacts } from "./modelFacts.ts";
+import { isName } from "../../core/runtime/backendDefault.ts";
 
 /**
  * The daemon's own words, without the plumbing around them.
@@ -265,6 +266,53 @@ export function installRuntimeIpc(
       }
     },
   );
+
+  /* ------------------------------------------------- default runtime -- */
+
+  /**
+   * The runtime each engine starts its models on, and who overrides it.
+   *
+   * Asked about only the engines the window is drawing a choice for -- the ones
+   * with two or more runtimes installed -- because each answer costs a read per
+   * model. Names that are not names are dropped rather than looked up.
+   */
+  ipcMain.handle("myra:backend-defaults", async (_e, recipes: unknown) => {
+    try {
+      const asked = (Array.isArray(recipes) ? recipes : []).filter(isName).slice(0, 32);
+      return { ok: true, states: await runtime.backendDefaults(asked) };
+    } catch (err) {
+      return { ok: false, error: reasonFrom(err), states: {} };
+    }
+  });
+
+  /** Choose the runtime an engine's models start on. */
+  ipcMain.handle("myra:backend-default-set", async (_e, recipe: unknown, backend: unknown) => {
+    try {
+      await runtime.setDefaultBackend(String(recipe ?? ""), String(backend ?? ""));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: reasonFrom(err) };
+    }
+  });
+
+  /**
+   * Hand every model of an engine back to the default.
+   *
+   * Answers with what happened to each model rather than a bare `ok`: a reset
+   * that reached forty of forty-one is a thing to say, not to round to success.
+   */
+  ipcMain.handle("myra:backend-models-reset", async (_e, recipe: unknown) => {
+    try {
+      const result = await runtime.resetModelBackends(String(recipe ?? ""));
+      return {
+        ok: true,
+        cleared: result.cleared.length,
+        failed: result.failed.map((f) => ({ model: f.model, error: reasonFrom(new Error(f.error)) })),
+      };
+    } catch (err) {
+      return { ok: false, error: reasonFrom(err) };
+    }
+  });
 
   ipcMain.handle("myra:lemonade-downloads", async () => {
     try {

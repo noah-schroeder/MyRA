@@ -333,6 +333,12 @@ const api = {
   engineUpdatesCheck: () => ipcRenderer.invoke("myra:engine-updates-check"),
   engineUpdate: (recipe: string, backend: string, version?: string) =>
     ipcRenderer.invoke("myra:engine-update", recipe, backend, version ?? null),
+  /* Which runtime an engine's models start on. Loopback calls to the daemon
+     and nothing more; a model's own choice stays on its Tune page. */
+  backendDefaults: (recipes: string[]) => ipcRenderer.invoke("myra:backend-defaults", recipes),
+  setDefaultBackend: (recipe: string, backend: string) =>
+    ipcRenderer.invoke("myra:backend-default-set", recipe, backend),
+  resetModelBackends: (recipe: string) => ipcRenderer.invoke("myra:backend-models-reset", recipe),
   lemonadeCatalog: () => ipcRenderer.invoke("myra:lemonade-catalog"),
   lemonadeModels: () => ipcRenderer.invoke("myra:lemonade-models"),
   lemonadeRescan: () => ipcRenderer.invoke("myra:lemonade-rescan"),

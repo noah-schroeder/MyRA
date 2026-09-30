@@ -3787,6 +3787,74 @@ p.warning { margin: 0; font-size: 12.5px; }
 
 .lem-backends { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/*
+ * One engine's default runtime, under the chips that name the runtimes.
+ *
+ * A rule above rather than a box of its own: it is part of the card, about the
+ * same chips, and a bordered box inside a bordered 250px card is three lines of
+ * chrome around one dropdown.
+ *
+ * **Every control here restates what Settings' generic rules would otherwise
+ * decide**, because this lives inside `.pane` and two of those rules reach it.
+ * `.pane label` stacks its children in a column -- which centred the caption over
+ * the dropdown -- and `.pane select` gives a select 7px of padding and restates
+ * `background` as a shorthand, which wipes the chevron `.select` draws from two
+ * gradients and leaves a dropdown that looks like a text box. Two-class
+ * selectors below outrank both without reaching for `!important`.
+ */
+.lem-default {
+  display: flex; flex-direction: column; gap: 6px;
+  padding-top: 9px; border-top: 1px solid var(--border);
+}
+.lem-default .lem-default-row {
+  display: flex; flex-direction: row; align-items: center; flex-wrap: wrap;
+  gap: 5px 10px; font-size: 11.5px;
+}
+.lem-default-label { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.lem-default .lem-default-select {
+  flex: 1 1 130px; min-width: 0; max-width: 100%;
+  appearance: none; -webkit-appearance: none;
+  font: inherit; font-size: 11.5px;
+  padding: 4px 24px 4px 9px;
+  color: var(--text);
+  background-color: var(--bg-float);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: right 12px center, right 7px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: border-color var(--t-fast);
+}
+.lem-default .lem-default-select:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text) 50%),
+    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+}
+.lem-default .lem-default-select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.lem-default .lem-default-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.lem-default .lem-default-select option { background: var(--bg-float); color: var(--text); }
+.lem-default-note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--text-faint); }
+.lem-default-chose { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }
+.lem-default-notice { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }
+/* Amber, the colour MyRA already uses for "look at this", and not red: part of
+   a reset not taking is worth reading, and nothing here is broken. */
+.lem-default-notice.warn { color: var(--amber); }
+/* Buttons keep their own width -- a column would stretch them across the card --
+   but may wrap: `.lem-install` is nowrap, and "Reset all 8 to Automatic (AMD
+   (ROCm))" is wider than the 250px card's inside. The label names where the
+   models end up, so shortening it is not the fix. */
+.lem-default > .lem-install {
+  align-self: flex-start; max-width: 100%;
+  white-space: normal; text-align: left; line-height: 1.4;
+}
+
 .lem-install {
   font: inherit; font-size: 11.5px;
   padding: 4px 10px; border-radius: var(--radius-sm);

@@ -50,6 +50,18 @@ export interface ModelShape {
    * the settings panel whether to offer that control at all.
    */
   experts?: number;
+  /**
+   * How many multi-token-prediction layers the file carries -- `0` is a finding
+   * (the header was read and names none), absent means it was not read.
+   *
+   * Informative only, like `experts`: it decides whether the settings panel
+   * offers the speculative-decoding controls, and nothing is sized from it.
+   * Only a GGUF header states it (`<arch>.nextn_predict_layers`); a
+   * `config.json` describes the unquantised parent, and converters routinely
+   * drop the MTP head, so the published config is not evidence about the file
+   * that will load.
+   */
+  mtpLayers?: number;
 }
 
 const GIB = 1024 ** 3;

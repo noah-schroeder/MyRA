@@ -234,3 +234,29 @@ test("a missing head dimension falls back to embedding_length / head_count", () 
   // 2048 / 32 = 64, a plausible head dimension -- not NaN, not undefined.
   assert.equal(kvCacheBytes(shape, 8192, 2), 8 * 30 * 64 * 8192 * 2 * 2);
 });
+
+/*
+ * Multi-token prediction is stated by one key and is absent, rather than zero,
+ * on a model without it -- so the difference between "has none" and "not
+ * read" has to be made here. The settings panel offers the speculative-
+ * decoding controls from it, and confusing the two hides them on a model
+ * that has the layers or offers a setting that stops one without from loading.
+ */
+test("a model's MTP layers are read from the header", () => {
+  const shape = modelShape(parseGguf(fixture([
+    kvStr("general.architecture", "qwen35"),
+    kvU32("qwen35.block_count", 32),
+    kvU32("qwen35.nextn_predict_layers", 1),
+  ])));
+  assert.equal(shape.mtpLayers, 1);
+});
+
+test("a model whose header names no MTP layers has none, which is a finding", () => {
+  assert.equal(modelShape(parseGguf(fixture(QWEN))).mtpLayers, 0);
+});
+
+test("nothing is claimed about MTP from a header that never reached the layer count", () => {
+  const shape = modelShape(parseGguf(fixture([kvStr("general.architecture", "test")])));
+  assert.equal(shape.layers, undefined);
+  assert.equal(shape.mtpLayers, undefined);
+});
