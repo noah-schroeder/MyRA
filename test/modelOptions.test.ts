@@ -226,3 +226,56 @@ test("the auto-sizer's own guard is the recipe's field list, not a model name", 
   assert.ok("ctx_size" in parseModelOptions(LLAMACPP).defaults);
   assert.ok(!("ctx_size" in parseModelOptions(WHISPERCPP).defaults));
 });
+
+/* ---------------------------------------------------- the default runtime -- */
+
+test("a model's own runtime beats the default, and emptying the box gives it back", () => {
+  /* Measured, lemond 11.8.0: with the engine's default set to cpu, a model that
+     saved `vulkan` runs on vulkan, and posting an empty string (or null, or
+     "auto") drops just that key. The Tune panel sends what the box holds, so
+     emptying it is the path back to following Settings → Runtime -- which the
+     help text under the box now says. */
+  const options = parseModelOptions({
+    ...LLAMACPP,
+    defaults: { ...LLAMACPP.defaults, llamacpp_backend: "cpu" },
+    saved: { ctx_size: 16384, llamacpp_backend: "vulkan" },
+    effective: { ctx_size: 16384, llamacpp_backend: "vulkan" },
+  });
+  assert.equal(effectiveValue(options, "llamacpp_backend"), "vulkan");
+  assert.deepEqual(patchFrom(options, { llamacpp_backend: "" }), { llamacpp_backend: "" });
+});
+
+test("saving with the box still showing the default does not pin the model to it", () => {
+  /* Once the engine's default is ROCm, every model's box reads "rocm" without
+     anybody having typed it. Writing it back as an override would quietly pin
+     all of them, and the next change of default would reach none. */
+  const options = parseModelOptions({
+    ...LLAMACPP,
+    defaults: { ...LLAMACPP.defaults, llamacpp_backend: "rocm" },
+    saved: {},
+    effective: { llamacpp_backend: "rocm" },
+  });
+  assert.deepEqual(patchFrom(options, { llamacpp_backend: "rocm" }), {});
+});
+
+test("the image engine's runtime is an everyday setting called Backend", () => {
+  const options = parseModelOptions({
+    model_name: "SD-Turbo",
+    recipe: "sd-cpp",
+    defaults: { steps: 4, "sd-cpp_backend": "vulkan", sdcpp_args: "", width: 512 },
+    saved: {},
+    effective: {},
+  });
+  const field = fieldsFor(options).find((f) => f.key === "sd-cpp_backend");
+  assert.equal(field?.label, "Backend");
+  assert.equal(field?.advanced, false);
+  assert.match(field?.help ?? "", /Settings → Runtime/);
+});
+
+test("every runtime field points at the place the default is set", () => {
+  for (const options of [LLAMACPP, WHISPERCPP]) {
+    const key = Object.keys(options.defaults).find((k) => k.endsWith("_backend"));
+    const field = fieldsFor(parseModelOptions(options)).find((f) => f.key === key);
+    assert.match(field?.help ?? "", /Settings → Runtime/, key);
+  }
+});

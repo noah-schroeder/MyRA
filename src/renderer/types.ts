@@ -18,6 +18,7 @@ import type { ForeignModel } from "../core/runtime/foreign.ts";
 import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
 import type { LoadedModel } from "../core/runtime/lemonade.ts";
 import type { ModelOptions } from "../core/runtime/modelOptions.ts";
+import type { EngineBackendState } from "../core/runtime/backendDefault.ts";
 import type { AutoContext, ModelShape } from "../core/runtime/fit.ts";
 export type { RunFootprint } from "../core/research/run.ts";
 import type { RunFootprint } from "../core/research/run.ts";
@@ -908,6 +909,12 @@ export interface MyRAApi {
     /** How many experts a MoE model routes between, when known. Informative:
      *  it decides whether the MoE-CPU slider is offered, not what it goes to. */
     experts?: number;
+    /** MTP layers in the model's own file: `0` means it was read and has none,
+     *  absent means it was not read. */
+    mtpLayers?: number;
+    /** Lemonade labels this model `mtp` and turns draft-mtp on by itself, which
+     *  is true of models whose MTP head is a separate draft file. */
+    lemonadeMtp?: true;
     /** The full shape, when known, for the memory bar to size a context against. */
     shape?: ModelShape;
     /** The weights on disk, in bytes -- the other half the bar needs. */
@@ -938,6 +945,22 @@ export interface MyRAApi {
     backend: string,
     version?: string,
   ): Promise<{ ok: boolean; error?: string; version?: string; info?: MachineInfo }>;
+  /**
+   * The runtime each named engine starts its models on, and which models chose
+   * their own. An engine the daemon has no runtime setting for is left out.
+   */
+  backendDefaults(
+    recipes: string[],
+  ): Promise<{ ok: boolean; error?: string; states: Record<string, EngineBackendState> }>;
+  /** Choose the runtime an engine's models start on; `auto` hands it back to Lemonade. */
+  setDefaultBackend(recipe: string, backend: string): Promise<{ ok: boolean; error?: string }>;
+  /** Let every model of an engine follow the default again; the runtime is all it clears. */
+  resetModelBackends(recipe: string): Promise<{
+    ok: boolean;
+    error?: string;
+    cleared?: number;
+    failed?: { model: string; error: string }[];
+  }>;
   lemonadeCatalog(): Promise<{ ok: boolean; error?: string; catalog: CatalogEntry[] }>;
   lemonadeModels(): Promise<{
     ok: boolean;

@@ -27,8 +27,16 @@
 export interface FlagSpec {
   /** The canonical spelling, which is what gets written. */
   flag: string;
-  /** A shorter spelling that means the same thing, read but never written. */
-  alias?: string;
+  /**
+   * Other spellings that mean the same thing, read but never written.
+   *
+   * A list because a renamed flag leaves more than one behind: llama.cpp's
+   * speculative-decoding flags were renamed wholesale and the old names now
+   * *refuse to start the server* ("the argument has been removed"), so every
+   * spelling a saved string might still carry has to be recognised to be
+   * rewritten into the one that works.
+   */
+  aliases?: readonly string[];
   label: string;
   kind: "toggle" | "enum" | "integer" | "number" | "text";
   values?: readonly string[];
@@ -45,6 +53,14 @@ export interface FlagSpec {
    * not have one.
    */
   sliderMax?: "layers";
+  /**
+   * This flag only means something for a model with a particular capability,
+   * which the renderer knows once it has read the file: `"mtp"` is a model
+   * with multi-token-prediction heads. Like `sliderMax`, it is a fact about
+   * whichever model is open rather than about the flag, so the decision to
+   * show or hide lives with the caller and this only names the capability.
+   */
+  gate?: "mtp";
   help: string;
   advanced: boolean;
   /** Shown in red: this one interacts with something else MyRA relies on. */
@@ -54,7 +70,7 @@ export interface FlagSpec {
 export const LLAMA_FLAGS: readonly FlagSpec[] = [
   {
     flag: "--n-gpu-layers",
-    alias: "-ngl",
+    aliases: ["-ngl"],
     label: "Layers on the GPU",
     kind: "integer",
     min: 0,
@@ -70,7 +86,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
        the MoE weights of the first N layers in the CPU" -- so the label says
        layers rather than promising a per-expert dial the flag does not have. */
     flag: "--n-cpu-moe",
-    alias: "-ncmoe",
+    aliases: ["-ncmoe"],
     label: "MoE layers kept on the CPU",
     kind: "integer",
     min: 0,
@@ -127,8 +143,67 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
     advanced: false,
   },
   {
+    /* llama.cpp takes a comma-separated list here and more types than this
+       (ngram-*, eagle3, dflash…). Only the one this group is about is offered;
+       anything else already in the string is kept and shown as it stands. */
+    flag: "--spec-type",
+    label: "Speculative decoding",
+    kind: "enum",
+    values: ["none", "draft-mtp"],
+    gate: "mtp",
+    help:
+      "Lets a model with multi-token-prediction (MTP) heads guess several tokens ahead and keep " +
+      "the ones the full model agrees with, which is faster for the same answer. \"none\" turns it off. " +
+      "Only a model that has MTP layers can do this.",
+    advanced: false,
+    /* No static `warn`: the failure is real (llama-server exits with "context
+       type MTP requested but model doesn't contain MTP layers") but only for a
+       file with none, and the panel knows which this is. A red line on every
+       MTP model saying it might not load is a warning people learn to skip. */
+  },
+  {
+    /* The old spellings are all listed because each one now fails the launch
+       outright: measured against the bundled llama-server, `--draft-max 4`
+       exits with "the argument has been removed. use --spec-draft-n-max". */
+    flag: "--spec-draft-n-max",
+    aliases: ["--draft-max", "--draft-n", "--draft"],
+    label: "Tokens drafted ahead",
+    kind: "integer",
+    min: 1,
+    max: 32,
+    gate: "mtp",
+    help:
+      "How many tokens the model guesses before the full model checks them. llama.cpp's default is 3. " +
+      "A wrong guess wastes the work after it, so more is not automatically faster.",
+    advanced: false,
+  },
+  {
+    flag: "--spec-draft-n-min",
+    aliases: ["--draft-min", "--draft-n-min"],
+    label: "Fewest tokens drafted",
+    kind: "integer",
+    min: 0,
+    max: 32,
+    gate: "mtp",
+    help: "A draft shorter than this is thrown away rather than checked. llama.cpp's default is 0.",
+    advanced: true,
+  },
+  {
+    flag: "--spec-draft-p-min",
+    aliases: ["--draft-p-min"],
+    label: "Draft confidence floor",
+    kind: "number",
+    min: 0,
+    max: 1,
+    gate: "mtp",
+    help:
+      "Stops drafting as soon as the model is less sure than this of its next guess, so a hard " +
+      "passage drafts fewer tokens than an easy one. llama.cpp's default is 0, which never stops early.",
+    advanced: true,
+  },
+  {
     flag: "--threads",
-    alias: "-t",
+    aliases: ["-t"],
     label: "Threads",
     kind: "integer",
     min: 1,
@@ -138,7 +213,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
   },
   {
     flag: "--parallel",
-    alias: "-np",
+    aliases: ["-np"],
     label: "Parallel slots",
     kind: "integer",
     min: 1,
@@ -151,7 +226,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
   },
   {
     flag: "--batch-size",
-    alias: "-b",
+    aliases: ["-b"],
     label: "Batch size",
     kind: "integer",
     min: 1,
@@ -161,7 +236,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
   },
   {
     flag: "--ubatch-size",
-    alias: "-ub",
+    aliases: ["-ub"],
     label: "Micro-batch size",
     kind: "integer",
     min: 1,
@@ -192,7 +267,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
   },
   {
     flag: "--split-mode",
-    alias: "-sm",
+    aliases: ["-sm"],
     label: "Split across GPUs",
     kind: "enum",
     values: ["none", "layer", "row"],
@@ -201,7 +276,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
   },
   {
     flag: "--tensor-split",
-    alias: "-ts",
+    aliases: ["-ts"],
     label: "Split proportions",
     kind: "text",
     help: "How much goes to each card, e.g. 3,1 for a 24 GB card beside an 8 GB one.",
@@ -209,7 +284,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
   },
   {
     flag: "--main-gpu",
-    alias: "-mg",
+    aliases: ["-mg"],
     label: "Main GPU",
     kind: "integer",
     min: 0,
@@ -248,7 +323,7 @@ export const LLAMA_FLAGS: readonly FlagSpec[] = [
 const BY_FLAG = new Map<string, FlagSpec>();
 for (const spec of LLAMA_FLAGS) {
   BY_FLAG.set(spec.flag, spec);
-  if (spec.alias) BY_FLAG.set(spec.alias, spec);
+  for (const alias of spec.aliases ?? []) BY_FLAG.set(alias, spec);
 }
 
 /** Anything that could end one argument and begin another. */

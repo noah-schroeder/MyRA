@@ -155,6 +155,31 @@ describe("mergeConfig", () => {
     assert.deepEqual(merged["sdcpp"], { backend: "cuda", steps: 20, args: "--auto-fit" });
   });
 
+  it("leaves the default runtime a person chose alone", () => {
+    /* Settings → Runtime writes `llamacpp.backend` through the daemon, which
+       persists it to this file. MyRA merges its pins into the file before every
+       start, so anything it pinned over that block would put Vulkan back the
+       next time the app opened -- and the first anyone would know is a model
+       loading on the wrong card. */
+    const merged = mergeConfig({
+      llamacpp: { backend: "rocm", args: "" },
+      whispercpp: { backend: "cpu" },
+      sdcpp: { backend: "rocm", steps: 20 },
+    });
+    assert.deepEqual(merged["llamacpp"], { backend: "rocm", args: "" });
+    assert.deepEqual(merged["whispercpp"], { backend: "cpu" });
+    assert.equal((merged["sdcpp"] as Record<string, unknown>)["backend"], "rocm");
+  });
+
+  it("pins nothing under any engine's runtime setting", () => {
+    /* The other half: a pin that named `backend` would win over the person's
+       choice at every start, whatever the merge does with the rest. */
+    for (const block of ["llamacpp", "whispercpp", "sdcpp"]) {
+      const pinned = pinnedConfig()[block] as Record<string, unknown> | undefined;
+      assert.equal(pinned === undefined || !("backend" in pinned), true, block);
+    }
+  });
+
   it("does not discard the rest of the telemetry block while disabling it", () => {
     /* A shallow merge would drop hide_inputs and the otlp settings, which are
        the controls someone would have set deliberately. */

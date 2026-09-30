@@ -86,12 +86,27 @@ const KNOWN: Record<string, Omit<OptionField, "key" | "advanced"> & { advanced?:
     kind: "context",
     help: "How much of a conversation the model can hold at once. Bigger costs memory — the KV cache grows with it.",
   },
+  /* Emptying the box is how a model goes back to following the default set in
+     Settings → Runtime: the field is sent as "", which the daemon drops (measured,
+     lemond 11.8.0 -- `null` and "auto" do the same). Said here, where the box is. */
   llamacpp_backend: {
     label: "Backend",
     kind: "text",
-    help: "Which build runs it: cuda, vulkan, rocm or cpu. Leave as the default unless you have a reason.",
+    help: "Which runtime runs this model: cuda, vulkan, rocm or cpu. Empty the box to follow the default set in Settings → Runtime.",
   },
-  whispercpp_backend: { label: "Backend", kind: "text", help: "Which build runs transcription." },
+  whispercpp_backend: {
+    label: "Backend",
+    kind: "text",
+    help: "Which runtime runs transcription. Empty the box to follow the default set in Settings → Runtime.",
+  },
+  /* The image engine spells it with the hyphen here and without it in the
+     daemon's config -- see backendDefault.ts. Without an entry it fell through
+     to "Sd-cpp backend", tucked under the advanced settings. */
+  "sd-cpp_backend": {
+    label: "Backend",
+    kind: "text",
+    help: "Which runtime draws the image. Empty the box to follow the default set in Settings → Runtime.",
+  },
   llamacpp_device: {
     label: "Device",
     kind: "text",
@@ -187,7 +202,9 @@ export function fieldsFor(options: ModelOptions): OptionField[] {
 }
 
 /** The few whose relative order is worth pinning; everything else sorts by name. */
-const ORDER = ["ctx_size", "llamacpp_backend", "whispercpp_backend", "evict_idle_timeout"];
+const ORDER = [
+  "ctx_size", "llamacpp_backend", "whispercpp_backend", "sd-cpp_backend", "evict_idle_timeout",
+];
 
 function humanise(key: string): string {
   const words = key.replace(/_/g, " ").trim();

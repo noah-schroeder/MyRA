@@ -247,14 +247,18 @@ export async function learnFacts(model: string, checkpoint?: string): Promise<Mo
  * reaches every route that never triggers a download-time fetch at all: LM
  * Studio and Ollama imports, and anything installed before this existed.
  *
- * Never overwrites a shape this same function already recorded. A read that
- * fails or finds nothing writes nothing -- see the header comment on why a
- * local read's failure is never persisted, unlike a network fetch's.
+ * Never overwrites a shape this same function already recorded -- except one
+ * written before `mtpLayers` existed, which is read again so a model installed
+ * last month can show the speculative-decoding controls. Once it has answered
+ * the record carries the field (`0` when the file has none), so that is one
+ * more read, not one per load. A read that fails or finds nothing writes
+ * nothing -- see the header comment on why a local read's failure is never
+ * persisted, unlike a network fetch's.
  */
 export async function learnShapeFromFile(model: string, path: string): Promise<ModelFacts | undefined> {
   const all = await readAll();
   const existing = all[model];
-  if (existing?.shapeFrom === "gguf") return existing;
+  if (existing?.shapeFrom === "gguf" && existing.shape?.mtpLayers !== undefined) return existing;
   const shape = await readShapeFromFile(path).catch(() => undefined);
   if (!shape) return existing;
   const facts: ModelFacts = { ...existing, at: existing?.at ?? new Date().toISOString(), shape, shapeFrom: "gguf" };

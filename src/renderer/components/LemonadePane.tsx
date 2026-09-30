@@ -35,8 +35,12 @@ import { CapabilityIcons, DownloadProgress, gb } from "./modelBits.tsx";
 import { useDownloads } from "./Downloads.tsx";
 import { displayName, fraction } from "../../core/downloads/download.ts";
 import { ModelOptionsEditor } from "./ModelOptionsEditor.tsx";
+import { RuntimeDefault } from "./RuntimeDefault.tsx";
 
 import { groupCatalog, repoOf, type CatalogEntry } from "../../core/runtime/catalog.ts";
+import {
+  AUTO, BACKEND_LABELS, changeNotice, defaultChoices, installedRuntimes, type EngineBackendState,
+} from "../../core/runtime/backendDefault.ts";
 import { CURATED_CHAT } from "../../core/runtime/curatedChat.ts";
 import { LEMONADE_VERSION } from "../../core/runtime/lemonade.ts";
 import { displayModelName, SOURCE_LABELS, type ForeignModel } from "../../core/runtime/foreign.ts";
@@ -55,16 +59,6 @@ import {
 import type { DownloadJob, EngineInfo, MachineInfo } from "../../core/runtime/systemInfo.ts";
 import type { EngineUpdate } from "../../core/runtime/engineReleases.ts";
 import type { PendingUpdate } from "../types.ts";
-
-const BACKEND_LABELS: Record<string, string> = {
-  cuda: "NVIDIA (CUDA)",
-  rocm: "AMD (ROCm)",
-  vulkan: "Vulkan",
-  metal: "Apple silicon (Metal)",
-  cpu: "Processor",
-  npu: "NPU",
-  system: "Already on this machine",
-};
 
 /** Engine ids are upstream's; these say what each one is for. */
 const ENGINE_LABELS: Record<string, string> = {
@@ -468,6 +462,17 @@ export function LemonadePane({
      closed by pressing the same button again. */
   const [confirming, setConfirming] = useState<string | undefined>();
 
+  /* The runtime each engine starts its models on. Read from the daemon whenever
+     the engines are on screen and never kept anywhere else -- the daemon's own
+     config is the only place the launch looks. The notice is the one line said
+     about the last change; it belongs to a single engine's card and goes when
+     the next change starts. */
+  const [runtimes, setRuntimes] = useState<Record<string, EngineBackendState>>({});
+  const [runtimeNotice, setRuntimeNotice] = useState<
+    { recipe: string; text: string; warn: boolean; reload?: string } | undefined
+  >();
+  const runtimeRead = useRef(0);
+
   const refresh = useCallback(async (): Promise<void> => {
     const [infoRes, listRes, catRes, verRes] = await Promise.all([
       window.myra.lemonadeInfo(),
@@ -519,6 +524,28 @@ export function LemonadePane({
   }, [refresh]);
 
   useEffect(() => { void start(); }, [start]);
+
+  /* Only the engines with a choice to make are asked about -- two runtimes or
+     more installed -- because each answer costs a read per model. */
+  const readRuntimes = useCallback(async (engines: EngineInfo[]): Promise<void> => {
+    const recipes = engines.filter((e) => installedRuntimes(e).length >= 2).map((e) => e.id);
+    const mine = ++runtimeRead.current;
+    if (!recipes.length) {
+      setRuntimes({});
+      return;
+    }
+    const res = await window.myra.backendDefaults(recipes);
+    /* The newest question's answer only: two reads overlap whenever a change is
+       followed by a refresh, and the older one arriving last would put the
+       dropdown back on a value that has just been changed. */
+    if (mine === runtimeRead.current && res.ok) setRuntimes(res.states);
+  }, []);
+
+  /* On `info`, which every refresh replaces -- so a change, a finished download
+     and a reload all re-read the counts without each having to remember to. */
+  useEffect(() => {
+    if (section === "engines" && info) void readRuntimes(info.engines);
+  }, [section, info, readRuntimes]);
 
   /* Only while something is transferring. The daemon owns the download now, so
      this is the only window onto it -- but polling an idle server for the life
@@ -602,6 +629,130 @@ export function LemonadePane({
     setPhase(undefined);
     setJobs([]);
     if (!res.ok) setError(res.error);
+    await refresh();
+  };
+
+  /* The words for a value of one engine's default, exactly as its dropdown
+     words it -- so a sentence about the change and the control it came from
+     cannot name the same runtime two ways. */
+  const defaultLabel = (engine: EngineInfo, state: EngineBackendState, value: string): string =>
+    defaultChoices({
+      installed: installedRuntimes(engine),
+      configured: state.configured,
+      resolved: state.resolved,
+    }).find((c) => c.value === value)?.label ?? value;
+
+  /**
+   * The loaded model worth offering to reload, when there is exactly one.
+   *
+   * A running model keeps the runtime it started on, so after a change the
+   * sentence says so; the button is offered only for the model the rest of the
+   * app calls loaded, because reloading goes through the same unload-then-load
+   * the Tune panel's own button uses, and that lets go of everything.
+   */
+  const reloadable = (reached: readonly string[]): string | undefined =>
+    reached.length === 1 && reached[0] === loaded ? reached[0] : undefined;
+
+  /**
+   * Change what an engine's models start on.
+   *
+   * Takes effect at once for every model that follows the default -- the daemon
+   * applies it live -- and reaches nothing that is already running, which the
+   * line afterwards says. A model with a runtime of its own is not touched; the
+   * reset below is how those are brought along.
+   */
+  const chooseRuntime = async (engine: EngineInfo, backend: string): Promise<void> => {
+    const before = runtimes[engine.id];
+    if (!before || backend === before.configured) return;
+    const now = defaultLabel(engine, before, backend);
+    setRuntimeNotice(undefined);
+    setBusy(true);
+    setError(undefined);
+    setPhase(`Setting the default runtime for ${engineName(engine.id).toLowerCase()} to ${now}`);
+    const res = await window.myra.setDefaultBackend(engine.id, backend);
+    setBusy(false);
+    setPhase(undefined);
+    if (!res.ok) {
+      setError(res.error ?? "The default runtime could not be changed.");
+    } else {
+      /* Shown now and confirmed by the read `refresh` starts: without it the
+         dropdown sat on the old value for as long as that read took, which
+         looked like the choice not having been taken. Automatic drops what it
+         resolved to, because that was the previous choice and not an answer. */
+      setRuntimes((all) => ({
+        ...all,
+        [engine.id]: { ...before, configured: backend, resolved: backend === AUTO ? undefined : backend },
+      }));
+      /* Only the models that follow the default are reached by it, running or not. */
+      const reached = before.loaded.filter((id) => !before.chose.some((c) => c.model === id));
+      const reload = reloadable(reached);
+      setRuntimeNotice({
+        recipe: engine.id,
+        warn: false,
+        text: changeNotice({
+          kind: "default", now, keepers: before.chose.length, loaded: reached.map(displayModelName),
+        }),
+        ...(reload ? { reload } : {}),
+      });
+    }
+    await refresh();
+  };
+
+  /**
+   * Hand every model of an engine back to the default.
+   *
+   * One press, and deliberately without a second: the only thing given up is a
+   * runtime choice that is one field on a Tune page to make again, the button
+   * names where the models end up, and the line above it names the runtimes
+   * being left. What a confirmation would add is a click between a person and
+   * the thing they opened the page to do.
+   */
+  const resetRuntimes = async (engine: EngineInfo): Promise<void> => {
+    const before = runtimes[engine.id];
+    if (!before?.chose.length) return;
+    const now = defaultLabel(engine, before, before.configured);
+    setRuntimeNotice(undefined);
+    setBusy(true);
+    setError(undefined);
+    setPhase(`Resetting ${before.chose.length === 1 ? "1 model" : `${before.chose.length} models`} to ${now}`);
+    const res = await window.myra.resetModelBackends(engine.id);
+    setBusy(false);
+    setPhase(undefined);
+    if (!res.ok) {
+      setError(res.error ?? "The models could not be reset.");
+    } else {
+      const failed = res.failed ?? [];
+      const missed = new Set(failed.map((f) => f.model));
+      /* Same reason as above: the reset line should not outlive the reset. */
+      setRuntimes((all) => ({
+        ...all,
+        [engine.id]: { ...before, chose: before.chose.filter((c) => missed.has(c.model)) },
+      }));
+      /* A loaded model changes runtime on its next load only if it had one of
+         its own that has now gone. One that already followed the default is
+         exactly where it was. */
+      const reached = before.loaded.filter(
+        (id) => before.chose.some((c) => c.model === id) && !missed.has(id),
+      );
+      const reload = reloadable(reached);
+      /* The first reason, not all of them: they are nearly always the same one,
+         and a list of forty identical lines is not more information. */
+      if (failed[0]) {
+        setError(
+          `Could not reset ${displayModelName(failed[0].model)}: ${failed[0].error}` +
+            (failed.length > 1 ? ` (and ${failed.length - 1} more)` : ""),
+        );
+      }
+      setRuntimeNotice({
+        recipe: engine.id,
+        warn: failed.length > 0,
+        text: changeNotice({
+          kind: "reset", now, cleared: res.cleared ?? 0, failed: failed.length,
+          loaded: reached.map(displayModelName),
+        }),
+        ...(reload ? { reload } : {}),
+      });
+    }
     await refresh();
   };
 
@@ -1006,6 +1157,35 @@ export function LemonadePane({
                         <span className="lem-chip dim">Nothing here runs on this machine</span>
                       ) : null}
                     </div>
+
+                    {/* Under the chips it is about: which of the runtimes just
+                        named do this engine's models start on. Renders nothing
+                        for an engine with one runtime, where there is no
+                        choice to make. */}
+                    <RuntimeDefault
+                      engine={engine}
+                      state={runtimes[engine.id]}
+                      busy={busy}
+                      notice={runtimeNotice?.recipe === engine.id ? runtimeNotice : undefined}
+                      reload={
+                        runtimeNotice?.recipe === engine.id && runtimeNotice.reload
+                          ? {
+                              name: displayModelName(runtimeNotice.reload),
+                              run: () => {
+                                const id = runtimeNotice.reload;
+                                if (!id) return;
+                                setRuntimeNotice(undefined);
+                                void run(`Reloading ${displayModelName(id)}`, async () => {
+                                  await window.myra.lemonadeUnload();
+                                  return window.myra.lemonadeLoad(id);
+                                });
+                              },
+                            }
+                          : undefined
+                      }
+                      onChoose={(backend) => void chooseRuntime(engine, backend)}
+                      onReset={() => void resetRuntimes(engine)}
+                    />
 
                     {/* One row per backend with a build waiting, either found
                         on GitHub or already chosen and not yet fetched. */}

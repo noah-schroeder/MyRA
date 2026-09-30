@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -20,7 +20,7 @@ import {
 } from "../src/main/runtime/modelFacts.ts";
 
 /** A minimal real GGUF file, built the same way test/runtimeGguf.test.ts does. */
-async function writeGguf(path: string, blockCount: number): Promise<void> {
+async function writeGguf(path: string, blockCount: number, mtpLayers?: number): Promise<void> {
   const u32 = (n: number): Buffer => {
     const b = Buffer.alloc(4);
     b.writeUInt32LE(n);
@@ -43,6 +43,7 @@ async function writeGguf(path: string, blockCount: number): Promise<void> {
     kvU32("testarch.embedding_length", 256),
     kvU32("testarch.attention.head_count", 8),
     kvU32("testarch.attention.head_count_kv", 8),
+    ...(mtpLayers !== undefined ? [kvU32("testarch.nextn_predict_layers", mtpLayers)] : []),
   ];
   const header = Buffer.concat([
     Buffer.from("GGUF"), u32(3), u64(0), u64(pairs.length), ...pairs,
@@ -60,6 +61,27 @@ test("learnShapeFromFile records the shape and marks where it came from", async 
   assert.equal(facts?.shapeFrom, "gguf");
   assert.equal(facts?.shape?.layers, 12);
   assert.equal((await factsFor("model-a"))?.shape?.layers, 12);
+  /* A file that names no MTP layers is recorded as having none, not left blank:
+     blank is what a record written before the field existed looks like. */
+  assert.equal(facts?.shape?.mtpLayers, 0);
+});
+
+test("a GGUF shape recorded before mtpLayers existed is read again, once", async () => {
+  const dir = process.env["MYRA_CONFIG_DIR"]!;
+  const factsFile = join(dir, "modelFacts.json");
+  const all = JSON.parse(await readFile(factsFile, "utf8").catch(() => "{}")) as Record<string, unknown>;
+  all["model-old"] = { at: "2026-01-01T00:00:00.000Z", shapeFrom: "gguf", shape: { layers: 12 } };
+  await writeFile(factsFile, JSON.stringify(all));
+
+  const path = join(dir, "gguf-old.gguf");
+  await writeGguf(path, 12, 1);
+  const facts = await learnShapeFromFile("model-old", path);
+  assert.equal(facts?.shape?.mtpLayers, 1, "an installed model must be able to learn it has MTP layers");
+
+  /* ...and then it is answered, so a model is not re-read at every load. */
+  const other = join(dir, "gguf-old-other.gguf");
+  await writeGguf(other, 12, 0);
+  assert.equal((await learnShapeFromFile("model-old", other))?.shape?.mtpLayers, 1);
 });
 
 test("a second GGUF read does nothing once one has already answered", async () => {

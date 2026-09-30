@@ -144,3 +144,82 @@ test("a quantised key cache is reported as what it costs the sizer", () => {
   assert.equal(kvBytesPerElement("--parallel 1"), undefined);
   assert.equal(kvBytesPerElement("--cache-type-k iq4_nl"), undefined);
 });
+
+/*
+ * Speculative decoding. llama.cpp renamed the whole family: the old
+ * `--draft-max` and friends are now refused outright, so a saved string that
+ * still carries one fails the launch -- measured against the bundled
+ * llama-server, `--draft-max 4` exits with "the argument has been removed. use
+ * --spec-draft-n-max". The panel is the only thing positioned to heal it.
+ */
+test("the speculative-decoding flags are written under their current names", () => {
+  const before = "--parallel 1";
+  const after = writeFlags(before, {
+    ...readFlags(before).values,
+    "--spec-type": "draft-mtp",
+    "--spec-draft-n-max": "5",
+  });
+  assert.equal(after, "--parallel 1 --spec-type draft-mtp --spec-draft-n-max 5");
+});
+
+test("every removed spelling is read, and written back as the one that still works", () => {
+  const cases: [string, string, string][] = [
+    ["--draft-max", "--spec-draft-n-max", "4"],
+    ["--draft-n", "--spec-draft-n-max", "4"],
+    ["--draft", "--spec-draft-n-max", "4"],
+    ["--draft-min", "--spec-draft-n-min", "2"],
+    ["--draft-n-min", "--spec-draft-n-min", "2"],
+    ["--draft-p-min", "--spec-draft-p-min", "0.5"],
+  ];
+  for (const [old, current, value] of cases) {
+    const before = `--parallel 1 ${old} ${value} --myra-nonsense 3`;
+    const { values, unknown } = readFlags(before);
+    assert.equal(values[current], value, `${old} was not read as ${current}`);
+    assert.deepEqual(unknown, ["--myra-nonsense", "3"], `${old} was left behind as an unknown token`);
+    assert.equal(
+      writeFlags(before, values),
+      `--parallel 1 ${current} ${value} --myra-nonsense 3`,
+      `${old} was not rewritten in place`,
+    );
+  }
+});
+
+test("the drafted-token count takes a whole number of tokens and nothing else", () => {
+  const n = spec("--spec-draft-n-max");
+  assert.equal(validFlag(n, "4"), undefined);
+  assert.match(validFlag(n, "0")!, /at least 1/);
+  assert.match(validFlag(n, "33")!, /at most 32/);
+  assert.match(validFlag(n, "2.5")!, /whole number/);
+  assert.match(validFlag(n, "4 --mlock")!, /cannot contain spaces/);
+  assert.equal(validFlag(spec("--spec-draft-p-min"), "0.75"), undefined);
+  assert.match(validFlag(spec("--spec-draft-p-min"), "1.5")!, /at most 1/);
+});
+
+test("speculative decoding offers only the type this panel can vouch for", () => {
+  assert.equal(validFlag(spec("--spec-type"), "draft-mtp"), undefined);
+  assert.equal(validFlag(spec("--spec-type"), "none"), undefined);
+  assert.match(validFlag(spec("--spec-type"), "draft-everything")!, /must be one of/);
+  /* What llama.cpp accepts beyond that is not refused on the way through: a
+     string somebody tuned by hand keeps it, exactly. */
+  const before = "--spec-type ngram-mod,draft-mtp --parallel 1";
+  assert.equal(writeFlags(before, readFlags(before).values), before);
+});
+
+test("the flags that depend on the model's own capabilities say which", () => {
+  assert.deepEqual(
+    LLAMA_FLAGS.filter((f) => f.gate).map((f) => f.flag),
+    ["--spec-type", "--spec-draft-n-max", "--spec-draft-n-min", "--spec-draft-p-min"],
+  );
+});
+
+test("no spelling belongs to two flags", () => {
+  /* BY_FLAG is built by `set`, so a shared alias would make one flag silently
+     stop being recognised rather than fail anywhere. */
+  const seen = new Map<string, string>();
+  for (const f of LLAMA_FLAGS) {
+    for (const name of [f.flag, ...(f.aliases ?? [])]) {
+      assert.equal(seen.get(name), undefined, `${name} is claimed by ${seen.get(name)} and ${f.flag}`);
+      seen.set(name, f.flag);
+    }
+  }
+});
