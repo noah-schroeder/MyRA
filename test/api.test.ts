@@ -206,6 +206,28 @@ test("token counts are read in all three dialects' spellings", () => {
   assert.deepEqual(usageFrom("garbage"), {});
 });
 
+test("usageFrom reads a streamed reply's final frame, which is most gateway traffic", () => {
+  // OpenAI-style SSE, cut mid-frame at the front the way the 8000-character tail is.
+  const sse =
+    'nt":"lo"}}]}\n\n' +
+    'data: {"choices":[{"delta":{"content":"!"}}],"usage":null}\n\n' +
+    'data: {"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":17}}\n\n' +
+    "data: [DONE]\n\n";
+  assert.deepEqual(usageFrom(sse), { prompt: 42, completion: 17 });
+  // Anthropic's message_delta carries the output count in the tail.
+  assert.deepEqual(
+    usageFrom('event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":9}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n'),
+    { completion: 9 },
+  );
+  // Ollama: one JSON object per line, the counts on the last.
+  assert.deepEqual(
+    usageFrom('{"message":{"content":"hi"},"done":false}\n{"done":true,"prompt_eval_count":5,"eval_count":2}\n'),
+    { prompt: 5, completion: 2 },
+  );
+  // A stream whose client never asked for usage has none to find.
+  assert.deepEqual(usageFrom('data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n'), {});
+});
+
 test("tokens per second measures generation, not time spent reading the prompt", () => {
   const speed = tokensPerSecond({
     ...rec("a"), completionTokens: 100, durationMs: 3000, firstTokenMs: 1000,
