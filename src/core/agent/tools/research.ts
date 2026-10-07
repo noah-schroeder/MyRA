@@ -25,6 +25,7 @@ import { asUntrusted } from "../../research/html.ts";
 import { DEFAULT_PAGE_CHARS, effectiveCategory, exactly, searches } from "../../research/config.ts";
 import type { ResearchMode } from "../../research/config.ts";
 import type { ToolDef } from "../registry.ts";
+import { noteUsageStage, withUsage } from "../../usage/context.ts";
 
 /**
  * The reach control in the GUI.
@@ -269,24 +270,30 @@ async function deepRun(
   doneThisTurn = { question: question.trim(), runId: run.id };
   host?.onRunCreated?.(run.id);
   const projectNotes = await host.projectNotes?.().catch(() => undefined);
+  const pipelineHost = host;
   try {
-    const result = await runPipeline({
+    /* Every model call the run makes is counted as this run's, stage by
+       stage, in whichever project holds the run when somebody looks. */
+    const result = await withUsage({ feature: "research", item: { kind: "run", ref: run.id } }, () => runPipeline({
       ...(projectNotes ? { projectNotes } : {}),
       question,
       run,
       // Forced, so "academic_research" means what it says regardless of what
       // the settings happened to hold when the user last touched them.
       category,
-      fallbackModel: host.fallbackModel,
-      ui: host.ui,
-      ...(host.knownModels ? { knownModels: host.knownModels } : {}),
+      fallbackModel: pipelineHost.fallbackModel,
+      ui: pipelineHost.ui,
+      ...(pipelineHost.knownModels ? { knownModels: pipelineHost.knownModels } : {}),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       onProgress: (note: string) => {
         ctx.onUpdate?.(note);
         host?.onProgress?.(note);
       },
-      onStage: (stage: string) => host?.onStage?.(stage),
-    });
+      onStage: (stage: string) => {
+        noteUsageStage(stage);
+        host?.onStage?.(stage);
+      },
+    }));
     /* A deep run numbers its report and bibliography together from [1]. Landing
        that in a conversation that has already cited things would put every one
        of its markers on somebody else's paper, so the whole document is moved

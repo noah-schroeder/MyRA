@@ -41,6 +41,8 @@ import { buildSystem, buildUser, type DraftRequest } from "../core/papers/prompt
 import { byNewest, idOfFile, paperFileName, parseRecord, summaryOf } from "../core/papers/store.ts";
 import { makeOwnDir, OWNER_ONLY_FILE } from "../core/paths.ts";
 import type { Jobs } from "./work.ts";
+import { memberUsage } from "./usage.ts";
+import { withUsage } from "../core/usage/context.ts";
 import { revealInside } from "./reveal.ts";
 
 export interface PaperDeps {
@@ -214,7 +216,8 @@ export function installPaperIpc(deps: PaperDeps): void {
 
     try {
       const resolved = await deps.llm();
-      const result = await runSubagent({
+      const usage = await memberUsage("paper", { kind: "paper", ref: paper });
+      const result = await withUsage(usage, () => runSubagent({
         /* The endpoint the resolver returned already names the model; this is
            only what the result reports it ran on. Empty means "do not
            override what is on the endpoint", which is exactly right here. */
@@ -228,7 +231,7 @@ export function installPaperIpc(deps: PaperDeps): void {
         onProgress: (note) => {
           if (note.startsWith("retrying")) jobs.restart();
         },
-      });
+      }));
       const text = result.text.trim();
       if (!text) {
         return {

@@ -355,6 +355,11 @@ const api = {
   apiRequests: () => ipcRenderer.invoke("myra:api-requests"),
   apiCancel: (id: string) => ipcRenderer.invoke("myra:api-cancel", id),
   apiClearLog: () => ipcRenderer.invoke("myra:api-clear-log"),
+  /* ---- usage ---- */
+  usageSummary: (query: unknown) => ipcRenderer.invoke("myra:usage-summary", query),
+  usageClear: () => ipcRenderer.invoke("myra:usage-clear"),
+  usageExport: (query: unknown) => ipcRenderer.invoke("myra:usage-export", query),
+  onUsageChanged: (cb: () => void) => on("myra:usage-changed", () => cb()),
   onApi: (cb: (state: unknown) => void) => {
     const fn = (_e: unknown, state: unknown): void => cb(state);
     ipcRenderer.on("myra:api", fn);

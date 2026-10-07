@@ -12,6 +12,11 @@
  * guarantee is code that cannot produce one. Nothing here is written to disk
  * either -- closing MyRA loses the log, which is the right trade for what is
  * only a debugging aid.
+ *
+ * The usage record (core/usage/) is the one thing that outlives it: when a
+ * request finishes, its key label, model, token counts and timings -- the same
+ * metadata as here, still never a word of the body -- are added to the counts
+ * Settings → Usage shows, unless recording is switched off there.
  */
 
 /** How far a request got. `open` means it is still streaming. */

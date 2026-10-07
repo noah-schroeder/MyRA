@@ -122,6 +122,8 @@ import { installPdfRenderer } from "./pdf.ts";
 import { RuntimeManager } from "./runtime/manager.ts";
 import { installRuntimeIpc } from "./runtime/ipc.ts";
 import { ApiManager } from "./api/manager.ts";
+import { createUsageRecorder, installUsageIpc } from "./usage.ts";
+import { withUsage } from "../core/usage/context.ts";
 import { installApiIpc } from "./api/ipc.ts";
 import { MyraTray, claimSingleInstance, reveal } from "./tray.ts";
 import { displayModelName } from "../core/runtime/foreign.ts";
@@ -185,8 +187,24 @@ const runtime = new RuntimeManager();
  * the runtime is its business -- in particular it has no way to reach
  * `installBackend` or `pullModel`, which is the whole point of the design.
  */
+/**
+ * The usage record, before the gateway that reports into it.
+ *
+ * `send` is reached through a closure because the window it talks to does not
+ * exist yet; nothing is sent until the first model call finishes.
+ */
+const usage = createUsageRecorder({
+  config,
+  send: (channel, payload) => send(channel, payload),
+  runtimeBaseUrl: () => {
+    const status = runtime.lemonade.status;
+    return status.state === "ready" ? status.baseUrl : undefined;
+  },
+});
+
 const api = new ApiManager({
   upstream: () => runtime.chatEndpoint(),
+  onSettled: (record, upstream) => usage.recordApi(record, upstream),
   models: async () => {
     const loaded = runtime.lemonade.status.health?.modelLoaded;
     /* Only what is downloaded. Offering the whole 228-entry catalogue would
@@ -826,7 +844,16 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       }
     }
 
-    const result = await runTurn({
+    /* Counted as this conversation's, in this project, for Settings → Usage --
+       every model call the turn makes inherits it, research runs and drafts
+       included, unless they say they are something more specific. */
+    const signal = inFlight.signal;
+    const chatUsage = {
+      feature: "chat" as const,
+      item: { kind: "chat", ref: conversation.id },
+      ...(project ? { project: { id: project.id, name: project.name } } : {}),
+    };
+    const result = await withUsage(chatUsage, () => runTurn({
       registry,
       endpoint,
       messages: conversation.messages_,
@@ -860,7 +887,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
       ...(apiKey ? { apiKey } : {}),
       ...(Object.keys(sampling ?? {}).length ? { sampling: sampling! } : {}),
       ...(extra ? { extra } : {}),
-      signal: inFlight.signal,
+      signal,
       approve,
       onEvent: emit,
       ...(limit ? { contextLimit: limit } : {}),
@@ -874,7 +901,7 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
        * configure for a step the user never asked to think about.
        */
       summarise: async (messages) => {
-        const { text } = await runSubagent({
+        const { text } = await withUsage({ feature: "compaction" }, () => runSubagent({
           endpoint,
           ...(apiKey ? { apiKey } : {}),
           /* `endpoint.model`, not `settings.llm.model`: for a model MyRA is
@@ -886,10 +913,10 @@ async function handleSend(text: string, attachments: PendingAttachment[] = []): 
           system: SUMMARY_SYSTEM,
           prompt: summaryPrompt(messages),
           signal: inFlight!.signal,
-        });
+        }));
         return text;
       },
-    });
+    }));
     conversation.messages_.push(...result.messages);
     conversation.contextTokens = result.contextTokens;
     if (result.compaction) conversation.compaction = result.compaction;
@@ -3050,6 +3077,7 @@ async function main(): Promise<void> {
      (see core/tasks/task.ts's header) -- main/tasks.ts files new tasks under
      the active project itself, on the same field every other kind reads. */
   installTaskIpc({ config, send });
+  installUsageIpc({ config, send, usage });
   /* The fallback reminder heartbeat. Started here rather than lazily on first
      use, so a task with a reminder set before the app was last closed is not
      missed on the very session that would have caught it. */
@@ -3351,6 +3379,8 @@ app.on("before-quit", (event) => {
       /* The listening socket must not outlive the window either -- and the key
          usage counters are only flushed on stop. */
       await api.stop();
+      // The last second of merged API usage, which is held until then.
+      await usage.flush();
     })(),
     new Promise<void>((resolve) => { ceiling = setTimeout(resolve, QUIT_TIMEOUT_MS); }),
   ])

@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 
 import { baseUrl, refuseReason, type ApiConfig } from "../../core/api/config.ts";
 import { bearerFrom, findKey, type ApiKey } from "../../core/api/keys.ts";
-import { modelFrom, usageFrom, RequestLog } from "../../core/api/log.ts";
+import { modelFrom, usageFrom, RequestLog, type RequestRecord } from "../../core/api/log.ts";
 import { routeFor, type Route } from "../../core/api/routes.ts";
 
 /** Where to forward to, resolved per request so a restart is picked up. */
@@ -39,6 +39,12 @@ export interface GatewayOptions {
   log: RequestLog;
   /** Persist a key's usage counters. Called at most once per request. */
   onKeyUsed?: (keyId: string) => void;
+  /**
+   * A forwarded request has finished, however it ended -- for the usage
+   * record. The record is metadata only, the same as the log's; `upstream` is
+   * where it was sent, so the record can say which runtime answered.
+   */
+  onSettled?: (record: RequestRecord, upstream: string) => void;
 }
 
 export interface GatewayStatus {
@@ -370,7 +376,7 @@ export class ApiGateway {
     const controller = new AbortController();
     this.#inflight.set(id, controller);
 
-    this.#opts.log.start({
+    const opened: RequestRecord = {
       id,
       startedAt: new Date(startedAt).toISOString(),
       keyLabel: key?.label ?? "—",
@@ -380,11 +386,20 @@ export class ApiGateway {
       dialect: route.dialect,
       ...(wanted ? { model: wanted } : {}),
       state: "open",
-    });
+    };
+    this.#opts.log.start({ ...opened });
 
     const finish = (patch: Parameters<RequestLog["update"]>[1]): void => {
       this.#inflight.delete(id);
-      this.#opts.log.update(id, { durationMs: Date.now() - startedAt, ...patch });
+      const settled = { durationMs: Date.now() - startedAt, ...patch };
+      this.#opts.log.update(id, settled);
+      /* From this request's own copy, not the log's: the ring holds 500, and
+         a request that outlived that many newer ones must still be counted. */
+      try {
+        this.#opts.onSettled?.({ ...opened, ...settled }, upstream.baseUrl);
+      } catch {
+        // Bookkeeping; it must never break the response it is counting.
+      }
     };
 
     // The client going away must abort the work, not merely stop reading it.

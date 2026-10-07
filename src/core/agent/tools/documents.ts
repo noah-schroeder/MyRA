@@ -19,6 +19,7 @@ import {
   DocsError, convert, documentsDir, exists, readAsText, writeText,
 } from "../../documents/office.ts";
 import type { ToolDef } from "../registry.ts";
+import { withUsage } from "../../usage/context.ts";
 import { asUntrusted } from "../../research/html.ts";
 import { readResearchConfig, readsDocuments } from "../../research/config.ts";
 import { runDraft, type DraftUi } from "../../documents/draft.ts";
@@ -391,22 +392,23 @@ export const draftDocumentTool: ToolDef = {
       throw new DocsError(`Unknown format. Choose one of: ${FORMAT_NAMES.join(", ")}`);
     }
 
-    const result = await runDraft({
+    // Counted as a draft, inside whatever conversation and project asked for it.
+    const result = await withUsage({ feature: "document" }, () => runDraft({
       request,
-      model: draftHost.model(),
+      model: draftHost!.model(),
       // Threaded through, not merely validated: the format reaches the outline,
       // which names the file and decides whether the last save runs a
       // conversion. Checked above and then dropped, "write it as a docx" would
       // have produced a .md and said nothing about it.
       format: formatName,
-      ui: draftHost.ui,
+      ui: draftHost!.ui,
       save: (markdown, opts) => saveDraft(opts.outline, markdown, opts.final),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       onProgress: (note) => {
         ctx.onUpdate?.(note);
         draftHost?.onProgress?.(note);
       },
-    });
+    }));
 
     const rel = result.path.slice(documentsDir().length + 1);
     /*

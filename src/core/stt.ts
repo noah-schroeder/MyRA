@@ -14,6 +14,7 @@
  */
 
 import type { EndpointSettings } from "./config.ts";
+import { reportingUsage } from "./usage/context.ts";
 
 export class TranscriptionError extends Error {
   override readonly name = "TranscriptionError";
@@ -77,6 +78,39 @@ async function post(opts: TranscribeOptions, format: "json" | "verbose_json"): P
       "No transcription model is set up. Choose one in Settings → Audio.",
     );
   }
+  /* Counted in seconds of audio, read off the WAV header MyRA wrote itself,
+     rather than the duration the server reports -- which `json` (dictation's
+     format) does not carry at all. */
+  const seconds = wavSeconds(audio);
+  return reportingUsage(
+    {
+      kind: "transcription",
+      baseUrl: endpoint.baseUrl,
+      model: endpoint.model || "whisper-1",
+      ...(seconds !== undefined ? { units: seconds } : {}),
+    },
+    opts.signal,
+    () => postOnce(opts, format),
+  );
+}
+
+/**
+ * How long a WAV is, from its own header, or nothing for anything else.
+ *
+ * Every recording MyRA sends is a canonical 44-byte-header PCM WAV it wrote
+ * itself (capture.ts, the dictation encoder), so the byte rate at offset 28
+ * and the bytes after the header are the whole answer.
+ */
+export function wavSeconds(audio: Buffer): number | undefined {
+  if (audio.length < 44) return undefined;
+  if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") return undefined;
+  const byteRate = audio.readUInt32LE(28);
+  if (!byteRate) return undefined;
+  return Math.round(((audio.length - 44) / byteRate) * 10) / 10;
+}
+
+async function postOnce(opts: TranscribeOptions, format: "json" | "verbose_json"): Promise<string> {
+  const { endpoint, audio } = opts;
 
   const form = new FormData();
   form.append(
