@@ -299,3 +299,16 @@ test("chartSizeFor passes through a reasonable size unchanged, only rounded", ()
   assert.equal(size.width, 500);
   assert.equal(size.height, 381);
 });
+
+test("a y-tick format changes the labels and the margin they need, and nothing else", () => {
+  const data: ChartData = {
+    kind: "bar", categories: ["a", "b"], stacked: true,
+    series: [{ name: "s", points: [{ x: 0, y: 1_200_000 }, { x: 1, y: 300_000 }] }],
+  };
+  const plain = layoutChart(data);
+  const short = layoutChart(data, { yTickFormat: (v) => `${v / 1_000_000}M` });
+  assert.deepEqual(short.yTicks.map((t) => t.pos), plain.yTicks.map((t) => t.pos));
+  assert.ok(short.yTicks.every((t) => t.label.endsWith("M")));
+  assert.ok(short.plot.x < plain.plot.x, "shorter labels leave the plot more room");
+  assert.deepEqual(layoutChart(data, {}), plain, "omitted, the layout is exactly what it was");
+});
