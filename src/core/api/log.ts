@@ -12,6 +12,11 @@
  * guarantee is code that cannot produce one. Nothing here is written to disk
  * either -- closing MyRA loses the log, which is the right trade for what is
  * only a debugging aid.
+ *
+ * The usage record (core/usage/) is the one thing that outlives it: when a
+ * request finishes, its key label, model, token counts and timings -- the same
+ * metadata as here, still never a word of the body -- are added to the counts
+ * Settings → Usage shows, unless recording is switched off there.
  */
 
 /** How far a request got. `open` means it is still streaming. */
@@ -117,28 +122,56 @@ export function modelFrom(body: string | undefined): string | undefined {
   }
 }
 
-/** Token counts from a completed response, for the rows that show them. */
+/** The counts in one parsed response body or stream frame, in any of the three dialects. */
+function countsIn(parsed: unknown): { prompt?: number; completion?: number } {
+  const p = parsed as {
+    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; input_tokens?: unknown; output_tokens?: unknown };
+    prompt_eval_count?: unknown;
+    eval_count?: unknown;
+  } | null;
+  if (!p || typeof p !== "object") return {};
+  /* Three dialects, three spellings, all reaching this one function because
+     the gateway does not care which one a client speaks. OpenAI and
+     Anthropic both nest theirs under `usage`; Ollama puts its counts at the
+     top level with different names again. */
+  const u = p.usage;
+  const prompt = u?.prompt_tokens ?? u?.input_tokens ?? p.prompt_eval_count;
+  const completion = u?.completion_tokens ?? u?.output_tokens ?? p.eval_count;
+  return {
+    ...(typeof prompt === "number" ? { prompt } : {}),
+    ...(typeof completion === "number" ? { completion } : {}),
+  };
+}
+
+/**
+ * Token counts from a completed response, for the rows that show them.
+ *
+ * `body` is the last few kilobytes of what was relayed. A plain JSON reply is
+ * read whole; a stream is not JSON at all -- server-sent `data:` frames for
+ * OpenAI and Anthropic, one JSON object per line for Ollama -- so it is read
+ * from the end, frame by frame, until one carries counts. Reading only the
+ * whole-body case meant every streamed request through the gateway, which is
+ * most of them, was recorded with no tokens.
+ */
 export function usageFrom(body: string): { prompt?: number; completion?: number } {
   try {
-    const parsed = JSON.parse(body) as {
-      usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number };
-      prompt_eval_count?: number;
-      eval_count?: number;
-    };
-    /* Three dialects, three spellings, all reaching this one function because
-       the gateway does not care which one a client speaks. OpenAI and
-       Anthropic both nest theirs under `usage`; Ollama puts its counts at the
-       top level with different names again. */
-    const u = parsed.usage;
-    const prompt = u?.prompt_tokens ?? u?.input_tokens ?? parsed.prompt_eval_count;
-    const completion = u?.completion_tokens ?? u?.output_tokens ?? parsed.eval_count;
-    return {
-      ...(typeof prompt === "number" ? { prompt } : {}),
-      ...(typeof completion === "number" ? { completion } : {}),
-    };
+    return countsIn(JSON.parse(body));
   } catch {
-    return {};
+    // Not one JSON document; read it as a stream below.
   }
+  const lines = body.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let line = lines[i]!.trim();
+    if (line.startsWith("data:")) line = line.slice(5).trim();
+    if (!line.startsWith("{")) continue;
+    try {
+      const found = countsIn(JSON.parse(line));
+      if (found.prompt !== undefined || found.completion !== undefined) return found;
+    } catch {
+      // The first line of a cut tail is usually half a frame.
+    }
+  }
+  return {};
 }
 
 /** Tokens per second, when there is enough to compute it honestly. */

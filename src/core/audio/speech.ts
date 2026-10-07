@@ -26,6 +26,7 @@ import {
   DEFAULT_PCM, isRawPcm, PCM_FORMAT, rateFrom, repairWav, wavFromPcm, WAV_FORMAT,
 } from "./wav.ts";
 import type { EndpointSettings } from "../config.ts";
+import { reportingUsage } from "../usage/context.ts";
 
 export class SpeechError extends Error {
   override readonly name = "SpeechError";
@@ -64,7 +65,17 @@ export function speechUrl(baseUrl: string): string {
   return /\/v\d+$/.test(base) ? `${base}/audio/speech` : `${base}/v1/audio/speech`;
 }
 
+/** One reply spoken aloud, counted for the usage dashboard in characters. */
 export async function speak(opts: SpeakOptions): Promise<Spoken> {
+  if (!opts.endpoint.baseUrl || !opts.endpoint.model || !opts.text.trim()) return speakOnce(opts);
+  return reportingUsage(
+    { kind: "speech", baseUrl: opts.endpoint.baseUrl, model: opts.endpoint.model, units: opts.text.length },
+    opts.signal,
+    () => speakOnce(opts),
+  );
+}
+
+async function speakOnce(opts: SpeakOptions): Promise<Spoken> {
   const { endpoint, text } = opts;
   if (!endpoint.baseUrl) {
     throw new SpeechError("No voice model is set up. Choose one in Settings → Audio.");

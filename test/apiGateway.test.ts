@@ -15,7 +15,7 @@ import { after, test } from "node:test";
 
 import { API_DEFAULTS, type ApiConfig } from "../src/core/api/config.ts";
 import { mintKey } from "../src/core/api/keys.ts";
-import { RequestLog } from "../src/core/api/log.ts";
+import { RequestLog, type RequestRecord } from "../src/core/api/log.ts";
 import { ApiGateway, passThroughHeaders } from "../src/main/api/server.ts";
 
 const minted = mintKey("test");
@@ -60,6 +60,7 @@ function makeGateway(opts: {
   config?: () => ApiConfig;
   upstream?: () => { baseUrl: string; apiKey: string } | undefined;
   models?: () => Promise<{ id: string; loaded: boolean }[]>;
+  onSettled?: (record: RequestRecord, upstream: string) => void;
 }) {
   return new ApiGateway({
     config: opts.config ?? (() => configWith({ port: opts.port })),
@@ -67,6 +68,7 @@ function makeGateway(opts: {
     models: opts.models ?? (async () => []),
     loadModel: async () => undefined,
     log: new RequestLog(),
+    ...(opts.onSettled ? { onSettled: opts.onSettled } : {}),
   });
 }
 
@@ -198,4 +200,42 @@ test("only the three safe headers cross, and no hop-by-hop one", () => {
   assert.equal(out["transfer-encoding"], undefined);
   assert.equal(out["set-cookie"], undefined);
   assert.equal(out["access-control-allow-origin"], undefined);
+});
+
+test("a finished streamed request is handed on for the usage record, counts and key label included", async () => {
+  const upstream: Server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n');
+    res.write('data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4}}\n\n');
+    res.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  open.push(() => new Promise<void>((resolve) => upstream.close(() => resolve())));
+  const upstreamUrl = `http://127.0.0.1:${String((upstream.address() as { port: number }).port)}/api/v1`;
+
+  const settled: { record: RequestRecord; upstream: string }[] = [];
+  const gateway = await gatewayWith({
+    upstream: () => ({ baseUrl: upstreamUrl, apiKey: "lemonade" }),
+    models: async () => [{ id: "qwen", loaded: true }],
+    onSettled: (record, up) => settled.push({ record, upstream: up }),
+  });
+  open.push(() => gateway.stop());
+  const status = await gateway.start();
+
+  const res = await fetch(`http://127.0.0.1:${String(status.port)}/v1/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${minted.secret}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: "qwen", stream: true, messages: [{ role: "user", content: "hi" }] }),
+  });
+  const body = await res.text();
+
+  assert.equal(res.status, 200, body);
+  assert.equal(settled.length, 1);
+  const [{ record, upstream: up }] = settled as [{ record: RequestRecord; upstream: string }];
+  assert.equal(up, upstreamUrl);
+  assert.equal(record.state, "done");
+  assert.equal(record.model, "qwen");
+  assert.equal(record.keyLabel, "test");
+  assert.equal(record.promptTokens, 11);
+  assert.equal(record.completionTokens, 4);
 });

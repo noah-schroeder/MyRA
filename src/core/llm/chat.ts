@@ -16,6 +16,7 @@ import { splitThinking, type DeltaKind } from "./thinking.ts";
 import type { MessageStats } from "./speed.ts";
 import { expandImages, type Attachment, type ContentPart } from "./attach.ts";
 import type { TurnProgress } from "./progress.ts";
+import { reportUsage, type UsageEvent } from "../usage/context.ts";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -301,6 +302,73 @@ function usageFrom(raw: unknown): ChatUsage {
   return { input, output, total: u?.total_tokens ?? input + output };
 }
 
+/**
+ * What the usage record needs from one call, beside what the caller gets.
+ *
+ * Kept off `ChatResult` because it answers a different question: `usage`
+ * there is zero when nothing was reported, which is right for a context meter
+ * that has to show a number, and wrong for a dashboard that must not count a
+ * silent server as an idle one. `usage` here is set only when a usage block
+ * actually arrived.
+ */
+interface Meter {
+  usage?: ChatUsage;
+  cached?: number;
+  reasoning?: number;
+  timing?: ChatTiming;
+}
+
+/**
+ * Input tokens the server answered from its cache, when it says.
+ *
+ * Two spellings: OpenAI's `prompt_tokens_details.cached_tokens`, which hosted
+ * APIs and newer llama.cpp builds put in `usage`, and llama.cpp's own
+ * `timings.cache_n`. Part of the input count, never added to it.
+ */
+function cachedTokens(usage: unknown, timings: unknown): number | undefined {
+  const details = (usage as { prompt_tokens_details?: { cached_tokens?: unknown } } | undefined)
+    ?.prompt_tokens_details;
+  const stated = details?.cached_tokens;
+  if (typeof stated === "number" && Number.isFinite(stated) && stated >= 0) return stated;
+  const n = (timings as { cache_n?: unknown } | undefined)?.cache_n;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/** Note a usage block on the meter, if this frame or body carried one. */
+function meterUsage(meter: Meter, usage: unknown, timings: unknown): void {
+  if (usage && typeof usage === "object") {
+    meter.usage = usageFrom(usage);
+    const reasoning = reasoningTokens(usage);
+    if (reasoning) meter.reasoning = reasoning;
+  }
+  const cached = cachedTokens(usage, timings);
+  if (cached !== undefined) meter.cached = cached;
+}
+
+function usageEvent(
+  endpoint: EndpointSettings,
+  outcome: UsageEvent["outcome"],
+  started: number,
+  meter: Meter,
+): UsageEvent {
+  const t = meter.timing;
+  /* Generation time on the same terms speed.ts uses: the server's own figure,
+     or everything after the first token, never the prompt's share of it. */
+  const genMs = t ? (t.predictedMs ?? (t.ttftMs !== undefined ? t.totalMs - t.ttftMs : undefined)) : undefined;
+  return {
+    kind: "text",
+    baseUrl: endpoint.baseUrl,
+    model: endpoint.model ?? "",
+    outcome,
+    ms: Date.now() - started,
+    ...(t?.ttftMs !== undefined ? { ttftMs: t.ttftMs } : {}),
+    ...(genMs !== undefined && genMs > 0 ? { genMs } : {}),
+    ...(meter.usage ? { input: meter.usage.input, output: meter.usage.output } : {}),
+    ...(meter.cached !== undefined ? { cached: meter.cached } : {}),
+    ...(meter.reasoning ? { reasoning: meter.reasoning } : {}),
+  };
+}
+
 /** A finite, positive number, or nothing -- never a zero or a NaN standing in for one. */
 function positiveMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -323,12 +391,35 @@ function timingFrom(raw: unknown): { promptMs?: number; predictedMs?: number } |
     : undefined;
 }
 
-/** One chat completion. Streams when `onDelta` is supplied, otherwise not. */
+/**
+ * One chat completion. Streams when `onDelta` is supplied, otherwise not.
+ *
+ * Every call that reaches the network is counted for the usage dashboard here,
+ * however it ends -- this is the one function every chat turn, research stage,
+ * review, draft and meeting note passes through, so counting it here rather
+ * than at each caller is what makes a new caller impossible to forget. Who the
+ * call was for is read from the ambient tags (usage/context.ts), never passed.
+ */
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
-  const { endpoint } = opts;
-  if (!endpoint.baseUrl) {
+  if (!opts.endpoint.baseUrl) {
     throw new LlmError("No model is configured. Add one in Settings → Providers, or load a local one from Models.");
   }
+  const started = Date.now();
+  const meter: Meter = {};
+  try {
+    const result = await chatOnce(opts, meter);
+    reportUsage(usageEvent(opts.endpoint, "ok", started, meter));
+    return result;
+  } catch (err) {
+    /* Counted too, with whatever the server reported before it failed: an
+       empty reply or a dropped stream may still have been billed. */
+    reportUsage(usageEvent(opts.endpoint, opts.signal?.aborted ? "cancelled" : "error", started, meter));
+    throw err;
+  }
+}
+
+async function chatOnce(opts: ChatOptions, meter: Meter): Promise<ChatResult> {
+  const { endpoint } = opts;
 
   const timeoutMs = endpoint.timeoutMs || 120_000;
   const deadline = idleDeadline(timeoutMs);
@@ -409,8 +500,8 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   let result: ChatResult;
   try {
     result = streaming
-      ? await readStream(res, opts.onDelta!, deadline.touch, opts.onProgress)
-      : await readWhole(res);
+      ? await readStream(res, opts.onDelta!, deadline.touch, opts.onProgress, meter)
+      : await readWhole(res, meter);
   } catch (err) {
     // The user pressing stop is not a failure to describe; let it through as it is.
     if (opts.signal?.aborted) throw err;
@@ -472,7 +563,7 @@ function idleDeadline(ms: number): { signal: AbortSignal; touch: () => void; cle
   };
 }
 
-async function readWhole(res: Response): Promise<ChatResult> {
+async function readWhole(res: Response, meter: Meter = {}): Promise<ChatResult> {
   const body = (await res.json().catch(() => undefined)) as
     | {
         choices?: {
@@ -485,9 +576,11 @@ async function readWhole(res: Response): Promise<ChatResult> {
           finish_reason?: string;
         }[];
         usage?: unknown;
+        timings?: unknown;
         error?: { message?: string };
       }
     | undefined;
+  meterUsage(meter, body?.usage, body?.timings);
   if (body?.error?.message) throw new LlmError(body.error.message);
   const choice = body?.choices?.[0];
   const content = choice?.message?.content;
@@ -586,6 +679,7 @@ async function readStream(
   onProgress: () => void = () => {},
   /** How far along the call is, for the window. See `ChatOptions.onProgress`. */
   report?: (progress: TurnProgress) => void,
+  meter: Meter = {},
 ): Promise<ChatResult> {
   if (!res.body) throw new LlmError("The LLM endpoint returned no response body.");
   const reader = res.body.getReader();
@@ -683,6 +777,7 @@ async function readStream(
           usage = usageFrom(parsed.usage);
           hidden = reasoningTokens(parsed.usage);
         }
+        if (parsed.usage || parsed.timings) meterUsage(meter, parsed.usage, parsed.timings);
         if (parsed.timings) {
           const t = timingFrom(parsed.timings);
           if (t?.promptMs !== undefined) promptMs = t.promptMs;
@@ -739,6 +834,7 @@ async function readStream(
     ...(predictedMs !== undefined ? { predictedMs } : {}),
     measured: promptMs !== undefined || predictedMs !== undefined,
   };
+  meter.timing = timing;
 
   return {
     text,

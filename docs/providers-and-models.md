@@ -93,3 +93,34 @@ Anthropic, or Ollama-shaped endpoint.
 
 It's off by default, refuses to start without a key, and only listens on
 loopback unless you explicitly turn on **Also serve on the local network**.
+
+## Seeing what you've used
+
+**Settings → Usage** shows how much MyRA has asked of its models over any
+date range: input and output tokens, requests, generation speed and, for a
+hosted model, an estimated cost. You can break it down by model, project,
+feature (chat, deep research, peer review, the paper drafter, meetings…),
+where it ran (this computer or a hosted provider), who asked (MyRA itself or
+an app using the local API, key by key), and a deep-research run's stages.
+Click a row to narrow everything to it; **Export CSV** writes one row per call
+for a spreadsheet. Calls from another app that arrive in a rapid burst are
+merged into one row a second, with a column saying how many.
+
+A few things the page is careful about:
+
+- **Costs are the provider's own prices.** Where a provider publishes a price
+  for a model (OpenRouter does), MyRA keeps the price it reported at the time
+  of each call. MyRA keeps no price list of its own, so a hosted model with no
+  published price is left out of the estimate, and the page says how many
+  calls that was.
+- **"Not reported" is not zero.** Some servers do not send token counts, for
+  example an API client that streams without asking for them. Those calls are
+  counted as requests and named on the page instead of being added in as zero.
+- **A project's usage follows its work.** A conversation filed into a project
+  afterwards brings its usage with it.
+- **Counts only, kept here.** Nothing of what was said is recorded, and nothing
+  is sent anywhere. **Record usage** at the bottom of the page turns recording
+  off, and **Clear usage log…** deletes every record so you can start fresh.
+
+Counting starts from the version that added this page. Older conversations
+are not counted back.

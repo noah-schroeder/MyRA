@@ -15,6 +15,7 @@
 
 import { ConfigStore, type Settings } from "../config.ts";
 import { FETCH_TIMEOUT_MS } from "./config.ts";
+import { reportUsage } from "../usage/context.ts";
 
 /** Requests are sized to keep one batch comfortably inside any server's limits. */
 const BATCH = 64;
@@ -56,13 +57,47 @@ export async function embeddingEndpoint(): Promise<(Endpoint & { model: string }
 
 interface EmbeddingResponse {
   data?: { index?: number; embedding?: number[] }[];
+  usage?: { prompt_tokens?: unknown };
   error?: { message?: string };
 }
 
+/**
+ * One batch, counted for the usage dashboard however it ends -- a research
+ * run's ranking pass is hundreds of these, and on a hosted embeddings model
+ * they are billed like any other tokens.
+ */
 async function embedBatch(
   texts: string[],
   model: string,
   endpoint: Endpoint,
+  signal?: AbortSignal,
+): Promise<number[][]> {
+  const started = Date.now();
+  const meter: { input?: number } = {};
+  const report = (outcome: "ok" | "error" | "cancelled"): void =>
+    reportUsage({
+      kind: "embeddings",
+      baseUrl: endpoint.baseUrl,
+      model,
+      outcome,
+      ms: Date.now() - started,
+      ...(meter.input !== undefined ? { input: meter.input, output: 0 } : {}),
+    });
+  try {
+    const vectors = await embedBatchOnce(texts, model, endpoint, meter, signal);
+    report("ok");
+    return vectors;
+  } catch (err) {
+    report(signal?.aborted ? "cancelled" : "error");
+    throw err;
+  }
+}
+
+async function embedBatchOnce(
+  texts: string[],
+  model: string,
+  endpoint: Endpoint,
+  meter: { input?: number },
   signal?: AbortSignal,
 ): Promise<number[][]> {
   let lastError = "";
@@ -99,6 +134,8 @@ async function embedBatch(
     }
 
     const body = (await res.json()) as EmbeddingResponse;
+    const tokens = body.usage?.prompt_tokens;
+    if (typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0) meter.input = tokens;
     const rows = body.data ?? [];
     if (rows.length !== texts.length) {
       throw new Error(`embeddings returned ${rows.length} vectors for ${texts.length} inputs`);

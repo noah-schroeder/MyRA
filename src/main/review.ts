@@ -36,6 +36,8 @@ import {
 } from "../core/review/record.ts";
 import { idOfFile, parseRecord, reviewFileName } from "../core/review/store.ts";
 import type { Jobs } from "./work.ts";
+import { memberUsage } from "./usage.ts";
+import { withUsage } from "../core/usage/context.ts";
 
 export interface ReviewDeps {
   config: ConfigStore;
@@ -331,10 +333,11 @@ export function installReviewIpc(deps: ReviewDeps): void {
       deps.onCreated?.(record.id);
       await publish();
 
+      const usage = await memberUsage("review", { kind: "review", ref: record.id }, deps.config.current.activeProject);
       for (const [index, request] of requests.entries()) {
         jobs.step({ step: index, label: request.reviewerLabel });
 
-        const result = await runSubagent({
+        const result = await withUsage(usage, () => runSubagent({
           model: resolved.endpoint.model ?? "",
           endpoint: resolved.endpoint,
           ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
@@ -348,7 +351,7 @@ export function installReviewIpc(deps: ReviewDeps): void {
           onProgress: (note) => {
             if (note.startsWith("retrying")) jobs.restart();
           },
-        });
+        }));
 
         const text = result.text.trim();
         /* One silent reviewer does not lose the other two. The panel is filed

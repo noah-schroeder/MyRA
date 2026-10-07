@@ -29,6 +29,7 @@ named.
 | Hugging Face token | not sent with an ordinary download | sent only for a gated repository, unless you chose "Always send my token" |
 | Engine update checks | — | only when you press the button in Settings → Runtime |
 | Files, transcripts, meeting audio, history | always | never |
+| Usage counts (Settings → Usage) | always — counts only, never what was said | never |
 
 ## In full
 
@@ -92,6 +93,13 @@ named.
   installing one is a separate press.
 - Everything else — files, transcripts, meeting audio, conversation history
   — never crosses the network at all.
+- **Settings → Usage keeps counts, not content.** For each model call: when,
+  which model and provider, whether it ran on this computer, which project and
+  feature, which API key if another app asked, token counts and timings — never
+  a word of the prompt or the reply. It is written owner-only under
+  `~/.config/myra/usage/`, one file per month, read only by that page, and never
+  sent anywhere. The page has a switch to stop recording and a **Clear usage
+  log…** button that deletes every record.
 
 ## No telemetry, no auto-updater
 

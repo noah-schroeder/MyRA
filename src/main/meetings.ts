@@ -35,6 +35,8 @@ import { ownerOf } from "../core/projects/project.ts";
 import { readAll as readAllProjects } from "./projectStore.ts";
 import { hasMemory } from "./memoryStore.ts";
 import { meetingToNotes } from "./projectMemory.ts";
+import { memberUsage } from "./usage.ts";
+import { withUsage } from "../core/usage/context.ts";
 
 export interface MeetingDeps {
   config: ConfigStore;
@@ -213,14 +215,16 @@ export function installMeetingIpc(deps: MeetingDeps): void {
     publish({ phase: "processing", workingOn: dir, error: undefined });
     running = new AbortController();
     try {
-      const { lines, transcript } = await transcribeMeeting({
+      const signal = running.signal;
+      const usage = await memberUsage("meeting", { kind: "meeting", ref: basename(dir) });
+      const { lines, transcript } = await withUsage(usage, async () => transcribeMeeting({
         record,
         context: await contextFor(record, dir),
         transcription: forBatch(endpoint),
         ...(apiKey ? { transcriptionKey: apiKey } : {}),
-        signal: running.signal,
+        signal,
         onProgress: (progress) => publish({ progress }),
-      });
+      }));
       await writeTranscript(dir, { lines, text: transcript });
       // The readable copy lands beside the recording whatever else happens to
       // it, so a transcript is never trapped inside a JSON file.
@@ -273,7 +277,9 @@ export function installMeetingIpc(deps: MeetingDeps): void {
       const canonical = (rel: string): string =>
         vault ? rel : rel.includes("transcript") ? TRANSCRIPT_MD : NOTES_MD;
 
-      const result = await noteMeeting({
+      const signal = running.signal;
+      const usage = await memberUsage("meeting", { kind: "meeting", ref: basename(dir) });
+      const result = await withUsage(usage, async () => noteMeeting({
         record,
         context: await contextFor(record, dir),
         llm: forBatch(llm),
@@ -283,9 +289,9 @@ export function installMeetingIpc(deps: MeetingDeps): void {
         deleteAudio: settings.deleteRawAudioAfterTranscription,
         ...(vault ? { reportDir: settings.meetingReportDir } : { reportDir: "" }),
         save: (rel, content) => saver(root)(canonical(rel), content),
-        signal: running.signal,
+        signal,
         onProgress: (progress) => publish({ progress }),
-      });
+      }));
       // Only when it was filed somewhere else: writing it twice into the same
       // directory is how the duplicate above happened.
       if (vault) await saver(dir)(NOTES_MD, result.notes.markdown);

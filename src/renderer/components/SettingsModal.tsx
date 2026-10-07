@@ -13,6 +13,7 @@ import { engineStates, runnable, type Runnable } from "../../core/runtime/runnab
 import { modelIdOf } from "../../core/audio/models.ts";
 import { DEFAULT_REVIEW_PROMPT, DEFAULT_STUDY_TYPES } from "../../core/review/prompt.ts";
 import { DEFAULT_PERSONA } from "../../core/agent/systemPrompt.ts";
+import { UsagePane } from "./UsagePane.tsx";
 
 /**
  * Everything configurable, in one place.
@@ -25,7 +26,7 @@ import { DEFAULT_PERSONA } from "../../core/agent/systemPrompt.ts";
 
 type Tab =
   | "providers" | "runtime" | "library" | "databases" | "storage" | "audio" | "appearance"
-  | "permissions" | "persona" | "review" | "about";
+  | "permissions" | "persona" | "review" | "usage" | "about";
 
 /*
  * There was an "Endpoints" tab here, and Providers replaced it.
@@ -51,6 +52,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "permissions", label: "Permissions" },
   { id: "persona", label: "Persona" },
   { id: "review", label: "Peer review" },
+  { id: "usage", label: "Usage" },
   { id: "about", label: "About" },
 ];
 
@@ -90,7 +92,9 @@ export function SettingsModal({
 
   return (
     <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="Settings">
-      <div className="settings">
+      {/* Wider while Usage is open: a chart and a seven-column table do not fit
+          the 860px every other tab is written for. */}
+      <div className={tab === "usage" ? "settings settings-wide" : "settings"}>
         <header className="settings-head">
           <nav className="settings-tabs">
             {TABS.map((t) => (
@@ -123,6 +127,7 @@ export function SettingsModal({
           {tab === "permissions" ? <Permissions settings={settings} patch={patch} /> : null}
           {tab === "persona" ? <Persona settings={settings} patch={patch} /> : null}
           {tab === "review" ? <Review settings={settings} patch={patch} /> : null}
+          {tab === "usage" ? <UsagePane settings={settings} patch={patch} /> : null}
           {tab === "about" ? (
             <About
               onReplayTutorial={() => {

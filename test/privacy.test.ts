@@ -20,6 +20,7 @@ import { join } from "node:path";
 import {
   makeOwnDir, makePrivateDir, OWNER_ONLY_DIR, OWNER_ONLY_FILE,
 } from "../src/core/paths.ts";
+import { UsageLog } from "../src/core/usage/log.ts";
 
 let root = "";
 let umaskBefore = 0;
@@ -100,5 +101,22 @@ describe("files MyRA writes", () => {
     const path = join(root, "default.md");
     await writeFile(path, "public", "utf8");
     assert.notEqual(await modeOf(path), OWNER_ONLY_FILE);
+  });
+});
+
+describe("the usage record", () => {
+  /* What somebody worked on and when, model by model -- not content, but a
+     diary of work all the same, and another account on a shared machine has
+     no business reading it. */
+  it("is owner-only, directory and files, whatever the umask says", async () => {
+    const dir = join(root, "usage");
+    const log = new UsageLog(dir);
+    await log.append({
+      v: 1, at: new Date().toISOString(), kind: "text", source: "app", feature: "chat", model: "m",
+      provider: { id: "", name: "This computer" }, where: "local", ms: 1, outcome: "ok",
+    });
+    assert.equal(await modeOf(dir), OWNER_ONLY_DIR);
+    const [month] = await log.months();
+    assert.equal(await modeOf(log.fileFor(month!)), OWNER_ONLY_FILE);
   });
 });

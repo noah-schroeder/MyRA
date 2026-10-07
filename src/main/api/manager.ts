@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { CONFIG_DIR, makeOwnDir, OWNER_ONLY_FILE } from "../../core/paths.ts";
 import { API_DEFAULTS, mergeApiConfig, type ApiConfig } from "../../core/api/config.ts";
 import { mintKey, type ApiKey } from "../../core/api/keys.ts";
-import { RequestLog } from "../../core/api/log.ts";
+import { RequestLog, type RequestRecord } from "../../core/api/log.ts";
 import { ApiGateway, type GatewayStatus, type Upstream } from "./server.ts";
 
 const CONFIG_PATH = join(CONFIG_DIR, "api.json");
@@ -39,6 +39,8 @@ export class ApiManager {
     upstream: () => Upstream | undefined;
     models: () => Promise<{ id: string; loaded: boolean }[]>;
     loadModel: (id: string) => Promise<void>;
+    /** See `GatewayOptions.onSettled`. */
+    onSettled?: (record: RequestRecord, upstream: string) => void;
   }) {
     this.#gateway = new ApiGateway({
       config: () => this.#config,
@@ -47,6 +49,7 @@ export class ApiManager {
       loadModel: deps.loadModel,
       log: this.#log,
       onKeyUsed: (id) => this.#noteKeyUse(id),
+      ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
     });
     this.#gateway.onChange(() => this.#emit());
     this.#log.onChange(() => this.#emitLog());

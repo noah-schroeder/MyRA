@@ -172,8 +172,8 @@ function deviceY(v: number, scale: Scale, plot: { y: number; h: number }): numbe
 /** How much room the y-axis tick labels need, so the plot area does not
  *  start at a fixed offset regardless of whether labels read "1" or
  *  "123,456.5". */
-function yTickLabelWidth(scale: Scale): number {
-  const longest = scale.ticks.reduce((n, v) => Math.max(n, String(v).length), 1);
+function yTickLabelWidth(scale: Scale, format?: (v: number) => string): number {
+  const longest = scale.ticks.reduce((n, v) => Math.max(n, (format ? format(v) : String(v)).length), 1);
   return longest * FONT_SIZE * CHAR_W;
 }
 
@@ -290,7 +290,11 @@ export function layoutChart(data: ChartData, opts: {
   /** The figure's own drawn size -- omitted for the fixed 640x420 canvas
    *  every existing caller and test still gets by default. */
   size?: ChartSize | undefined;
+  /** How a y tick is printed -- "1.2M" on a usage chart. Omitted, the labels
+   *  (and so the left margin they need) are exactly what they always were. */
+  yTickFormat?: ((v: number) => string) | undefined;
 } = {}): ChartLayout {
+  const yLabelOf = (v: number): string => (opts.yTickFormat ? opts.yTickFormat(v) : tickLabel(v));
   const names = seriesNames(data);
   const legend = names.length > 1 ? names.map((name, i) => ({ name, colorIndex: i })) : [];
 
@@ -302,7 +306,7 @@ export function layoutChart(data: ChartData, opts: {
     const xScale = niceScale(Math.min(...allX), Math.max(...allX));
     const yScale = niceScale(Math.min(...allY), Math.max(...allY));
     const frame = layoutFrame({
-      ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: legend,
+      ...opts, yTickWidth: yTickLabelWidth(yScale, opts.yTickFormat), legendNames: legend,
     });
 
     const series: PlottedSeries[] = data.series.map((s, i) => ({
@@ -334,7 +338,7 @@ export function layoutChart(data: ChartData, opts: {
     return {
       kind: data.kind, width: frame.width, height: frame.height, plot: frame.plot,
       xTicks: xScale.ticks.map((v) => ({ pos: deviceX(v, xScale, frame.plot), label: tickLabel(v) })),
-      yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: tickLabel(v) })),
+      yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: yLabelOf(v) })),
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.xLabel ? { xLabel: opts.xLabel } : {}),
       ...(opts.yLabel ? { yLabel: opts.yLabel } : {}),
@@ -359,7 +363,7 @@ export function layoutChart(data: ChartData, opts: {
       Math.min(0, ...perCategoryMins, ...errorExtent),
       Math.max(0, ...perCategoryTotals, ...errorExtent),
     );
-    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: legend });
+    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale, opts.yTickFormat), legendNames: legend });
 
     const n = data.categories.length;
     const slotW = frame.plot.w / Math.max(1, n);
@@ -402,7 +406,7 @@ export function layoutChart(data: ChartData, opts: {
 
     return {
       kind: "bar", width: frame.width, height: frame.height, plot: frame.plot,
-      yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: tickLabel(v) })),
+      yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: yLabelOf(v) })),
       categoryTicks: data.categories.map((label, i) => ({ pos: frame.plot.x + (i + 0.5) * slotW, label })),
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.xLabel ? { xLabel: opts.xLabel } : {}),
@@ -415,7 +419,7 @@ export function layoutChart(data: ChartData, opts: {
     const built = data.groups.map((g) => boxOf(g));
     const allY = built.flatMap((b) => [b.whiskerLo, b.whiskerHi, ...b.outliers]);
     const yScale = niceScale(Math.min(...allY), Math.max(...allY));
-    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: [] });
+    const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale, opts.yTickFormat), legendNames: [] });
 
     const n = data.groups.length;
     const slotW = frame.plot.w / Math.max(1, n);
@@ -436,7 +440,7 @@ export function layoutChart(data: ChartData, opts: {
 
     return {
       kind: "box", width: frame.width, height: frame.height, plot: frame.plot,
-      yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: tickLabel(v) })),
+      yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: yLabelOf(v) })),
       categoryTicks: data.groups.map((g, i) => ({ pos: frame.plot.x + (i + 0.5) * slotW, label: g.label })),
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.xLabel ? { xLabel: opts.xLabel } : {}),
@@ -448,7 +452,7 @@ export function layoutChart(data: ChartData, opts: {
   // histogram
   const bins = histBins(data.values);
   const yScale = niceScale(0, Math.max(1, ...bins.map((b) => b.count)));
-  const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale), legendNames: [] });
+  const frame = layoutFrame({ ...opts, yTickWidth: yTickLabelWidth(yScale, opts.yTickFormat), legendNames: [] });
   const xMin = bins[0]!.lo;
   const xMax = bins[bins.length - 1]!.hi;
   const xOf = (v: number): number => frame.plot.x + ((v - xMin) / (xMax - xMin || 1)) * frame.plot.w;
@@ -461,7 +465,7 @@ export function layoutChart(data: ChartData, opts: {
 
   return {
     kind: "histogram", width: frame.width, height: frame.height, plot: frame.plot,
-    yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: tickLabel(v) })),
+    yTicks: yScale.ticks.map((v) => ({ pos: deviceY(v, yScale, frame.plot), label: yLabelOf(v) })),
     categoryTicks: bins.map((b) => ({ pos: xOf((b.lo + b.hi) / 2), label: tickLabel((b.lo + b.hi) / 2) })),
     ...(opts.title ? { title: opts.title } : {}),
     ...(opts.xLabel ? { xLabel: opts.xLabel } : {}),

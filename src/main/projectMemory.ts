@@ -33,6 +33,8 @@ import {
   buildUpdatePrompt, groundProposals, notePass, parseProposals, toAutoItems, type GroundedItem, type NotePass,
 } from "../core/projects/memoryUpdate.ts";
 import { readMemory, updateMemory, withMemoryLock, writeMemory } from "./memoryStore.ts";
+import { readProject } from "./projectStore.ts";
+import { withUsage } from "../core/usage/context.ts";
 
 /* ------------------------------------------------------------------ *
  * What this needs from the app                                       *
@@ -99,6 +101,7 @@ export interface SetupOutput {
  * printed.
  */
 async function ask(
+  projectId: string,
   prompt: string,
   signal?: AbortSignal,
   live?: SetupOutput,
@@ -107,7 +110,15 @@ async function ask(
   const { llm } = host();
   live?.progress({ phase: "waiting" });
   const resolved = await llm();
-  const { text } = await runSubagent({
+  /* Counted under the project whose notes these are, whichever conversation
+     happened to ask -- the setup chat and the pass before a reply run outside
+     the chat turn's own tags. */
+  const project = await readProject(projectId).catch(() => undefined);
+  const usage = {
+    feature: "project-notes" as const,
+    project: { id: projectId, name: project?.name ?? "" },
+  };
+  const { text } = await withUsage(usage, () => runSubagent({
     model: resolved.endpoint.model ?? "",
     prompt,
     endpoint: resolved.endpoint,
@@ -123,7 +134,7 @@ async function ask(
           ...(resolved.promptProgress ? { promptProgress: true } : {}),
         }
       : {}),
-  });
+  }));
   return text;
 }
 
@@ -161,7 +172,7 @@ export async function runProjectSetup(
 
   const draft = await (async () => {
     try {
-      return parseOffers(await ask(buildOffersPrompt(description), signal, out));
+      return parseOffers(await ask(projectId, buildOffersPrompt(description), signal, out));
     } catch {
       return { items: [] as NewItem[], offers: [...FIXED_TASKS] };
     }
@@ -247,7 +258,7 @@ async function runTask(
   const { say } = out;
   const questions = await (async () => {
     try {
-      return parseTaskQuestions(await ask(buildTaskQuestionsPrompt(task, description, memory), signal, out));
+      return parseTaskQuestions(await ask(projectId, buildTaskQuestionsPrompt(task, description, memory), signal, out));
     } catch {
       return [];
     }
@@ -263,7 +274,7 @@ async function runTask(
 
   const items = await (async () => {
     try {
-      return parseTaskResult(await ask(buildTaskResultPrompt(task, description, answered, memory), signal, out));
+      return parseTaskResult(await ask(projectId, buildTaskResultPrompt(task, description, answered, memory), signal, out));
     } catch {
       return [];
     }
@@ -328,7 +339,7 @@ export async function notesBeforeReply(
     const memory = await readMemory(projectId);
     if (!memory.auto) return undefined;
     const pass = await notePass(memory, session.messages_, session.id, (prompt) =>
-      ask(prompt, signal, undefined, { reasoning: true }),
+      ask(projectId, prompt, signal, undefined, { reasoning: true }),
     );
     if (!pass) return undefined;
     await writeMemory(projectId, pass.memory);
@@ -494,7 +505,7 @@ export function installMemoryIpc(installed: MemoryDeps): void {
 
     let grounded: GroundedItem[];
     try {
-      const proposals = parseProposals(await ask(buildUpdatePrompt(memory, session.messages_, since)));
+      const proposals = parseProposals(await ask(projectId, buildUpdatePrompt(memory, session.messages_, since)));
       /* Unreadable is not "nothing found": the stretch stays unread, so the
          next turn's own pass still looks at it. */
       if (!proposals) return { ok: true, added: 0, memory };

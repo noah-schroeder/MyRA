@@ -853,6 +853,47 @@ and never of anything else, for the `timings_per_token` reason above. The loop e
 never stores it for replay. The window's `TurnStatus` always shows a moving clock, and a
 bar only when a server reported a figure.
 
+### Usage
+
+Settings → Usage shows how much MyRA has asked of its models — per model, project,
+feature, date, on this computer or hosted, by MyRA itself or by an API-gateway key — and
+every number on it comes from one place. **`chat()` counts every call it sends**, success,
+failure or cancel, so a new caller cannot be forgotten; embeddings
+([embed.ts](src/core/research/embed.ts)), transcription, speech and images report the same
+way, in seconds, characters and pictures rather than tokens. **Who a call was for is ambient,
+not an argument** ([usage/context.ts](src/core/usage/context.ts)): the place that knows — a
+chat turn, the research tool, a review, a draft, a meeting, the project-notes `ask` — wraps
+its work in `withUsage`, and `AsyncLocalStorage` carries the tags down through every await.
+Threading a feature and a project through eight research stages would have touched dozens of
+signatures, and an untagged call is still counted, as "other". The research tool's `onStage`
+calls `noteUsageStage`, which touches only a research context.
+
+Main adds what only it knows ([main/usage.ts](src/main/usage.ts)): which provider an address
+belongs to and whether that is this machine (`classifyEndpoint`, on the same `effectiveKind`
+rule the picker and the privacy report use), and the price. Four rules hold the numbers up.
+**A count nobody reported is not zero** — `chat()` keeps a meter separate from `ChatResult`,
+whose zeros the context meter needs, and a record without a usage block has no `input` field
+at all; the page counts those as `unreported` and says so. **A cost is the provider's own
+price, frozen on the record at call time** (`pricing.ts` keeps no price list and this does not
+start one); a hosted call without one is `unpriced`, never guessed. **A project is resolved
+when somebody looks, not when the call is made**: a record carries its `item` (the project
+member it is part of) and the project at the time, and whoever holds the item now wins —
+filing a conversation after the fact is the ordinary case, and its usage follows it. Only
+when nothing holds the item does the recorded project stand in, by its recorded name if it
+has since been deleted. And **counts only**: [usage/log.ts](src/core/usage/log.ts) rebuilds
+every record through `parseUsageRecord` before appending, so no field a caller hung on it can
+reach the file. One owner-only `CONFIG_DIR/usage/YYYY-MM.jsonl` per local month, read
+incrementally; `recordUsage` switches it off on the page that shows it.
+
+The gateway's forwarded requests reach the same record through `onSettled`. Its request log
+(`core/api/log.ts`) stays in memory; only the counts outlive it — and through
+[coalesce.ts](src/core/usage/coalesce.ts), which holds them up to a second and writes alike
+requests as one line with a `count`. The in-memory log is capped against a client retrying
+an instant failure in a tight loop; on disk that loop would be a line per attempt, hundreds a
+second, so it is merged instead, totals exact. Quitting flushes what is held. `usageFrom` reads a streamed
+reply from the end, frame by frame, because the whole-body parse it used to be never found
+the usage frame of an SSE or Ollama stream — which is most gateway traffic.
+
 ### Files dropped into the chat
 
 An image or a document, dropped straight into the composer — OCR and "chat with this paper"
@@ -1132,10 +1173,10 @@ configurable belongs in that shape. API keys never appear there: they go to the 
 keyring via [secrets.ts](src/main/secrets.ts), which refuses to persist when Electron
 falls back to its hardcoded-password encryption.
 
-IPC channels are all `myra:*` — 199 of them, registered in
+IPC channels are all `myra:*` — 202 of them, registered in
 [main/index.ts](src/main/index.ts)'s `installIpc` and in the `install*Ipc` modules it
 calls (meetings, dictation, audio, images, papers, projects, project memory, project papers,
-sources, runtime, api, review, tasks), and exposed one-by-one in the preload. Adding a capability means touching all
+sources, runtime, api, review, tasks, usage), and exposed one-by-one in the preload. Adding a capability means touching all
 three layers plus `src/renderer/types.ts`, and at that scale a channel wired in only three of
 the four is a `window.myra` call that is `undefined` at runtime.
 

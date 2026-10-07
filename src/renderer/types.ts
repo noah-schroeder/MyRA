@@ -14,6 +14,7 @@ import type { ApiState } from "../main/api/manager.ts";
    other shared shape in this file is reached. */
 export type { ApiState };
 import type { RequestRecord } from "../core/api/log.ts";
+import type { UsageQuery, UsageSummary } from "../core/usage/aggregate.ts";
 import type { ForeignModel } from "../core/runtime/foreign.ts";
 import type { InstalledModel } from "../main/runtime/lemonadeApi.ts";
 import type { LoadedModel } from "../core/runtime/lemonade.ts";
@@ -260,6 +261,8 @@ export interface Settings {
   meetingInstructions: string;
   /** Closing the window leaves MyRA running in the tray. */
   keepRunningInTray: boolean;
+  /** Keep counts of model usage for Settings → Usage. Never what was said. */
+  recordUsage: boolean;
   setupCompleted: boolean;
   /** Whether the first-run tour has been shown. Settings -> About can reset it. */
   seenTutorial: boolean;
@@ -1107,6 +1110,16 @@ export interface MyRAApi {
   apiClearLog(): Promise<{ ok: boolean; entries: RequestRecord[] }>;
   onApi(cb: (state: ApiState) => void): () => void;
   onApiLog(cb: (entries: RequestRecord[]) => void): () => void;
+  /* ---- usage ---- */
+  /** Counts for Settings → Usage. `recording` is the switch's current state. */
+  usageSummary(query: UsageQuery): Promise<
+    { ok: true; summary: UsageSummary; recording: boolean; earliest?: string } | { ok: false; error: string }
+  >;
+  usageClear(): Promise<{ ok: boolean; error?: string }>;
+  /** The filtered records as CSV, through a save dialog. */
+  usageExport(query: UsageQuery): Promise<{ ok: boolean; error?: string; saved?: boolean; path?: string; rows?: number }>;
+  /** A model call was counted; at most once a second. */
+  onUsageChanged(cb: () => void): () => void;
   /* ---- projects ---- */
   projectList(): Promise<{ ok: boolean; projects: ProjectSummary[] }>;
   /** `research` starts the project's memory "pending" -- the setup chat runs on its first message. */

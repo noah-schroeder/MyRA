@@ -23,6 +23,7 @@
  */
 
 import type { EndpointSettings } from "../config.ts";
+import { reportingUsage } from "../usage/context.ts";
 
 export class ImageError extends Error {
   override readonly name = "ImageError";
@@ -120,7 +121,17 @@ export function buildRequest(opts: Pick<GenerateOptions, "endpoint" | "prompt" |
   };
 }
 
+/** One picture, counted for the usage dashboard as one image and its time. */
 export async function generate(opts: GenerateOptions): Promise<Generated> {
+  if (!opts.endpoint.baseUrl || !opts.endpoint.model || !opts.prompt.trim()) return generateOnce(opts);
+  return reportingUsage(
+    { kind: "image", baseUrl: opts.endpoint.baseUrl, model: opts.endpoint.model, units: 1 },
+    opts.signal,
+    () => generateOnce(opts),
+  );
+}
+
+async function generateOnce(opts: GenerateOptions): Promise<Generated> {
   const { endpoint, prompt } = opts;
   if (!endpoint.baseUrl) {
     throw new ImageError("No image model is set up. Choose one from the picker above.");

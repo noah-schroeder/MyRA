@@ -297,6 +297,15 @@ export interface Settings {
    */
   keepRunningInTray: boolean;
   /**
+   * Keep a record of model usage for Settings → Usage.
+   *
+   * Counts only -- which model, where it ran, tokens each way, how long -- and
+   * never a word of what was said, kept owner-only under `CONFIG_DIR/usage`.
+   * On by default because it is a local file nobody else reads; the switch is
+   * on the page that shows it, beside the button that clears it.
+   */
+  recordUsage: boolean;
+  /**
    * Whether first-run setup has been through once.
    *
    * Not "is everything installed": someone who deliberately skipped the model
@@ -479,6 +488,7 @@ export const DEFAULT_SETTINGS: Settings = {
   meetingCaptureSystemAudio: true,
   meetingInstructions: "",
   keepRunningInTray: true,
+  recordUsage: true,
   setupCompleted: false,
   seenTutorial: false,
   providers: [],
@@ -592,6 +602,8 @@ export class ConfigStore {
         vaultRoot: sanitiseRoot(parsed.vaultRoot, DEFAULT_SETTINGS.vaultRoot, { emptyMeans: "none" }),
         zoteroDataDir: sanitiseRoot(parsed.zoteroDataDir, DEFAULT_SETTINGS.zoteroDataDir, { emptyMeans: "none" }),
         hfTokenUse: parsed.hfTokenUse === "always" ? "always" : "gated",
+        // Only an explicit false turns it off; anything else in the file is the default.
+        recordUsage: parsed.recordUsage !== false,
         /* Joined onto a root rather than being one: `filingRoot` does
            join(vaultRoot, subdir), so "../../" filed notes above the vault. */
         vaultWriteSubdir: sanitiseSubdir(parsed.vaultWriteSubdir, DEFAULT_SETTINGS.vaultWriteSubdir),
